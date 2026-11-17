@@ -24,6 +24,8 @@ let storage: Storage;
 let savedGenomes: GenomeDocument[] = [], savedEnvironments: EnvironmentDocument[] = [], simulations: SimulationMetadata[] = [];
 let active: SimulationSession | null = null, renderer: Renderer | null = null;
 let inspectorProgram: ProgramEditor | null = null;
+const expandedInspections = new Set<{ session: SimulationSession; cellId: number; editor: ProgramEditor }>();
+const inspectedRevisions = new WeakMap<ProgramEditor, { session: SimulationSession; cellId: number; revision: number; tick: number }>();
 let ready = false, transitioning = false, saveFailed = false;
 let lifecycleFlushes = 0;
 let selectedId: number | null = null;
@@ -338,6 +340,18 @@ function memoryValue(value: unknown): string {
   if (Array.isArray(value)) return '[' + value.map(memoryValue).join(', ') + ']';
   return JSON.stringify(value) ?? String(value);
 }
+function updateProgramEvaluation(editor: ProgramEditor, session: SimulationSession, cellId: number): void {
+  const previous = inspectedRevisions.get(editor);
+  if (previous?.session === session && previous.cellId === cellId
+    && previous.revision === session.revision && previous.tick === session.world.tick) return;
+  inspectedRevisions.set(editor, { session, cellId, revision: session.revision, tick: session.world.tick });
+  if (!session.world.cells.some(cell => cell.id === cellId)) {
+    editor.setEvaluationUnavailable(`Organism ${cellId} has died. Its program remains available; live values do not.`);
+    return;
+  }
+  try { editor.setEvaluation(session.engine.getCellEvaluation(cellId)); }
+  catch (error) { editor.setEvaluationUnavailable(readableError(error)); }
+}
 function updateInspector(): void {
   if (!active || selectedId === null || !$('inspector-content')) return;
   const cell = active.world.cells.find(item => item.id === selectedId);
@@ -356,14 +370,22 @@ function updateInspector(): void {
     $('memory-page').closest<HTMLElement>('.memory-footer')!.hidden = pageCount === 1;
     document.querySelector<HTMLButtonElement>('[data-action="memory-previous"]')!.disabled = memoryPage === 0;
     document.querySelector<HTMLButtonElement>('[data-action="memory-next"]')!.disabled = memoryPage === pageCount-1;
+  } else if (inspectorView === 'program' && inspectorProgram) {
+    updateProgramEvaluation(inspectorProgram, active, cell.id);
   }
 }
-function openLiveProgram(id: number): void {
+function openLiveProgram(id: number, cellId?: number): void {
   if (!active) return;
-  const engine = active.engine, name = genomeName(id), source = engine.getGenome(id).source;
-  const dialog = createDialog(name, `<div class="live-program-editor"></div><footer class="dialog-actions"><button class="button subtle" id="program-graph">${icon('graph')}Graph</button><button class="button primary" id="program-save">${icon('copy')}Save to Genomes</button></footer>`, 'editor-dialog live-program-dialog');
+  const session = active, engine = session.engine, name = genomeName(id), source = engine.getGenome(id).source;
+  const title = cellId === undefined ? name : `Organism ${cellId} · ${name}`;
+  const dialog = createDialog(title, `<div class="live-program-editor"></div><footer class="dialog-actions"><button class="button subtle" id="program-graph">${icon('graph')}Graph</button><button class="button primary" id="program-save">${icon('copy')}Save to Genomes</button></footer>`, 'editor-dialog live-program-dialog');
   const editor = new ProgramEditor({ parent: dialog.querySelector<HTMLElement>('.live-program-editor')!, source, readOnly: true, compiler });
-  dialog.addEventListener('close', () => editor.destroy(), { once: true });
+  const inspection = cellId === undefined ? null : { session, cellId, editor };
+  if (inspection) { expandedInspections.add(inspection); updateProgramEvaluation(editor, session, inspection.cellId); }
+  dialog.addEventListener('close', () => {
+    if (inspection) expandedInspections.delete(inspection);
+    editor.destroy();
+  }, { once: true });
   dialog.querySelector('#program-graph')!.addEventListener('click', () => { try { genomeVisualizer.open(engine.getGenomeGraph(id), name); } catch (error) { setDialogError(dialog,error); } });
   dialog.querySelector('#program-save')!.addEventListener('click', () => {
     const button = dialog.querySelector<HTMLButtonElement>('#program-save')!; button.disabled = true;
@@ -467,6 +489,7 @@ function renderActiveGenomes(): void {
 }
 function updateSimulationUi(): void {
   if(!active||prefs.tab!=='simulation') return;
+  for (const inspection of expandedInspections) updateProgramEvaluation(inspection.editor, inspection.session, inspection.cellId);
   if(prefs.simulationView==='player') {
     $('player-caption').textContent=active.world.cells.length+' organisms · '+clock(active.world.time);
     updateInspector();
@@ -558,7 +581,7 @@ async function action(name:string,id?:string,genomeId?:number):Promise<void>{
   if(name==='memory-previous'||name==='memory-next'){memoryPage+=name==='memory-next'?1:-1;updateInspector();return;}
   if(name==='cell-program'||name==='cell-graph'){
     const cell=active?.world.cells.find(item=>item.id===selectedId);if(!cell||!active)return;
-    if(name==='cell-program')openLiveProgram(cell.genomeId);else genomeVisualizer.open(active.engine.getGenomeGraph(cell.genomeId),genomeName(cell.genomeId));return;
+    if(name==='cell-program')openLiveProgram(cell.genomeId, cell.id);else genomeVisualizer.open(active.engine.getGenomeGraph(cell.genomeId),genomeName(cell.genomeId));return;
   }
   if(name==='live-program'&&genomeId){openLiveProgram(genomeId);return;}
   if(name==='live-graph'&&genomeId&&active){genomeVisualizer.open(active.engine.getGenomeGraph(genomeId),genomeName(genomeId));return;}

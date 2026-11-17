@@ -48,11 +48,12 @@ impl Registers {
 
 impl Program {
     pub(crate) fn checkpoint_source_matches(&self, compiled: &Self, source: &str, authored: bool) -> bool {
-        if authored {
-            let mut a = Writer::new(); let mut b = Writer::new();
-            self.write_checkpoint(&mut a); compiled.write_checkpoint(&mut b);
-            !a.failed() && !b.failed() && a.0 == b.0
-        } else { self.to_source().as_deref() == Some(source) }
+        let mut a = Writer::new(); let mut b = Writer::new();
+        self.write_checkpoint(&mut a); compiled.write_checkpoint(&mut b);
+        let exact = !a.failed() && !b.failed() && a.0 == b.0;
+        // New mutations compile their one-span patch directly. Older saves
+        // retain a graph whose canonical source has equivalent alias nodes.
+        exact || (!authored && self.to_source().as_deref() == Some(source))
     }
 
     pub(crate) fn write_checkpoint(&self, w: &mut Writer) {

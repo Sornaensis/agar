@@ -9,6 +9,8 @@ export interface GenomeSymbol {
   readonly signature: string;
   readonly description: string;
   readonly insertText?: string;
+  /** A complete, valid usage example shown by the reference browser. */
+  readonly example?: string;
 }
 export interface GenomeBinding {
   readonly name: string;
@@ -310,4 +312,163 @@ export function searchGenomeSymbols(query: string, bindings: readonly GenomeBind
     .filter(item => !needle || `${item.name} ${item.signature} ${item.description}`.toLowerCase().includes(needle))
     .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
     .slice(0, count);
+}
+
+export interface GenomeCompletionContext {
+  kind: 'statement' | 'expression' | 'register' | 'none';
+  /** A useful editing hint, never a substitute for the Rust type checker. */
+  expected?: PrimitiveType | 'number' | 'register' | 'vec2 | string';
+}
+
+const numericFunctions = new Set(['sin', 'cos', 'abs', 'min', 'max', 'clamp', 'int', 'float', 'vec', 'sqrt', 'sign', 'atan2', 'lerp', 'noise']);
+const vectorFunctions = new Set(['dot', 'normalize', 'angle', 'x', 'y']);
+
+/** Incomplete code is expected here. Infer only the constraints visible at the cursor. */
+export function genomeCompletionContext(source: string, position: number, bindings: readonly GenomeBinding[] = []): GenomeCompletionContext {
+  if (!Number.isInteger(position) || position < 0 || position > source.length) return { kind: 'none' };
+  const all = tokenizeGenome(source);
+  const enclosing = all.find(token => token.from <= position && position <= token.to);
+  if (enclosing?.kind === 'comment' && position > enclosing.from
+    || enclosing?.kind === 'string' && position > enclosing.from
+      && (position < enclosing.to || enclosing.text.length === 1 || !enclosing.text.endsWith('"'))) return { kind: 'none' };
+  const preceding = all.filter(token => token.kind !== 'comment' && token.from < position);
+  // A partial identifier is the completion prefix, not a completed grammar term.
+  if (preceding.at(-1)?.to === position || (preceding.at(-1)?.to ?? 0) > position) {
+    const last = preceding.at(-1)!;
+    if (identifierKinds.has(last.kind) && !['if', 'then', 'else', 'when', 'clear'].includes(last.text)) preceding.pop();
+  }
+  let start = preceding.length;
+  while (start > 0 && preceding[start - 1].text !== ';') start--;
+  const tokens = preceding.slice(start);
+  if (!tokens.length) return { kind: 'statement' };
+  if (tokens[0].text === 'clear' && !tokens.some(token => token.text === 'when')) return { kind: 'register', expected: 'register' };
+  const assignment = tokens.findIndex(token => token.text === '=');
+  if (assignment < 0 && tokens[0].text === 'let') return { kind: 'none' };
+  if (assignment < 0 && tokens.length === 1) return { kind: 'statement' };
+  const expressionTokens = assignment >= 0 ? tokens.slice(assignment + 1) : tokens;
+
+  // Find the innermost still-open call, skipping complete nested expressions.
+  const calls: { name: string | undefined; index: number }[] = [];
+  for (let index = 0; index < expressionTokens.length; index++) {
+    const token = expressionTokens[index];
+    if (token.text === '(') calls.push({ name: expressionTokens[index - 1]?.kind === 'function' ? expressionTokens[index - 1].text : undefined, index });
+    else if (token.text === ')') calls.pop();
+  }
+  const currentCall = calls.at(-1);
+  if (currentCall?.name === 'populated') return { kind: 'register', expected: 'register' };
+  const last = expressionTokens.at(-1)?.text;
+  if (['if', 'when', '&&', '||', '!'].includes(last ?? '')) return { kind: 'expression', expected: 'boolean' };
+  if (currentCall?.name && (!last || last === '(' || last === ',')) {
+    if (numericFunctions.has(currentCall.name)) return { kind: 'expression', expected: 'number' };
+    if (vectorFunctions.has(currentCall.name)) return { kind: 'expression', expected: 'vec2' };
+    if (currentCall.name === 'length') return { kind: 'expression', expected: 'vec2 | string' };
+  }
+  if (last && ['<', '<=', '>', '>=', '/', '*'].includes(last)) return { kind: 'expression', expected: 'number' };
+  if (last && ['==', '!=', '+', '-'].includes(last)) {
+    const previous = expressionTokens.at(-2);
+    const known = previous && (lookupGenomeSymbol(previous.text, bindings)?.type ?? (previous.kind === 'string' ? 'string' : previous.kind === 'number' ? 'number' : undefined));
+    if (known && ['integer', 'scalar', 'boolean', 'string', 'vec2', 'number'].includes(known)) {
+      return { kind: 'expression', expected: known === 'integer' || known === 'scalar' ? 'number' : known as PrimitiveType | 'number' };
+    }
+  }
+  // A branch or operator can change the required operand type. Do not infer through it.
+  if (expressionTokens.length) return { kind: 'expression' };
+  const target = assignment > 0 && tokens[0].text !== 'let' ? lookupGenomeSymbol(tokens[0].text, bindings) : undefined;
+  return { kind: 'expression', ...(target && ['integer', 'scalar', 'boolean', 'string', 'vec2'].includes(target.type) ? { expected: target.type as PrimitiveType } : {}) };
+}
+
+/** Blank completion is deliberately split into writable statements and readable expressions. */
+export function genomeCompletions(source: string, position: number, prefix = '', bindings: readonly GenomeBinding[] = []): GenomeSymbol[] {
+  const context = genomeCompletionContext(source, position, bindings);
+  if (context.kind === 'none') return [];
+  const needle = prefix.toLowerCase();
+  const registers = registerCompletions(prefix || 'r', source, prefix ? 40 : 15);
+  if (!prefix) for (const family of REGISTER_FAMILIES) {
+    const name = `${family.prefix}001`;
+    if (!registers.some(item => item.name === name)) registers.push(registerSymbol(name)!);
+  }
+  const available = new Map<string, GenomeSymbol>();
+  const add = (item: GenomeSymbol): void => { if (!needle || item.name.toLowerCase().startsWith(needle)) available.set(item.name, item); };
+  if (context.kind === 'register') {
+    registers.forEach(add);
+    return [...available.values()];
+  }
+  if (context.kind === 'statement') {
+    BUILTIN_OUTPUTS.forEach(item => add({ ...item, insertText: `${item.name} = ` }));
+    registers.forEach(item => add({ ...item, insertText: `${item.name} = ` }));
+    for (const name of ['let', 'clear']) add({ ...lookupGenomeSymbol(name)!, insertText: `${name} ` });
+    return [...available.values()];
+  }
+  [...BUILTIN_SIGNALS, ...BUILTIN_FUNCTIONS, ...registers].forEach(add);
+  bindings.forEach(binding => add(lookupGenomeSymbol(binding.name, [binding])!));
+  for (const name of ['if', 'true', 'false']) add(lookupGenomeSymbol(name)!);
+  const expected = context.expected;
+  const accepts = (item: GenomeSymbol): boolean => {
+    if (!expected || item.type === 'T' || item.type === 'not checked') return true;
+    const types = item.type.split(' | ');
+    if (expected === 'number' || expected === 'scalar') return types.includes('integer') || types.includes('scalar');
+    // Any primitive may begin a comparison. Prefer booleans without hiding useful comparison operands.
+    if (expected === 'boolean') return true;
+    if (expected === 'vec2 | string') return types.includes('vec2') || types.includes('string');
+    return types.includes(expected);
+  };
+  return [...available.values()].filter(accepts).sort((a, b) => {
+    if (expected === 'boolean') return Number(b.type === 'boolean') - Number(a.type === 'boolean');
+    return 0;
+  });
+}
+
+const outputExamples: Readonly<Record<string, string>> = Object.freeze({
+  thrust: 'thrust = if food.visible then 0.7 else 0.2;', turn: 'turn = clamp(food.angle, -1, 1);',
+  divide: 'divide = maturity >= 1 && energy.fraction > 0.65;', grow: 'grow = if energy.fraction > 0.6 then 1 else 0;',
+  photosynthesize: 'photosynthesize = 1;', engulf: 'engulf = prey.visible && prey.size * 1.6 <= size && prey.integrity <= 0.35;',
+  bite: 'bite = if prey.visible && !prey.same_genome then 1 else 0;', defend: 'defend = if threat.visible then 1 else 0;',
+  repair: 'repair = if integrity < 0.9 && energy.fraction > 0.4 then 1 else 0;', absorb: 'absorb = if nutrient.fraction < 0.8 then 1 else 0;',
+  feed: 'feed = 1;',
+});
+
+export interface GenomeSymbolDocumentation { example: string; notes: readonly string[] }
+export function genomeSymbolDocumentation(item: GenomeSymbol): GenomeSymbolDocumentation {
+  if (item.category === 'register') {
+    return { example: `${item.name} = ${REGISTER_FAMILIES.find(family => family.type === item.type)?.empty ?? '0'};\nclear ${item.name} when age > 10;`,
+      notes: ['Addresses run from 001 to 999 for each of the five primitive types.', 'Reads use memory from the start of the evaluation. Writes commit together after a real tick; clear wins when both rules fire.'] };
+  }
+  if (item.category === 'output') return {
+    example: outputExamples[item.name] ?? `${item.name} = 0.2;`,
+    notes: [item.type === 'scalar' ? 'Accepts integers or scalars. The engine clamps the command to its supported range.' : 'Requires a boolean expression; numbers are not booleans.',
+      'This is a write-only action request. Read the relevant body or state signal to inspect what the organism can actually do.'],
+  };
+  if (item.category === 'signal') return { example: `let observed = ${item.name};`,
+    notes: ['Read-only input, sampled consistently for this evaluation.',
+      item.name.startsWith('prey.') || item.name.startsWith('food.') || item.name.startsWith('neighbor.') || item.name.startsWith('threat.')
+        ? `Check ${item.name.split('.')[0]}.visible before relying on the target’s other values.`
+        : 'Local bindings can combine this signal with arithmetic, comparisons, functions, or if expressions.'] };
+  return { example: item.example ?? item.signature, notes: [] };
+}
+
+/** Reference menus include one address per family; typing a prefix explores all 999. */
+export function genomeSignalCatalog(direction: 'read' | 'write'): readonly GenomeSymbol[] {
+  return [...(direction === 'read' ? BUILTIN_SIGNALS : BUILTIN_OUTPUTS), ...REGISTER_FAMILIES.map(family => registerSymbol(`${family.prefix}001`)!)];
+}
+
+/** Parentheses are transparent to the compiler; unwrap only a balanced group covering the whole selection. */
+export function unwrapGenomeSelection(source: string, from: number, to: number, tokens: readonly GenomeToken[] = tokenizeGenome(source)): { from: number; to: number } {
+  while (from < to && /\s/.test(source[from])) from++;
+  while (to > from && /\s/.test(source[to - 1])) to--;
+  const selected = tokens.filter(token => token.kind !== 'comment' && token.from >= from && token.to <= to);
+  let left = 0, right = selected.length - 1;
+  while (left < right && selected[left].text === '(' && selected[right].text === ')'
+    && selected[left].from === from && selected[right].to === to) {
+    let depth = 0, enclosing = true;
+    for (let index = left; index <= right; index++) {
+      if (selected[index].text === '(') depth++;
+      if (selected[index].text === ')') depth--;
+      if (depth <= 0 && index < right) { enclosing = false; break; }
+    }
+    if (!enclosing || depth !== 0) break;
+    left++; right--;
+    from = selected[left]?.from ?? selected[left - 1].to;
+    to = right >= left ? selected[right].to : from;
+  }
+  return { from, to };
 }

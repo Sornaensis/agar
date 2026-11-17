@@ -7,7 +7,8 @@ const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.Scri
 const language = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputText).toString('base64')}`);
 const { GENOME_SYMBOLS, BUILTIN_FUNCTIONS, BUILTIN_SIGNALS, BUILTIN_OUTPUTS, LANGUAGE_KEYWORDS,
   REGISTER_FAMILIES, lookupGenomeSymbol, registerSymbol, registerCompletions, searchGenomeSymbols,
-  tokenizeGenome, identifierAt, symbolAt } = language;
+  tokenizeGenome, identifierAt, symbolAt, genomeCompletionContext, genomeCompletions,
+  genomeSignalCatalog, genomeSymbolDocumentation, unwrapGenomeSelection } = language;
 const rust = await readFile(new URL('../engine/src/genome.rs', import.meta.url), 'utf8');
 const sorted = values => [...values].sort();
 const names = symbols => symbols.map(item => item.name);
@@ -104,6 +105,61 @@ assert.equal(searchGenomeSymbols('food.angle')[0].name, 'food.angle');
 assert.deepEqual(searchGenomeSymbols('nutrient.', [], 5).map(item => item.name).sort(), ['nutrient.angle', 'nutrient.capacity', 'nutrient.fraction', 'nutrient.level', 'nutrient.stored']);
 assert.equal(searchGenomeSymbols('ri999')[0].name, 'ri999');
 
+// Editing incomplete source must separate writable statements from readable expressions.
+const atEnd = (program, prefix = '', bindings = []) => genomeCompletions(program, program.length, prefix, bindings);
+for (const empty of ['', '   ', '# a complete comment\n', 'thrust = 0;\n\n']) {
+  assert.equal(genomeCompletionContext(empty, empty.length).kind, 'statement');
+  const completions = atEnd(empty);
+  for (const output of BUILTIN_OUTPUTS) assert.ok(completions.some(item => item.name === output.name && item.insertText === `${output.name} = `), `Blank statement offers ${output.name}`);
+  for (const family of REGISTER_FAMILIES) assert.ok(completions.some(item => item.name === `${family.prefix}001` && item.insertText.endsWith(' = ')), `Blank statement offers ${family.type} writes`);
+  assert.ok(!completions.some(item => item.category === 'signal' || item.category === 'function'), 'Blank statements do not advertise read-only values as write targets');
+}
+for (const expression of ['thrust = ', 'let target = ', 'divide = if ', 'turn = clamp(', 'let x = (', 'rb001 = true when ']) {
+  assert.equal(genomeCompletionContext(expression, expression.length).kind, 'expression');
+  assert.ok(atEnd(expression).length > 0, `Blank expression has completions: ${expression}`);
+  assert.ok(atEnd(expression).every(item => item.category !== 'output' && !['let', 'clear'].includes(item.name)), 'Expression completions never include write-only commands');
+}
+assert.ok(atEnd('thrust = ').some(item => item.name === 'energy.fraction'));
+assert.ok(!atEnd('thrust = ').some(item => item.name === 'food.visible'), 'Numeric assignment omits bare booleans');
+assert.ok(atEnd('divide = ').some(item => item.name === 'food.visible'));
+assert.ok(atEnd('divide = ').some(item => item.name === 'energy'), 'Boolean expressions can begin a numeric comparison');
+assert.ok(atEnd('rs001 = ').some(item => item.name === 'rs001'));
+assert.ok(!atEnd('rs001 = ').some(item => item.category === 'signal'), 'String assignments do not suggest incompatible scalar sensors');
+assert.ok(atEnd('rv001 = ').some(item => item.name === 'vec'));
+assert.ok(!atEnd('rv001 = ').some(item => item.name === 'food.angle'));
+assert.ok(atEnd('let a = dot(').some(item => item.name === 'rv001'));
+assert.ok(!atEnd('let a = dot(').some(item => item.name === 'energy'));
+assert.ok(atEnd('let a = sin(').some(item => item.name === 'energy'));
+assert.ok(!atEnd('let a = sin(').some(item => item.name === 'rb001'));
+for (const address of ['clear ', 'clear ri', 'let remembered = populated(', 'let remembered = populated(r']) {
+  const prefix = address.endsWith('ri') ? 'ri' : address.endsWith('(r') ? 'r' : '';
+  assert.equal(genomeCompletionContext(address, address.length).kind, 'register');
+  assert.ok(atEnd(address, prefix).every(item => item.category === 'register' && !item.insertText));
+}
+assert.deepEqual(atEnd('# food.'), []);
+assert.deepEqual(atEnd('rs001 = "food.'), []);
+assert.deepEqual(atEnd('let '), [], 'Declaration names do not show builtin reads or writes');
+assert.ok(atEnd('let ok = remembered && ', '', locals).some(item => item.name === 'remembered'));
+assert.deepEqual(names(atEnd('th', 'th')), ['thrust']);
+assert.ok(atEnd('thrust = food.', 'food.').every(item => item.name.startsWith('food.') && item.category === 'signal'));
+for (const [selection, expected] of [
+  [' (energy * 0.1) ', 'energy * 0.1'], ['((energy * 0.1))', 'energy * 0.1'],
+  ['(\"(🌱)\")', '\"(🌱)\"'], ['(a) + (b)', '(a) + (b)'], ['(energy * 0.1', '(energy * 0.1'],
+  ['(energy # context\n * 0.1)', 'energy # context\n * 0.1'],
+]) {
+  const range = unwrapGenomeSelection(selection, 0, selection.length);
+  assert.equal(selection.slice(range.from, range.to), expected, `Only balanced enclosing parentheses are unwrapped: ${selection}`);
+}
+for (const direction of ['read', 'write']) {
+  const catalog = genomeSignalCatalog(direction);
+  assert.ok(catalog.every(item => item.category === (direction === 'read' ? 'signal' : 'output') || item.category === 'register'));
+  assert.equal(catalog.filter(item => item.category === 'register').length, 5);
+  for (const item of catalog) {
+    const docs = genomeSymbolDocumentation(item);
+    assert.ok(docs.example.length > 4 && docs.notes.length > 0, `${item.name} has a reference example and operational notes`);
+  }
+}
+
 // Check actual accepted expressions and result types against the shipped Rust WASM.
 const { instance } = await WebAssembly.instantiate(await readFile(new URL('../engine/pkg/agar_engine.wasm', import.meta.url)), {});
 const api = instance.exports;
@@ -121,6 +177,11 @@ function compileProgram(program, valid = true) {
   } finally { api.dealloc(ptr, bytes.length); }
 }
 const required = 'thrust = 0; turn = 0; divide = false;';
+for (const item of [...genomeSignalCatalog('read'), ...genomeSignalCatalog('write')]) {
+  const example = genomeSymbolDocumentation(item).example;
+  const missing = ['thrust', 'turn', 'divide'].filter(name => !new RegExp(`(?:^|;)\\s*${name}\\s*=`).test(example));
+  compileProgram(`${example}\n${missing.map(name => `${name} = ${name === 'divide' ? 'false' : '0'};`).join('\n')}`);
+}
 for (const sensor of BUILTIN_SIGNALS) {
   const graph = compileProgram(`let probe = ${sensor.name}; ${required}`);
   assert.equal(graph.nodes.find(node => node.kind === 'sensor' && node.label === sensor.name).type, sensor.type, `${sensor.name} has the documented primitive type`);

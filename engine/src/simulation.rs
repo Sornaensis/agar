@@ -99,7 +99,7 @@ pub fn mutate_registered(
     let Some(parent) = genomes.get(parent_id.wrapping_sub(1) as usize) else {
         return MutationResult { genome_id: 0, skipped: Some("Unknown parent genome.") };
     };
-    let Some(mutation) = parent.program.mutate(seed, kind) else {
+    let Some(mutation) = Program::mutate_source(&parent.source, seed, kind) else {
         return MutationResult { genome_id: parent_id, skipped: Some("No applicable mutation fits this program's limits.") };
     };
     let mutation_kind = match mutation.kind {
@@ -438,7 +438,15 @@ impl World {
         self.mutation_rate = if rate.is_finite() { rate.clamp(0.0, 1.0) } else { 0.0 };
     }
 
-    pub fn sense_all(&self) -> Vec<Inputs> {
+    pub fn sense_all(&self) -> Vec<Inputs> { self.sense_selected(None) }
+
+    /// Uses the same snapshot sensing as the tick, without advancing the world.
+    pub fn sense_cell(&self, id: u32) -> Option<Inputs> {
+        let index = self.cells.iter().position(|cell| cell.id == id && cell.alive())?;
+        self.sense_selected(Some(index)).into_iter().next()
+    }
+
+    fn sense_selected(&self, selected: Option<usize>) -> Vec<Inputs> {
         let mut food_grid = Grid::new();
         let mut cell_grid = Grid::new();
         for (i, f) in self.food.iter().enumerate() { food_grid.insert(f.x, f.y, i); }
@@ -458,7 +466,7 @@ impl World {
                 }
             }
         }
-        self.cells.iter().map(|cell| {
+        self.cells.iter().enumerate().filter(|(index, _)| selected.is_none_or(|selected| selected == *index)).map(|(_, cell)| {
             let (flow_x, flow_y) = self.environment.flow_at(cell.x, cell.y, self.time());
             let (light_gradient, temperature_gradient) = self.environment.gradients(cell.x, cell.y);
             let directional = |(x, y): (f64, f64)| if x.hypot(y) < 1e-12 { 0.0 } else { relative_angle(y.atan2(x) - cell.angle) };

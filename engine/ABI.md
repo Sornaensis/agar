@@ -127,9 +127,9 @@ Numeric sensors are scalars. Angles are relative to heading, in radians. Food/ne
 
 Limits are **8,192 expression nodes**, **65,536 tokens**, **256 KiB UTF-8 source**, and **64 nested expression levels**, for both authored and generated programs. References, constants, operators, calls, and guards contribute nodes; comments and whitespace do not. Invalid compilation leaves the world unchanged.
 
-Mutation kinds are any (0), constant (1), expression (2), and reference (3). Constants retain their primitive types and bounds. Expression replacements preserve actual operand/result signatures. References use compatible sensors, same-type register addresses, or earlier visible bindings. Mutations cannot introduce forward references, cycles, ill-typed guards, or illegal addresses. They edit existing expressions/reads and preserve register write destinations; absent action outputs are not introduced, except the existing compatibility treatment of omitted `grow` as zero.
+Mutation kinds are any (0), constant (1), expression (2), and reference (3). Each mutation parses the exact inherited source, selects one reachable node, and patches only its source location. Constants retain their primitive types and bounds. Expression mutations replace one compatible operator/function token or insert/remove one typed unary operation. Binary operator replacement preserves precedence, so unparenthesized neighboring operands do not regroup. References use compatible sensors, same-type register addresses, or earlier visible bindings. Mutations cannot introduce forward references, cycles, ill-typed guards, or illegal addresses. Register write destinations and omitted outputs remain unchanged, including omitted `grow`.
 
-Serialization preserves simultaneous register rules, prunes unreachable expressions, and emits shallow topological bindings. Export/recompile must preserve future memory states as well as immediate outputs. Numeric compatibility is by type, not physical units. Validity does not guarantee survival or useful behavior.
+The complete patched source is typechecked again and becomes the child’s executable program. Every byte outside the edited node is retained, including comments, whitespace, declaration names, and unused definitions. Descendants inherit that source and accumulate one change per mutation; mutation never flattens the program into generated bindings. Legacy canonical serialization is retained only to validate older checkpoint graphs. Source maps are transient and reconstructed when inspecting or mutating a genome. Numeric compatibility is by type, not physical units. Validity does not guarantee survival or useful behavior.
 
 No applicable change, oversized generated source, or exhausted registry capacity safely retains the parent. Default daughter mutation probability is 0.10. Mutation uses a separate deterministic stream derived from seed, tick, and cell IDs. Existing variants are reused before capacity checks, allowing reset to replay existing lineages. Division always pays its ordinary cost, including fallback inheritance. Successful automatic variants increment `mutation_count`; skipped attempts increment `mutation_skipped_count`. Draft mutations affect neither counter.
 
@@ -184,18 +184,19 @@ Engulf/bite use the frozen prey ID and recheck contact after movement; they do n
 
 `predation_count` counts engulf/bite deaths; `attack_count` counts contact bite hits, including hits on later ticks. `photosynthesis_total` is actual gross absorbed energy; upkeep is separate. Cell photosynthesis, nutrient uptake, and remodeling rates report actual activity during the last completed tick.
 
-## WASM API, version 6
+## WASM API, version 7
 
 The module exports `memory`. Pointers/lengths use bytes, except world/environment snapshot lengths, which count `f32` values. Returned buffers are engine-owned: read the matching length and copy immediately before other allocating calls. Refresh JavaScript views after memory growth. Never free engine-owned buffers. Caller-allocated source buffers must be freed once with their exact pointer/length.
 
 | Exports | Behavior |
 | --- | --- |
-| `abi_version() -> u32` | Returns 5 |
+| `abi_version() -> u32` | Returns 7 |
 | `alloc(len) -> ptr`, `dealloc(ptr, len)` | Allocate/free a zeroed source buffer; above 256 KiB returns null |
 | `compile_genome(ptr, len) -> u32` | UTF-8 source → ID ≥ 1; zero plus readable error on failure |
 | `analyze_genome(ptr, len) -> ptr`, `genome_analysis_len()` | Authoritative compiler analysis as engine-owned UTF-8 JSON; no genome registration or simulation mutation |
 | `mutate_genome(id, seed, kind) -> u32` | Variant ID; parent ID plus explanation on safe no-op; zero for invalid ID/kind |
 | `genome_source_ptr(id)`, `genome_source_len()` | UTF-8 source copy; null for invalid ID |
+| `cell_evaluation_ptr(cell_id)`, `cell_evaluation_len()` | Read-only expression preview for one living cell as engine-owned UTF-8 JSON; null plus readable error for a missing/dead cell |
 | `genome_graph_ptr(id)`, `genome_graph_len()` | UTF-8 JSON of the compiled expression graph; null pointer and zero length for invalid ID |
 | `genome_parent(id)`, `genome_mutation_kind(id)` | Provenance; zero for authored/unknown genomes |
 | `genome_count()`, `genome_limit()` | Current count / 2,048 |
@@ -245,7 +246,7 @@ Ranges use zero-based UTF-16 offsets with exclusive ends, suitable for JavaScrip
 
 Valid source has no diagnostics. Invalid source returns the first compiler error; completed earlier declarations and the partial node count remain available after parser/type errors. Lexical errors return no bindings and a zero node count because lexing precedes parsing. `sourceBytes` counts the input's UTF-8 bytes, independently of its UTF-16 length. Oversized input is rejected before parsing, with an empty range at the document start.
 
-Analysis changes only its transient response buffer. It does not consume genome IDs or registry space, change the latest engine error, advance RNGs or cells, or alter checkpoint bytes. It remains available when the genome registry is full. The native ABI accepts a null pointer for empty or oversized input; other nonempty inputs must provide a readable UTF-8 source buffer. Copy the returned JSON before another allocating engine call, and free only the caller's source buffer. The analysis JSON schema is unchanged in ABI 6.
+Analysis changes only its transient response buffer. It does not consume genome IDs or registry space, change the latest engine error, advance RNGs or cells, or alter checkpoint bytes. It remains available when the genome registry is full. The native ABI accepts a null pointer for empty or oversized input; other nonempty inputs must provide a readable UTF-8 source buffer. Copy the returned JSON before another allocating engine call, and free only the caller's source buffer. The analysis JSON schema is unchanged in ABI 7.
 
 ### World snapshot
 
@@ -333,9 +334,34 @@ Memory includes populated slots, ordered by primitive type/address. JSON retains
  {"name":"rv999","type":"vec2","value":[0.5,-1]}]
 ```
 
+### Organism expression evaluation
+
+`cell_evaluation_ptr(cell_id)` evaluates the organism's exact stored source against freshly sampled **current world state and current committed memory**, using the ordinary Rust node evaluator and the same sensing code as simulation ticks. It neither commits writes/clears nor advances time, fields, cells, food, RNGs, lineage, or counters. It is a preview of the displayed snapshot, not a recording of the last tick: the next tick first advances environmental fields and may therefore read slightly different inputs. All pure branches and unused bindings have values because the graph evaluator is eager.
+
+The version-1 JSON response has this shape (`Value` means number, boolean, string, or a two-number vector):
+
+```ts
+{
+  version: 1; cellId: number; genomeId: number; time: number; tick: number;
+  semantics: 'current-snapshot'; source: string;
+  expressions: {id: number; from: number; to: number; type: string; value: Value}[];
+  bindings: {name: string; from: number; to: number; type: string; value: Value}[];
+  signals: {name: string; type: string; value: Value}[];
+  outputs: {name: string; type: string; value: Value; from: number | null; to: number | null}[];
+  writes: {name: string; kind: 'write' | 'clear'; type: string; value: Value | null;
+    guard: boolean; applies: boolean; from: number; to: number}[];
+}
+```
+
+All offsets are **UTF-16** positions in `source`, with exclusive `to`. Expression ranges identify the original expression; a reference has its own range instead of borrowing the declaration's range. Binding ranges cover declaration names. Write ranges cover destination register names. Omitted outputs have null ranges. Type labels are `integer`, `scalar`, `boolean`, `string`, and `vec2`.
+
+`expressions` and `bindings` show raw typed values. `outputs` report commands after ordinary clamping/defaults, before physical resource constraints. `signals` includes every readable builtin. Write `value` is the converted proposed register value; clears use null. `guard` is true when no `when` exists. A clear applies when its guard is true; a write applies only when its guard is true and no simultaneous clear wins for that address. The preview never changes register occupancy or charges energy.
+
+The evaluation buffer is independent of source, analysis, graph, memory, and field buffers. Copy it immediately before another allocating WASM call. A missing/dead organism clears its buffer and returns null with an error, so the UI must discard previous live values. Newborns can be inspected immediately with their current empty memory. The original graph in legacy checkpoints remains intact; its validated source is parsed for source locations and evaluated with the same runtime operations.
+
 ### Genome graph
 
-The graph backend retains its existing JSON version-1 format in ABI 6. It inspects a registered program without evaluating it, advancing the world, changing cell memory, or registering a new genome. The UTF-8 buffer is separate from source, memory, and field buffers; copy it before further allocating WASM calls. An invalid ID clears the graph length and returns null with a readable error.
+The graph backend retains its existing JSON version-1 format in ABI 7. It inspects a registered program without evaluating it, advancing the world, changing cell memory, or registering a new genome. The UTF-8 buffer is separate from source, memory, and field buffers; copy it before further allocating WASM calls. An invalid ID clears the graph length and returns null with a readable error.
 
 The JSON shape is `{version: 1, nodes: [...], roots: [...]}`. Each node has `id`, `kind`, `type`, `label`, `inputs`, `bindings`, and `reachable`. IDs are actual compiler-array indexes; input IDs preserve operand order and duplicates and are always lower than their consumer's ID. A conditional's inputs are condition, then branch, else branch. Types use `integer`, `scalar`, `boolean`, `string`, or `vec2`. Kinds are `constant`, `sensor`, `register`, `populated`, `reference`, `unary`, `binary`, `conditional`, and `call`. Labels are concise source literals, names, or operators; bindings list aliases attached to that node. Unused expressions remain present with `reachable: false`, so graph counts match the compiler's 8,192-node budget.
 
@@ -365,4 +391,4 @@ Existing ABI-5 version-2 saves require no format conversion. `engine/fixtures/tr
 
 ## Verification
 
-`cargo test --manifest-path engine/Cargo.toml` covers parsing, mutation, synchronous memory, material conservation, proportional uptake, partial feeding, body remodeling/capabilities, predation, replay, checkpoint migration/continuation/corruption, and ABI behavior. `npm run test:wasm` exercises the compiled module, including all 4,995 slots, the exact 8,192-node bound, multi-tick mutation round-trips, nutrient/body behavior, packed ABI 6 layouts, and lossless checkpoints across separate WASM instances. `node scripts/check-engine-loader.mjs` also verifies populations beyond the former limits, rejected seed counts, and the real version-1 fixture's exact source, mutated graph, cell state, typed registers, and deterministic version-2 continuation. `npm run build:pages` checks TypeScript and emits a static relative-path build.
+`cargo test --manifest-path engine/Cargo.toml` covers parsing, mutation, synchronous memory, material conservation, proportional uptake, partial feeding, body remodeling/capabilities, predation, replay, checkpoint migration/continuation/corruption, and ABI behavior. `npm run test:wasm` exercises the compiled module, including all 4,995 slots, the exact 8,192-node bound, multi-tick mutation round-trips, nutrient/body behavior, packed ABI 7 layouts, and lossless checkpoints across separate WASM instances. `node scripts/check-engine-loader.mjs` also verifies populations beyond the former limits, rejected seed counts, and the real version-1 fixture's exact source, mutated graph, cell state, typed registers, and deterministic version-2 continuation. `npm run build:pages` checks TypeScript and emits a static relative-path build.

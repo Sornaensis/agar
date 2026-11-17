@@ -14,6 +14,7 @@
     "test:wasm": "node scripts/check-wasm.mjs",
     "test:graph": "node scripts/check-genome-network.mjs",
     "test:language": "node scripts/check-genome-language.mjs",
+    "test:inspection": "node scripts/check-program-inspection.mjs",
     "preview": "vite preview --host 0.0.0.0",
     "test:storage": "node scripts/check-storage.mjs",
     "test:session": "node scripts/check-session.mjs",

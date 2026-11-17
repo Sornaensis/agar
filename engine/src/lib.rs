@@ -20,13 +20,14 @@ struct Engine {
     memory_buffer: Vec<u8>,
     graph_buffer: Vec<u8>,
     analysis_buffer: Vec<u8>,
+    evaluation_buffer: Vec<u8>,
     state_buffer: Vec<u8>,
 }
 
 impl Engine {
     fn new() -> Self {
         Self { genomes: Vec::new(), world: World::empty(1), error: String::new(), snapshot: Vec::new(),
-            environment_snapshot: Vec::new(), source_buffer: Vec::new(), memory_buffer: Vec::new(), graph_buffer: Vec::new(), analysis_buffer: Vec::new(), state_buffer: Vec::new() }
+            environment_snapshot: Vec::new(), source_buffer: Vec::new(), memory_buffer: Vec::new(), graph_buffer: Vec::new(), analysis_buffer: Vec::new(), evaluation_buffer: Vec::new(), state_buffer: Vec::new() }
     }
     fn compile(&mut self, source: &str) -> u32 {
         self.error.clear();
@@ -80,7 +81,7 @@ impl Engine {
 thread_local! { static ENGINE: RefCell<Engine> = RefCell::new(Engine::new()); }
 
 #[no_mangle]
-pub extern "C" fn abi_version() -> u32 { 6 }
+pub extern "C" fn abi_version() -> u32 { 7 }
 
 /// Allocate a writable, zero-initialized byte buffer. The caller must deallocate
 /// it exactly once with the same pointer and length, after compile_genome.
@@ -234,6 +235,35 @@ pub extern "C" fn genome_graph_ptr(genome_id: u32) -> *const u8 {
 
 #[no_mangle]
 pub extern "C" fn genome_graph_len() -> u32 { ENGINE.with(|e| e.borrow().graph_buffer.len() as u32) }
+
+/// Evaluate an organism against the current world snapshot without committing
+/// writes or stepping time, environment, RNG, or any organism. Copy immediately.
+#[no_mangle]
+pub extern "C" fn cell_evaluation_ptr(cell_id: u32) -> *const u8 {
+    ENGINE.with(|engine| {
+        let mut engine = engine.borrow_mut();
+        engine.evaluation_buffer.clear();
+        engine.error.clear();
+        let Some(inputs) = engine.world.sense_cell(cell_id) else {
+            engine.error = "This organism is no longer alive.".into();
+            return std::ptr::null();
+        };
+        let cell = engine.world.cells.iter().find(|cell| cell.id == cell_id).unwrap();
+        let genome = &engine.genomes[(cell.genome_id - 1) as usize];
+        match Program::evaluation_json(&genome.source, &inputs, &cell.memory, cell.id, cell.genome_id, engine.world.ticks) {
+            Ok(json) => {
+                engine.evaluation_buffer = json.into_bytes();
+                engine.evaluation_buffer.as_ptr()
+            }
+            Err(error) => { engine.error = error; std::ptr::null() }
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn cell_evaluation_len() -> u32 {
+    ENGINE.with(|engine| engine.borrow().evaluation_buffer.len() as u32)
+}
 
 #[no_mangle]
 pub extern "C" fn genome_parent(genome_id: u32) -> u32 {
@@ -525,7 +555,7 @@ mod tests {
         engine.compile(genome::DEFAULT_PROGRAM);
         engine.world.reset(11, 1);
         engine.world.snapshot(&mut engine.snapshot);
-        assert_eq!(abi_version(), 6);
+        assert_eq!(abi_version(), 7);
         assert_eq!(engine.snapshot.len(), 12 + 22 * simulation::CELL_STRIDE + 360 * 4);
         assert_eq!(engine.snapshot[7], simulation::WIDTH as f32);
         assert_eq!(engine.snapshot[8], simulation::HEIGHT as f32);
@@ -742,5 +772,52 @@ mod tests {
         assert!(!genome_graph_ptr(id).is_null());
         assert_eq!(error_len(), 0);
         assert_eq!(unsafe { std::slice::from_raw_parts(genome_graph_ptr(id), genome_graph_len() as usize) }, json);
+    }
+
+    #[test]
+    fn expression_preview_is_repeatable_side_effect_free_and_rejects_missing_cells() {
+        ENGINE.with(|engine| *engine.borrow_mut() = Engine::new());
+        let id = ENGINE.with(|engine| engine.borrow_mut().compile("# 🌿\nlet count=ri001+1;ri001=count;thrust=0;turn=0;divide=false;"));
+        reset_empty(71, 0);
+        assert_eq!(seed_cells(id, 2.0, 100.0, 100.0), 2);
+        tick(3);
+        let before = ENGINE.with(|engine| checkpoint::save(&engine.borrow()).unwrap());
+        let pointer = cell_evaluation_ptr(1);
+        assert!(!pointer.is_null());
+        let length = cell_evaluation_len() as usize;
+        let copied = unsafe { std::slice::from_raw_parts(pointer, length) }.to_vec();
+        let json = std::str::from_utf8(&copied).unwrap();
+        assert!(json.contains("\"tick\":3"));
+        assert!(json.contains("\"type\":\"integer\",\"value\":4"));
+        assert!(json.contains("\"name\":\"energy\",\"type\":\"scalar\""));
+        cell_memory_ptr(1); genome_source_ptr(id); genome_graph_ptr(id); snapshot_ptr(); environment_snapshot_ptr();
+        assert_eq!(unsafe { std::slice::from_raw_parts(pointer, length) }, copied);
+        assert_eq!(before, ENGINE.with(|engine| checkpoint::save(&engine.borrow()).unwrap()));
+        assert_eq!(unsafe { std::slice::from_raw_parts(cell_evaluation_ptr(1), cell_evaluation_len() as usize) }, copied);
+        assert!(cell_evaluation_ptr(0).is_null());
+        assert_eq!(cell_evaluation_len(), 0);
+        assert!(error_len() > 0);
+        assert!(cell_evaluation_ptr(u32::MAX).is_null());
+        assert_eq!(cell_evaluation_len(), 0);
+        assert_eq!(before, ENGINE.with(|engine| checkpoint::save(&engine.borrow()).unwrap()));
+    }
+
+    #[test]
+    fn legacy_checkpoint_inspection_preserves_stored_graph_and_future_state() {
+        ENGINE.with(|engine| {
+            let mut engine = engine.borrow_mut();
+            assert!(engine.restore_state(include_bytes!("../fixtures/trophic-v1.bin")), "{}", engine.error);
+        });
+        let before = ENGINE.with(|engine| checkpoint::save(&engine.borrow()).unwrap());
+        let cells = ENGINE.with(|engine| engine.borrow().world.cells.iter().map(|cell| cell.id).collect::<Vec<_>>());
+        for id in cells.iter().take(5) {
+            assert!(!cell_evaluation_ptr(*id).is_null());
+            assert!(cell_evaluation_len() > 0);
+        }
+        assert_eq!(before, ENGINE.with(|engine| checkpoint::save(&engine.borrow()).unwrap()));
+        let mut copy = checkpoint::restore(&before).unwrap();
+        tick(30);
+        for _ in 0..30 { copy.world.step(&mut copy.genomes); }
+        assert_eq!(checkpoint::save(&copy).unwrap(), ENGINE.with(|engine| checkpoint::save(&engine.borrow()).unwrap()));
     }
 }

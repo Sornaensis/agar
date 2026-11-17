@@ -1,5 +1,5 @@
 {
-  "abi": 6,
+  "abi": 7,
   "memory": "memory",
   "functions": [
     "abi_version",
@@ -50,6 +50,8 @@
     "environment_snapshot_len",
     "cell_memory_ptr",
     "cell_memory_len",
+    "cell_evaluation_ptr",
+    "cell_evaluation_len",
     "predation_count",
     "attack_count",
     "photosynthesis_total",

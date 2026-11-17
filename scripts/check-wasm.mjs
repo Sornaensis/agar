@@ -12,7 +12,9 @@ for (const name of ['alloc', 'dealloc', 'compile_genome', 'error_ptr', 'error_le
 assert.ok(api.memory instanceof WebAssembly.Memory);
 assert.equal(typeof api.genome_graph_ptr, 'function');
 assert.equal(typeof api.genome_graph_len, 'function');
-assert.equal(api.abi_version(), 6);
+assert.equal(api.abi_version(), 7);
+assert.equal(typeof api.cell_evaluation_ptr, 'function');
+assert.equal(typeof api.cell_evaluation_len, 'function');
 const HEADER_SIZE = 12;
 const CELL_STRIDE = 63;
 const FOOD_STRIDE = 4;
@@ -129,7 +131,7 @@ function errorOf(module) {
 function snapshotOf(module) {
   const ptr = module.snapshot_ptr();
   const values = new Float32Array(module.memory.buffer, ptr, module.snapshot_len()).slice();
-  assert.equal(values.length, HEADER_SIZE + values[2] * CELL_STRIDE + values[3] * FOOD_STRIDE, 'ABI6 snapshot layout');
+  assert.equal(values.length, HEADER_SIZE + values[2] * CELL_STRIDE + values[3] * FOOD_STRIDE, 'ABI7 snapshot layout');
   assert.ok(values.every(Number.isFinite), 'Simulation state must remain finite');
   assert.equal(values[9], 0, 'Former population-limit slot is reserved, with no population ceiling');
   assert.ok(Number.isSafeInteger(values[2]) && values[2] >= 0, 'Population is a nonnegative count');
@@ -743,7 +745,7 @@ for (const cell of cellsOf(advance(coreBody, 390))) {
   close(cell.senseRange, 40, 0.00002, 'Unspecialized cells retain only basic sensing');
 }
 checkMinerals(coreBody, 'Body remodeling preserves mineral mass');
-console.log('Nutrient/body WASM checks passed: ABI6, compartment accounting, explicit inputs, spring/reset behavior, mineral-limited growth, founder specialization, paid delayed remodeling, frozen body sensors, shared targets, and core upkeep.');
+console.log('Nutrient/body WASM checks passed: ABI7, compartment accounting, explicit inputs, spring/reset behavior, mineral-limited growth, founder specialization, paid delayed remodeling, frozen body sensors, shared targets, and core upkeep.');
 
 // Structural inspection must expose the compiler's graph without executing it
 // or creating same-tick feedback edges between register writes and reads.

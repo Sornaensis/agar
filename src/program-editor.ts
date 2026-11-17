@@ -1,6 +1,6 @@
 import { Compartment, EditorState, Transaction, type Extension } from '@codemirror/state';
 import {
-  EditorView, drawSelection, dropCursor, highlightActiveLine, highlightActiveLineGutter,
+  EditorView, closeHoverTooltips, drawSelection, dropCursor, highlightActiveLine, highlightActiveLineGutter,
   hoverTooltip, keymap, lineNumbers, type ViewUpdate,
 } from '@codemirror/view';
 import {
@@ -15,9 +15,9 @@ import {
 import { lintGutter, nextDiagnostic, previousDiagnostic, setDiagnostics, setDiagnosticsEffect } from '@codemirror/lint';
 import { searchKeymap } from '@codemirror/search';
 import { tags } from '@lezer/highlight';
-import type { Engine, GenomeAnalysis, GenomeBinding, GenomeDiagnostic } from './engine';
+import type { Engine, GenomeAnalysis, GenomeBinding, GenomeDiagnostic, GenomeEvaluation } from './engine';
 import {
-  lookupGenomeSymbol, registerCompletions, searchGenomeSymbols, tokenizeGenome,
+  genomeCompletions, genomeSignalCatalog, genomeSymbolDocumentation, lookupGenomeSymbol, tokenizeGenome, unwrapGenomeSelection,
   type GenomeSymbol, type GenomeToken, type GenomeTokenKind,
 } from './genome-language';
 import './program-editor.css';
@@ -44,6 +44,7 @@ export interface ProgramEditorState {
 interface LocalDeclaration { name: string; from: number; to: number; scopeFrom: number }
 interface SymbolRange { from: number; to: number; symbol: GenomeSymbol }
 interface StreamState { line: string; tokens: readonly GenomeToken[]; index: number }
+interface EvaluatedPart { from: number; to: number; type: string; value: unknown; label?: string; note?: string }
 
 const tokenStyles: Record<GenomeTokenKind, string> = {
   keyword: 'keyword', boolean: 'bool', number: 'number', string: 'string', comment: 'comment',
@@ -123,6 +124,26 @@ function symbolHelp(symbol: GenomeSymbol, compact = false): HTMLElement {
   return element;
 }
 
+function evaluationValue(value: unknown, type: string): string {
+  if (type === 'vec2' && Array.isArray(value)) return `vec(${value.map(component => evaluationValue(component, 'scalar')).join(', ')})`;
+  if (typeof value === 'number') return Number.isInteger(value) ? String(value) : Number(value.toPrecision(7)).toString();
+  if (typeof value === 'string') return JSON.stringify(value);
+  return String(value);
+}
+
+function evaluationHelp(part: EvaluatedPart, source: string, compact = false): HTMLElement {
+  const element = document.createElement('div'); element.className = `program-evaluation-help${compact ? ' compact' : ''}`;
+  const expression = document.createElement('code'); expression.className = 'program-evaluation-expression';
+  expression.textContent = part.label ?? source.slice(part.from, part.to).trim();
+  expression.title = expression.textContent;
+  const result = document.createElement('div'); result.className = 'program-evaluation-result';
+  const value = document.createElement('code'); value.textContent = evaluationValue(part.value, part.type);
+  const type = document.createElement('span'); type.textContent = part.type;
+  result.append(value, type); element.append(expression, result);
+  if (part.note) { const note = document.createElement('p'); note.textContent = part.note; element.append(note); }
+  return element;
+}
+
 /** An isolated editor: changing or checking code never writes the catalog or a live world. */
 export class ProgramEditor {
   readonly element: HTMLElement;
@@ -133,6 +154,14 @@ export class ProgramEditor {
   private readonly statusElement: HTMLElement;
   private readonly positionElement: HTMLElement;
   private readonly sizeElement: HTMLElement;
+  private readonly referenceElement: HTMLElement;
+  private readonly readSignalSelect: HTMLSelectElement;
+  private readonly writeSignalSelect: HTMLSelectElement;
+  private readonly evaluationElement: HTMLElement;
+  private readonly evaluationTimeElement: HTMLElement;
+  private referenceSymbol: GenomeSymbol | null = null;
+  private evaluation: GenomeEvaluation | null = null;
+  private evaluationUnavailable: string | null = null;
   private source: string;
   private readOnly: boolean;
   private destroyed = false;
@@ -159,7 +188,17 @@ export class ProgramEditor {
     const identifier = `program-editor-${++editorSequence}`;
     this.element = document.createElement('div');
     this.element.className = 'program-editor';
+    const referenceBar = document.createElement('div'); referenceBar.className = 'program-reference-bar';
+    this.readSignalSelect = this.createSignalSelect('read');
+    this.writeSignalSelect = this.createSignalSelect('write');
+    this.evaluationTimeElement = document.createElement('span'); this.evaluationTimeElement.className = 'program-evaluation-time';
+    this.evaluationTimeElement.hidden = true;
+    const completionHint = document.createElement('span'); completionHint.className = 'program-completion-hint';
+    completionHint.textContent = 'Ctrl Space'; completionHint.title = 'Open contextual autocomplete with Control or Command + Space';
+    referenceBar.append(this.readSignalSelect, this.writeSignalSelect, completionHint, this.evaluationTimeElement);
+    this.referenceElement = document.createElement('div'); this.referenceElement.className = 'program-reference-panel'; this.referenceElement.hidden = true;
     const host = document.createElement('div'); host.className = 'program-editor-code';
+    this.evaluationElement = document.createElement('div'); this.evaluationElement.className = 'program-evaluation'; this.evaluationElement.hidden = true;
     this.helpElement = document.createElement('div');
     this.helpElement.className = 'program-context';
     this.helpElement.id = `${identifier}-context`;
@@ -179,7 +218,7 @@ export class ProgramEditor {
     const shortcuts = document.createElement('span');
     shortcuts.className = 'program-shortcuts'; shortcuts.id = `${identifier}-shortcuts`;
     shortcuts.textContent = 'Tab leaves the editor. Control or Command plus Space opens completions, Enter checks the program, S saves, Z undoes, and Shift Z redoes. Control or Command plus bracket indents. F8 goes to the next error.';
-    this.element.append(host, this.helpElement, this.diagnosticsElement, statusBar, shortcuts);
+    this.element.append(referenceBar, this.referenceElement, host, this.evaluationElement, this.helpElement, this.diagnosticsElement, statusBar, shortcuts);
     options.parent.append(this.element);
     this.view = new EditorView({
       parent: host,
@@ -198,8 +237,24 @@ export class ProgramEditor {
           autocompletion({ override: [context => this.complete(context)], activateOnTypingDelay: 120, maxRenderedOptions: 40 }),
           hoverTooltip((_view, position, side) => {
             const match = this.symbolNear(position);
-            if (!match || (position === match.from && side < 0) || (position === match.to && side > 0)) return null;
-            return { pos: match.from, end: match.to, above: true, create: () => ({ dom: symbolHelp(match.symbol) }) };
+            const evaluated = this.evaluatedPart(position, position);
+            const source = this.source;
+            const range = evaluated ?? match;
+            if (!range || (position === range.from && side < 0) || (position === range.to && side > 0)) return null;
+            return { pos: range.from, end: range.to, above: true, create: () => {
+              const dom = document.createElement('div');
+              const render = (): void => {
+                const snapshot = this.evaluation;
+                const part = snapshot?.source === source ? this.evaluatedPart(position, position) : null;
+                dom.replaceChildren();
+                if (part && snapshot) dom.append(evaluationHelp({ ...part,
+                  note: `${part.note ? `${part.note} ` : ''}Snapshot at ${snapshot.time.toFixed(2)} s · organism ${snapshot.cellId}.`,
+                }, source));
+                if (match) dom.append(symbolHelp(match.symbol));
+              };
+              render();
+              return { dom, update: render };
+            } };
           }, { hoverTime: 350, hideOnChange: true }),
           // Clear marks in the same transaction as edits instead of leaving an old error attached to new code.
           EditorState.transactionExtender.of(transaction => transaction.docChanged
@@ -241,10 +296,17 @@ export class ProgramEditor {
   /** Programmatic changes (for example mutations) remain possible while input is temporarily locked. */
   setValue(source: string): void {
     if (this.destroyed || source === this.source) return;
-    const position = Math.min(this.view.state.selection.main.head, source.length);
+    let from = 0;
+    while (from < this.source.length && from < source.length && this.source[from] === source[from]) from++;
+    let oldTo = this.source.length, newTo = source.length;
+    while (oldTo > from && newTo > from && this.source[oldTo - 1] === source[newTo - 1]) { oldTo--; newTo--; }
+    // Never split a Unicode surrogate pair while finding the smallest text edit.
+    if (from > 0 && /[\uDC00-\uDFFF]/.test(source[from] ?? this.source[from] ?? '')) from--;
+    if (oldTo < this.source.length && /[\uDC00-\uDFFF]/.test(this.source[oldTo])) oldTo++;
+    if (newTo < source.length && /[\uDC00-\uDFFF]/.test(source[newTo])) newTo++;
     this.view.dispatch({
-      changes: { from: 0, to: this.view.state.doc.length, insert: source },
-      selection: { anchor: position },
+      changes: { from, to: oldTo, insert: source.slice(from, newTo) },
+      selection: { anchor: from, head: newTo },
       annotations: [isolateHistory.of('full'), Transaction.userEvent.of('input.replace')],
       scrollIntoView: true,
     });
@@ -258,10 +320,30 @@ export class ProgramEditor {
     this.readOnly = readOnly;
     this.view.dispatch({ effects: this.readOnlyMode.reconfigure(this.readOnlyExtensions()) });
     this.element.classList.toggle('is-readonly', readOnly);
+    if (this.referenceSymbol) this.showReference(this.referenceSymbol);
     this.options.onStateChange?.();
   }
 
   focus(): void { if (!this.destroyed) this.view.focus(); }
+
+  /** Pure previews are supplied by the current organism's WASM instance, never inferred in JS. */
+  setEvaluation(evaluation: GenomeEvaluation | null): void {
+    if (this.destroyed) return;
+    if (evaluation && evaluation.source !== this.source) {
+      this.setEvaluationUnavailable('The program changed. Refresh this organism to evaluate its current source.'); return;
+    }
+    this.evaluation = evaluation; this.evaluationUnavailable = null;
+    this.renderEvaluation(); this.renderContext();
+    // Existing hover views receive the same fresh snapshot as the persistent value panel.
+    this.view.dispatch(evaluation ? {} : { effects: closeHoverTooltips });
+  }
+
+  setEvaluationUnavailable(message: string): void {
+    if (this.destroyed) return;
+    this.evaluation = null; this.evaluationUnavailable = message;
+    this.renderEvaluation(); this.renderContext();
+    this.view.dispatch({ effects: closeHoverTooltips });
+  }
 
   /** A result applies only to the exact revision requested; a changed/destroyed editor returns false. */
   check(): Promise<boolean> {
@@ -306,6 +388,7 @@ export class ProgramEditor {
     this.destroyed = true; this.validationSerial++;
     window.clearTimeout(this.validationTimer);
     this.pending = null; this.analysis = null; this.tokens = []; this.codeTokens = []; this.declarations = [];
+    this.evaluation = null; this.referenceSymbol = null;
     this.declarationByFrom.clear(); this.bindingByFrom.clear();
     this.view.destroy(); this.element.remove();
   }
@@ -319,12 +402,144 @@ export class ProgramEditor {
     if (update.docChanged) {
       this.source = update.state.doc.toString(); this.revision++; this.validationSerial++;
       this.analysis = null; this.diagnostics = []; this.status = 'dirty';
+      if (this.evaluation) { this.evaluation = null; this.evaluationUnavailable = 'The source changed. Values are unavailable for this draft.'; }
       this.bindingByFrom.clear();
       this.sourceBytes = encoder.encode(this.source).length;
       this.refreshTokens(); this.renderDiagnostics(); this.renderStatus();
       this.scheduleCheck(); this.options.onChange?.(this.source); this.options.onStateChange?.();
     }
-    if (update.docChanged || update.selectionSet) this.renderContext();
+    if (update.docChanged || update.selectionSet) { this.renderContext(); this.renderEvaluation(); }
+  }
+
+  private createSignalSelect(direction: 'read' | 'write'): HTMLSelectElement {
+    const select = document.createElement('select'); select.className = `program-signal-select ${direction}`;
+    select.setAttribute('aria-label', direction === 'read' ? 'Read signal reference' : 'Write signal reference');
+    const prompt = document.createElement('option'); prompt.value = ''; prompt.textContent = direction === 'read' ? 'Read signals' : 'Write signals';
+    select.append(prompt);
+    const groups = new Map<string, HTMLOptGroupElement>();
+    for (const item of genomeSignalCatalog(direction)) {
+      const groupName = item.category === 'register' ? 'Memory registers'
+        : direction === 'write' ? item.name.startsWith('invest.') ? 'Body allocation' : 'Actions'
+          : /^(food|prey|neighbor|threat)\./.test(item.name) ? 'Sensed targets'
+            : /^(light|temperature|flow)\./.test(item.name) || ['nutrient.level', 'nutrient.angle'].includes(item.name) ? 'Environment'
+              : /^(body|sense)\./.test(item.name) ? 'Body capabilities' : 'Cell state';
+      let group = groups.get(groupName);
+      if (!group) { group = document.createElement('optgroup'); group.label = groupName; groups.set(groupName, group); select.append(group); }
+      const option = document.createElement('option'); option.value = item.name;
+      option.textContent = `${item.name}${item.category === 'register' ? ` … ${item.name.slice(0, 2)}999` : ''} · ${item.type}`;
+      group.append(option);
+    }
+    select.addEventListener('change', () => {
+      const selected = lookupGenomeSymbol(select.value);
+      if (!selected) { this.referenceElement.hidden = true; this.referenceSymbol = null; return; }
+      (direction === 'read' ? this.writeSignalSelect : this.readSignalSelect).value = '';
+      this.showReference(selected);
+    });
+    return select;
+  }
+
+  private showReference(symbol: GenomeSymbol): void {
+    this.referenceSymbol = symbol; this.referenceElement.hidden = false;
+    const content = document.createElement('div'); content.className = 'program-reference-content';
+    const summary = symbolHelp(symbol); summary.classList.add('program-reference-summary');
+    const usage = document.createElement('div'); usage.className = 'program-reference-usage';
+    const liveValue = document.createElement('div'); liveValue.className = 'program-reference-live-value'; liveValue.hidden = true; usage.append(liveValue);
+    const documentation = genomeSymbolDocumentation(symbol);
+    const example = document.createElement('pre'); example.className = 'program-reference-example'; example.textContent = documentation.example;
+    usage.append(example);
+    for (const text of documentation.notes) { const note = document.createElement('p'); note.textContent = text; summary.append(note); }
+    content.append(summary, usage);
+    const controls = document.createElement('div'); controls.className = 'program-reference-controls';
+    if (!this.readOnly) {
+      const insert = document.createElement('button'); insert.type = 'button'; insert.className = 'program-reference-insert';
+      insert.textContent = symbol.category === 'output' || this.writeSignalSelect.value ? 'Insert write' : 'Insert read';
+      insert.addEventListener('click', () => {
+        if (this.destroyed || this.readOnly) return;
+        const writing = symbol.category === 'output' || Boolean(this.writeSignalSelect.value);
+        const text = writing ? `${symbol.name} = ` : symbol.name;
+        const selection = this.view.state.selection.main;
+        this.view.dispatch({ changes: { from: selection.from, to: selection.to, insert: text }, selection: { anchor: selection.from + text.length },
+          annotations: Transaction.userEvent.of('input.complete'), scrollIntoView: true });
+        this.view.focus();
+      });
+      controls.append(insert);
+    }
+    const close = document.createElement('button'); close.type = 'button'; close.className = 'program-reference-close'; close.textContent = 'Close';
+    close.setAttribute('aria-label', 'Close signal reference');
+    close.addEventListener('click', () => { this.referenceElement.hidden = true; this.referenceSymbol = null; this.readSignalSelect.value = ''; this.writeSignalSelect.value = ''; });
+    controls.append(close);
+    this.referenceElement.replaceChildren(content, controls);
+    this.renderReferenceValue();
+  }
+
+  private renderReferenceValue(): void {
+    const container = this.referenceElement.querySelector<HTMLElement>('.program-reference-live-value');
+    if (!container) return;
+    const symbol = this.referenceSymbol, evaluation = this.evaluation;
+    const value = symbol?.category === 'signal' ? evaluation?.signals.find(value => value.name === symbol.name)
+      : symbol?.category === 'output' ? evaluation?.outputs.find(value => value.name === symbol.name) : undefined;
+    container.hidden = !value;
+    if (!value || !evaluation) { container.replaceChildren(); return; }
+    const label = document.createElement('span'); label.textContent = `${symbol?.category === 'output' ? 'Clamped request' : 'Current value'} · ${evaluation.time.toFixed(2)} s`;
+    const code = document.createElement('code'); code.textContent = evaluationValue(value.value, value.type);
+    container.replaceChildren(label, code);
+  }
+
+  private evaluatedPart(from: number, to: number): EvaluatedPart | null {
+    const evaluation = this.evaluation;
+    if (!evaluation || evaluation.source !== this.source) return null;
+    const selection = from !== to;
+    let start = from, end = to;
+    if (selection) {
+      const normalized = unwrapGenomeSelection(this.source, from, to, this.codeTokens);
+      start = normalized.from; end = normalized.to;
+    }
+    if (!selection) {
+      const token = this.tokenAt(from);
+      if (token) {
+        if (token.kind === 'comment') return null;
+        // An operator belongs to its enclosing expression, never to the leaf ending at its left edge.
+        start = token.from; end = token.to;
+        const declaration = evaluation.bindings.find(binding => binding.from === token.from && binding.to === token.to);
+        if (declaration) return { ...declaration, label: declaration.name, note: 'Local binding value.' };
+        const output = token.kind === 'output' ? evaluation.outputs.find(output => output.name === token.text) : undefined;
+        if (output) return { from: token.from, to: token.to, type: output.type, value: output.value, label: output.name,
+          note: 'Action request after engine clamping. Capability and resource checks still apply.' };
+        const write = evaluation.writes.find(write => write.from === token.from && write.to === token.to);
+        if (write) return { ...write, value: write.kind === 'clear' ? write.applies : write.value,
+          type: write.kind === 'clear' ? 'boolean' : write.type, label: write.kind === 'clear' ? `clear ${write.name}` : `${write.name} write`,
+          note: write.applies ? 'This rule would apply. Previewing does not change memory.' : write.guard ? 'This write is suppressed by an active clear.' : 'The when condition is false; this rule would not apply.' };
+      }
+    }
+    let found: (typeof evaluation.expressions)[number] | undefined;
+    for (const expression of evaluation.expressions) {
+      if (expression.from > start || expression.to < end || expression.from === expression.to) continue;
+      if (!found || expression.to - expression.from < found.to - found.from) found = expression;
+    }
+    return found ? { ...found, ...(selection && (found.from !== start || found.to !== end) ? { note: 'Value of the enclosing complete expression.' } : {}) } : null;
+  }
+
+  private renderEvaluation(): void {
+    const evaluation = this.evaluation;
+    this.renderReferenceValue();
+    this.evaluationElement.hidden = !evaluation && !this.evaluationUnavailable;
+    this.evaluationTimeElement.hidden = !evaluation;
+    this.element.classList.toggle('has-evaluation', Boolean(evaluation));
+    if (!evaluation) {
+      this.evaluationTimeElement.textContent = '';
+      const hint = document.createElement('span'); hint.className = 'program-context-empty'; hint.textContent = this.evaluationUnavailable ?? '';
+      this.evaluationElement.replaceChildren(hint); return;
+    }
+    this.evaluationTimeElement.textContent = `Snapshot ${evaluation.time.toFixed(2)} s`;
+    this.evaluationTimeElement.title = `Organism ${evaluation.cellId} · tick ${evaluation.tick}. Current signals and memory; this preview does not commit writes or advance the world.`;
+    const selection = this.view.state.selection.main;
+    const part = this.evaluatedPart(selection.from, selection.to);
+    const content = part ? evaluationHelp(part, this.source, true) : document.createElement('span');
+    if (!part) { content.className = 'program-context-empty'; content.textContent = 'Click, hover, or select an expression to inspect its value.'; }
+    const note = document.createElement('span'); note.className = 'program-evaluation-note';
+    note.textContent = 'Current signals and memory · preview does not commit writes';
+    note.title = 'Values are calculated with the same evaluator as the simulation. All pure branches can be inspected, including a branch an if expression does not select. Commands may still be limited by the body and available resources.';
+    this.evaluationElement.replaceChildren(content, note);
   }
 
   private scheduleCheck(): void {
@@ -409,6 +624,7 @@ export class ProgramEditor {
     const left = token?.from === position && (token.kind === 'punctuation' || token.kind === 'operator')
       ? this.symbolNear(Math.max(0, position - 1))?.symbol : undefined;
     const symbol = this.symbolNear(position)?.symbol ?? left ?? this.callAt(position);
+    this.helpElement.hidden = Boolean(this.evaluation && !symbol);
     const key = symbol ? `${symbol.signature}\n${symbol.description}` : '';
     if (key === this.helpKey && this.helpElement.childNodes.length) return;
     this.helpKey = key;
@@ -428,14 +644,11 @@ export class ProgramEditor {
     const word = context.matchBefore(/[A-Za-z_][A-Za-z0-9_.]*/);
     if (!word && !context.explicit) return null;
     const prefix = word?.text ?? '', from = word?.from ?? context.pos;
-    const bindings = this.visibleBindings(context.pos);
-    const symbols = new Map(searchGenomeSymbols(prefix, bindings, 160).map(item => [item.name, item]));
-    for (const item of registerCompletions(prefix, this.source, 30)) symbols.set(item.name, item);
+    const bindings: { name: string; type: string; from: number; to: number }[] = this.visibleBindings(context.pos);
     for (const item of this.declarations) {
-      if (item.scopeFrom <= context.pos && item.name.toLowerCase().startsWith(prefix.toLowerCase())) symbols.set(item.name, this.localSymbol(item));
-      if (symbols.size >= 200) break;
+      if (item.scopeFrom <= context.pos && !bindings.some(binding => binding.name === item.name)) bindings.push({ ...item, type: 'not checked' });
     }
-    const options: Completion[] = [...symbols.values()].map(symbol => ({
+    const options: Completion[] = genomeCompletions(this.source, context.pos, prefix, bindings).map(symbol => ({
       label: symbol.name,
       type: symbol.category === 'binding' || symbol.category === 'register' ? 'variable'
         : symbol.category === 'signal' || symbol.category === 'output' ? 'property' : symbol.category,
@@ -445,6 +658,9 @@ export class ProgramEditor {
       apply: (view, completion, start, end) => {
         if (view.state.readOnly) return;
         let insert = symbol.insertText ?? symbol.name, anchor = start + insert.length;
+        if (insert.endsWith(' = ') && /^\s*=/.test(view.state.sliceDoc(end, Math.min(end + 32, view.state.doc.length)))) {
+          insert = symbol.name; anchor = start + insert.length;
+        }
         if (symbol.category === 'function' && !symbol.insertText && !/^\s*\(/.test(view.state.sliceDoc(end, Math.min(end + 32, view.state.doc.length)))) {
           insert += '()'; anchor++;
         }

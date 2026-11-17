@@ -45,6 +45,92 @@ export interface GenomeAnalysis {
   valid: boolean; diagnostics: GenomeDiagnostic[]; bindings: GenomeBinding[];
   nodeCount: number; sourceBytes: number;
 }
+export type GenomeValue = number | boolean | string | [number, number];
+export interface GenomeExpressionEvaluation {
+  id: number; from: number; to: number; type: GenomeValueType; value: GenomeValue;
+}
+export interface GenomeBindingEvaluation {
+  name: string; from: number; to: number; type: GenomeValueType; value: GenomeValue;
+}
+export interface GenomeSignalEvaluation { name: string; type: GenomeValueType; value: GenomeValue }
+export interface GenomeOutputEvaluation {
+  name: string; type: GenomeValueType; value: GenomeValue;
+  /** The expression range, or null for an omitted output's default. */
+  from: number | null; to: number | null;
+}
+export interface GenomeWriteEvaluation {
+  name: string; kind: 'write' | 'clear'; type: GenomeValueType; value: GenomeValue | null;
+  guard: boolean; applies: boolean; from: number; to: number;
+}
+/** A side-effect-free evaluation against this cell's current signals and memory.
+ * It is a snapshot preview, not a record of its last tick or a committed action. */
+export interface GenomeEvaluation {
+  version: 1; semantics: 'current-snapshot'; cellId: number; genomeId: number;
+  time: number; tick: number; source: string;
+  expressions: GenomeExpressionEvaluation[]; bindings: GenomeBindingEvaluation[];
+  signals: GenomeSignalEvaluation[]; outputs: GenomeOutputEvaluation[]; writes: GenomeWriteEvaluation[];
+}
+
+/** Keep source ranges and runtime values trustworthy before rendering inspection UI. */
+export function validateGenomeEvaluation(value: unknown, expectedCellId?: number): GenomeEvaluation {
+  const fail = (): never => { throw new Error('The engine returned an invalid program evaluation. Rebuild the current WASM engine.'); };
+  if (!value || typeof value !== 'object') return fail();
+  const trace = value as GenomeEvaluation;
+  const types = new Set<GenomeValueType>(['integer', 'scalar', 'boolean', 'string', 'vec2']);
+  const positiveId = (id: number): boolean => Number.isInteger(id) && id >= 1 && id <= 0xffff_ffff;
+  if (trace.version !== 1 || trace.semantics !== 'current-snapshot'
+    || !positiveId(trace.cellId) || !positiveId(trace.genomeId)
+    || (expectedCellId !== undefined && trace.cellId !== expectedCellId)
+    || !Number.isSafeInteger(trace.tick) || trace.tick < 0 || !Number.isFinite(trace.time) || trace.time < 0
+    || typeof trace.source !== 'string' || trace.source.length > MAX_PROGRAM_BYTES
+    || new TextEncoder().encode(trace.source).length > MAX_PROGRAM_BYTES
+    || !Array.isArray(trace.expressions) || !trace.expressions.length || trace.expressions.length > 8192
+    || !Array.isArray(trace.bindings) || trace.bindings.length > 8192
+    || !Array.isArray(trace.signals) || trace.signals.length !== 61
+    || !Array.isArray(trace.outputs) || trace.outputs.length !== 17
+    || !Array.isArray(trace.writes) || trace.writes.length > 9990) return fail();
+  const range = (from: number, to: number): boolean => Number.isInteger(from) && Number.isInteger(to)
+    && from >= 0 && to > from && to <= trace.source.length;
+  const scalar = (item: unknown): item is number => typeof item === 'number' && Number.isFinite(item) && Math.abs(item) <= 1e12;
+  const typed = (type: GenomeValueType, item: unknown): boolean => {
+    if (!types.has(type)) return false;
+    switch (type) {
+      case 'integer': return typeof item === 'number' && Number.isInteger(item) && item >= -2147483648 && item <= 2147483647;
+      case 'scalar': return scalar(item);
+      case 'boolean': return typeof item === 'boolean';
+      case 'string': return typeof item === 'string' && new TextEncoder().encode(item).length <= 128;
+      case 'vec2': return Array.isArray(item) && item.length === 2 && item.every(scalar);
+    }
+  };
+  const named = (item: GenomeSignalEvaluation): boolean => Boolean(item) && typeof item.name === 'string' && item.name.length > 0 && typed(item.type, item.value);
+  for (let id = 0; id < trace.expressions.length; id++) {
+    const expression = trace.expressions[id];
+    if (!expression || expression.id !== id || !range(expression.from, expression.to) || !typed(expression.type, expression.value)) return fail();
+  }
+  for (const binding of trace.bindings) {
+    if (!named(binding) || !range(binding.from, binding.to) || trace.source.slice(binding.from, binding.to) !== binding.name) return fail();
+  }
+  if (!trace.signals.every(named) || new Set(trace.signals.map(signal => signal.name)).size !== trace.signals.length) return fail();
+  const outputNames = new Set<string>();
+  for (const output of trace.outputs) {
+    if (!named(output) || outputNames.has(output.name)
+      || !((output.from === null && output.to === null)
+        || (typeof output.from === 'number' && typeof output.to === 'number' && range(output.from, output.to)))) return fail();
+    outputNames.add(output.name);
+  }
+  const ruleNames = new Set<string>();
+  const registerTypes: Record<string, GenomeValueType> = { ri: 'integer', rf: 'scalar', rb: 'boolean', rs: 'string', rv: 'vec2' };
+  for (const rule of trace.writes) {
+    if (!rule || typeof rule.name !== 'string' || !/^r[ifbsv](?!000)\d{3}$/.test(rule.name)
+      || registerTypes[rule.name.slice(0, 2)] !== rule.type || !['write', 'clear'].includes(rule.kind)
+      || !range(rule.from, rule.to) || trace.source.slice(rule.from, rule.to) !== rule.name
+      || typeof rule.guard !== 'boolean' || typeof rule.applies !== 'boolean' || (rule.applies && !rule.guard)
+      || (rule.kind === 'clear' ? rule.value !== null || rule.applies !== rule.guard : !typed(rule.type, rule.value))
+      || ruleNames.has(`${rule.kind}:${rule.name}`)) return fail();
+    ruleNames.add(`${rule.kind}:${rule.name}`);
+  }
+  return trace;
+}
 export interface GenomeGraphNode {
   id: number;
   kind: 'constant' | 'sensor' | 'register' | 'populated' | 'reference' | 'unary' | 'binary' | 'conditional' | 'call';
@@ -136,6 +222,7 @@ interface WasmExports extends WebAssembly.Exports {
   remove_source(id: number): number; clear_sources(): void;
   environment_snapshot_ptr(): number; environment_snapshot_len(): number;
   cell_memory_ptr(id: number): number; cell_memory_len(): number;
+  cell_evaluation_ptr(id: number): number; cell_evaluation_len(): number;
   predation_count(): number; attack_count(): number; photosynthesis_total(): number;
   genome_bytes(): number; genome_byte_limit(): number;
 }
@@ -275,6 +362,15 @@ export class Engine {
     const entries: unknown = JSON.parse(new TextDecoder().decode(new Uint8Array(this.wasm.memory.buffer, pointer, length)));
     if (!Array.isArray(entries)) throw new Error('The engine returned an invalid memory snapshot.');
     return entries as RegisterEntry[];
+  }
+  getCellEvaluation(id: number): GenomeEvaluation {
+    if (!Number.isInteger(id) || id < 1 || id > 0xffff_ffff) throw new Error('Choose a living organism to inspect its program.');
+    const pointer = this.wasm.cell_evaluation_ptr(id);
+    const length = this.wasm.cell_evaluation_len();
+    if (!pointer || !length) throw new Error(this.readError() || `Organism ${id} is no longer available.`);
+    // Decode before another engine call can replace the buffer or grow memory.
+    const json = new TextDecoder().decode(new Uint8Array(this.wasm.memory.buffer, pointer, length));
+    return validateGenomeEvaluation(JSON.parse(json), id);
   }
   mutate(genomeId: number, seed: number, kind: MutationKind = 0): MutationResult {
     const id = this.wasm.mutate_genome(genomeId, seed >>> 0, kind);

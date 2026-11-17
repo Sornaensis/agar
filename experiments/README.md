@@ -2,6 +2,8 @@
 
 These deterministic experiments test the simulator's behavior. They do not guarantee indefinite coexistence or validate a biological model.
 
+The recorded results below predate the source-preserving mutation changes in ABI 7. They retain their original engine hashes and programs. New mutation-enabled runs may follow different trajectories; the measurements are historical comparisons, not predictions for every later build.
+
 ## Population and feeding correction
 
 - `population-before.json` records the shipped ABI 5 mixed ecosystem for seeds 42, 7, and 2026, with mutations disabled, through 900 simulated seconds.

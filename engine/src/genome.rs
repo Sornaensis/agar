@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
 mod checkpoint;
+mod source;
 
 pub const MAX_SOURCE_BYTES: usize = 256 * 1024;
 const MAX_TOKENS: usize = 65_536;
@@ -1027,22 +1028,7 @@ impl Op {
             Self::Call(f, args) => (args, f.arity()),
         }
     }
-    fn map_children(&self, mut map: impl FnMut(usize) -> usize) -> Self {
-        match *self {
-            Self::Reference(a) => Self::Reference(map(a)),
-            Self::Negate(a) => Self::Negate(map(a)),
-            Self::Not(a) => Self::Not(map(a)),
-            Self::Binary(op, a, b) => Self::Binary(op, map(a), map(b)),
-            Self::Choose(a, b, c) => Self::Choose(map(a), map(b), map(c)),
-            Self::Call(f, mut args) => {
-                for a in &mut args[..f.arity()] {
-                    *a = map(*a);
-                }
-                Self::Call(f, args)
-            }
-            _ => self.clone(),
-        }
-    }
+
 }
 #[derive(Debug, Clone)]
 struct Node {
@@ -1459,19 +1445,6 @@ impl Program {
             self.extras[12],
         ]
     }
-    fn map_roots(&mut self, map: impl Fn(usize) -> usize) {
-        self.thrust = map(self.thrust);
-        self.turn = map(self.turn);
-        self.divide = map(self.divide);
-        self.grow = self.grow.map(&map);
-        for o in &mut self.extras {
-            *o = o.map(&map);
-        }
-        for w in &mut self.writes {
-            w.value = w.value.map(&map);
-            w.guard = w.guard.map(&map);
-        }
-    }
     fn reachable(&self) -> Vec<bool> {
         let mut reached = vec![false; self.nodes.len()];
         let mut stack: Vec<_> = self.output_indices().into_iter().flatten().collect();
@@ -1514,83 +1487,6 @@ impl MutationRng {
     }
 }
 impl Program {
-    /// Mutations are typed graph construction. No random text/rejection loop.
-    pub fn mutate(&self, seed: u64, requested: MutationKind) -> Option<Mutation> {
-        if self.grow.is_none() {
-            let mut p = self.clone();
-            p.grow = Some(p.nodes.len());
-            p.nodes.push(Node {
-                op: Op::Constant(Value::Scalar(0.0)),
-                ty: Type::Number,
-                scope: p.bindings.len(),
-            });
-            return p.mutate(seed, requested);
-        }
-        let reachable = self.reachable();
-        let mut candidates = Vec::new();
-        for (i, n) in self.nodes.iter().enumerate() {
-            if !reachable[i] {
-                continue;
-            }
-            if matches!(requested, MutationKind::Any | MutationKind::Constant)
-                && matches!(n.op, Op::Constant(_))
-            {
-                candidates.push((i, MutationKind::Constant));
-            }
-            if matches!(requested, MutationKind::Any | MutationKind::Expression) {
-                candidates.push((i, MutationKind::Expression));
-            }
-            if matches!(requested, MutationKind::Any | MutationKind::Reference)
-                && matches!(
-                    n.op,
-                    Op::Reference(_) | Op::Sensor(_) | Op::Register(_) | Op::Populated(_)
-                )
-            {
-                candidates.push((i, MutationKind::Reference));
-            }
-        }
-        if candidates.is_empty() {
-            return None;
-        }
-        let mut rng = MutationRng::new(seed);
-        let (index, kind) = candidates[rng.index(candidates.len())];
-        let mut child = self.clone();
-        match kind {
-            MutationKind::Constant => {
-                let Op::Constant(value) = &child.nodes[index].op else {
-                    unreachable!()
-                };
-                child.nodes[index].op = Op::Constant(mutate_constant(value, &mut rng));
-            }
-            MutationKind::Expression => {
-                let options = child.expression_options(index);
-                let choice = rng.index(options.len() + 1);
-                if choice < options.len() {
-                    child.nodes[index].op = options[choice].clone();
-                } else {
-                    child.wrap_expression(index);
-                }
-            }
-            MutationKind::Reference => {
-                let options = child.reference_options(index);
-                if options.is_empty() {
-                    return None;
-                }
-                child.nodes[index].op = options[rng.index(options.len())].clone();
-            }
-            MutationKind::Any => unreachable!(),
-        }
-        child.prune();
-        if child.nodes.len() > MAX_NODES {
-            return None;
-        }
-        let source = child.to_source()?;
-        Some(Mutation {
-            program: child,
-            source,
-            kind,
-        })
-    }
     fn reference_options(&self, index: usize) -> Vec<Op> {
         let node = &self.nodes[index];
         let current = self.reference_root(index);
@@ -1628,104 +1524,6 @@ impl Program {
             }
         }
         options
-    }
-    fn expression_options(&self, index: usize) -> Vec<Op> {
-        let node = &self.nodes[index];
-        let mut options = Vec::new();
-        match node.op {
-            Op::Binary(_, a, b) => {
-                for op in Binary::ALL {
-                    if binary_type(op, self.nodes[a].ty, self.nodes[b].ty) == Some(node.ty) {
-                        options.push(Op::Binary(op, a, b));
-                    }
-                }
-            }
-            Op::Call(f, args) => {
-                for candidate in Function::ALL {
-                    if candidate.arity() == f.arity()
-                        && candidate.ty(&args[..f.arity()]
-                            .iter()
-                            .map(|&i| self.nodes[i].ty)
-                            .collect::<Vec<_>>())
-                            == Some(node.ty)
-                    {
-                        options.push(Op::Call(candidate, args));
-                    }
-                }
-            }
-            Op::Choose(c, a, b) => options.push(Op::Choose(c, b, a)),
-            Op::Negate(a) => {
-                for f in Function::ALL {
-                    if f.arity() == 1 && f.ty(&[self.nodes[a].ty]) == Some(node.ty) {
-                        options.push(Op::Call(f, [a, 0, 0]));
-                    }
-                }
-            }
-            _ => {}
-        }
-        let (children, count) = node.op.children();
-        for &c in &children[..count] {
-            if self.nodes[c].ty == node.ty {
-                options.push(Op::Reference(c));
-            }
-        }
-        options.retain(|op| *op != node.op);
-        options
-    }
-    fn wrap_expression(&mut self, index: usize) {
-        let original = self.nodes[index].clone();
-        let shift = |i| if i >= index { i + 1 } else { i };
-        for node in &mut self.nodes {
-            node.op = node.op.map_children(shift);
-        }
-        for b in &mut self.bindings {
-            b.node = shift(b.node);
-        }
-        self.map_roots(shift);
-        self.nodes.insert(index, original.clone());
-        self.nodes[index + 1].op = match original.ty {
-            Type::Bool => Op::Not(index),
-            Type::String => Op::Call(Function::Identity, [index, 0, 0]),
-            _ => Op::Negate(index),
-        };
-    }
-    fn prune(&mut self) {
-        let reached = self.reachable();
-        let mut map = vec![usize::MAX; self.nodes.len()];
-        let mut next = 0;
-        for (i, keep) in reached.iter().enumerate() {
-            if *keep {
-                map[i] = next;
-                next += 1;
-            }
-        }
-        let mut scope_map = vec![0; self.bindings.len() + 1];
-        for (i, b) in self.bindings.iter().enumerate() {
-            scope_map[i + 1] = scope_map[i] + usize::from(reached[b.node]);
-        }
-        self.nodes = self
-            .nodes
-            .iter()
-            .enumerate()
-            .filter_map(|(i, n)| {
-                reached[i].then(|| Node {
-                    op: n.op.map_children(|child| map[child]),
-                    ty: n.ty,
-                    scope: scope_map[n.scope],
-                })
-            })
-            .collect();
-        self.bindings = self
-            .bindings
-            .iter()
-            .filter_map(|b| {
-                reached[b.node].then(|| Binding {
-                    name: b.name.clone(),
-                    node: map[b.node],
-                })
-            })
-            .collect();
-        self.map_roots(|i| map[i]);
     }
     fn to_source(&self) -> Option<String> {
         if self.grow.is_none() {
@@ -2157,6 +1955,8 @@ struct Parser {
     bindings: HashMap<String, usize>,
     binding_order: Vec<Binding>,
     binding_locations: Vec<Location>,
+    node_locations: Vec<source::NodeLocation>,
+    write_locations: Vec<Location>,
 }
 impl Parser {
     fn new(tokens: Vec<Token>) -> Self {
@@ -2167,6 +1967,8 @@ impl Parser {
             bindings: HashMap::new(),
             binding_order: Vec::new(),
             binding_locations: Vec::new(),
+            node_locations: Vec::new(),
+            write_locations: Vec::new(),
         }
     }
     fn peek(&self) -> &Token {
@@ -2200,6 +2002,8 @@ impl Parser {
             ty,
             scope: self.binding_order.len(),
         });
+        let end = self.tokens[self.position.saturating_sub(1)].location.to.max(location.to);
+        self.node_locations.push(source::NodeLocation { from: location.from, to: end, head: location });
         Ok(index)
     }
     fn require(&self, index: usize, expected: Type, location: Location) -> Result<(), CompileError> {
@@ -2257,6 +2061,7 @@ impl Parser {
                 }
                 let guard = self.guard()?;
                 self.expect(Kind::Semicolon, "';' after clear")?;
+                self.write_locations.push(token.location);
                 writes.push(WriteRule {
                     register,
                     value: None,
@@ -2346,6 +2151,7 @@ impl Parser {
                 self.bindings.insert(name, value);
             } else if let Some(register) = register {
                 self.assignable(value, register.ty, token.location)?;
+                self.write_locations.push(token.location);
                 writes.push(WriteRule {
                     register,
                     value: Some(value),
@@ -2518,6 +2324,7 @@ impl Parser {
                 ))
             })?;
             left = self.add(Op::Binary(operation, left, right), ty, operator_location)?;
+            self.node_locations[left].from = location.from;
         }
         Ok(left)
     }
@@ -2723,10 +2530,10 @@ mod tests {
         ] {
             assert!(Program::compile(&format!("thrust=0;turn=0;divide=false;{invalid}")).is_err());
         }
-        let program = Program::compile("thrust=.2;turn=food.angle;divide=maturity>=1;feed=1-gut.fraction;invest.attack=prey.attack*.5;rf001=digestion.rate+growth.rate+exudation.rate;").unwrap();
+        let source = "thrust=.2;turn=food.angle;divide=maturity>=1;feed=1-gut.fraction;invest.attack=prey.attack*.5;rf001=digestion.rate+growth.rate+exudation.rate;";
         for kind in [MutationKind::Any, MutationKind::Constant, MutationKind::Expression, MutationKind::Reference] {
             for seed in 1..50 {
-                if let Some(mutation) = program.mutate(seed, kind) { assert_roundtrip(&mutation); }
+                if let Some(mutation) = Program::mutate_source(source, seed, kind) { assert_roundtrip(&mutation); }
             }
         }
     }
@@ -3333,10 +3140,9 @@ mod tests {
         ];
         let mut returned = 0;
         for source in sources {
-            let parent = Program::compile(source).unwrap();
             for kind in kinds {
                 for seed in 0..300 {
-                    if let Some(mutation) = parent.mutate(seed, kind) {
+                    if let Some(mutation) = Program::mutate_source(source, seed, kind) {
                         assert!(kind == MutationKind::Any || mutation.kind == kind);
                         assert_ne!(mutation.kind, MutationKind::Any);
                         assert_roundtrip(&mutation);
@@ -3350,8 +3156,8 @@ mod tests {
 
     #[test]
     fn mutation_chains_and_export_recompile_chains_remain_valid() {
-        let mut internal = Program::compile(DEFAULT_PROGRAM).unwrap();
-        let mut exported = internal.clone();
+        let mut internal_source = DEFAULT_PROGRAM.to_string();
+        let mut exported_source = internal_source.clone();
         let mut accepted = [0, 0];
         let kinds = [
             MutationKind::Constant,
@@ -3361,13 +3167,14 @@ mod tests {
         ];
         for seed in 1..=1800 {
             let kind = kinds[seed as usize % kinds.len()];
-            if let Some(mutation) = internal.mutate(seed * 97, kind) {
+            if let Some(mutation) = Program::mutate_source(&internal_source, seed * 97, kind) {
                 assert_roundtrip(&mutation);
-                internal = mutation.program;
+                internal_source = mutation.source;
                 accepted[0] += 1;
             }
-            if let Some(mutation) = exported.mutate(seed * 101, kind) {
-                exported = assert_roundtrip(&mutation);
+            if let Some(mutation) = Program::mutate_source(&exported_source, seed * 101, kind) {
+                assert_roundtrip(&mutation);
+                exported_source = mutation.source;
                 accepted[1] += 1;
             }
         }
@@ -3405,7 +3212,8 @@ mod tests {
 
     #[test]
     fn reference_substitution_respects_type_lexical_scope_and_alias_targets() {
-        let program = Program::compile("let early = 0.2; let current = energy; let future = age; let alias = current; let flag = food.visible; thrust = alias; turn = future; divide = flag;").unwrap();
+        let source = "let early = 0.2; let current = energy; let future = age; let alias = current; let flag = food.visible; thrust = alias; turn = future; divide = flag;";
+        let program = Program::compile(source).unwrap();
         let early = program.bindings[0].node;
         let current = program.bindings[1].node;
         let future = program.bindings[2].node;
@@ -3446,15 +3254,15 @@ mod tests {
             }
         }
         for seed in 0..500 {
-            assert_roundtrip(&program.mutate(seed, MutationKind::Reference).unwrap());
+            assert_roundtrip(&Program::mutate_source(source, seed, MutationKind::Reference).unwrap());
         }
     }
 
     #[test]
-    fn pruning_preserves_scope_boundaries_and_avoids_unused_mutation_targets() {
-        let parent = Program::compile("let unused = 999; let first = energy; let dead = false; let later = age; thrust = first; turn = later; grow = size; divide = food.visible;").unwrap();
+    fn source_mutation_preserves_scope_boundaries_and_avoids_unused_targets() {
+        let source = "let unused = 999; let first = energy; let dead = false; let later = age; thrust = first; turn = later; grow = size; divide = food.visible;";
         for seed in 0..150 {
-            let mutation = parent.mutate(seed, MutationKind::Reference).unwrap();
+            let mutation = Program::mutate_source(source, seed, MutationKind::Reference).unwrap();
             assert_roundtrip(&mutation);
             for (index, node) in mutation.program.nodes.iter().enumerate() {
                 for candidate in mutation.program.reference_options(index) {
@@ -3468,26 +3276,27 @@ mod tests {
             }
         }
         // A dead constant is not an eligible mutation target.
-        assert!(parent.mutate(1, MutationKind::Constant).is_none());
+        assert!(Program::mutate_source(source, 1, MutationKind::Constant).is_none());
     }
 
     #[test]
-    fn expression_mutation_can_grow_and_replace_typed_subtrees() {
+    fn expression_mutation_can_insert_or_remove_one_typed_unary_operation() {
         let parent = Program::compile(DEFAULT_PROGRAM).unwrap();
         let mut grew = false;
         let mut shrank = false;
         for seed in 0..500 {
-            let mutation = parent.mutate(seed, MutationKind::Expression).unwrap();
+            let mutation = Program::mutate_source(DEFAULT_PROGRAM, seed, MutationKind::Expression).unwrap();
             grew |= mutation.program.nodes.len() > parent.nodes.len();
             shrank |= mutation.program.nodes.len() < parent.nodes.len();
             assert_roundtrip(&mutation);
         }
         assert!(
             grew && shrank,
-            "expression mutations must include insertion and subtree replacement"
+            "expression mutations must include one-node insertion and removal"
         );
-        let leaf = Program::compile("thrust = 0; turn = 1; divide = false;").unwrap();
-        let mutation = leaf.mutate(3, MutationKind::Expression).unwrap();
+        let source = "thrust = 0; turn = 1; divide = false;";
+        let leaf = Program::compile(source).unwrap();
+        let mutation = Program::mutate_source(source, 3, MutationKind::Expression).unwrap();
         assert!(mutation.program.nodes.len() > leaf.nodes.len());
         assert_roundtrip(&mutation);
     }
@@ -3501,7 +3310,7 @@ mod tests {
         for source in sources {
             let parent = Program::compile(source).unwrap();
             for seed in 0..500 {
-                let mutation = parent.mutate(seed, MutationKind::Constant).unwrap();
+                let mutation = Program::mutate_source(source, seed, MutationKind::Constant).unwrap();
                 assert_roundtrip(&mutation);
                 assert_ne!(parent.to_source(), Some(mutation.source));
             }
@@ -3509,28 +3318,24 @@ mod tests {
     }
 
     #[test]
-    fn exhausted_budget_is_reported_without_emitting_invalid_source() {
-        let long = format!(
-            "thrust = {}; turn = 0; divide = false;",
-            vec!["energy"; 3000].join(" + ")
-        );
-        let parent = Program::compile(&long).unwrap();
+    fn source_limits_are_checked_without_serialization_expansion() {
+        let source = format!("thrust = {}; turn = 0; divide = false;", vec!["energy"; 3000].join(" + "));
+        let parent = Program::compile(&source).unwrap();
         assert!(parent.to_source().is_none());
-        // Constant edits do not shorten this large expression's serialization.
-        for seed in 0..100 {
-            assert!(parent.mutate(seed, MutationKind::Constant).is_none());
-        }
-        for seed in 0..100 {
-            if let Some(mutation) = parent.mutate(seed, MutationKind::Expression) {
+        for seed in 0..50 {
+            assert_roundtrip(&Program::mutate_source(&source, seed, MutationKind::Constant).unwrap());
+            if let Some(mutation) = Program::mutate_source(&source, seed, MutationKind::Expression) {
                 assert_roundtrip(&mutation);
             }
         }
-        let no_constants =
-            Program::compile("thrust = energy; turn = age; grow = size; divide = food.visible;")
-                .unwrap();
-        assert!(no_constants.mutate(1, MutationKind::Constant).is_none());
-        let no_references = Program::compile("thrust = 0; turn = 0; divide = false;").unwrap();
-        assert!(no_references.mutate(1, MutationKind::Reference).is_none());
+        assert!(Program::mutate_source("thrust=energy;turn=age;grow=size;divide=food.visible;", 1, MutationKind::Constant).is_none());
+        assert!(Program::mutate_source("thrust=0;turn=0;divide=false;", 1, MutationKind::Reference).is_none());
+        let prefix = "thrust=.9;turn=0;divide=false;#";
+        let source = format!("{prefix}{}", "x".repeat(MAX_SOURCE_BYTES - prefix.len()));
+        assert!(Program::compile(&source).is_ok());
+        for seed in 0..50 {
+            if let Some(mutation) = Program::mutate_source(&source, seed, MutationKind::Constant) { assert_roundtrip(&mutation); }
+        }
     }
 
     #[test]
@@ -3539,22 +3344,17 @@ mod tests {
             "thrust = {}; turn = 0; divide = true;",
             vec!["0.001"; 120].join(" + ")
         );
-        let parent = Program::compile(&source).unwrap();
         for seed in 0..30 {
-            assert_roundtrip(&parent.mutate(seed, MutationKind::Constant).unwrap());
+            assert_roundtrip(&Program::mutate_source(&source, seed, MutationKind::Constant).unwrap());
         }
     }
 
     #[test]
     fn mutation_is_deterministic_across_fresh_compilation_and_hash_seeds() {
         for seed in 0..100 {
-            let first = Program::compile(DEFAULT_PROGRAM)
-                .unwrap()
-                .mutate(seed, MutationKind::Any)
+            let first = Program::mutate_source(DEFAULT_PROGRAM, seed, MutationKind::Any)
                 .unwrap();
-            let second = Program::compile(DEFAULT_PROGRAM)
-                .unwrap()
-                .mutate(seed, MutationKind::Any)
+            let second = Program::mutate_source(DEFAULT_PROGRAM, seed, MutationKind::Any)
                 .unwrap();
             assert_eq!(first.kind, second.kind);
             assert_eq!(first.source, second.source);
@@ -3562,36 +3362,21 @@ mod tests {
     }
 
     #[test]
-    fn implicit_growth_can_mutate_and_export_as_an_explicit_typed_signal() {
-        // The implicit grow=0 is this program's only reachable constant.
-        let parent =
-            Program::compile("thrust = energy; turn = age; divide = food.visible;").unwrap();
-        let inputs = Inputs {
-            energy: 1.0,
-            age: 0.2,
-            size: 1.0,
-            food_visible: true,
-            ..Inputs::default()
-        };
-        let before = parent.evaluate(&inputs);
-        assert_eq!(before.grow, 0.0);
-        let mut positive_growth_seen = false;
-        for seed in 0..200 {
-            let mutation = parent.mutate(seed, MutationKind::Constant).unwrap();
-            let restored = assert_roundtrip(&mutation);
-            assert!(mutation.source.contains("grow = "));
-            let after = restored.evaluate(&inputs);
-            assert_eq!(after.thrust, before.thrust);
-            assert_eq!(after.turn, before.turn);
-            assert_eq!(after.divide, before.divide);
-            positive_growth_seen |= after.grow > 0.0;
+    fn omitted_growth_is_not_added_by_a_mutation() {
+        let source = "thrust=energy;turn=age;divide=food.visible;";
+        assert!(Program::mutate_source(source, 1, MutationKind::Constant).is_none());
+        for seed in 0..100 {
+            let variant = Program::mutate_source(source, seed, MutationKind::Any).unwrap();
+            assert!(!variant.source.contains("grow"));
+            assert!(variant.program.grow.is_none());
+            assert_roundtrip(&variant);
         }
-        assert!(positive_growth_seen);
     }
 
     #[test]
     fn size_is_an_eligible_numeric_reference_and_growth_mutations_roundtrip() {
-        let parent = Program::compile("let scale = energy; thrust = scale; turn = age; grow = size / 4; divide = food.visible;").unwrap();
+        let source = "let scale = energy; thrust = scale; turn = age; grow = size / 4; divide = food.visible;";
+        let parent = Program::compile(source).unwrap();
         let energy_node = parent.bindings[0].node;
         assert!(parent
             .reference_options(energy_node)
@@ -3611,13 +3396,12 @@ mod tests {
             MutationKind::Reference,
         ] {
             for seed in 0..300 {
-                let mutation = parent.mutate(seed, kind).unwrap();
+                let mutation = Program::mutate_source(source, seed, kind).unwrap();
                 let restored = assert_roundtrip(&mutation);
                 assert_eq!(restored.nodes[restored.grow.unwrap()].ty, Type::Number);
                 assert!(mutation
                     .source
-                    .lines()
-                    .any(|line| line.starts_with("grow = ")));
+                    .contains("grow = "));
             }
         }
     }
@@ -3926,18 +3710,12 @@ mod register_tests {
             assert_eq!(value(&m, name), Value::Scalar(n));
         }
         transition_roundtrip(&p, &p.to_source().unwrap());
-        let division = program("ri001=ri001+1;rf001=ri001/2;");
-        for (i, node) in division.nodes.iter().enumerate() {
-            if matches!(node.op, Op::Binary(Binary::Divide, _, _)) {
-                for replacement in division.expression_options(i) {
-                    if let Op::Binary(op, a, b) = replacement {
-                        assert_eq!(
-                            binary_type(op, division.nodes[a].ty, division.nodes[b].ty),
-                            Some(Type::Number)
-                        );
-                    }
-                }
-            }
+        let source = "ri001=ri001+1;rf001=ri001/2;thrust=0;turn=0;divide=false;";
+        for seed in 0..100 {
+            let variant = Program::mutate_source(source, seed, MutationKind::Expression).unwrap();
+            let root = variant.program.writes.iter().find(|rule| rule.register.name() == "rf001").unwrap().value.unwrap();
+            assert_eq!(variant.program.nodes[root].ty, Type::Number);
+            transition_roundtrip(&variant.program, &variant.source);
         }
     }
     #[test]
@@ -4192,22 +3970,22 @@ mod register_tests {
             MutationKind::Reference,
         ] {
             for seed in 0..160 {
-                let mutation = parent.mutate(seed, kind).unwrap();
+                let mutation = Program::mutate_source(source, seed, kind).unwrap();
                 transition_roundtrip(&mutation.program, &mutation.source);
                 applied += 1;
             }
         }
         assert_eq!(applied, 640);
-        let mut internal = parent.clone();
-        let mut restored = parent;
+        let mut internal_source = source.to_string();
+        let mut restored_source = source.to_string();
         for seed in 1..=250 {
-            if let Some(m) = internal.mutate(seed * 97, MutationKind::Any) {
+            if let Some(m) = Program::mutate_source(&internal_source, seed * 97, MutationKind::Any) {
                 transition_roundtrip(&m.program, &m.source);
-                internal = m.program;
+                internal_source = m.source;
             }
-            if let Some(m) = restored.mutate(seed * 101, MutationKind::Any) {
-                transition_roundtrip(&m.program, &m.source);
-                restored = Program::compile(&m.source).unwrap();
+            if let Some(m) = Program::mutate_source(&restored_source, seed * 101, MutationKind::Any) {
+                transition_roundtrip(&Program::compile(&m.source).unwrap(), &m.source);
+                restored_source = m.source;
             }
         }
     }

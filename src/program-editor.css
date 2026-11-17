@@ -8,8 +8,42 @@
   border-radius: 9px;
   background: #11191b;
   color: #dfe8e4;
+  container-type: inline-size;
 }
 .program-editor:focus-within { border-color: #7da891; box-shadow: 0 0 0 1px #8fba9c12; }
+.program-reference-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding: 8px 10px; border-bottom: 1px solid #2b3b36; background: #18231f; }
+.program-signal-select { width: auto; max-width: min(220px, 42%); min-width: 105px; margin: 0; padding: 5px 25px 5px 8px; border: 1px solid #3d5146; border-radius: 5px; background-color: #202f27; color: #c3dace; font: 11px/1.5 Inter, ui-sans-serif, sans-serif; text-overflow: ellipsis; }
+.program-signal-select.read { color: #a5d6df; }
+.program-signal-select.write { color: #b9dfbd; }
+.program-signal-select:focus-visible { outline: 2px solid #9ad9b9; outline-offset: 2px; }
+.program-signal-select option, .program-signal-select optgroup { color: #dfe8e4; background: #1b2923; }
+.program-completion-hint { margin-left: auto; color: #799385; font: 9px/1.4 var(--mono, ui-monospace, monospace); white-space: nowrap; }
+.program-editor.is-readonly .program-completion-hint, .program-editor.has-evaluation .program-completion-hint { display: none; }
+.program-reference-panel { display: flex; gap: 9px; align-items: start; max-height: 230px; overflow: auto; border-bottom: 1px solid #395146; background: #1d2d25; }
+.program-reference-panel[hidden] { display: none; }
+.program-reference-content { display: grid; flex: 1; min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.program-symbol-help.program-reference-summary { min-width: 0; max-width: none; padding: 8px 12px; }
+.program-reference-usage { min-width: 0; padding: 0 12px 7px; }
+.program-reference-usage .program-reference-example { margin: 3px 0; }
+.program-reference-live-value { margin: 6px 0; padding: 6px 9px; border-left: 2px solid #8dc8a4; background: #142219; }
+.program-reference-live-value span { color: #8fb09a; font-size: 9px; }
+.program-reference-live-value code { display: block; color: #c2f0d3; font: 12px/1.6 var(--mono, ui-monospace, monospace); }
+.program-reference-example { margin: 7px 0; padding: 7px 9px; border-radius: 5px; background: #111d16; color: #d4e4d6; font: 10px/1.6 var(--mono, ui-monospace, monospace); white-space: pre-wrap; overflow-wrap: anywhere; }
+.program-reference-controls { display: flex; flex-direction: column; gap: 5px; padding: 10px 10px 10px 0; }
+.program-reference-controls button { min-height: 28px; padding: 3px 8px; border-radius: 5px; font-size: 10px; white-space: nowrap; }
+.program-reference-insert { border: 1px solid #52745b; color: #c4eccb; background: #304a36; }
+.program-reference-close { border: 1px solid transparent; color: #a1b7a8; background: transparent; }
+.program-evaluation-time { margin-left: auto; color: #abd1bd; font: 9px/1.5 var(--mono, ui-monospace, monospace); white-space: nowrap; }
+.program-evaluation { border-top: 1px solid #395146; background: #1a2a22; }
+.program-evaluation[hidden] { display: none; }
+.program-evaluation-help { max-width: 430px; padding: 10px 12px; overflow-wrap: anywhere; }
+.program-evaluation-help.compact { max-width: none; padding: 7px 13px 3px; }
+.program-evaluation-expression { display: block; max-height: 54px; overflow: auto; color: #a3b8ac; font: 10px/1.6 var(--mono, ui-monospace, monospace); white-space: pre-wrap; }
+.program-evaluation-result { display: flex; gap: 10px; align-items: baseline; margin-top: 3px; }
+.program-evaluation-result code { max-height: 72px; overflow: auto; color: #b6edcb; font: 12px/1.6 var(--mono, ui-monospace, monospace); white-space: pre-wrap; }
+.program-evaluation-result span { flex: 0 0 auto; color: #839e8e; font: 9px/1.5 Inter, ui-sans-serif, sans-serif; }
+.program-evaluation-help p { margin: 3px 0 0; color: #9ab2a2; font: 10px/1.6 Inter, ui-sans-serif, sans-serif; }
+.program-evaluation-note { display: block; padding: 3px 13px 7px; color: #789482; font: 9px/1.5 Inter, ui-sans-serif, sans-serif; }
 .program-editor-code { min-width: 0; height: var(--program-editor-height); }
 .program-editor .cm-editor { height: 100%; font: 12px/1.75 var(--mono, ui-monospace, monospace); }
 .program-editor .cm-scroller { overflow: auto; font-family: inherit; }
@@ -37,6 +71,7 @@
 .program-editor .cm-panel label { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; }
 .program-editor .cm-panel button[name="close"] { width: 22px; height: 22px; border-radius: 4px; }
 .program-context { min-height: 57px; max-height: 105px; overflow: auto; border-top: 1px solid #283735; background: #182220; }
+.program-context[hidden] { display: none; }
 .program-context-empty { display: block; padding: 11px 13px; color: #7c9287; font-size: 11px; line-height: 1.6; }
 .program-symbol-help { max-width: 420px; padding: 10px 12px; }
 .program-symbol-help code { display: block; color: #b5e3c9; font: 11px/1.6 var(--mono, ui-monospace, monospace); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -66,6 +101,16 @@
 .organism-program-editor .program-symbol-help.compact { padding: 6px 9px; }
 .organism-program-editor .program-symbol-help code, .organism-program-editor .program-symbol-help p { font-size: 10px; }
 .organism-program-editor .program-status { padding: 4px 9px; min-height: 27px; gap: 8px; }
+.organism-program-editor .program-reference-bar { padding: 6px 7px; gap: 5px; }
+.organism-program-editor .program-signal-select { min-width: 96px; max-width: 48%; font-size: 10px; }
+.organism-program-editor .program-evaluation-time { flex-basis: 100%; margin: 0; }
+.organism-program-editor .program-evaluation-help.compact { padding: 6px 9px 3px; }
+.organism-program-editor .program-evaluation-note { padding: 2px 9px 6px; font-size: 8px; }
+@container (min-width: 620px) {
+  .program-reference-panel { max-height: 180px; }
+  .program-reference-content { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 10px; }
+  .program-reference-usage { padding: 8px 4px 8px 0; }
+}
 @keyframes program-check-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .program-editor[data-state="checking"] .program-check-state::before { animation: none; } }
 @media (max-width: 680px) {

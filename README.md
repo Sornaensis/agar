@@ -31,11 +31,19 @@ Built-ins stay unchanged. Editing a recipe or program creates a new document, an
 
 ## Program editor
 
-The bundled CodeMirror editor provides syntax highlighting, line numbers, bracket matching, autocomplete, undo/redo, and type/signature help at the caret and on hover. Suggestions include signals, builtins, outputs, typed registers, and previously declared local signals. A mutation is one undoable edit.
+The bundled CodeMirror editor provides syntax highlighting, line numbers, bracket matching, autocomplete, undo/redo, and type/signature help at the caret and on hover. **Read signals** and **Write signals** menus above the code provide types, descriptions, and examples; editable drafts can insert the selected symbol. A mutation is one undoable edit.
+
+Press **Ctrl/Cmd + Space** on an empty statement line for writable outputs and register rules. Inside an expression it offers readable signals, earlier local bindings, typed registers, and functions. Suggestions follow the expected type when the context determines one, and never offer output-only names as readable values. Comments and string contents suppress completion.
 
 Type checking runs after an editing pause and on **Check**. It uses the same Rust compiler as the simulation, without registering a genome or changing a running world. Compiler errors appear as marked source ranges and a clickable diagnostic with line and column. The compiler reports its first error; fixing it exposes any subsequent error. Completed local declarations retain their inferred types when a later statement is incomplete.
 
 **Save genome** / **Save copy** explicitly commits a valid program to the catalog. Typing and checking only update a recovery draft; closing and reopening **New genome** can recover it. Organism programs remain read-only, with the same highlighting and type help.
+
+### Inspect an organism's expressions
+
+Click an organism, open **Program**, and hover, place the caret, or select an expression to see its typed value. Expand the program for more space. Values come from the Rust evaluator for that specific organism and update while its simulation runs; pause playback to examine a stable snapshot. A genome opened from the catalog or active-genome list has no organism state and does not invent values.
+
+The displayed time identifies a **current-state preview**. Reads use the current cell's signals and memory; all pure expressions, including both branches of a conditional, can be inspected. Outputs show requested commands after their normal clamps, while register rules show whether they would apply, including clear-over-write precedence. Inspection does not advance time, change random state, or commit writes. It is not a recording of the last tick or a promise of the next one: the environment and other cells may change before the next evaluation. If the cell dies, its expanded source remains available and live values are cleared.
 
 | Shortcut | Action |
 | --- | --- |
@@ -325,10 +333,12 @@ Mutations operate on the typed expression graph:
 | Category | Allowed changes |
 | --- | --- |
 | Constants | Perturb bounded integer/scalar/vector values, flip booleans, or edit bounded strings while preserving the type. |
-| Expressions | Replace operators with compatible signatures, simplify a subtree, or insert a wrapper whose input/output types fit. |
+| Expressions | Change a compatible operator/function, or add/remove one typed unary operation at a selected expression. |
 | References | Substitute a same-type sensor, register read, or earlier in-scope immutable binding. |
 
-Construction preserves operand types, function arity, required output types, lexical scope, and acyclic dependencies. Arithmetic retains the interpreter's finite-value rules. The serializer emits shallow, topologically ordered bindings so sharing cannot expand into an exponential source tree. Exported variants must fit the source, token, node, and nesting budgets and must compile back to an equivalent program.
+Each successful mutation patches **one node in the parent's existing source**. Comments, local names, statement order, and text outside that node remain intact; programs are not flattened into generated temporary bindings. Descendants inherit the changed source, so successive mutations accumulate through the lineage. A draft mutation has the same behavior and can be undone in one step.
+
+Construction preserves operand types, function arity, required output types, lexical scope, and acyclic dependencies. Arithmetic retains the interpreter's finite-value rules. The patched source is recompiled with the authoritative compiler and must fit the source, token, node, and nesting budgets. A failed or unchanged candidate leaves the parent intact. Older saved variants retain whatever source they already had; later mutations preserve that source rather than reconstructing lost comments.
 
 These guarantees concern program validity. A valid mutation can still produce an organism that moves poorly, cannot reproduce, or starves. Numeric compatibility distinguishes integer/scalar types, but does not distinguish physical units.
 
@@ -336,7 +346,7 @@ A simulation stores at most **2,048 genomes**, subject to its **64 MiB source/pr
 
 Mutation also preserves register types, guard types, legal addresses, and synchronous transition semantics. Exporting and recompiling a mutant must preserve its future memory updates as well as its immediate outputs. Strings and vectors obey the same finite storage and value limits after mutation.
 
-Mutations edit existing expressions and register reads; they preserve write destinations and rules. Optional actions must be present in the authored genome to evolve, apart from the existing treatment of omitted `grow` as a mutable zero.
+Mutations edit existing expressions and register reads; they preserve write destinations and rules. Optional actions must be present in the authored genome to evolve. Mutation does not insert an omitted `grow` or any other default output.
 
 Mutation randomness is separate from the physics and food random stream. The same seed, programs, settings, and action sequence reproduce the same evolution within the same engine runtime.
 
@@ -382,6 +392,7 @@ npm run test:engine   # Requires Rust
 npm run test:wasm
 npm run test:graph
 npm run test:language
+npm run test:inspection
 npm run test:storage
 npm run test:session
 npm run test:food-chain
@@ -391,6 +402,12 @@ Native tests cover the language, synchronous registers, valid mutations, editor 
 
 WASM integration checks exercise the actual compiled engine, including the 8,192-node limit and byte-identical continuation after restoring into an independent instance. Graph tests cover bounded navigation and typed dependencies. Language checks compare the editor catalog with Rust names and compiled result types, and verify typed register suggestions, comment/string isolation, and UTF-16 cursor ranges. Storage/session checks cover portable copies, immutable built-ins, rejected imports, transaction failures, aligned checkpoint metadata, asynchronous save ordering, and exclusive ownership of an open run.
 
+Inspection checks exercise native expression values through the real TypeScript/WASM boundary, Unicode source ranges, implicit output defaults, current memory, clear precedence, restored worlds, malformed responses, and unchanged checkpoint bytes before/after inspection.
+
 The food-chain check compares several fixed-seed mixed ecosystems with mutation disabled, reports trophic populations over time, and checks producer-to-consumer energy transfer. It is a regression check, not a guarantee of perpetual coexistence. The recorded before/after runs and their limitations are in [experiments/README.md](experiments/README.md).
 
 The same seed and action sequence are reproducible within the same engine runtime; cross-platform bit-identical floating-point replay is not promised.
+
+## Planned organelle model
+
+[design/organelles.md](design/organelles.md) proposes paid cell expansion and individually grown organelles with internal-space and membrane constraints, separate sensor capabilities, and generic observations instead of semantic food/prey sensors. It defines resource accounting, construction, damage, division, language controls, and an implementation sequence. This is a design plan; the current simulator still uses body allocations.
