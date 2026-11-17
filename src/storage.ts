@@ -85,7 +85,7 @@ export function validateEnvironmentConfig(value: unknown): EnvironmentConfig {
   const config = object(value, 'Environment');
   if (!Array.isArray(config.sources) || config.sources.length > 16) throw new Error('An environment can contain at most 16 sources.');
   return {
-    foodRate: number(config.foodRate, 'Food supply', 0, 60),
+    foodRate: number(config.foodRate, 'External organic input', 0, 60),
     ambientTemperature: number(config.ambientTemperature, 'Temperature', 0, 1),
     ambientLight: number(config.ambientLight, 'Light', 0, 1),
     currentStrength: number(config.currentStrength, 'Current', 0, 30),
@@ -115,7 +115,7 @@ function historyPoint(value: unknown): HistoryPoint {
   return {
     time: number(item.time, 'Simulation time', 0, Number.MAX_SAFE_INTEGER),
     population: number(item.population, 'Population', 0, 384, true),
-    food: number(item.food, 'Food count', 0, 1200, true),
+    food: number(item.food, 'Organic particle count', 0, 1200, true),
     births: number(item.births, 'Births', 0, Number.MAX_SAFE_INTEGER, true),
     deaths: number(item.deaths, 'Deaths', 0, Number.MAX_SAFE_INTEGER, true),
   };

@@ -77,15 +77,15 @@ export async function checkEngineLoader() {
   const wrongAbi = changeExports(bytes, entries => entries.map(entry => entry.name === 'abi_version'
     ? { ...entry, index: entries.find(item => item.name === 'genome_limit').index } : entry));
   const legacyInstance = (await WebAssembly.instantiate(legacy, {})).instance;
-  assert.equal(legacyInstance.exports.abi_version(), 4, 'Regression fixture is an actual ABI4 engine');
+  assert.equal(legacyInstance.exports.abi_version(), contract.abi, 'Missing-export fixture retains real compiled engine code');
   assert.equal(legacyInstance.exports.analyze_genome, undefined);
   const temporary = await mkdtemp(join(tmpdir(), 'agar-engine-check-'));
   try {
     for (const [name, data, expected] of [
-      ['older-abi4.wasm', legacy, /Missing engine exports: analyze_genome, genome_analysis_len/],
+      ['missing-analysis.wasm', legacy, /Missing engine exports: analyze_genome, genome_analysis_len/],
       ['wrong-function.wasm', wrongFunction, /analyze_genome is memory, expected function/],
       ['wrong-memory.wasm', wrongMemory, /memory is function, expected memory/],
-      ['wrong-abi.wasm', wrongAbi, /Expected engine ABI 4, received 2048/],
+      ['wrong-abi.wasm', wrongAbi, new RegExp(`Expected engine ABI ${contract.abi}, received 2048`)],
       ['invalid.wasm', new Uint8Array(8), /not a valid WebAssembly module/],
     ]) {
       const path = join(temporary, name); await writeFile(path, data);
@@ -122,7 +122,7 @@ export async function checkEngineLoader() {
     await assert.rejects(Engine.load(), /different builds.*Missing engine exports: analyze_genome, genome_analysis_len/);
     await assert.rejects(Engine.load(), /Missing engine exports: analyze_genome/);
     await assert.rejects(Engine.load(), /Missing engine exports: memory/);
-    await assert.rejects(Engine.load(), /Expected engine ABI 4, received 2048/);
+    await assert.rejects(Engine.load(), new RegExp(`Expected engine ABI ${contract.abi}, received 2048`));
     const requestsBefore = requests.length, compilationsBefore = compilations;
     const [editorA, editorB, run] = await Promise.all([Engine.load(), Engine.load(), Engine.load()]);
     assert.equal(requests.length, requestsBefore + 1, 'Concurrent loads share one fetch after retrying failures');
@@ -143,13 +143,55 @@ export async function checkEngineLoader() {
     assert.equal(editorA.analyze('').diagnostics[0].from, 0);
     assert.equal(editorA.analyze('é'.repeat(131073)).sourceBytes, 262146);
     assert.deepEqual(editorA.saveState(), beforeAnalysis);
+    const legacyBytes = new Uint8Array(await readFile(new URL('../engine/fixtures/trophic-v1.bin', import.meta.url)));
+    const expected = JSON.parse(await readFile(new URL('../engine/fixtures/trophic-v1.json', import.meta.url), 'utf8'));
+    assert.equal(expected.provenance.abi, 4);
+    assert.equal(new DataView(legacyBytes.buffer).getUint32(8, true), 1);
+    const migrated = await Engine.load(), continued = await Engine.load();
+    migrated.restoreState(legacyBytes);
+    const world = migrated.snapshot();
+    assert.equal(world.tick, expected.header[0]);
+    assert.equal(world.cells.length, expected.cells.length);
+    for (const genome of expected.genomes) {
+      assert.equal(migrated.getGenome(genome.id).source, genome.source, 'Migration preserves editable source, including old mutation printing');
+      const graph = migrated.getGenomeGraph(genome.id);
+      assert.deepEqual(graph.nodes, genome.graph.nodes, 'Migration retains exact mutated ASTs rather than recompiling printed source');
+      assert.equal(graph.roots.length, genome.graph.roots.length + 2);
+      assert.deepEqual(graph.roots.filter(root => root.id !== 'output:feed' && root.id !== 'output:invest.attack'), genome.graph.roots,
+        'Migration preserves every legacy output and register rule, adding only the two new output defaults');
+      assert.equal(graph.roots.find(root => root.name === 'feed').default, '1');
+      assert.equal(graph.roots.find(root => root.name === 'invest.attack').default, '0');
+    }
+    const retainedFields = { id: 0, genomeId: 1, x: 2, y: 3, vx: 4, vy: 5, angle: 6, energy: 7, age: 8,
+      generation: 9, parentId: 10, size: 18, integrity: 38, nutrientStored: 40,
+      bodyPropulsion: 45, bodyPhotosynthesis: 46, bodyDigestion: 47, bodyArmor: 48, bodySensing: 49 };
+    for (const previous of expected.cells) {
+      const cell = world.cells.find(item => item.id === previous.packed[0]); assert.ok(cell);
+      for (const [field, offset] of Object.entries(retainedFields)) assert.equal(cell[field], previous.packed[offset], `${field} survives version1 migration`);
+      // The legacy JSON oracle canonicalizes signed zero; the binary checkpoint
+      // retains it and is checked byte-for-byte after upgrading below.
+      assert.deepEqual(JSON.parse(JSON.stringify(migrated.getMemory(cell.id))), previous.memory,
+        'All five typed register banks survive migration');
+      for (const field of ['bodyAttack', 'gutEnergy', 'gutNutrients', 'digestionRate', 'growthRate', 'exudationRate']) assert.equal(cell[field], 0, `${field} has an explicit legacy default`);
+      assert.equal(cell.birthSize, Math.min(cell.size, 1));
+    }
+    const upgraded = migrated.saveState();
+    assert.equal(new DataView(upgraded.buffer).getUint32(8, true), 2);
+    continued.restoreState(upgraded);
+    assert.deepEqual(continued.saveState(), upgraded, 'Current version2 roundtrip retains exact allocation accounting');
+    migrated.tick(60); continued.tick(60);
+    assert.deepEqual(migrated.saveState(), continued.saveState(), 'Migrated worlds continue deterministically under the new model');
+    const beforeRejectedSave = migrated.saveState(), unknownVersion = legacyBytes.slice();
+    new DataView(unknownVersion.buffer).setUint32(8, 3, true);
+    assert.throws(() => migrated.restoreState(unknownVersion), /unsupported save version/);
+    assert.deepEqual(migrated.saveState(), beforeRejectedSave, 'Unsupported versions cannot replace the live simulation');
     await Engine.load();
     assert.equal(requests.length, requestsBefore + 1, 'Later loads reuse compiled code');
     assert.equal(compilations, compilationsBefore + 1);
   } finally {
     globalThis.fetch = originalFetch; WebAssembly.compile = originalCompile;
   }
-  console.log('Engine artifact/loader checks passed: real old ABI4 regression, export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, and independent state.');
+  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, and real ABI4 version1 checkpoint migration with exact mutated graphs and registers.');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await checkEngineLoader();

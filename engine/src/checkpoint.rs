@@ -4,7 +4,7 @@ use crate::{Engine, genome::{Program, MAX_SOURCE_BYTES}, simulation::{Genome, Wo
 
 pub(crate) const MAX_STATE_BYTES: usize = 128 * 1024 * 1024;
 const MAGIC: &[u8; 8] = b"CELLAR01";
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 pub(crate) type Result<T> = std::result::Result<T, String>;
 
 pub(crate) fn ensure(ok: bool, message: &str) -> Result<()> {
@@ -24,9 +24,10 @@ impl Writer {
     pub fn text(&mut self, text: &str) { self.count(text.len()); self.0.extend(text.as_bytes()); }
 }
 
-pub(crate) struct Reader<'a> { bytes: &'a [u8], offset: usize }
+pub(crate) struct Reader<'a> { bytes: &'a [u8], offset: usize, version: u32 }
 impl<'a> Reader<'a> {
-    pub fn new(bytes: &'a [u8]) -> Self { Self { bytes, offset: 0 } }
+    pub fn new(bytes: &'a [u8]) -> Self { Self { bytes, offset: 0, version: VERSION } }
+    pub fn version(&self) -> u32 { self.version }
     fn take(&mut self, count: usize) -> Result<&'a [u8]> {
         let end = self.offset.checked_add(count).ok_or("Invalid simulation save: length overflow.")?;
         ensure(end <= self.bytes.len(), "truncated data")?;
@@ -73,7 +74,9 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
     ensure(bytes.len() >= 20 && bytes.len() <= MAX_STATE_BYTES, "save size is outside its limit")?;
     let mut r = Reader::new(bytes);
     ensure(r.take(8)? == MAGIC, "unknown save format")?;
-    ensure(r.u32()? == VERSION, "unsupported save version")?;
+    let version = r.u32()?;
+    ensure(version == 1 || version == VERSION, "unsupported save version")?;
+    r.version = version;
     ensure(r.u32()? as usize == bytes.len(), "incorrect save length")?;
     ensure(r.u32()? == checksum(&bytes[20..]), "checksum mismatch")?;
     let count = r.count(MAX_GENOMES)?;
@@ -88,9 +91,15 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
         let program = Program::read_checkpoint(&mut r)?;
         ensure(program.checkpoint_source_matches(&compiled, &source, parent == 0), "genome source does not match its compiled program")?;
         let mut genome = Genome::new(source, program, parent, kind);
-        // Preserve the original budget accounting, including allocation capacities.
-        ensure(saved_bytes >= genome.bytes && saved_bytes <= MAX_GENOME_BYTES, "invalid genome budget")?;
-        genome.bytes = saved_bytes;
+        if version == 1 {
+            // The new Program has two additional roots. Old allocation sizes do
+            // not describe its storage; charge the bounded allocations just read.
+            ensure(genome.bytes <= MAX_GENOME_BYTES, "migrated genome exceeds its allocation budget")?;
+        } else {
+            // Current-format saves preserve allocation capacities exactly.
+            ensure(saved_bytes >= genome.bytes, "invalid genome budget")?;
+            genome.bytes = saved_bytes;
+        }
         genomes.push(genome);
         ensure(registry_bytes(&genomes) <= MAX_GENOME_BYTES, "genome registry exceeds 64 MiB")?;
     }
@@ -160,6 +169,32 @@ mod tests {
     }
 
     #[test]
+    fn actual_version_one_fixture_migrates_mutated_graphs_and_registers() {
+        let bytes = include_bytes!("../fixtures/trophic-v1.bin");
+        assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 1);
+        let restored = restore(bytes).unwrap();
+        assert_eq!(restored.genomes.len(), 2);
+        assert_eq!(restored.genomes[1].parent_id, 1);
+        assert_eq!(restored.genomes[1].mutation_kind, 2);
+        assert_eq!(restored.world.cells.len(), 2);
+        for cell in &restored.world.cells {
+            assert_eq!(cell.memory.populated_count(), 5);
+            assert_eq!(cell.body[5], 0.0);
+            assert_eq!(cell.gut_energy, 0.0);
+            assert_eq!(cell.gut_nutrients, 0.0);
+            assert_eq!(cell.birth_size, cell.size.min(1.0));
+        }
+        for genome in &restored.genomes {
+            let outputs = genome.program.evaluate(&crate::genome::Inputs::default());
+            assert_eq!(outputs.feed, 1.0);
+            assert_eq!(outputs.invest_attack, 0.0);
+        }
+        let upgraded = save(&restored).unwrap();
+        assert_eq!(u32::from_le_bytes(upgraded[8..12].try_into().unwrap()), 2);
+        assert_eq!(save(&restore(&upgraded).unwrap()).unwrap(), upgraded);
+    }
+
+    #[test]
     fn invalid_checkpoints_are_atomic_including_semantically_invalid_data() {
         let mut e = live_engine(); let before = save(&e).unwrap();
         let mut cases = vec![Vec::new(), before[..before.len()-1].to_vec()];
@@ -169,7 +204,7 @@ mod tests {
             match invalid {
                 0 => bad.world.cells[0].vx = f64::NAN,
                 1 => bad.world.cells[0].genome_id = u32::MAX,
-                2 => bad.world.cells[0].body = [1.0; 5],
+                2 => bad.world.cells[0].body = [1.0; 6],
                 3 => bad.genomes[0].source = "thrust = true; turn = 0; divide = false;".into(),
                 4 => bad.world.ticks = u64::MAX,
                 _ => bad.genomes[0].source = "thrust = 0; turn = 0; divide = false;".into(),

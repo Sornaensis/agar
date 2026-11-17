@@ -12,9 +12,9 @@ for (const name of ['alloc', 'dealloc', 'compile_genome', 'error_ptr', 'error_le
 assert.ok(api.memory instanceof WebAssembly.Memory);
 assert.equal(typeof api.genome_graph_ptr, 'function');
 assert.equal(typeof api.genome_graph_len, 'function');
-assert.equal(api.abi_version(), 4);
+assert.equal(api.abi_version(), 5);
 const HEADER_SIZE = 12;
-const CELL_STRIDE = 53;
+const CELL_STRIDE = 63;
 const FOOD_STRIDE = 4;
 const ENV_HEADER = 7;
 const PATCH_STRIDE = 5;
@@ -45,7 +45,8 @@ function cellsOf(state) {
       generation:state[n+9], parent:state[n+10], radius:state[n+11], foodDistance:state[n+13],
       neighborDistance:state[n+16], size:state[n+18], capacity:state[n+19], metabolism:state[n+20], memoryUsed:state[n+21], memoryCost:state[n+22], light:state[n+23], temperature:state[n+25], flowX:state[n+27], flowY:state[n+28], integrity:state[n+38], photoRate:state[n+39],
       nutrientStored:state[n+40], nutrientCapacity:state[n+41], nutrientLevel:state[n+42], nutrientAngle:state[n+43], uptakeRate:state[n+44],
-      body:Array.from(state.slice(n+45,n+50)), senseRange:state[n+50], remodelingRate:state[n+51], bodyUpkeep:state[n+52] };
+      body:[...state.slice(n+45,n+50),state[n+53]], senseRange:state[n+50], remodelingRate:state[n+51], bodyUpkeep:state[n+52],
+      gutEnergy:state[n+54], gutCapacity:state[n+55], gutNutrients:state[n+56], digestionRate:state[n+57], growthRate:state[n+58], birthSize:state[n+59], maturity:state[n+60], lifespan:state[n+61], exudationRate:state[n+62] };
   });
 }
 function advance(module, steps) {
@@ -103,7 +104,8 @@ assert.equal(compile('thrust = 0; turn = 0; divide = false; grow = true;'), 0, '
 
 assert.ok(api.seed_cells(genome, 3, 600, 380) > 0, 'Compiled genomes can seed new cells');
 assert.ok(api.add_food(600, 380, 5) > 0, 'User can add food');
-api.set_food_rate(0);
+// Sustained external input funds a heterotroph's slower growth cycle.
+api.set_food_rate(6);
 for (let step = 0; step < 40; step += 1) {
   api.tick(120);
   snapshot();
@@ -127,7 +129,7 @@ function errorOf(module) {
 function snapshotOf(module) {
   const ptr = module.snapshot_ptr();
   const values = new Float32Array(module.memory.buffer, ptr, module.snapshot_len()).slice();
-  assert.equal(values.length, HEADER_SIZE + values[2] * CELL_STRIDE + values[3] * FOOD_STRIDE, 'ABI4 snapshot layout');
+  assert.equal(values.length, HEADER_SIZE + values[2] * CELL_STRIDE + values[3] * FOOD_STRIDE, 'ABI5 snapshot layout');
   assert.ok(values.every(Number.isFinite), 'Simulation state must remain finite');
   assert.ok(values[2] <= values[9] && values[3] <= values[10], 'Entity caps');
   for (const cell of cellsOf(values)) {
@@ -139,13 +141,16 @@ function snapshotOf(module) {
     close(cell.capacity, 200 * cell.size, 0.0003, 'Energy capacity scales with biomass');
     const assigned = cell.body.reduce((sum, value) => sum + value, 0);
     assert.ok(cell.body.every(value => value >= 0 && value <= 1) && assigned <= 1.000001, 'Actual capabilities share one body budget');
-    close(cell.bodyUpkeep, 0.30 * assigned * cell.size, 0.000002, 'Specialized body upkeep is exposed');
+    close(cell.bodyUpkeep, (0.30 * (assigned - cell.body[5]) + 0.80 * cell.body[5]) * cell.size, 0.000002, 'Specialized body upkeep is exposed');
     close(cell.metabolism, (0.35 * cell.size + cell.bodyUpkeep) * (0.5 + cell.temperature), 0.000003, 'Basal metabolism includes body investment and local temperature');
     close(cell.nutrientCapacity, 2 * cell.size, 0.000002, 'Free mineral storage scales with biomass');
     assert.ok(cell.nutrientStored >= 0 && cell.nutrientStored <= cell.nutrientCapacity + 0.000002, 'Nutrient reserves remain bounded');
     close(cell.senseRange, 40 + 400 * cell.body[4], 0.00004, 'Sensing follows actual investment');
     assert.ok(cell.nutrientLevel >= 0 && cell.uptakeRate >= 0 && cell.remodelingRate >= 0);
     assert.ok(cell.energy <= cell.capacity + 0.0003, 'Feeding respects size-dependent capacity');
+    assert.ok(cell.gutEnergy >= 0 && cell.gutEnergy <= cell.gutCapacity + 0.0001, 'Gut contents respect capacity');
+    assert.ok(cell.gutNutrients >= 0 && cell.digestionRate >= 0 && cell.growthRate >= 0 && cell.exudationRate >= 0, 'Trophic state remains nonnegative');
+    assert.ok(cell.birthSize >= 0.5 && cell.birthSize <= 4 && cell.maturity >= 0 && cell.maturity <= 1 && cell.lifespan > 0, 'Lifecycle signals remain bounded');
   }
   return values;
 }
@@ -187,16 +192,17 @@ const firstControlCells = new Map(cellsOf(firstControl).map(cell => [cell.id, ce
 for (const id of isolatedIds) {
   const grown = firstGrowthCells.get(id);
   const unchanged = firstControlCells.get(id);
-  close(grown.size - unchanged.size, 0.25 * DT, 0.000001, 'Growth rate is bounded per fixed tick');
-  close(unchanged.energy - grown.energy, 20 * (grown.size - unchanged.size), 0.00003, 'Growing pays20 energy per biomass');
+  close(grown.size - unchanged.size, 0.05 * DT, 0.000001, 'Growth rate is bounded per fixed tick');
+  close(unchanged.energy - grown.energy, 80 * (grown.size - unchanged.size), 0.00003, 'Growing pays80 energy per biomass');
 }
 const excessiveGrowth = await worldFor(`${legacySource} grow = 50;`, 31415, 5);
 assert.deepEqual(advance(excessiveGrowth, 1), firstGrowth, 'Growth requests above1 clamp to1');
 
 // A size-dependent signal stops growth without any stateful genome instruction.
-const feedback = await worldFor(`${legacySource} grow = if size < 1.5 then 1 else 0;`);
-const settled = advance(feedback, 120);
-assert.ok(cellsOf(settled).every(cell => cell.size >= 1.5 - 0.000001 && cell.size <= 1.5 + 0.25 * DT + 0.000001), 'The size signal stops growth at its threshold, within one tick');
+const feedback = await worldFor(`${legacySource} grow = if size < 1.5 then 1 else 0; photosynthesize=1;`);
+feedback.set_environment(0.5,1,0);
+const settled = advance(feedback, 1800);
+assert.ok(cellsOf(settled).every(cell => cell.size >= 1.5 - 0.000001 && cell.size <= 1.5 + 0.05 * Math.sqrt(1.5) * DT + 0.000001), 'The size signal stops growth at its threshold, within one tick');
 const settledSizes = cellsOf(settled).map(cell => [cell.id, cell.size]);
 const later = advance(feedback, 120);
 assert.deepEqual(cellsOf(later).map(cell => [cell.id, cell.size]), settledSizes, 'Size feedback keeps later growth at zero');
@@ -213,17 +219,19 @@ for (const id of isolatedIds) {
 }
 
 // The enlarged capacity must govern feeding, not merely be displayed in the ABI.
-const feedingTarget = cellsOf(later).find(cell => cell.neighborDistance > 40);
+feedback.set_environment(0.5,0,0);
+const beforeFeeding = advance(feedback,1800);
+const feedingTarget = cellsOf(beforeFeeding).find(cell => cell.neighborDistance > 40);
 assert.ok(feedingTarget, 'Capacity check has an isolated target');
 assert.ok(feedback.add_food(feedingTarget.x, feedingTarget.y, 1200) > 0);
-const fed = cellsOf(advance(feedback, 90)).find(cell => cell.id === feedingTarget.id);
+const fed = cellsOf(advance(feedback, 2400)).find(cell => cell.id === feedingTarget.id);
 assert.ok(fed.energy > 200, 'A grown cell can store more energy than a size1 founder');
 close(fed.energy, fed.capacity, 0.0003, 'Abundant food fills the size-dependent energy capacity over time');
 
 // Unconditional growth reaches the size cap instead of exceeding it.
 const abundantGrowth = await worldFor(`${growthSource} photosynthesize=1;`, 31415, 5);
 abundantGrowth.set_environment(0.5, 1, 0);
-const capped = advance(abundantGrowth, 390);
+const capped = advance(abundantGrowth, 4200);
 assert.equal(capped[2], growthInitial[2], 'Supplied light and minerals let every founder reach the cap');
 assert.ok(cellsOf(capped).every(cell => Math.abs(cell.size - 4) < 0.000001), 'Growth stops at size4');
 console.log('Growth WASM checks passed: legacy programs, paid/clamped growth, reactive size feedback, scaled maintenance, real feeding capacity, and size bounds.');
@@ -290,28 +298,35 @@ assert.equal(api.mutate_genome(genome, 1, 999), 0, 'Unknown mutation category re
 assert.deepEqual(snapshot(), beforeManual, 'Rejected mutation requests leave the world unchanged');
 
 // Compare the exact first division step with mutation disabled/enabled. Only
-// daughter genotype IDs may differ; biology/energy/positions must be unchanged.
+// daughter genotype IDs and kin-dependent prey observations may differ;
+// biology, energy, positions, and every other field must remain unchanged.
 const ordinary = await fresh();
 const evolving = await fresh();
-const divisionSource = 'thrust = 0; turn = 0; divide = true;';
+const divisionSource = 'thrust=0;turn=0;divide=true;grow=if size<2 then 1 else 0;photosynthesize=1;feed=0;invest.propulsion=0;invest.photosynthesis=1;invest.digestion=0;invest.armor=0;invest.sensing=0;invest.attack=0;';
 const ordinaryId = compileIn(ordinary, divisionSource);
 const evolvingId = compileIn(evolving, divisionSource);
 ordinary.reset(2026, ordinaryId);
 evolving.reset(2026, evolvingId);
 ordinary.set_mutation_rate(0);
 evolving.set_mutation_rate(1);
-for (let i = 0; i < 180 && snapshotOf(ordinary)[4] === 0; i++) {
+ordinary.set_environment(0.5,1,0); evolving.set_environment(0.5,1,0);
+const noDivision = await worldFor(divisionSource.replace("divide=true", "divide=false"), 2026);
+noDivision.set_environment(0.5,1,0);
+for (let i = 0; i < 1800 && snapshotOf(ordinary)[4] === 0; i++) {
   ordinary.tick(1);
   evolving.tick(1);
+  noDivision.tick(1);
 }
 const baselineDivision = snapshotOf(ordinary);
 const mutatedDivision = snapshotOf(evolving);
 assert.ok(baselineDivision[4] > 0, 'The comparison includes actual divisions');
-close(cellsOf(baselineDivision).reduce((sum, cell) => sum + cell.size, 0), 22, 0.000001, 'Division conserves founder biomass');
+close(cellsOf(baselineDivision).reduce((sum, cell) => sum + cell.size, 0), cellsOf(snapshotOf(noDivision)).reduce((sum, cell) => sum + cell.size, 0), 0.00001, 'Division conserves the biomass grown before splitting');
 for (const daughter of cellsOf(baselineDivision).filter(cell => cell.parent)) {
   const parent = cellsOf(baselineDivision).find(cell => cell.id === daughter.parent);
   assert.ok(parent, 'The dividing parent remains in the world');
-  assert.equal(daughter.size, 0.5, 'A size1 founder produces a size0.5 daughter');
+  assert.ok(daughter.size >= 1 && daughter.size < 1.01, 'A founder doubles before producing a size1 daughter');
+  assert.equal(daughter.birthSize, daughter.size, 'Daughter birth mass resets the next division target');
+  assert.equal(parent.birthSize, parent.size, 'Retained parent also needs another doubling');
   assert.equal(parent.size, daughter.size, 'Division splits biomass equally');
   assert.equal(parent.energy, daughter.energy, 'Division splits remaining energy equally');
 }
@@ -327,27 +342,33 @@ for (let offset = HEADER_SIZE; offset < HEADER_SIZE + mutatedDivision[2] * CELL_
     assert.ok(compileIn(validator, sourceOf(evolving, genotype)), 'Daughter program is valid source');
   } else assert.equal(genotype, evolvingId, 'Founders keep the original genotype');
   mutatedDivision[offset + 1] = baselineDivision[offset + 1];
+  // A newborn with a different genome is now preferred over a kin target in
+  // read-only sensing. Those derived observations are not division physics.
+  for (let field = 29; field <= 33; field++) mutatedDivision[offset + field] = baselineDivision[offset + field];
 }
 assert.deepEqual(mutatedDivision, baselineDivision, 'Mutation does not alter division energy or physics');
 assert.equal(sourceOf(evolving, evolvingId), divisionSource);
-assert.ok(cellsOf(advance(ordinary, 300)).every(cell => cell.generation <= 1), 'Size0.5 cells cannot divide again without growing');
+assert.ok(cellsOf(advance(ordinary, 300)).every(cell => cell.generation <= 1), 'Daughters cannot divide again without growing');
 
 // Evolve through multiple generations, then reset and repeat with the existing
 // immutable genome registry. Historical IDs must not change seeded replay.
-api.reset(77, genome);
+const evolutionGenome = compile(divisionSource);
+assert.ok(evolutionGenome);
+api.set_environment(0.5,1,0);
+api.reset(77, evolutionGenome);
 api.set_mutation_rate(0.4);
-for (let i = 0; i < 15; i++) api.tick(120);
+for (let i = 0; i < 30; i++) api.tick(120);
 const evolvedFirst = snapshot();
 const mutatedBirths = api.mutation_count();
 const skippedBirths = api.mutation_skipped_count();
-assert.ok(mutatedBirths > 0, 'Automatic mutation is active in a foraging world');
+assert.ok(mutatedBirths > 0, 'Automatic mutation is active in a growing, light-supplied population');
 for (let offset = HEADER_SIZE; offset < HEADER_SIZE + evolvedFirst[2] * CELL_STRIDE; offset += CELL_STRIDE) {
   const text = sourceOf(api, evolvedFirst[offset + 1]);
   assert.ok(compileIn(validator, text), 'Every living evolved genome remains editable and valid');
 }
-api.reset(77, genome);
+api.reset(77, evolutionGenome);
 api.set_mutation_rate(0.4);
-for (let i = 0; i < 15; i++) api.tick(120);
+for (let i = 0; i < 30; i++) api.tick(120);
 assert.deepEqual(snapshot(), evolvedFirst, 'Evolution repeats with the same seed and settings');
 assert.equal(api.mutation_count(), mutatedBirths);
 assert.equal(api.mutation_skipped_count(), skippedBirths);
@@ -377,7 +398,8 @@ assert.equal(bounded.genome_count(), limit);
 assert.equal(sourceOf(bounded, boundedParent), divisionSource);
 bounded.reset(100, boundedParent);
 bounded.set_mutation_rate(1);
-bounded.tick(120); bounded.tick(1);
+bounded.set_environment(0.5,1,0);
+advance(bounded,1800);
 assert.ok(bounded.mutation_skipped_count() > 0, 'Automatic capacity fallback is visible in telemetry');
 assert.equal(bounded.genome_count(), limit);
 assert.ok(snapshotOf(bounded).every(Number.isFinite));
@@ -400,7 +422,7 @@ function environmentOf(module) {
 }
 function resourcesOf(module) {
   const state = snapshotOf(module);
-  let resources = cellsOf(state).reduce((sum, cell) => sum + cell.energy + 20 * cell.size, 0);
+  let resources = cellsOf(state).reduce((sum, cell) => sum + cell.energy + cell.gutEnergy + 80 * cell.size, 0);
   for (let n = HEADER_SIZE + state[2] * CELL_STRIDE; n < state.length; n += FOOD_STRIDE) resources += state[n + 2];
   return resources;
 }
@@ -494,8 +516,9 @@ assert.ok(compileIn(fullBank, `#${'x'.repeat(20_000)}\n${legacySource}`), 'Sourc
 assert.equal(fullBank.alloc(262_145), 0, 'WASM allocation enforces the256KiB source boundary');
 assert.ok(fullBank.genome_bytes() > 0 && fullBank.genome_bytes() <= fullBank.genome_byte_limit());
 
-const inheritance = await worldFor('thrust=0;turn=0;divide=true;ri001=ri001+1;', 2026);
-for (let tick = 0; tick < 180 && snapshotOf(inheritance)[4] === 0; tick++) inheritance.tick(1);
+const inheritance = await worldFor(divisionSource + 'ri001=ri001+1;', 2026);
+inheritance.set_environment(0.5,1,0);
+for (let tick = 0; tick < 1800 && snapshotOf(inheritance)[4] === 0; tick++) inheritance.tick(1);
 const inheritanceState = snapshotOf(inheritance);
 assert.ok(inheritanceState[4] > 0);
 for (const cell of cellsOf(inheritanceState).filter(c => c.parent)) {
@@ -578,17 +601,23 @@ assert.equal(darkPhoto.photosynthesis_total(), 0);
 assert.ok(cellsOf(litState).reduce((s,c)=>s+c.energy,0) > cellsOf(darkState).reduce((s,c)=>s+c.energy,0), 'Photosynthesis actually changes energy');
 
 const hunters = await fresh();
-const preyId = compileIn(hunters, legacySource);
-const hunterId = compileIn(hunters, 'thrust=0;turn=0;divide=false;grow=if size<2 then 1 else 0;engulf=true;');
+const preyId = compileIn(hunters, legacySource + 'feed=0;');
+const hunterId = compileIn(hunters, 'thrust=0;turn=0;divide=false;bite=1;engulf=true;feed=1;invest.propulsion=0;invest.photosynthesis=0;invest.digestion=0.4;invest.armor=0.1;invest.sensing=0.1;invest.attack=0.4;');
 assert.ok(preyId && hunterId);
 hunters.set_food_rate(0); hunters.set_mutation_rate(0);
 hunters.seed_cells(preyId, 14, 600, 380); hunters.seed_cells(hunterId, 14, 600, 380);
 const resourcesBeforeHunt = resourcesOf(hunters);
-advance(hunters, 300);
-assert.ok(hunters.predation_count() > 0, 'Engulfment occurs through the browser-facing API');
-assert.ok(resourcesOf(hunters) <= resourcesBeforeHunt + 0.002, 'Growth, predation, and remains cannot create resource energy');
+advance(hunters, 900);
+assert.ok(hunters.attack_count() > 0 && hunters.predation_count() > 0, 'Dedicated attack tissue can wound and kill prey through the browser API');
+assert.ok(resourcesOf(hunters) <= resourcesBeforeHunt + 0.002, 'Growth, predation, gut processing, and remains cannot create resource energy');
+const harmless = await fresh();
+const harmlessId = compileIn(harmless, 'thrust=0;turn=0;divide=false;bite=1;engulf=true;');
+harmless.set_food_rate(0); harmless.seed_cells(harmlessId, 28, 600, 380);
+advance(harmless, 180);
+assert.equal(harmless.attack_count(),0,'Biting cannot borrow attack capacity from digestion');
+assert.equal(harmless.predation_count(),0,'Engulf output alone cannot bypass the attack requirement');
 const fighters = await fresh();
-const fighterId = compileIn(fighters, 'thrust=0;turn=0;divide=false;bite=1;defend=0.2;repair=0.1;');
+const fighterId = compileIn(fighters, 'thrust=0;turn=0;divide=false;bite=1;defend=0.2;repair=0.1;invest.attack=0.4;');
 assert.ok(fighterId);
 fighters.set_food_rate(0); fighters.seed_cells(fighterId, 28, 600, 380);
 advance(fighters, 180);
@@ -607,7 +636,7 @@ function checkMinerals(module, label) {
   close(total, water + food + cells, 1e-7, `${label}: compartments sum to the total`);
   close(total, module.nutrient_input_total(), 1e-6, `${label}: no minerals created or destroyed`);
   const state = snapshotOf(module);
-  const cellMinerals = cellsOf(state).reduce((sum, cell) => sum + cell.size + cell.nutrientStored, 0);
+  const cellMinerals = cellsOf(state).reduce((sum, cell) => sum + cell.size + cell.nutrientStored + cell.gutNutrients, 0);
   let foodMinerals = 0;
   for (let n = HEADER_SIZE + state[2] * CELL_STRIDE; n < state.length; n += FOOD_STRIDE) {
     assert.ok(state[n + 3] >= 0);
@@ -647,10 +676,11 @@ close(minerals.nutrient_dissolved_total(), 60 * 38, 1e-7, 'Reset applies the nex
 close(minerals.nutrient_input_total(), 60 * 38 + 22 * 1.5 + 360 * 0.25, 1e-7, 'Reset restarts the input ledger');
 checkMinerals(minerals, 'Reset ledger');
 
-const mineralLimited = await worldFor(`${legacySource} absorb=0;grow=1;`, 31415, 0);
+const mineralLimited = await worldFor(`${legacySource} absorb=0;grow=1;photosynthesize=1;feed=0;`, 31415, 0);
+mineralLimited.set_environment(0.5,1,0);
 const isolatedMineralCells = cellsOf(snapshotOf(mineralLimited)).filter(cell => cell.foodDistance > 30 && cell.neighborDistance > 40).map(cell => cell.id);
 assert.ok(isolatedMineralCells.length);
-advance(mineralLimited, 120);
+advance(mineralLimited, 1200);
 for (const cell of cellsOf(snapshotOf(mineralLimited)).filter(cell => isolatedMineralCells.includes(cell.id))) {
   close(cell.size, 1.5, 0.000002, 'Growth cannot exceed the available half-unit mineral reserve');
   close(cell.nutrientStored, 0, 0.000002, 'Growth binds the reserve into the body');
@@ -658,7 +688,7 @@ for (const cell of cellsOf(snapshotOf(mineralLimited)).filter(cell => isolatedMi
 }
 checkMinerals(mineralLimited, 'Nutrient-limited growth');
 
-const bodyOutputs = (p, l, d, a, s) => `invest.propulsion=${p};invest.photosynthesis=${l};invest.digestion=${d};invest.armor=${a};invest.sensing=${s};`;
+const bodyOutputs = (p, l, d, a, s, attack = 0) => `invest.propulsion=${p};invest.photosynthesis=${l};invest.digestion=${d};invest.armor=${a};invest.sensing=${s};invest.attack=${attack};`;
 const motorText = 'thrust=1;turn=0;divide=false;absorb=0;rf001=body.propulsion;rf002=sense.range;';
 const balancedMotor = await worldFor(motorText);
 const investedMotor = await worldFor(motorText + bodyOutputs(1, 0, 0, 0, 0));
@@ -668,19 +698,29 @@ const balancedStep = new Map(cellsOf(advance(balancedMotor, 1)).map(cell => [cel
 const investedStep = new Map(cellsOf(advance(investedMotor, 1)).map(cell => [cell.id, cell]));
 for (const id of motorIds) {
   const base = balancedStep.get(id), changed = investedStep.get(id);
-  assert.deepEqual([changed.x, changed.y, changed.vx, changed.vy], [base.x, base.y, base.vx, base.vy], 'New investment cannot improve propulsion during its own tick');
-  close(base.energy - changed.energy, 12 * 0.08 * DT, 0.00003, 'Reassigning body mass pays the remodeling cost');
-  close(changed.body[0], 0.2 + 0.08 * DT, 0.000001, 'Remodeling advances toward the target at its rate limit');
-  close(changed.remodelingRate, 0.08, 0.000001, 'Remodeling telemetry reports actual biomass per second');
-  close(memoryOf(investedMotor, id).rf001, 0.2, 1e-12, 'Register writes observe the pre-remodel body');
-  assert.equal(memoryOf(investedMotor, id).rf002, 120);
+  assert.ok(Math.hypot(changed.vx,changed.vy) > Math.hypot(base.vx,base.vy),'Founders start with the capabilities requested by their program');
+  close(changed.body[0],1,0.000001,'A motor founder uses its normalized starting body');
+  assert.equal(changed.remodelingRate,0,'Initial specialization is not a paid remodel');
+  close(memoryOf(investedMotor,id).rf001,0.2,1e-12,'Initial register reads still use the pre-step body');
 }
-balancedMotor.tick(1); investedMotor.tick(1);
-const motorAfterTwo = new Map(cellsOf(snapshotOf(investedMotor)).map(cell => [cell.id, cell]));
-for (const base of cellsOf(snapshotOf(balancedMotor)).filter(cell => motorIds.includes(cell.id))) {
-  const changed = motorAfterTwo.get(base.id);
-  assert.ok(Math.hypot(changed.vx, changed.vy) > Math.hypot(base.vx, base.vy), 'Paid propulsion improves motion beginning the next tick');
-  close(memoryOf(investedMotor, base.id).rf001, investedStep.get(base.id).body[0], 0.000001, 'The next evaluation sees the previous allocation');
+const changingMotor = await worldFor(motorText + bodyOutputs('if age < 1 / 30 then 0.2 else 1','if age < 1 / 30 then 0.2 else 0','if age < 1 / 30 then 0.2 else 0','if age < 1 / 30 then 0.2 else 0','if age < 1 / 30 then 0.2 else 0'));
+advance(changingMotor,1);
+balancedMotor.tick(1); changingMotor.tick(1);
+const changedSecond = new Map(cellsOf(snapshotOf(changingMotor)).map(cell=>[cell.id,cell]));
+for (const base of cellsOf(snapshotOf(balancedMotor)).filter(cell=>motorIds.includes(cell.id))) {
+  const changed=changedSecond.get(base.id);
+  assert.deepEqual([changed.x,changed.y,changed.vx,changed.vy],[base.x,base.y,base.vx,base.vy],'An existing cell cannot benefit from a remodel during the same tick');
+  close(base.energy-changed.energy,12*0.08*DT,0.00003,'Changing the body pays remodeling energy');
+  close(changed.body[0],0.2+0.08*DT,0.000001,'Later remodeling is rate limited');
+  close(changed.remodelingRate,0.08,0.000001,'Remodeling telemetry reports actual biomass per second');
+  close(memoryOf(changingMotor,base.id).rf001,0.2,1e-12,'Registers observe the old allocation');
+}
+balancedMotor.tick(1);changingMotor.tick(1);
+const changedThird = new Map(cellsOf(snapshotOf(changingMotor)).map(cell=>[cell.id,cell]));
+for (const base of cellsOf(snapshotOf(balancedMotor)).filter(cell=>motorIds.includes(cell.id))) {
+  const changed=changedThird.get(base.id);
+  assert.ok(Math.hypot(changed.vx,changed.vy)>Math.hypot(base.vx,base.vy),'Paid remodeling improves motion on the following tick');
+  close(memoryOf(changingMotor,base.id).rf001,changedSecond.get(base.id).body[0],0.000001,'Next evaluation reads the completed allocation');
 }
 const normalizedBody = await worldFor(`${legacySource} absorb=0;${bodyOutputs(1, 1, 1, 1, 1)}`);
 const balancedBody = await worldFor(`${legacySource} absorb=0;`);
@@ -692,7 +732,7 @@ for (const cell of cellsOf(advance(coreBody, 390))) {
   close(cell.senseRange, 40, 0.00002, 'Unspecialized cells retain only basic sensing');
 }
 checkMinerals(coreBody, 'Body remodeling preserves mineral mass');
-console.log('Nutrient/body WASM checks passed: ABI4, compartment accounting, explicit inputs, spring/reset behavior, mineral-limited growth, paid delayed propulsion, frozen body sensors, shared targets, and core upkeep.');
+console.log('Nutrient/body WASM checks passed: ABI5, compartment accounting, explicit inputs, spring/reset behavior, mineral-limited growth, founder specialization, paid delayed remodeling, frozen body sensors, shared targets, and core upkeep.');
 
 // Structural inspection must expose the compiler's graph without executing it
 // or creating same-tick feedback edges between register writes and reads.
@@ -713,7 +753,7 @@ function graphOf(module, id) {
     if (node.kind === 'register' || node.kind === 'populated') assert.deepEqual(node.inputs, [], 'Old-memory reads are graph leaves');
   }
   assert.equal(new Set(graph.roots.map(root => root.id)).size, graph.roots.length);
-  assert.equal(graph.roots.filter(root => root.kind === 'output').length, 15);
+  assert.equal(graph.roots.filter(root => root.kind === 'output').length, 17);
   const pending = [];
   for (const root of graph.roots) {
     assert.ok(types.has(root.type));
@@ -763,6 +803,8 @@ assert.equal(writeRoot.type, 'integer');
 assert.equal(structuralGraph.roots.find(root => root.id === 'output:photosynthesize').default, '0');
 assert.equal(structuralGraph.roots.find(root => root.id === 'output:engulf').default, 'false');
 assert.equal(structuralGraph.roots.find(root => root.id === 'output:absorb').default, '1');
+assert.equal(structuralGraph.roots.find(root => root.id === 'output:feed').default, '1');
+assert.equal(structuralGraph.roots.find(root => root.id === 'output:invest.attack').default, '0');
 for (const ability of ['propulsion', 'photosynthesis', 'digestion', 'armor', 'sensing']) {
   assert.equal(structuralGraph.roots.find(root => root.id === `output:invest.${ability}`).default, '0.2');
 }

@@ -80,7 +80,7 @@ impl Engine {
 thread_local! { static ENGINE: RefCell<Engine> = RefCell::new(Engine::new()); }
 
 #[no_mangle]
-pub extern "C" fn abi_version() -> u32 { 4 }
+pub extern "C" fn abi_version() -> u32 { 5 }
 
 /// Allocate a writable, zero-initialized byte buffer. The caller must deallocate
 /// it exactly once with the same pointer and length, after compile_genome.
@@ -506,7 +506,7 @@ mod tests {
         engine.compile(genome::DEFAULT_PROGRAM);
         engine.world.reset(11, 1);
         engine.world.snapshot(&mut engine.snapshot);
-        assert_eq!(abi_version(), 4);
+        assert_eq!(abi_version(), 5);
         assert_eq!(engine.snapshot.len(), 12 + 22 * simulation::CELL_STRIDE + 360 * 4);
         assert_eq!(engine.snapshot[7], simulation::WIDTH as f32);
         assert_eq!(engine.snapshot[8], simulation::HEIGHT as f32);
@@ -530,6 +530,8 @@ mod tests {
         assert_eq!(engine.snapshot[12 + 50], 120.0);
         assert_eq!(engine.snapshot[12 + 51], 0.0);
         assert_eq!(engine.snapshot[12 + 52], 0.3);
+        assert_eq!(simulation::CELL_STRIDE, 63);
+        assert_eq!(&engine.snapshot[12 + 53..12 + 63], &[0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 1.0, 0.0, 300.0, 0.0]);
         assert_eq!(engine.snapshot[12 + 22 * simulation::CELL_STRIDE + 3], 0.25);
         assert!(engine.snapshot.iter().all(|v| v.is_finite()));
     }

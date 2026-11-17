@@ -1,6 +1,6 @@
 //! A fixed-step, seeded simulation. Genomes only read the pre-step snapshot;
-//! material transport, upkeep, uptake, growth, feeding, predation, remodeling,
-//! division, and death are resolved by the host in that order.
+//! upkeep, digestion, mineral uptake, feeding, light capture, predation, growth,
+//! remodeling, division, and death are resolved by the host in that order.
 use crate::genome::{EvalScratch, Inputs, MutationKind, Outputs, Program, Registers};
 use crate::environment::{Environment, PATCHES, PATCH_AREA};
 use std::collections::HashMap;
@@ -17,27 +17,30 @@ pub const CELL_RADIUS: f64 = 7.0;
 pub const MAX_ENERGY: f64 = 200.0;
 pub const MIN_SIZE: f64 = 0.5;
 pub const MAX_SIZE: f64 = 4.0;
-pub const MAX_GROWTH_RATE: f64 = 0.25;
-pub const GROWTH_ENERGY_COST: f64 = 20.0;
+pub const MAX_GROWTH_RATE: f64 = 0.05;
+pub const GROWTH_ENERGY_COST: f64 = 80.0;
 pub const BASAL_METABOLISM: f64 = 0.65;
 pub const THRUST_ENERGY_COST: f64 = 1.45;
-pub const CELL_STRIDE: usize = 53;
+pub const CELL_STRIDE: usize = 63;
+pub const LIFESPAN: f64 = 300.0;
 pub const MEMORY_REGISTER_COST: f64 = 0.0025;
 pub const MAX_GENOME_BYTES: usize = 64 * 1024 * 1024;
 const PHOTO_RATE: f64 = 3.0;
 const PHOTO_UPKEEP: f64 = 0.18;
 const PHOTO_PATCH_POWER: f64 = 0.02;
+const PHOTO_EXUDATION: f64 = 0.12;
 const BITE_UPKEEP: f64 = 0.9;
 const DEFENSE_UPKEEP: f64 = 0.6;
 const REPAIR_RATE: f64 = 0.15;
 const REPAIR_COST: f64 = 20.0;
 const ENGULF_RATIO: f64 = 1.6;
 const ENGULF_COST: f64 = 8.0;
-const ENGULF_RECOVERY: f64 = 0.8;
 const REMAINS_RECOVERY: f64 = 0.6;
 const FOOD_NUTRIENTS: f64 = 0.25;
 const FOOD_DECAY: f64 = 0.02;
-const DIGESTION_RATE: f64 = 90.0;
+const INGESTION_RATE: f64 = 60.0;
+const DIGESTION_RATE: f64 = 6.0;
+const ASSIMILATION_EFFICIENCY: f64 = 0.65;
 const UPTAKE_RATE: f64 = 0.25;
 const REMODELING_RATE: f64 = 0.08;
 const REMODELING_COST: f64 = 12.0;
@@ -46,10 +49,11 @@ const PHOTOSYNTHESIS: usize = 1;
 const DIGESTION: usize = 2;
 const ARMOR: usize = 3;
 const SENSING: usize = 4;
+const ATTACK: usize = 5;
 pub const MAX_GENOMES: usize = 2048;
 const DIVISION_MIN_ENERGY: f64 = 90.0;
 const DIVISION_COST: f64 = 12.0;
-const DIVISION_COOLDOWN: f64 = 4.0;
+const DIVISION_COOLDOWN: f64 = 12.0;
 const GRID_COLUMNS: usize = 10;
 const GRID_ROWS: usize = 6;
 const GRID_BUCKETS: usize = GRID_COLUMNS * GRID_ROWS;
@@ -138,11 +142,20 @@ pub struct Cell {
     pub photosynthesis_rate: f64,
     /// Free minerals; each unit of biomass also binds one mineral unit.
     pub nutrient_stored: f64,
-    /// Propulsion, photosynthesis, digestion, armor, and sensing fractions.
-    pub body: [f64; 5],
+    /// Propulsion, photosynthesis, digestion, armor, sensing, and attack fractions.
+    pub body: [f64; 6],
     pub uptake_rate: f64,
     pub remodeling_rate: f64,
     pub engulf_cooldown: f64,
+    /// Unassimilated organic energy and minerals in the finite digestive store.
+    pub gut_energy: f64,
+    pub gut_nutrients: f64,
+    /// Useful energy delivered by digestion per second on the last tick.
+    pub digestion_rate: f64,
+    pub growth_rate: f64,
+    pub birth_size: f64,
+    /// Organic energy actually deposited into food per second on the last tick.
+    pub exudation_rate: f64,
 }
 
 impl Cell {
@@ -150,10 +163,14 @@ impl Cell {
     pub fn radius(&self) -> f64 { CELL_RADIUS * self.size.sqrt() }
     pub fn energy_capacity(&self) -> f64 { MAX_ENERGY * self.size }
     pub fn nutrient_capacity(&self) -> f64 { 2.0 * self.size }
-    pub fn body_upkeep(&self) -> f64 { 0.30 * self.body.iter().sum::<f64>() * self.size }
+    pub fn body_upkeep(&self) -> f64 {
+        (0.30 * self.body[..ATTACK].iter().sum::<f64>() + 0.80 * self.body[ATTACK]) * self.size
+    }
     pub fn basal_metabolism(&self) -> f64 { 0.35 * self.size + self.body_upkeep() }
     pub fn sense_range(&self) -> f64 { 40.0 + 400.0 * self.body[SENSING] }
     fn capacity_factor(&self, capability: usize) -> f64 { self.body[capability] / 0.2 }
+    pub fn gut_capacity(&self) -> f64 { 100.0 * self.size * self.capacity_factor(DIGESTION) }
+    pub fn maturity(&self) -> f64 { (self.size / self.birth_size - 1.0).clamp(0.0, 1.0) }
 
     /// Return overflow for immediate recycling into the environment.
     fn receive_nutrients(&mut self, amount: f64) -> f64 {
@@ -163,31 +180,33 @@ impl Cell {
     }
 
     fn grow(&mut self, signal: f64) {
+        self.growth_rate = 0.0;
         if !self.alive() || self.size >= MAX_SIZE || signal <= 0.0 { return; }
-        let requested = (signal * MAX_GROWTH_RATE * DT).min(MAX_SIZE - self.size)
+        let requested = (signal * MAX_GROWTH_RATE * self.size.sqrt() * DT).min(MAX_SIZE - self.size)
             .min(self.nutrient_stored);
-        let cost = requested * GROWTH_ENERGY_COST;
-        let growth = if cost >= self.energy {
-            // Spending all available energy must produce exactly zero, rather
-            // than a rounding residue that could let a dead cell eat again.
-            let affordable = self.energy / GROWTH_ENERGY_COST;
-            self.energy = 0.0;
-            affordable
-        } else {
-            self.energy -= cost;
-            requested
-        };
+        // New biomass increases the reserve requirement too. Optional growth
+        // may not spend the 20% reserve needed to keep the cell functioning.
+        let affordable = (self.energy - 0.2 * self.energy_capacity()).max(0.0)
+            / (GROWTH_ENERGY_COST + 0.2 * MAX_ENERGY);
+        let growth = requested.min(affordable);
+        self.energy -= growth * GROWTH_ENERGY_COST;
         self.nutrient_stored = (self.nutrient_stored - growth).max(0.0);
         self.size = (self.size + growth).min(MAX_SIZE);
+        self.growth_rate = growth / DT;
+    }
+
+    fn body_target(output: &Outputs) -> [f64; 6] {
+        let mut target = [output.invest_propulsion, output.invest_photosynthesis,
+            output.invest_digestion, output.invest_armor, output.invest_sensing, output.invest_attack];
+        for fraction in &mut target { *fraction = fraction.clamp(0.0, 1.0); }
+        let target_sum: f64 = target.iter().sum();
+        if target_sum > 1.0 { for fraction in &mut target { *fraction /= target_sum; } }
+        target
     }
 
     fn remodel(&mut self, output: &Outputs) {
         if !self.alive() { return; }
-        let mut target = [output.invest_propulsion, output.invest_photosynthesis,
-            output.invest_digestion, output.invest_armor, output.invest_sensing];
-        for fraction in &mut target { *fraction = fraction.clamp(0.0, 1.0); }
-        let target_sum: f64 = target.iter().sum();
-        if target_sum > 1.0 { for fraction in &mut target { *fraction /= target_sum; } }
+        let target = Self::body_target(output);
         let old_core = (1.0 - self.body.iter().sum::<f64>()).max(0.0);
         let new_core = (1.0 - target.iter().sum::<f64>()).max(0.0);
         let distance = 0.5 * ((old_core - new_core).abs()
@@ -332,7 +351,7 @@ impl World {
 
     pub fn nutrient_food_total(&self) -> f64 { self.food.iter().map(|food| food.nutrients).sum() }
     pub fn nutrient_cell_total(&self) -> f64 {
-        self.cells.iter().map(|cell| cell.size + cell.nutrient_stored).sum()
+        self.cells.iter().map(|cell| cell.size + cell.nutrient_stored + cell.gut_nutrients).sum()
     }
     pub fn nutrient_total(&self) -> f64 {
         self.environment.nutrient_total() + self.nutrient_food_total() + self.nutrient_cell_total()
@@ -360,8 +379,10 @@ impl World {
                 size: 1.0,
                 age: 0.0, generation: 0, parent_id: 0, cooldown: DIVISION_COOLDOWN,
                 memory: Registers::default(), integrity: 1.0, photosynthesis_rate: 0.0,
-                nutrient_stored: 0.5, body: [0.2; 5], uptake_rate: 0.0,
+                nutrient_stored: 0.5, body: [0.2, 0.2, 0.2, 0.2, 0.2, 0.0], uptake_rate: 0.0,
                 remodeling_rate: 0.0, engulf_cooldown: 0.0,
+                gut_energy: 0.0, gut_nutrients: 0.0, digestion_rate: 0.0,
+                growth_rate: 0.0, birth_size: 1.0, exudation_rate: 0.0,
             });
             self.nutrient_imports += 1.5;
             self.next_id += 1;
@@ -421,6 +442,11 @@ impl World {
                 nutrient_angle: directional(self.environment.nutrient_gradient(cell.x, cell.y)),
                 body_propulsion: cell.body[PROPULSION], body_photosynthesis: cell.body[PHOTOSYNTHESIS],
                 body_digestion: cell.body[DIGESTION], body_armor: cell.body[ARMOR], body_sensing: cell.body[SENSING],
+                body_attack: cell.body[ATTACK], gut_energy: cell.gut_energy, gut_capacity: cell.gut_capacity(),
+                gut_fraction: if cell.gut_capacity() > 0.0 { (cell.gut_energy / cell.gut_capacity()).clamp(0.0, 1.0) } else { 0.0 },
+                digestion_rate: cell.digestion_rate, growth_rate: cell.growth_rate,
+                birth_size: cell.birth_size, maturity: cell.maturity(), lifespan: LIFESPAN,
+                exudation_rate: cell.exudation_rate,
                 body_unassigned: (1.0 - cell.body.iter().sum::<f64>()).max(0.0), sense_range: range,
                 food_distance: range, neighbor_distance: range,
                 prey_distance: range, threat_distance: range,
@@ -443,6 +469,7 @@ impl World {
             let mut nearest_prey = range * range;
             let mut nearest_threat = range * range;
             let mut threat_id = u32::MAX;
+            let mut neighbor_id = u32::MAX;
             for i in cell_grid.nearby_radius(cell.x, cell.y, range) {
                 let target = &self.cells[i];
                 if target.id == cell.id { continue; }
@@ -450,20 +477,29 @@ impl World {
                 let dy = delta(target.y - cell.y, HEIGHT);
                 let d2 = dx * dx + dy * dy;
                 let angle = relative_angle(dy.atan2(dx) - cell.angle);
-                if d2 <= nearest_neighbor {
-                    nearest_neighbor = d2;
+                if d2 <= nearest_neighbor && (!input.neighbor_visible || d2 < nearest_neighbor || target.id < neighbor_id) {
+                    nearest_neighbor = d2; neighbor_id = target.id;
                     input.neighbor_visible = true;
                     input.neighbor_distance = d2.sqrt();
                     input.neighbor_angle = angle;
                 }
-                if target.size <= cell.size * 1.05 && d2 <= nearest_prey
-                    && (!input.prey_visible || d2 < nearest_prey || target.id < input.prey_id as u32) {
+                let same_genome = target.genome_id == cell.genome_id;
+                let preferred = !same_genome && input.prey_same_genome;
+                let same_preference = same_genome == input.prey_same_genome;
+                // Sensing describes potential targets; the program chooses
+                // hunting risk. Only capture, not visibility, has a size gate.
+                if d2 <= range * range
+                    && (!input.prey_visible || preferred || (same_preference
+                        && (d2 < nearest_prey || (d2 == nearest_prey && target.id < input.prey_id as u32)))) {
                     nearest_prey = d2;
                     input.prey_visible = true; input.prey_id = target.id as f64;
                     input.prey_angle = angle; input.prey_distance = d2.sqrt(); input.prey_size = target.size;
-                    input.prey_same_genome = target.genome_id == cell.genome_id;
+                    input.prey_same_genome = same_genome;
+                    input.prey_integrity = target.integrity;
+                    input.prey_attack = target.body[ATTACK];
+                    input.prey_photosynthesis = target.body[PHOTOSYNTHESIS];
                 }
-                if target.size >= cell.size * ENGULF_RATIO && d2 <= nearest_threat
+                if target.body[ATTACK] > 0.0 && target.size >= cell.size * 0.9 && d2 <= nearest_threat
                     && (!input.threat_visible || d2 < nearest_threat || target.id < threat_id) {
                     nearest_threat = d2; threat_id = target.id;
                     input.threat_visible = true; input.threat_angle = angle;
@@ -490,29 +526,36 @@ impl World {
             cell.photosynthesis_rate = 0.0;
             cell.uptake_rate = 0.0;
             cell.remodeling_rate = 0.0;
+            cell.digestion_rate = 0.0;
+            cell.growth_rate = 0.0;
+            cell.exudation_rate = 0.0;
             if !cell.alive() { continue; }
+            // A supplied founder already has its programmed phenotype. Only
+            // later changes (including inherited mutant targets) need remodeling.
+            if cell.generation == 0 && cell.age == 0.0 { cell.body = Cell::body_target(output); }
+            cell.age += DT;
+            if cell.age >= LIFESPAN { cell.integrity = 0.0; continue; }
             let propulsion = cell.capacity_factor(PROPULSION);
             cell.angle = wrap(cell.angle + output.turn * 3.2 * propulsion.sqrt() * DT, TAU);
             cell.vx = input.flow_x + (cell.vx - input.flow_x + cell.angle.cos() * output.thrust * propulsion * 100.0 * DT) * drag;
             cell.vy = input.flow_y + (cell.vy - input.flow_y + cell.angle.sin() * output.thrust * propulsion * 100.0 * DT) * drag;
             cell.x = wrap(cell.x + cell.vx * DT, WIDTH);
             cell.y = wrap(cell.y + cell.vy * DT, HEIGHT);
-            cell.age += DT;
             cell.cooldown = (cell.cooldown - DT).max(0.0);
             cell.engulf_cooldown = (cell.engulf_cooldown - DT).max(0.0);
             let maintenance = (cell.basal_metabolism() * metabolic_factor(input.temperature)
                 + output.thrust * THRUST_ENERGY_COST * cell.size * propulsion + input.memory_cost
                 + cell.size * (PHOTO_UPKEEP * output.photosynthesize * cell.capacity_factor(PHOTOSYNTHESIS)
-                    + BITE_UPKEEP * output.bite * cell.capacity_factor(DIGESTION)
+                    + BITE_UPKEEP * output.bite * cell.capacity_factor(ATTACK)
                     + DEFENSE_UPKEEP * output.defend * cell.capacity_factor(ARMOR))) * DT;
             cell.energy = (cell.energy - maintenance).max(0.0);
             let stress = (0.15 - input.temperature).max(input.temperature - 0.85).max(0.0);
             cell.integrity = (cell.integrity - stress * 0.3 * (1.0 - 0.5 * cell.body[ARMOR]) * DT).max(0.0);
             if !cell.alive() { continue; }
             let requested_repair = (REPAIR_RATE * output.repair * DT).min(1.0 - cell.integrity);
-            let repair_cost = requested_repair * REPAIR_COST;
+            let repair_cost = requested_repair * REPAIR_COST * cell.size;
             let repair = if repair_cost >= cell.energy {
-                let affordable = cell.energy / REPAIR_COST;
+                let affordable = cell.energy / (REPAIR_COST * cell.size);
                 // Spending every remaining unit must not leave a rounding
                 // residue that permits eating or photosynthesis to revive it.
                 cell.energy = 0.0;
@@ -523,25 +566,30 @@ impl World {
             };
             cell.integrity = (cell.integrity + repair).min(1.0);
         }
+        // Food collected below cannot fund this tick's actions. Digestion only
+        // accesses the gut carried into this tick, after mandatory upkeep.
+        self.digest(&outputs);
         self.absorb_nutrients(&outputs);
-        for (cell, output) in self.cells.iter_mut().zip(&outputs) { cell.grow(output.grow); }
         let time = self.time();
         for food in &mut self.food {
             let (vx, vy) = self.environment.flow_at(food.x, food.y, time);
             food.x = wrap(food.x + vx * DT, WIDTH); food.y = wrap(food.y + vy * DT, HEIGHT);
         }
         self.resolve_collisions();
-        self.eat();
+        self.eat(&outputs);
         self.photosynthesize(&outputs);
         let consumed = self.resolve_predation(&inputs, &outputs);
+        for (cell, output) in self.cells.iter_mut().zip(&outputs) { cell.grow(output.grow); }
         for (cell, output) in self.cells.iter_mut().zip(&outputs) { cell.remodel(output); }
+        self.spill_excess_gut();
 
         // Newborns only join after all original cells have completed this tick.
         let mut babies = Vec::new();
         let existing_count = self.cells.len();
         for (cell, output) in self.cells.iter_mut().zip(outputs.iter()) {
             if !output.divide || !cell.alive() || cell.cooldown > 0.0
-                || cell.size < 2.0 * MIN_SIZE || cell.energy < DIVISION_MIN_ENERGY * cell.size
+                || cell.size < 2.0 * MIN_SIZE || cell.size < 2.0 * cell.birth_size
+                || cell.energy < DIVISION_MIN_ENERGY * cell.size
                 || existing_count + babies.len() >= MAX_CELLS || self.next_id == u32::MAX || cell.generation == u32::MAX { continue; }
             let split_angle = cell.angle + PI * 0.5 + (self.rng.unit() - 0.5) * 0.6;
             let new_size = cell.size * 0.5;
@@ -577,6 +625,8 @@ impl World {
                 memory: Registers::default(), integrity: cell.integrity, photosynthesis_rate: 0.0,
                 nutrient_stored: cell.nutrient_stored * 0.5, body: cell.body,
                 uptake_rate: 0.0, remodeling_rate: 0.0, engulf_cooldown: cell.engulf_cooldown,
+                gut_energy: cell.gut_energy * 0.5, gut_nutrients: cell.gut_nutrients * 0.5,
+                digestion_rate: 0.0, growth_rate: 0.0, birth_size: new_size, exudation_rate: 0.0,
             };
             cell.x = wrap(cell.x - dx, WIDTH);
             cell.y = wrap(cell.y - dy, HEIGHT);
@@ -584,7 +634,10 @@ impl World {
             cell.vy -= split_angle.sin() * 3.0;
             cell.energy = new_energy;
             cell.size = new_size;
+            cell.birth_size = new_size;
             cell.nutrient_stored *= 0.5;
+            cell.gut_energy *= 0.5;
+            cell.gut_nutrients *= 0.5;
             cell.cooldown = DIVISION_COOLDOWN;
             self.next_id += 1;
             self.births += 1;
@@ -592,8 +645,9 @@ impl World {
         }
         let remains: Vec<(f64, f64, f64, f64)> = self.cells.iter().enumerate()
             .filter(|(i, cell)| !cell.alive() && !consumed[*i])
-            .map(|(_, cell)| (cell.x, cell.y, REMAINS_RECOVERY * (cell.energy.max(0.0) + GROWTH_ENERGY_COST * cell.size),
-                cell.size + cell.nutrient_stored))
+            .map(|(_, cell)| (cell.x, cell.y,
+                REMAINS_RECOVERY * (cell.energy.max(0.0) + GROWTH_ENERGY_COST * cell.size) + cell.gut_energy,
+                cell.size + cell.nutrient_stored + cell.gut_nutrients))
             .collect();
         for (x, y, energy, nutrients) in remains { self.emit_remains(x, y, energy, nutrients); }
         let before = self.cells.len();
@@ -625,7 +679,7 @@ impl World {
         let mut groups: Vec<Vec<(usize, f64)>> = vec![Vec::new(); PATCHES];
         for (i, (cell, output)) in self.cells.iter().zip(outputs).enumerate() {
             if !cell.alive() || output.absorb <= 0.0 { continue; }
-            let request = (output.absorb * UPTAKE_RATE * cell.size * cell.capacity_factor(DIGESTION) * DT)
+            let request = (output.absorb * UPTAKE_RATE * cell.size.sqrt() * DT)
                 .min((cell.nutrient_capacity() - cell.nutrient_stored).max(0.0)).min(cell.energy);
             if request > 0.0 { groups[Environment::patch(cell.x, cell.y)].push((i, request)); }
         }
@@ -654,17 +708,56 @@ impl World {
         }
     }
 
+    fn digest(&mut self, outputs: &[Outputs]) {
+        for (cell, output) in self.cells.iter_mut().zip(outputs) {
+            if !cell.alive() || output.feed <= 0.0 || cell.gut_energy <= 0.0 { continue; }
+            let energy_room = (cell.energy_capacity() - cell.energy).max(0.0);
+            let mineral_room = (cell.nutrient_capacity() - cell.nutrient_stored).max(0.0);
+            // A full reserve can still process a meal for its minerals. Once
+            // both stores are full the unprocessed meal remains in the gut.
+            let mineral_demand = if cell.gut_nutrients > 0.0 {
+                mineral_room / cell.gut_nutrients * cell.gut_energy
+            } else { 0.0 };
+            let raw = (DIGESTION_RATE * output.feed * cell.size * cell.capacity_factor(DIGESTION) * DT)
+                .min(cell.gut_energy).min((energy_room / ASSIMILATION_EFFICIENCY).max(mineral_demand));
+            if raw <= 0.0 { continue; }
+            let nutrients = if raw == cell.gut_energy { cell.gut_nutrients }
+                else { cell.gut_nutrients * (raw / cell.gut_energy) };
+            let useful = (raw * ASSIMILATION_EFFICIENCY).min(energy_room);
+            cell.gut_energy = (cell.gut_energy - raw).max(0.0);
+            cell.gut_nutrients = (cell.gut_nutrients - nutrients).max(0.0);
+            cell.energy += useful;
+            cell.digestion_rate = useful / DT;
+            let overflow = cell.receive_nutrients(nutrients);
+            self.environment.recycle_nutrients(cell.x, cell.y, overflow);
+        }
+    }
+
+    fn spill_excess_gut(&mut self) {
+        let mut spills = Vec::new();
+        for cell in &mut self.cells {
+            if !cell.alive() { continue; }
+            let excess = (cell.gut_energy - cell.gut_capacity()).max(0.0);
+            if excess <= 0.0 { continue; }
+            let nutrients = cell.gut_nutrients * (excess / cell.gut_energy);
+            cell.gut_energy -= excess;
+            cell.gut_nutrients = (cell.gut_nutrients - nutrients).max(0.0);
+            spills.push((cell.x, cell.y, excess, nutrients));
+        }
+        for (x, y, energy, nutrients) in spills { self.emit_remains(x, y, energy, nutrients); }
+    }
+
     fn photosynthesize(&mut self, outputs: &[Outputs]) {
         let mut requests = vec![0.0; self.cells.len()];
         let mut totals = vec![0.0; PATCHES];
         for (i, (cell, output)) in self.cells.iter().zip(outputs).enumerate() {
             if !cell.alive() || output.photosynthesize <= 0.0 { continue; }
-            let request = (PHOTO_RATE * output.photosynthesize * cell.size * cell.capacity_factor(PHOTOSYNTHESIS)
-                * self.environment.light_at(cell.x, cell.y) * DT)
-                .min((cell.energy_capacity() - cell.energy).max(0.0));
+            let request = PHOTO_RATE * output.photosynthesize * cell.size * cell.capacity_factor(PHOTOSYNTHESIS)
+                * self.environment.light_at(cell.x, cell.y) * DT;
             requests[i] = request;
             totals[Environment::patch(cell.x, cell.y)] += request;
         }
+        let mut exudates = Vec::new();
         for (i, cell) in self.cells.iter_mut().enumerate() {
             if requests[i] <= 0.0 { continue; }
             let patch = Environment::patch(cell.x, cell.y);
@@ -672,9 +765,14 @@ impl World {
             // Competing cells share that supply in proportion to their demand.
             let supply = PHOTO_PATCH_POWER * PATCH_AREA * self.environment.patch_light(patch) * DT;
             let gain = requests[i] * (supply / totals[patch]).min(1.0);
-            cell.energy += gain;
+            let retained = (gain * (1.0 - PHOTO_EXUDATION)).min((cell.energy_capacity() - cell.energy).max(0.0));
+            cell.energy += retained;
             cell.photosynthesis_rate = gain / DT;
             self.photosynthesis_total += gain;
+            exudates.push((i, cell.x, cell.y, cell.radius(), cell.angle, gain - retained));
+        }
+        for (i, x, y, radius, angle, energy) in exudates {
+            self.cells[i].exudation_rate = self.emit_exudate(x, y, radius, angle, energy) / DT;
         }
     }
 
@@ -695,47 +793,46 @@ impl World {
         let mut order: Vec<usize> = (0..self.cells.len()).collect();
         order.sort_by(|&a, &b| self.cells[b].size.total_cmp(&self.cells[a].size)
             .then_with(|| self.cells[a].id.cmp(&self.cells[b].id)));
-        let mut overflow = Vec::new();
         for i in order {
             if !outputs[i].engulf || !self.cells[i].alive() || self.cells[i].engulf_cooldown > 0.0
-                || self.cells[i].body[DIGESTION] < 0.05 { continue; }
+                || outputs[i].feed <= 0.0 || self.cells[i].body[ATTACK] <= 0.0
+                || self.cells[i].body[DIGESTION] <= 0.0 { continue; }
             let Some(j) = target(i) else { continue; };
             let attacker = &self.cells[i]; let prey = &self.cells[j];
-            if !prey.alive() || attacker.size < ENGULF_RATIO * prey.size || !contact(attacker, prey) { continue; }
+            if !prey.alive() || prey.integrity > 0.35
+                || attacker.size < ENGULF_RATIO * prey.size || !contact(attacker, prey) { continue; }
             let cost = ENGULF_COST * prey.size;
             if attacker.energy <= cost { continue; }
-            let recovered = ENGULF_RECOVERY * (prey.energy + GROWTH_ENERGY_COST * prey.size);
-            let capacity = attacker.energy_capacity();
-            let gained = recovered.min(capacity - (attacker.energy - cost));
-            let excess = recovered - gained;
-            let (x, y) = (prey.x, prey.y);
-            let minerals = prey.size + prey.nutrient_stored;
-            self.cells[i].energy = attacker.energy - cost + gained;
-            let nutrient_overflow = self.cells[i].receive_nutrients(minerals);
-            self.environment.recycle_nutrients(x, y, nutrient_overflow);
-            self.cells[i].engulf_cooldown = 2.0 / self.cells[i].capacity_factor(DIGESTION);
+            let recovered = prey.energy + GROWTH_ENERGY_COST * prey.size + prey.gut_energy;
+            if recovered > attacker.gut_capacity() - attacker.gut_energy { continue; }
+            let minerals = prey.size + prey.nutrient_stored + prey.gut_nutrients;
+            self.cells[i].energy -= cost;
+            self.cells[i].gut_energy += recovered;
+            self.cells[i].gut_nutrients += minerals;
+            self.cells[i].engulf_cooldown = (2.0 / self.cells[i].capacity_factor(DIGESTION)).clamp(0.4, 8.0);
             self.cells[j].energy = 0.0;
             self.cells[j].integrity = 0.0;
             // The consumed body is already elsewhere; it cannot remain on the
             // material ledger while waiting for this tick's removal phase.
             self.cells[j].size = 0.0;
             self.cells[j].nutrient_stored = 0.0;
+            self.cells[j].gut_energy = 0.0;
+            self.cells[j].gut_nutrients = 0.0;
             consumed[j] = true;
             self.predations += 1;
-            if excess > 0.0 { overflow.push((x, y, excess)); }
         }
 
         // Every surviving attack reads the state after engulfing but before any
         // bites. Aggregate first, then apply: reciprocal bites can kill both.
         let mut damage = vec![0.0; self.cells.len()];
         for i in 0..self.cells.len() {
-            if outputs[i].bite <= 0.0 || !self.cells[i].alive() || self.cells[i].body[DIGESTION] <= 0.0 { continue; }
+            if outputs[i].bite <= 0.0 || !self.cells[i].alive() || self.cells[i].body[ATTACK] <= 0.0 { continue; }
             let Some(j) = target(i) else { continue; };
             if !self.cells[j].alive() || !contact(&self.cells[i], &self.cells[j]) { continue; }
             let protection = (0.4 * self.cells[j].body[ARMOR]
                 + 0.65 * outputs[j].defend * self.cells[j].capacity_factor(ARMOR)).clamp(0.0, 0.95);
-            damage[j] += 0.25 * outputs[i].bite * self.cells[i].capacity_factor(DIGESTION)
-                * (self.cells[i].size / self.cells[j].size).min(4.0) * (1.0 - protection) * DT;
+            damage[j] += 0.12 * outputs[i].bite * self.cells[i].capacity_factor(ATTACK)
+                * (self.cells[i].size / self.cells[j].size).min(2.0) * (1.0 - protection) * DT;
             self.attacks += 1;
         }
         for (cell, damage) in self.cells.iter_mut().zip(damage) {
@@ -743,8 +840,36 @@ impl World {
             cell.integrity = (cell.integrity - damage).max(0.0);
             if cell.integrity == 0.0 { self.predations += 1; }
         }
-        for (x, y, energy) in overflow { self.emit_remains(x, y, energy, 0.0); }
         consumed
+    }
+
+    /// Release organic material outside the membrane, where touching consumers
+    /// can reach it despite cell collision separation. Nearby deposits merge,
+    /// but never back into the secreting cell's interior. No random draws are used.
+    fn emit_exudate(&mut self, center_x: f64, center_y: f64, radius: f64, angle: f64, mut energy: f64) -> f64 {
+        let x = wrap(center_x + (radius + 2.5) * angle.cos(), WIDTH);
+        let y = wrap(center_y + (radius + 2.5) * angle.sin(), HEIGHT);
+        let requested = energy;
+        let mut nearby: Vec<(usize, f64)> = self.food.iter().enumerate().filter_map(|(i, food)| {
+            let distance = delta(food.x - x, WIDTH).powi(2) + delta(food.y - y, HEIGHT).powi(2);
+            let from_center = delta(food.x - center_x, WIDTH).powi(2) + delta(food.y - center_y, HEIGHT).powi(2);
+            (distance <= 24.0_f64.powi(2) && from_center >= radius * radius
+                && food.energy < 24.0).then_some((i, distance))
+        }).collect();
+        nearby.sort_by(|(a, da), (b, db)| da.total_cmp(db).then_with(|| a.cmp(b)));
+        for (i, _) in nearby {
+            let deposited = energy.min(24.0 - self.food[i].energy);
+            self.food[i].energy += deposited;
+            energy -= deposited;
+            if energy <= 0.0 { return requested; }
+        }
+        while energy > 0.0 && self.food.len() < MAX_FOOD {
+            let deposited = energy.min(24.0);
+            self.food.push(Food { x, y, energy: deposited, nutrients: 0.0 });
+            energy -= deposited;
+        }
+        // Chemical energy that cannot fit the particle budget dissipates.
+        requested - energy
     }
 
     fn emit_remains(&mut self, x: f64, y: f64, mut energy: f64, mut nutrients: f64) {
@@ -806,19 +931,18 @@ impl World {
         }
     }
 
-    fn eat(&mut self) {
+    fn eat(&mut self, outputs: &[Outputs]) {
         let mut grid = Grid::new();
         for (i, c) in self.cells.iter().enumerate() { grid.insert(c.x, c.y, i); }
-        let mut budgets: Vec<f64> = self.cells.iter().map(|cell|
-            DIGESTION_RATE * cell.size * cell.capacity_factor(DIGESTION) * DT).collect();
+        let mut budgets: Vec<f64> = self.cells.iter().zip(outputs).map(|(cell, output)|
+            (INGESTION_RATE * output.feed * cell.size * cell.capacity_factor(DIGESTION) * DT)
+                .min((cell.gut_capacity() - cell.gut_energy).max(0.0))).collect();
         self.food.retain_mut(|food| {
             let mut winner: Option<usize> = None;
             let mut best_distance = f64::INFINITY;
             for i in grid.nearby(food.x, food.y) {
                 let cell = &self.cells[i];
-                if !cell.alive() || budgets[i] <= 0.0
-                    || (cell.energy >= cell.energy_capacity()
-                        && (cell.nutrient_stored >= cell.nutrient_capacity() || food.nutrients <= 0.0)) { continue; }
+                if !cell.alive() || budgets[i] <= 0.0 { continue; }
                 let dx = delta(cell.x - food.x, WIDTH);
                 let dy = delta(cell.y - food.y, HEIGHT);
                 let d2 = dx * dx + dy * dy;
@@ -830,17 +954,11 @@ impl World {
             }
             if let Some(index) = winner {
                 let cell = &mut self.cells[index];
-                let energy_room = (cell.energy_capacity() - cell.energy).max(0.0);
-                let mineral_room = (cell.nutrient_capacity() - cell.nutrient_stored).max(0.0);
-                let energy_fraction = if food.energy > 0.0 { energy_room / food.energy } else { 0.0 };
-                let mineral_fraction = if food.nutrients > 0.0 { mineral_room / food.nutrients } else { 0.0 };
-                let capacity_fraction = if food.energy > 0.0 { budgets[index] / food.energy } else { 1.0 };
-                let fraction = energy_fraction.max(mineral_fraction).min(capacity_fraction).clamp(0.0, 1.0);
+                let fraction = if food.energy > 0.0 { (budgets[index] / food.energy).clamp(0.0, 1.0) } else { 0.0 };
                 let energy = food.energy * fraction;
                 let nutrients = food.nutrients * fraction;
-                cell.energy += energy.min(energy_room);
-                let overflow = cell.receive_nutrients(nutrients);
-                self.environment.recycle_nutrients(food.x, food.y, overflow);
+                cell.gut_energy += energy;
+                cell.gut_nutrients += nutrients;
                 budgets[index] = (budgets[index] - energy).max(0.0);
                 food.energy = (food.energy - energy).max(0.0);
                 food.nutrients = (food.nutrients - nutrients).max(0.0);
@@ -883,6 +1001,9 @@ impl World {
                 cell.body[PROPULSION] as f32, cell.body[PHOTOSYNTHESIS] as f32, cell.body[DIGESTION] as f32,
                 cell.body[ARMOR] as f32, cell.body[SENSING] as f32, cell.sense_range() as f32,
                 cell.remodeling_rate as f32, cell.body_upkeep() as f32,
+                cell.body[ATTACK] as f32, cell.gut_energy as f32, cell.gut_capacity() as f32,
+                cell.gut_nutrients as f32, cell.digestion_rate as f32, cell.growth_rate as f32,
+                cell.birth_size as f32, cell.maturity() as f32, LIFESPAN as f32, cell.exudation_rate as f32,
             ]);
         }
         for food in &self.food {
@@ -929,6 +1050,10 @@ mod tests {
         world.seed_cells(1, 1, -1.0, -1.0);
         world.cells[0].vx = 0.0;
         world.cells[0].vy = 0.0;
+        // Action fixtures represent an already-grown cell; founder initialization
+        // and the new birth-to-division lifecycle have dedicated tests below.
+        world.cells[0].age = DT;
+        world.cells[0].birth_size = MIN_SIZE;
         world
     }
 
@@ -1005,7 +1130,9 @@ mod tests {
         assert!(world.food.is_empty());
         assert_eq!(world.eaten, 1);
         let total: f64 = world.cells.iter().map(|c| c.energy).sum();
-        assert!((total - (100.0 + 2.0 * (-FOOD_DECAY * DT).exp() - 2.0 * 0.65 * DT)).abs() < 1e-8);
+        close(total, 100.0 - 2.0 * 0.65 * DT);
+        close(world.cells.iter().map(|c| c.gut_energy).sum(), 2.0 * (-FOOD_DECAY * DT).exp());
+        assert!(world.cells.iter().all(|cell| cell.digestion_rate == 0.0), "a new meal cannot fund its collection tick");
     }
 
     #[test]
@@ -1082,6 +1209,9 @@ mod tests {
         let mut world = World::empty(1);
         world.set_mutation_rate(1.0);
         world.reset(42, 1);
+        // Begin with mature, nourished cells so replay tests exercise mutation
+        // directly instead of depending on a particular ecosystem's growth rate.
+        for cell in &mut world.cells { cell.size = 2.0; cell.energy = 300.0; cell.age = 10.0; cell.cooldown = 0.0; }
         for _ in 0..900 { world.step(&mut registry); }
         assert!(world.mutations > 0);
         let first_count = registry.len();
@@ -1093,6 +1223,7 @@ mod tests {
         world.reset(42, 1);
         assert_eq!(world.mutation_rate, 1.0);
         assert_eq!(world.mutations, 0);
+        for cell in &mut world.cells { cell.size = 2.0; cell.energy = 300.0; cell.age = 10.0; cell.cooldown = 0.0; }
         for _ in 0..900 { world.step(&mut registry); }
         let mut after = Vec::new();
         world.snapshot(&mut after);
@@ -1165,18 +1296,22 @@ mod tests {
     }
 
     #[test]
-    fn unaffordable_growth_spends_only_available_energy_and_dead_cells_cannot_eat_or_divide() {
+    fn growth_preserves_its_future_reserve_and_dead_cells_cannot_eat_or_divide() {
         let mut probe = one_cell().cells.remove(0);
-        probe.energy = 0.05;
+        probe.energy = 40.05;
         let previous_size = probe.size;
         probe.grow(1.0);
-        assert_eq!(probe.energy, 0.0);
-        assert!((probe.size - previous_size - 0.05 / GROWTH_ENERGY_COST).abs() < 1e-12);
+        close(probe.size - previous_size, 0.05 / (GROWTH_ENERGY_COST + 0.2 * MAX_ENERGY));
+        close(probe.energy, 0.2 * probe.energy_capacity());
+        let reserve_size = probe.size;
+        probe.grow(1.0);
+        close(probe.size, reserve_size);
+        probe.energy = 0.0;
         let dead_size = probe.size;
         probe.grow(1.0);
         assert_eq!(probe.size, dead_size, "a dead cell cannot grow again");
 
-        for energy in [0.001, BASAL_METABOLISM * DT + 0.05] {
+        for energy in [0.001, BASAL_METABOLISM * DT] {
             let mut world = one_cell();
             world.cells[0].energy = energy;
             world.cells[0].cooldown = 0.0;
@@ -1195,9 +1330,7 @@ mod tests {
         for size in [MIN_SIZE, 1.0, MAX_SIZE] {
             let mut world = one_cell();
             world.cells[0].size = size;
-            world.cells[0].energy = MAX_ENERGY * size - 1.0;
-            world.food.push(Food { x: world.cells[0].x, y: world.cells[0].y, energy: 1.0, nutrients: FOOD_NUTRIENTS });
-            world.eat();
+            world.cells[0].energy = MAX_ENERGY * size;
             assert_eq!(world.cells[0].energy, MAX_ENERGY * size);
             assert!((world.cells[0].basal_metabolism() - BASAL_METABOLISM * size).abs() < 1e-12);
             assert_eq!(world.cells[0].radius(), CELL_RADIUS * size.sqrt());
@@ -1254,7 +1387,7 @@ mod tests {
         let mut registry = genomes("thrust = 0; turn = 0; grow = 1; divide = true;");
         let mut world = one_cell();
         world.cells[0].size = 2.0;
-        world.cells[0].energy = 180.5;
+        world.cells[0].energy = 180.25;
         world.cells[0].cooldown = 0.0;
         world.step(&mut registry);
         assert_eq!(world.cells.len(), 1, "energy must meet the larger post-growth threshold");
@@ -1262,12 +1395,13 @@ mod tests {
         world.cells[0].energy = 300.0;
         world.step(&mut registry);
         assert_eq!(world.cells.len(), 2);
-        let grown_size = previous_size + MAX_GROWTH_RATE * DT;
+        let growth = MAX_GROWTH_RATE * previous_size.sqrt() * DT;
+        let grown_size = previous_size + growth;
         let total_size: f64 = world.cells.iter().map(|cell| cell.size).sum();
         let total_energy: f64 = world.cells.iter().map(|cell| cell.energy).sum();
         assert!((total_size - grown_size).abs() < 1e-12);
         let expected = 300.0 - BASAL_METABOLISM * previous_size * DT
-            - MAX_GROWTH_RATE * DT * GROWTH_ENERGY_COST - DIVISION_COST * grown_size;
+            - growth * GROWTH_ENERGY_COST - DIVISION_COST * grown_size;
         assert!((total_energy - expected).abs() < 1e-10);
     }
 
@@ -1303,7 +1437,7 @@ mod tests {
             world.cells[0].energy = 20.0;
             world.cells[0].x = 2.0; world.cells[0].y = 100.0;
             world.food.push(Food { x: WIDTH - 10.0, y: 100.0, energy: 1.0, nutrients: FOOD_NUTRIENTS });
-            world.eat();
+            world.eat(&vec![Outputs::default(); world.cells.len()]);
             assert_eq!(world.eaten, expected_meals);
             assert_eq!(world.food.len(), 1 - expected_meals as usize);
         }
@@ -1318,19 +1452,18 @@ mod tests {
         for cell in &mut world.cells { cell.y = 100.0; cell.energy = 50.0; }
         world.cells[0].x = 100.0; world.cells[1].x = 118.0;
         world.food.push(Food { x: 114.0, y: 100.0, energy: 1.0, nutrients: FOOD_NUTRIENTS });
-        world.eat();
-        assert_eq!(world.cells[0].energy, 50.0);
-        assert_eq!(world.cells[1].energy, 51.0, "nearest center wins despite the other cell's larger radius");
+        world.eat(&vec![Outputs::default(); world.cells.len()]);
+        assert_eq!(world.cells[0].gut_energy, 0.0);
+        assert_eq!(world.cells[1].gut_energy, 1.0, "nearest center wins despite the other cell's larger radius");
         world.cells[0].x = 110.0;
         world.food.push(Food { x: 114.0, y: 100.0, energy: 1.0, nutrients: FOOD_NUTRIENTS });
-        world.eat();
-        assert_eq!(world.cells[0].energy, 51.0, "lower stable ID breaks an equal-center-distance tie");
+        world.eat(&vec![Outputs::default(); world.cells.len()]);
+        assert_eq!(world.cells[0].gut_energy, 1.0, "lower stable ID breaks an equal-center-distance tie");
         world.cells[0].x = 100.0;
-        world.cells[1].energy = world.cells[1].energy_capacity();
-        world.cells[1].nutrient_stored = world.cells[1].nutrient_capacity();
+        world.cells[1].gut_energy = world.cells[1].gut_capacity();
         world.food.push(Food { x: 114.0, y: 100.0, energy: 1.0, nutrients: FOOD_NUTRIENTS });
-        world.eat();
-        assert_eq!(world.cells[0].energy, 52.0, "a full cell is ineligible even when it is closer");
+        world.eat(&vec![Outputs::default(); world.cells.len()]);
+        assert_eq!(world.cells[0].gut_energy, 2.0, "a full gut is ineligible even when it is closer");
         assert_eq!(world.eaten, 3);
     }
 
@@ -1379,7 +1512,7 @@ mod tests {
     }
 
     #[test]
-    fn light_is_shared_within_a_patch_and_full_or_dead_cells_take_no_photons() {
+    fn light_is_shared_full_cells_exude_surplus_and_dead_cells_take_no_photons() {
         let mut world = one_cell();
         world.seed_cells(1, 5, -1.0, -1.0);
         world.environment.configure(0.5, 1.0, 0.0);
@@ -1390,18 +1523,23 @@ mod tests {
         world.photosynthesize(&vec![output; world.cells.len()]);
         let available = PHOTO_PATCH_POWER * PATCH_AREA * DT;
         let harvested: f64 = world.cells.iter().take(4).map(|cell| cell.energy - 100.0).sum();
-        assert!((harvested - available).abs() < 1e-10);
+        let exuded: f64 = world.food.iter().map(|food| food.energy).sum();
+        close(harvested + exuded, available);
         assert!((world.photosynthesis_total - available).abs() < 1e-10);
-        assert!(world.cells.iter().take(4).all(|cell| (cell.photosynthesis_rate - available / 4.0 / DT).abs() < 1e-10));
+        assert!(world.cells.iter().take(5).all(|cell| (cell.photosynthesis_rate - available / 5.0 / DT).abs() < 1e-10));
         assert_eq!(world.cells[4].energy, MAX_ENERGY);
         assert_eq!(world.cells[5].energy, 0.0);
-        assert_eq!(world.cells[4].photosynthesis_rate, 0.0);
+        close(world.cells[4].exudation_rate, world.cells[4].photosynthesis_rate);
+        assert_eq!(world.cells[5].photosynthesis_rate, 0.0);
+        assert_eq!(world.food.len(), 1, "small exudates share a nearby particle");
+        assert!(world.food.iter().all(|food| food.nutrients == 0.0));
 
         world.cells.truncate(1);
         world.cells[0].energy = MAX_ENERGY - 0.01;
         world.photosynthesize(&[output]);
         assert_eq!(world.cells[0].energy, MAX_ENERGY);
-        assert!((world.cells[0].photosynthesis_rate - 0.01 / DT).abs() < 1e-10);
+        close(world.cells[0].photosynthesis_rate, PHOTO_RATE);
+        close(world.cells[0].exudation_rate, PHOTO_RATE - 0.01 / DT);
     }
 
     #[test]
@@ -1507,6 +1645,8 @@ mod tests {
             for (i, cell) in world.cells.iter_mut().enumerate() {
                 cell.x = [100.0, 140.0, 120.0][i]; cell.y = 100.0;
                 cell.size = if i < 2 { 4.0 } else { 1.0 }; cell.energy = 100.0;
+                cell.body = [0.2, 0.0, 0.2, 0.2, 0.2, 0.2];
+                if i == 2 { cell.integrity = 0.35; }
             }
             if reversed { world.cells.reverse(); }
             let inputs = world.sense_all();
@@ -1514,7 +1654,8 @@ mod tests {
             assert_eq!(consumed.iter().filter(|&&value| value).count(), 1);
             let winner = world.cells.iter().find(|cell| cell.id == 1).unwrap();
             let loser = world.cells.iter().find(|cell| cell.id == 2).unwrap();
-            assert_eq!(winner.energy, 100.0 - ENGULF_COST + ENGULF_RECOVERY * 120.0);
+            assert_eq!(winner.energy, 100.0 - ENGULF_COST);
+            close(winner.gut_energy, 100.0 + GROWTH_ENERGY_COST);
             assert_eq!(loser.energy, 100.0);
             assert_eq!(world.predations, 1);
             assert_eq!(world.attacks, 0);
@@ -1526,14 +1667,17 @@ mod tests {
         let output = Program::compile("thrust = 0; turn = 0; divide = false; engulf = true; bite = 1;").unwrap().evaluate(&Inputs::default());
         let mut world = one_cell(); world.seed_cells(1, 2, -1.0, -1.0);
         for (i, cell) in world.cells.iter_mut().enumerate() {
-            cell.x = 100.0; cell.y = 100.0;
+            cell.x = [100.0, 118.0, 120.0][i]; cell.y = 100.0;
             cell.size = [4.0, 2.0, 1.0][i]; cell.energy = [300.0, 150.0, 50.0][i];
+            cell.body = [0.2, 0.0, 0.2, 0.2, 0.2, 0.2];
+            if i == 1 { cell.integrity = 0.35; }
         }
         let inputs = world.sense_all();
         assert_eq!(inputs[0].prey_id, 2.0); assert_eq!(inputs[1].prey_id, 3.0);
         let consumed = world.resolve_predation(&inputs, &[output; 3]);
         assert_eq!(consumed, [false, true, false]);
-        assert_eq!(world.cells[0].energy, 300.0 - 16.0 + 0.8 * 190.0);
+        assert_eq!(world.cells[0].energy, 300.0 - 16.0);
+        assert_eq!(world.cells[0].gut_energy, 150.0 + 2.0 * GROWTH_ENERGY_COST);
         assert_eq!(world.cells[2].energy, 50.0);
         assert_eq!(world.cells[2].integrity, 1.0);
         assert_eq!(world.predations, 1);
@@ -1546,6 +1690,8 @@ mod tests {
         let mut world = one_cell(); world.seed_cells(1, 2, -1.0, -1.0);
         for cell in &mut world.cells { cell.y = 100.0; cell.energy = 100.0; }
         world.cells[0].x = 3.0; world.cells[0].size = 4.0;
+        world.cells[0].body = [0.2, 0.0, 0.2, 0.2, 0.2, 0.2];
+        world.cells[1].integrity = 0.35; world.cells[2].integrity = 0.35;
         world.cells[1].x = WIDTH - 10.0; world.cells[2].x = 60.0;
         let inputs = world.sense_all();
         assert_eq!(inputs[0].prey_id, 2.0);
@@ -1556,22 +1702,28 @@ mod tests {
     }
 
     #[test]
-    fn engulfing_pays_before_harvesting_and_overflow_becomes_bounded_food() {
+    fn engulfing_pays_before_capture_requires_weak_prey_and_never_overfills_the_gut() {
         let output = Program::compile("thrust = 0; turn = 0; divide = false; engulf = true;").unwrap().evaluate(&Inputs::default());
         let mut world = one_cell(); world.seed_cells(1, 1, -1.0, -1.0);
         for cell in &mut world.cells { cell.x = 100.0; cell.y = 100.0; cell.energy = 100.0; }
         world.cells[0].size = 4.0; world.cells[0].energy = ENGULF_COST;
+        world.cells[0].body = [0.2, 0.0, 0.2, 0.2, 0.2, 0.2];
+        world.cells[1].integrity = 0.35;
         let inputs = world.sense_all();
         assert_eq!(world.resolve_predation(&inputs, &[output; 2]), [false, false]);
         world.cells[0].energy = 799.0;
+        world.cells[1].integrity = 1.0;
+        assert_eq!(world.resolve_predation(&inputs, &[output; 2]), [false, false], "healthy prey cannot be engulfed");
+        world.cells[1].integrity = 0.35;
+        world.cells[0].gut_energy = 300.0;
+        assert_eq!(world.resolve_predation(&inputs, &[output; 2]), [false, false], "whole prey must fit the gut");
+        world.cells[0].gut_energy = 0.0;
         let before = 799.0 + 100.0 + GROWTH_ENERGY_COST * 5.0;
         assert_eq!(world.resolve_predation(&inputs, &[output; 2]), [false, true]);
-        assert_eq!(world.cells[0].energy, 800.0);
-        let food: f64 = world.food.iter().map(|food| food.energy).sum();
-        let after = world.cells[0].energy + GROWTH_ENERGY_COST * world.cells[0].size + food;
-        let lost = ENGULF_COST + (1.0 - ENGULF_RECOVERY) * (100.0 + GROWTH_ENERGY_COST);
-        assert!((after - (before - lost)).abs() < 1e-10);
-        assert!(world.food.iter().all(|food| food.energy > 0.0 && food.energy <= 24.0));
+        assert_eq!(world.cells[0].energy, 799.0 - ENGULF_COST);
+        let after = world.cells[0].energy + GROWTH_ENERGY_COST * world.cells[0].size + world.cells[0].gut_energy;
+        close(after, before - ENGULF_COST);
+        assert!(world.food.is_empty());
         world.food.resize(MAX_FOOD, Food { x: 0.0, y: 0.0, energy: 1.0, nutrients: FOOD_NUTRIENTS });
         world.emit_remains(1.0, 1.0, 100.0, 1.0);
         assert_eq!(world.food.len(), MAX_FOOD);
@@ -1579,30 +1731,34 @@ mod tests {
 
     #[test]
     fn reciprocal_bites_are_simultaneous_and_remains_do_not_duplicate_resources() {
-        let mut registry = genomes("thrust = 0; turn = 0; divide = false; bite = 1;");
+        let mut registry = genomes("thrust = 0; turn = 0; divide = false; bite = 1; invest.photosynthesis = 0; invest.attack = .2;");
         let mut world = one_cell(); world.seed_cells(1, 1, -1.0, -1.0);
         for (i, cell) in world.cells.iter_mut().enumerate() {
             cell.x = 100.0 + 14.0 * i as f64; cell.y = 100.0;
             cell.energy = 50.0; cell.integrity = 0.001; cell.vx = 0.0; cell.vy = 0.0;
+            cell.body = [0.2, 0.0, 0.2, 0.2, 0.2, 0.2];
         }
         world.step(&mut registry);
         assert!(world.cells.is_empty());
         assert_eq!(world.attacks, 2); assert_eq!(world.predations, 2); assert_eq!(world.deaths, 2);
         let recovered: f64 = world.food.iter().map(|food| food.energy).sum();
-        let expected = 2.0 * REMAINS_RECOVERY * (50.0 - (BASAL_METABOLISM + BITE_UPKEEP) * DT + GROWTH_ENERGY_COST);
+        let expected = 2.0 * REMAINS_RECOVERY * (50.0 - (BASAL_METABOLISM + 0.1 + BITE_UPKEEP) * DT + GROWTH_ENERGY_COST);
         assert!((recovered - expected).abs() < 1e-10);
     }
 
     #[test]
     fn defense_reduces_each_simultaneous_bite_and_costs_energy() {
         let mut world = one_cell(); world.seed_cells(1, 1, -1.0, -1.0);
-        for cell in &mut world.cells { cell.x = 100.0; cell.y = 100.0; cell.energy = 100.0; }
-        let mut registry = genomes("thrust = 0; turn = 0; divide = false; bite = 1; defend = 1;");
+        for cell in &mut world.cells {
+            cell.x = 100.0; cell.y = 100.0; cell.energy = 100.0;
+            cell.body = [0.2, 0.0, 0.2, 0.2, 0.2, 0.2];
+        }
+        let mut registry = genomes("thrust = 0; turn = 0; divide = false; bite = 1; defend = 1; invest.photosynthesis = 0; invest.attack = .2;");
         world.step(&mut registry);
         assert_eq!(world.attacks, 2);
         for cell in &world.cells {
-            assert!((cell.integrity - (1.0 - 0.25 * (1.0 - 0.08 - 0.65) * DT)).abs() < 1e-12);
-            assert!((cell.energy - (100.0 - (BASAL_METABOLISM + BITE_UPKEEP + DEFENSE_UPKEEP) * DT)).abs() < 1e-10);
+            assert!((cell.integrity - (1.0 - 0.12 * (1.0 - 0.08 - 0.65) * DT)).abs() < 1e-12);
+            assert!((cell.energy - (100.0 - (BASAL_METABOLISM + 0.1 + BITE_UPKEEP + DEFENSE_UPKEEP) * DT)).abs() < 1e-10);
         }
     }
 
@@ -1669,7 +1825,7 @@ mod tests {
         cell.energy = 0.039_069;
         let material = cell.size + cell.nutrient_stored;
         cell.grow(1.0);
-        assert_eq!(cell.energy, 0.0);
+        assert_eq!(cell.energy, 0.039_069, "growth preserves a depleted maintenance reserve");
         close(cell.size + cell.nutrient_stored, material);
     }
 
@@ -1682,7 +1838,8 @@ mod tests {
             for cell in &mut world.cells {
                 cell.x = 105.0; cell.y = 105.0; cell.energy = 100.0; cell.nutrient_stored = 0.0;
             }
-            world.cells[1].body = [0.15, 0.15, 0.4, 0.15, 0.15];
+            world.cells[1].body = [0.15, 0.15, 0.4, 0.15, 0.15, 0.0];
+            world.cells[1].size = 4.0;
             world.cells[2].energy = 0.0;
             world.cells[3].nutrient_stored = world.cells[3].nutrient_capacity();
             world.environment.add_nutrients(105.0, 105.0, 0.003);
@@ -1745,35 +1902,39 @@ mod tests {
     }
 
     #[test]
-    fn feeding_is_partial_has_one_total_throughput_budget_and_recycles_excess_minerals() {
+    fn ingestion_and_digestion_have_separate_budgets_and_recycle_excess_minerals() {
         let mut world = one_cell();
         world.cells[0].energy = 50.0;
         world.cells[0].nutrient_stored = 1.99;
         let (x, y) = (world.cells[0].x, world.cells[0].y);
         world.food = vec![Food { x, y, energy: 10.0, nutrients: 1.0 }; 2];
         let before = world.nutrient_total();
-        world.eat();
-        close(world.cells[0].energy, 53.0);
-        close(world.cells[0].nutrient_stored, 2.0);
-        close(world.food[0].energy, 7.0);
-        close(world.food[0].nutrients, 0.7);
+        world.eat(&vec![Outputs::default(); world.cells.len()]);
+        close(world.cells[0].energy, 50.0);
+        close(world.cells[0].nutrient_stored, 1.99);
+        close(world.cells[0].gut_energy, 2.0);
+        close(world.cells[0].gut_nutrients, 0.2);
+        close(world.food[0].energy, 8.0);
+        close(world.food[0].nutrients, 0.8);
         assert_eq!(world.food[1].energy, 10.0);
-        close(world.environment.nutrient_total(), 0.29);
+        close(world.environment.nutrient_total(), 0.0);
         assert_eq!(world.eaten, 0);
         close(world.nutrient_total(), before);
-
-        world.cells[0].energy = world.cells[0].energy_capacity();
-        world.eat();
-        close(world.food[0].energy, 7.0);
-        assert_eq!(world.food[1].energy, 10.0);
+        world.digest(&[Outputs::default()]);
+        close(world.cells[0].energy, 50.0 + 0.2 * ASSIMILATION_EFFICIENCY);
+        close(world.cells[0].digestion_rate, DIGESTION_RATE * ASSIMILATION_EFFICIENCY);
+        close(world.cells[0].gut_energy, 1.8);
+        close(world.cells[0].gut_nutrients, 0.18);
+        close(world.cells[0].nutrient_stored, 2.0);
+        close(world.environment.nutrient_total(), 0.01);
         close(world.nutrient_total(), before);
-
+        world.cells[0].energy = world.cells[0].energy_capacity();
         world.cells[0].nutrient_stored = 0.0;
         let before = world.nutrient_total();
-        world.eat();
+        world.digest(&[Outputs::default()]);
         assert_eq!(world.cells[0].energy, world.cells[0].energy_capacity());
-        close(world.cells[0].nutrient_stored, 0.3);
-        close(world.food[0].energy, 4.0);
+        close(world.cells[0].nutrient_stored, 0.02);
+        assert_eq!(world.cells[0].digestion_rate, 0.0);
         close(world.nutrient_total(), before);
     }
 
@@ -1828,13 +1989,18 @@ mod tests {
         world.cells[0].size = 4.0;
         world.cells[0].energy = 799.0;
         world.cells[0].nutrient_stored = 7.8;
+        world.cells[0].body = [0.2, 0.0, 0.2, 0.2, 0.2, 0.2];
         world.cells[1].nutrient_stored = 1.2;
+        world.cells[1].integrity = 0.35;
+        world.cells[1].gut_energy = 20.0; world.cells[1].gut_nutrients = 0.5;
         let output = Outputs { engulf: true, ..Outputs::default() };
         let before = world.nutrient_total();
         let inputs = world.sense_all();
         assert_eq!(world.resolve_predation(&inputs, &[output; 2]), [false, true]);
-        close(world.cells[0].nutrient_stored, 8.0);
-        close(world.environment.nutrient_total(), 2.0);
+        close(world.cells[0].nutrient_stored, 7.8);
+        close(world.cells[0].gut_energy, 200.0);
+        close(world.cells[0].gut_nutrients, 2.7);
+        close(world.environment.nutrient_total(), 0.0);
         close(world.nutrient_total(), before);
         assert_eq!(world.cells[0].engulf_cooldown, 2.0);
         assert!(world.food.iter().all(|food| food.nutrients == 0.0));
@@ -1842,12 +2008,15 @@ mod tests {
         world.cells.retain(Cell::alive);
         world.seed_cells(1, 1, -1.0, -1.0);
         world.cells[1].x = 100.0; world.cells[1].y = 100.0;
+        world.cells[1].integrity = 0.35;
         let inputs = world.sense_all();
         assert_eq!(world.resolve_predation(&inputs, &[output; 2]), [false, false]);
         world.cells[0].engulf_cooldown = 0.0;
-        world.cells[0].body[DIGESTION] = 0.049;
+        world.cells[0].gut_energy = 0.0; world.cells[0].gut_nutrients = 0.0;
+        world.cells[0].body[DIGESTION] = 0.0;
         assert_eq!(world.resolve_predation(&inputs, &[output; 2]), [false, false]);
         world.cells[0].body[DIGESTION] = 0.05;
+        world.cells[1].energy = 10.0;
         assert_eq!(world.resolve_predation(&inputs, &[output; 2]), [false, true]);
         close(world.cells[0].engulf_cooldown, 8.0);
     }
@@ -1860,7 +2029,7 @@ mod tests {
         world.cells[0].nutrient_stored = 2.1;
         world.cells[0].cooldown = 0.0;
         world.cells[0].engulf_cooldown = 3.0;
-        world.cells[0].body = [0.1, 0.3, 0.4, 0.1, 0.1];
+        world.cells[0].body = [0.1, 0.3, 0.4, 0.1, 0.1, 0.0];
         let body = world.cells[0].body;
         let before = world.nutrient_total();
         world.step(&mut genomes("thrust = 0; turn = 0; divide = true; absorb = 0; invest.propulsion = .1; invest.photosynthesis = .3; invest.digestion = .4; invest.armor = .1; invest.sensing = .1;"));
@@ -1882,7 +2051,7 @@ mod tests {
         let equal = Outputs { invest_propulsion: 1.0, invest_photosynthesis: 1.0, invest_digestion: 1.0,
             invest_armor: 1.0, invest_sensing: 1.0, ..Outputs::default() };
         cell.remodel(&equal);
-        assert_eq!(cell.body, [0.2; 5]);
+        assert_eq!(cell.body, [0.2, 0.2, 0.2, 0.2, 0.2, 0.0]);
         assert_eq!(cell.energy, 100.0);
         let propulsion = Outputs { invest_propulsion: 1.0, invest_photosynthesis: 0.0, invest_digestion: 0.0,
             invest_armor: 0.0, invest_sensing: 0.0, ..Outputs::default() };
@@ -1936,7 +2105,7 @@ mod tests {
     fn specialized_sensing_crosses_seams_and_large_queries_never_duplicate_buckets() {
         let mut world = one_cell();
         world.cells[0].x = 10.0; world.cells[0].y = 10.0;
-        world.cells[0].body = [0.0, 0.0, 0.0, 0.0, 1.0];
+        world.cells[0].body = [0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
         world.food.push(Food { x: WIDTH - 300.0, y: 10.0, energy: 1.0, nutrients: 0.25 });
         world.seed_cells(1, 1, -1.0, -1.0);
         world.cells[1].x = 10.0; world.cells[1].y = HEIGHT - 300.0;
@@ -1964,37 +2133,40 @@ mod tests {
     fn digestive_and_photosynthetic_allocations_bound_resource_processing() {
         for fraction in [0.0, 0.2, 0.4] {
             let mut world = one_cell();
-            world.cells[0].body = [0.0, 0.2, fraction, 0.0, 0.0];
+            world.cells[0].body = [0.0, 0.2, fraction, 0.0, 0.0, 0.0];
             world.cells[0].energy = 50.0;
             world.cells[0].nutrient_stored = 0.0;
             let (x, y) = (world.cells[0].x, world.cells[0].y);
             world.food.push(Food { x, y, energy: 100.0, nutrients: 1.0 });
-            world.eat();
-            close(world.cells[0].energy - 50.0, DIGESTION_RATE * fraction / 0.2 * DT);
+            world.eat(&vec![Outputs::default(); world.cells.len()]);
+            close(world.cells[0].gut_energy, INGESTION_RATE * fraction / 0.2 * DT);
+            close(world.cells[0].energy, 50.0);
+            world.digest(&[Outputs::default()]);
+            close(world.cells[0].energy - 50.0, DIGESTION_RATE * fraction / 0.2 * DT * ASSIMILATION_EFFICIENCY);
             world.environment.add_nutrients(x, y, 1.0);
             let reserve = world.cells[0].nutrient_stored;
             world.absorb_nutrients(&[Outputs::default()]);
-            close(world.cells[0].nutrient_stored - reserve, UPTAKE_RATE * fraction / 0.2 * DT);
+            close(world.cells[0].nutrient_stored - reserve, UPTAKE_RATE * DT);
 
             world.cells[0].body[PHOTOSYNTHESIS] = fraction;
             world.environment.configure(0.5, 1.0, 0.0);
             let energy = world.cells[0].energy;
             world.photosynthesize(&[Outputs { photosynthesize: 1.0, ..Outputs::default() }]);
-            close(world.cells[0].energy - energy, PHOTO_RATE * fraction / 0.2 * DT);
+            close(world.cells[0].energy - energy, PHOTO_RATE * fraction / 0.2 * DT * (1.0 - PHOTO_EXUDATION));
         }
     }
 
     #[test]
-    fn armor_caps_bite_protection_and_digestive_allocation_scales_damage() {
+    fn armor_caps_bite_protection_and_attack_allocation_scales_damage() {
         let mut world = one_cell();
         world.seed_cells(1, 1, -1.0, -1.0);
         for cell in &mut world.cells { cell.x = 100.0; cell.y = 100.0; }
-        world.cells[0].body = [0.0, 0.0, 0.4, 0.0, 0.6];
-        world.cells[1].body = [0.0, 0.0, 0.0, 0.5, 0.5];
+        world.cells[0].body = [0.0, 0.0, 0.0, 0.0, 0.6, 0.4];
+        world.cells[1].body = [0.0, 0.0, 0.0, 0.5, 0.5, 0.0];
         let inputs = world.sense_all();
         world.resolve_predation(&inputs, &[Outputs { bite: 1.0, ..Outputs::default() },
             Outputs { defend: 1.0, ..Outputs::default() }]);
-        close(world.cells[1].integrity, 1.0 - 0.25 * 2.0 * 0.05 * DT);
+        close(world.cells[1].integrity, 1.0 - 0.12 * 2.0 * 0.05 * DT);
         assert_eq!(world.attacks, 1);
         assert_eq!(world.cells[0].integrity, 1.0);
     }
@@ -2024,6 +2196,217 @@ mod tests {
                 assert!(cell.energy > 0.0 && cell.energy <= cell.energy_capacity());
             }
             assert!(world.food.iter().all(|food| food.energy > 0.0 && food.nutrients >= 0.0 && food.nutrients.is_finite()));
+        }
+    }
+
+    #[test]
+    fn a_founder_starts_with_its_programmed_body_and_autotrophs_need_no_digestive_tissue() {
+        let mut world = World::empty(24);
+        world.food_rate = 0.0;
+        world.mutation_rate = 0.0;
+        world.environment.configure(0.5, 1.0, 0.0);
+        world.seed_cells(1, 1, -1.0, -1.0);
+        world.cells[0].nutrient_stored = 0.0;
+        let mut registry = genomes("thrust = 0; turn = 0; divide = true; grow = 1; feed = 0; absorb = 1; photosynthesize = 1; invest.propulsion = 0; invest.photosynthesis = .8; invest.digestion = 0; invest.armor = 0; invest.sensing = .2; invest.attack = 0;");
+        let ledger = world.nutrient_total();
+        world.step(&mut registry);
+        let cell = &world.cells[0];
+        assert_eq!(cell.body, [0.0, 0.8, 0.0, 0.0, 0.2, 0.0]);
+        assert_eq!(cell.remodeling_rate, 0.0);
+        assert_eq!(cell.birth_size, 1.0);
+        assert_eq!(cell.gut_capacity(), 0.0);
+        assert!(cell.photosynthesis_rate > 0.0 && cell.exudation_rate > 0.0);
+        assert!(cell.uptake_rate > 0.0 && cell.size > 1.0 && cell.growth_rate > 0.0);
+        assert_eq!(world.births, 0);
+        close(world.nutrient_total(), ledger);
+    }
+
+    #[test]
+    fn feed_zero_pauses_both_ingestion_and_digestive_processing() {
+        let mut world = one_cell();
+        let cell = &mut world.cells[0];
+        cell.gut_energy = 10.0; cell.gut_nutrients = 0.5;
+        cell.nutrient_stored = 0.0;
+        world.food.push(Food { x: cell.x, y: cell.y, energy: 10.0, nutrients: 1.0 });
+        let energy = cell.energy;
+        let ledger = world.nutrient_total();
+        let off = Outputs { feed: 0.0, ..Outputs::default() };
+        world.eat(&[off]); world.digest(&[off]);
+        close(world.cells[0].gut_energy, 10.0);
+        close(world.cells[0].gut_nutrients, 0.5);
+        close(world.cells[0].energy, energy);
+        close(world.food[0].energy, 10.0);
+        world.digest(&[Outputs::default()]);
+        close(world.cells[0].energy, energy + DIGESTION_RATE * DT * ASSIMILATION_EFFICIENCY);
+        close(world.nutrient_total(), ledger);
+    }
+
+    #[test]
+    fn changing_digestive_tissue_spills_excess_gut_without_losing_minerals() {
+        let mut world = one_cell();
+        world.cells[0].gut_energy = 100.0; world.cells[0].gut_nutrients = 2.0;
+        world.cells[0].body[DIGESTION] = 0.05;
+        let ledger = world.nutrient_total();
+        world.spill_excess_gut();
+        close(world.cells[0].gut_energy, world.cells[0].gut_capacity());
+        close(world.cells[0].gut_nutrients, 0.5);
+        close(world.food.iter().map(|food| food.energy).sum(), 75.0);
+        close(world.nutrient_total(), ledger);
+        world.cells[0].body[DIGESTION] = 0.0;
+        world.food.resize(MAX_FOOD, Food { x: 0.0, y: 0.0, energy: 24.0, nutrients: 0.0 });
+        world.spill_excess_gut();
+        assert_eq!(world.cells[0].gut_energy, 0.0);
+        assert_eq!(world.cells[0].gut_nutrients, 0.0);
+        close(world.nutrient_total(), ledger);
+        close(world.environment.nutrient_total(), 0.5);
+    }
+
+    #[test]
+    fn division_requires_doubling_birth_mass_splits_the_gut_and_keeps_parent_age() {
+        let mut world = one_cell();
+        world.cells[0].birth_size = 1.0;
+        world.cells[0].cooldown = 0.0;
+        world.cells[0].energy = 180.0;
+        let mut registry = genomes("thrust = 0; turn = 0; divide = true; feed = 0; absorb = 0;");
+        world.step(&mut registry);
+        assert_eq!(world.births, 0, "a supplied size-one founder has not grown a second body");
+        world.cells[0].size = 2.0;
+        world.cells[0].age = 100.0;
+        world.cells[0].energy = 300.0;
+        world.cells[0].gut_energy = 60.0; world.cells[0].gut_nutrients = 0.6;
+        world.cells[0].nutrient_stored = 1.2;
+        let ledger = world.nutrient_total();
+        world.step(&mut registry);
+        assert_eq!(world.cells.len(), 2);
+        close(world.cells[0].age, 100.0 + DT);
+        assert_eq!(world.cells[1].age, 0.0);
+        for cell in &world.cells {
+            close(cell.size, 1.0); close(cell.birth_size, 1.0); close(cell.maturity(), 0.0);
+            close(cell.gut_energy, 30.0); close(cell.gut_nutrients, 0.3);
+            close(cell.nutrient_stored, 0.6); close(cell.cooldown, DIVISION_COOLDOWN);
+        }
+        close(world.nutrient_total(), ledger);
+    }
+
+    #[test]
+    fn senescence_returns_all_gut_energy_and_minerals_and_cannot_be_reset_by_division() {
+        let mut world = one_cell();
+        world.cells[0].age = LIFESPAN - DT * 0.5;
+        world.cells[0].size = 2.0; world.cells[0].energy = 300.0;
+        world.cells[0].cooldown = 0.0;
+        world.cells[0].gut_energy = 50.0; world.cells[0].gut_nutrients = 0.75;
+        let ledger = world.nutrient_total();
+        let expected_energy = REMAINS_RECOVERY * (300.0 + 2.0 * GROWTH_ENERGY_COST) + 50.0;
+        world.step(&mut genomes("thrust = 0; turn = 0; divide = true;"));
+        assert!(world.cells.is_empty());
+        assert_eq!(world.births, 0); assert_eq!(world.deaths, 1);
+        close(world.food.iter().map(|food| food.energy).sum(), expected_energy);
+        close(world.nutrient_total(), ledger);
+    }
+
+    #[test]
+    fn prey_prefers_nonkin_and_threats_require_attack_tissue_with_stable_ties() {
+        let mut world = one_cell();
+        world.seed_cells(1, 3, -1.0, -1.0);
+        for cell in &mut world.cells { cell.x = 100.0; cell.y = 100.0; }
+        world.cells[1].x = 101.0;
+        world.cells[2].x = 110.0; world.cells[3].x = 90.0;
+        for cell in &mut world.cells[2..] {
+            cell.genome_id = 2; cell.integrity = 0.6;
+            cell.body = [0.2, 0.0, 0.2, 0.2, 0.2, 0.2];
+        }
+        for reverse in [false, true] {
+            if reverse { world.cells.reverse(); }
+            let inputs = world.sense_all();
+            let index = world.cells.iter().position(|cell| cell.id == 1).unwrap();
+            let input = inputs[index];
+            assert_eq!(input.prey_id, 3.0); assert!(!input.prey_same_genome);
+            close(input.prey_integrity, 0.6); close(input.prey_attack, 0.2);
+            close(input.prey_photosynthesis, 0.0);
+            assert!(input.threat_visible); close(input.threat_distance, 10.0);
+        }
+        world.cells.retain(|cell| cell.genome_id == 1);
+        let inputs = world.sense_all();
+        assert!(inputs.iter().all(|input| input.prey_same_genome && !input.threat_visible));
+    }
+
+    #[test]
+    fn repeated_exudation_merges_particles_and_respects_the_particle_budget() {
+        let mut world = World::empty(99);
+        for _ in 0..1000 { close(world.emit_exudate(WIDTH - 1.0, 1.0, 0.0, 0.0, 0.01), 0.01); }
+        assert_eq!(world.food.len(), 1);
+        close(world.food[0].energy, 10.0);
+        close(world.emit_exudate(1.0, HEIGHT - 1.0, 0.0, 0.0, 0.25), 0.25);
+        assert_eq!(world.food.len(), 1, "merging also crosses both wrap seams");
+        world.food.resize(MAX_FOOD, Food { x: 1.0, y: 1.0, energy: 24.0, nutrients: 0.0 });
+        close(world.emit_exudate(1.0, 1.0, 0.0, 0.0, 100.0), 24.0 - 10.25);
+        assert_eq!(world.food.len(), MAX_FOOD);
+        assert!(world.food.iter().all(|food| food.energy <= 24.0 && food.nutrients == 0.0));
+    }
+
+    #[test]
+    fn exudates_stay_outside_the_producer_and_feed_a_stationary_adjacent_consumer() {
+        let mut registry = genomes("thrust = 0; turn = 0; divide = false; feed = 0; absorb = 0; photosynthesize = 1; invest.propulsion = 0; invest.photosynthesis = .8; invest.digestion = 0; invest.armor = 0; invest.sensing = .2;");
+        registry.extend(genomes("thrust = 0; turn = 0; divide = false; absorb = 0; invest.propulsion = 0; invest.photosynthesis = 0; invest.digestion = .8; invest.armor = 0; invest.sensing = .2;"));
+        let mut world = World::empty(31);
+        world.food_rate = 0.0; world.mutation_rate = 0.0;
+        world.environment.configure(0.5, 1.0, 0.0);
+        world.seed_cells(1, 1, -1.0, -1.0); world.seed_cells(2, 1, -1.0, -1.0);
+        for (i, cell) in world.cells.iter_mut().enumerate() {
+            cell.x = 100.0 + (2.0 * CELL_RADIUS + 0.01) * i as f64; cell.y = 100.0;
+            cell.vx = 0.0; cell.vy = 0.0; cell.angle = 0.0;
+            cell.energy = if i == 0 { MAX_ENERGY } else { 50.0 };
+        }
+        // An existing interior particle must not attract newly secreted energy.
+        world.food.push(Food { x: 100.0, y: 100.0, energy: 1.0, nutrients: 0.0 });
+        world.step(&mut registry);
+        close(world.food[0].energy, (-FOOD_DECAY * DT).exp());
+        let outside = world.food.iter().find(|food| food.x > 100.0).unwrap();
+        close(outside.x, 100.0 + CELL_RADIUS + 2.5);
+        close(outside.y, 100.0);
+        assert_eq!(world.cells[1].gut_energy, 0.0, "new exudates are first available next tick");
+        for _ in 0..29 { world.step(&mut registry); }
+        assert_eq!(world.cells.len(), 2); assert_eq!(world.predations, 0); assert_eq!(world.attacks, 0);
+        assert!(world.cells[1].energy > 50.0 && world.cells[1].digestion_rate > 0.0,
+            "the consumer obtains useful energy from the live producer without either cell moving");
+        for (i, cell) in world.cells.iter().enumerate() {
+            close(cell.x, 100.0 + (2.0 * CELL_RADIUS + 0.01) * i as f64);
+            close(cell.y, 100.0); close(cell.integrity, 1.0);
+        }
+    }
+
+    #[test]
+    fn smaller_hunters_can_sense_and_bite_larger_prey_but_cannot_engulf_it() {
+        let mut world = one_cell(); world.seed_cells(2, 1, -1.0, -1.0);
+        world.cells[0].x = 100.0; world.cells[0].y = 100.0;
+        world.cells[0].body = [0.2, 0.0, 0.2, 0.2, 0.2, 0.2];
+        world.cells[1].x = 115.0; world.cells[1].y = 100.0;
+        world.cells[1].size = 2.0; world.cells[1].integrity = 0.3;
+        world.cells[1].body = [0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
+        let inputs = world.sense_all();
+        assert!(inputs[0].prey_visible); assert_eq!(inputs[0].prey_id, world.cells[1].id as f64);
+        close(inputs[0].prey_size, 2.0); close(inputs[0].prey_photosynthesis, 1.0);
+        let consumed = world.resolve_predation(&inputs,
+            &[Outputs { bite: 1.0, engulf: true, ..Outputs::default() }, Outputs::default()]);
+        assert_eq!(consumed, [false, false]); assert_eq!(world.attacks, 1); assert_eq!(world.predations, 0);
+        close(world.cells[1].integrity, 0.3 - 0.12 * 0.5 * DT);
+        assert_eq!(world.cells[0].gut_energy, 0.0);
+    }
+
+    #[test]
+    fn attack_is_a_separate_capability_and_repair_cost_scales_with_mass() {
+        let mut world = one_cell(); world.seed_cells(1, 1, -1.0, -1.0);
+        for cell in &mut world.cells { cell.x = 100.0; cell.y = 100.0; }
+        world.cells[0].body = [0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
+        world.resolve_predation(&world.sense_all(), &[Outputs { bite: 1.0, ..Outputs::default() }; 2]);
+        assert_eq!(world.attacks, 0, "digestion alone cannot attack");
+        for size in [MIN_SIZE, 1.0, MAX_SIZE] {
+            let mut world = one_cell();
+            world.cells[0].size = size; world.cells[0].energy = 90.0 * size;
+            world.cells[0].integrity = 0.5;
+            world.step(&mut genomes("thrust = 0; turn = 0; divide = false; absorb = 0; repair = 1;"));
+            close(world.cells[0].energy, 90.0 * size - (BASAL_METABOLISM + REPAIR_RATE * REPAIR_COST) * size * DT);
+            close(world.cells[0].integrity, 0.5 + REPAIR_RATE * DT);
         }
     }
 }

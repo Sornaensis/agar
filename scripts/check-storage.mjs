@@ -24,7 +24,7 @@ const catalog = await import(await moduleUrl('../src/catalog.ts', { './presets':
 const { BUILTIN_GENOMES: genomes, BUILTIN_ENVIRONMENTS: environments, BUILTIN_SIMULATIONS: simulations } = catalog;
 const copy = value => structuredClone(value);
 
-assert.equal(genomes.length, 7);
+assert.equal(genomes.length, 8);
 assert.equal(environments.length, 3);
 assert.equal(simulations.length, 3);
 for (const genome of genomes) {

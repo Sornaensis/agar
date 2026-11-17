@@ -87,7 +87,7 @@ impl Program {
             let ty = read_type(r)?; let scope = r.count(MAX_NODES)?;
             let op = match r.u8()? {
                 0 => Op::Constant(read_value(r)?),
-                1 => Op::Sensor(Sensor::ALL[r.index(Sensor::ALL.len())?]),
+                1 => Op::Sensor(Sensor::ALL[r.index(if r.version() == 1 { 46 } else { Sensor::ALL.len() })?]),
                 2 => Op::Register(read_register(r)?), 3 => Op::Populated(read_register(r)?),
                 4 => Op::Reference(r.index(index)?), 5 => Op::Negate(r.index(index)?), 6 => Op::Not(r.index(index)?),
                 7 => Op::Binary(Binary::ALL[r.index(Binary::ALL.len())?], r.index(index)?, r.index(index)?),
@@ -132,8 +132,9 @@ impl Program {
         for (index, node) in nodes.iter().enumerate() {
             ensure(node.scope <= bindings.len() && bindings[..node.scope].iter().all(|b| b.node < index), "invalid lexical scope")?;
         }
-        let mut roots = [None; 15];
-        for (index, root) in roots.iter_mut().enumerate() {
+        let mut roots = [None; OUTPUT_NAMES.len()];
+        let root_count = if r.version() == 1 { 15 } else { OUTPUT_NAMES.len() };
+        for (index, root) in roots.iter_mut().take(root_count).enumerate() {
             *root = r.option(nodes.len())?;
             if let Some(id) = *root { ensure(nodes[id].ty == output_type(index) || (output_type(index) == Type::Number && nodes[id].ty == Type::Integer), "output type mismatch")?; }
         }

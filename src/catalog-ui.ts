@@ -222,7 +222,7 @@ export class CatalogUI {
         </div>
         <aside class="environment-rail">
           <section class="environment-form"><h3>Habitat</h3>
-            ${numberField('food', 'Food / second', config.foodRate, 0, 60, '0.5')}
+            ${numberField('food', 'External organic input / s', config.foodRate, 0, 60, '0.5')}
             ${numberField('light', 'Ambient light', config.ambientLight, 0, 1, '0.05')}
             ${numberField('temperature', 'Temperature', config.ambientTemperature, 0, 1, '0.05')}
             ${numberField('current', 'Current', config.currentStrength, 0, 30, '0.5')}
@@ -269,7 +269,7 @@ export class CatalogUI {
         }];
       });
       return validateEnvironmentConfig({
-        foodRate: inputNumber(query<HTMLInputElement>(dialog, '#environment-food'), 'Food supply', 0, 60),
+        foodRate: inputNumber(query<HTMLInputElement>(dialog, '#environment-food'), 'External organic input', 0, 60),
         ambientLight: inputNumber(query<HTMLInputElement>(dialog, '#environment-light'), 'Ambient light', 0, 1),
         ambientTemperature: inputNumber(query<HTMLInputElement>(dialog, '#environment-temperature'), 'Temperature', 0, 1),
         currentStrength: inputNumber(query<HTMLInputElement>(dialog, '#environment-current'), 'Current strength', 0, 30),

@@ -17,7 +17,8 @@
     "preview": "vite preview --host 0.0.0.0",
     "test:storage": "node scripts/check-storage.mjs",
     "test:session": "node scripts/check-session.mjs",
-    "check:engine": "node scripts/check-engine-artifact.mjs"
+    "check:engine": "node scripts/check-engine-artifact.mjs",
+    "test:food-chain": "node scripts/check-food-chain.mjs"
   },
   "devDependencies": {
     "typescript": "5.9.3",

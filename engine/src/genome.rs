@@ -69,6 +69,19 @@ pub struct Inputs {
     pub body_sensing: f64,
     pub body_unassigned: f64,
     pub sense_range: f64,
+    pub body_attack: f64,
+    pub gut_energy: f64,
+    pub gut_capacity: f64,
+    pub gut_fraction: f64,
+    pub digestion_rate: f64,
+    pub growth_rate: f64,
+    pub birth_size: f64,
+    pub maturity: f64,
+    pub lifespan: f64,
+    pub exudation_rate: f64,
+    pub prey_integrity: f64,
+    pub prey_attack: f64,
+    pub prey_photosynthesis: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -88,6 +101,8 @@ pub struct Outputs {
     pub invest_digestion: f64,
     pub invest_armor: f64,
     pub invest_sensing: f64,
+    pub feed: f64,
+    pub invest_attack: f64,
 }
 
 impl Default for Outputs {
@@ -108,6 +123,8 @@ impl Default for Outputs {
             invest_digestion: output_number_default(12),
             invest_armor: output_number_default(13),
             invest_sensing: output_number_default(14),
+            feed: output_number_default(15),
+            invest_attack: output_number_default(16),
         }
     }
 }
@@ -397,9 +414,23 @@ enum Sensor {
     BodySensing,
     BodyUnassigned,
     SenseRange,
+    BodyAttack,
+    GutEnergy,
+    GutCapacity,
+    GutFraction,
+    DigestionRate,
+    GrowthRate,
+    BirthSize,
+    Maturity,
+    Lifespan,
+    ExudationRate,
+    PreyIntegrity,
+    PreyAttack,
+    PreyPhotosynthesis,
 }
 impl Sensor {
-    const ALL: [Self; 46] = [
+    // Checkpoint version 1 stores the first 46 indices; never reorder them.
+    const ALL: [Self; 59] = [
         Self::Energy,
         Self::Age,
         Self::Speed,
@@ -446,6 +477,19 @@ impl Sensor {
         Self::BodySensing,
         Self::BodyUnassigned,
         Self::SenseRange,
+        Self::BodyAttack,
+        Self::GutEnergy,
+        Self::GutCapacity,
+        Self::GutFraction,
+        Self::DigestionRate,
+        Self::GrowthRate,
+        Self::BirthSize,
+        Self::Maturity,
+        Self::Lifespan,
+        Self::ExudationRate,
+        Self::PreyIntegrity,
+        Self::PreyAttack,
+        Self::PreyPhotosynthesis,
     ];
     fn name(self) -> &'static str {
         match self {
@@ -495,6 +539,19 @@ impl Sensor {
             Self::BodySensing => "body.sensing",
             Self::BodyUnassigned => "body.unassigned",
             Self::SenseRange => "sense.range",
+            Self::BodyAttack => "body.attack",
+            Self::GutEnergy => "gut.energy",
+            Self::GutCapacity => "gut.capacity",
+            Self::GutFraction => "gut.fraction",
+            Self::DigestionRate => "digestion.rate",
+            Self::GrowthRate => "growth.rate",
+            Self::BirthSize => "birth.size",
+            Self::Maturity => "maturity",
+            Self::Lifespan => "lifespan",
+            Self::ExudationRate => "exudation.rate",
+            Self::PreyIntegrity => "prey.integrity",
+            Self::PreyAttack => "prey.attack",
+            Self::PreyPhotosynthesis => "prey.photosynthesis",
         }
     }
     fn ty(self) -> Type {
@@ -561,6 +618,19 @@ impl Sensor {
             Self::BodySensing => Value::Scalar(finite(i.body_sensing)),
             Self::BodyUnassigned => Value::Scalar(finite(i.body_unassigned)),
             Self::SenseRange => Value::Scalar(finite(i.sense_range)),
+            Self::BodyAttack => Value::Scalar(finite(i.body_attack)),
+            Self::GutEnergy => Value::Scalar(finite(i.gut_energy)),
+            Self::GutCapacity => Value::Scalar(finite(i.gut_capacity)),
+            Self::GutFraction => Value::Scalar(finite(i.gut_fraction)),
+            Self::DigestionRate => Value::Scalar(finite(i.digestion_rate)),
+            Self::GrowthRate => Value::Scalar(finite(i.growth_rate)),
+            Self::BirthSize => Value::Scalar(finite(i.birth_size)),
+            Self::Maturity => Value::Scalar(finite(i.maturity)),
+            Self::Lifespan => Value::Scalar(finite(i.lifespan)),
+            Self::ExudationRate => Value::Scalar(finite(i.exudation_rate)),
+            Self::PreyIntegrity => Value::Scalar(finite(i.prey_integrity)),
+            Self::PreyAttack => Value::Scalar(finite(i.prey_attack)),
+            Self::PreyPhotosynthesis => Value::Scalar(finite(i.prey_photosynthesis)),
         }
     }
 }
@@ -981,7 +1051,7 @@ struct WriteRule {
     value: Option<usize>,
     guard: Option<usize>,
 }
-const OUTPUT_NAMES: [&str; 15] = [
+const OUTPUT_NAMES: [&str; 17] = [
     "thrust",
     "turn",
     "divide",
@@ -997,10 +1067,12 @@ const OUTPUT_NAMES: [&str; 15] = [
     "invest.digestion",
     "invest.armor",
     "invest.sensing",
+    "feed",
+    "invest.attack",
 ];
 fn output_number_default(index: usize) -> f64 {
     match index {
-        9 => 1.0,
+        9 | 15 => 1.0,
         10..=14 => 0.2,
         _ => 0.0,
     }
@@ -1020,7 +1092,7 @@ pub struct Program {
     turn: usize,
     divide: usize,
     grow: Option<usize>,
-    extras: [Option<usize>; 11],
+    extras: [Option<usize>; 13],
     writes: Vec<WriteRule>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1352,9 +1424,11 @@ impl Program {
             invest_digestion: number(self.extras[8], output_number_default(12)),
             invest_armor: number(self.extras[9], output_number_default(13)),
             invest_sensing: number(self.extras[10], output_number_default(14)),
+            feed: number(self.extras[11], output_number_default(15)),
+            invest_attack: number(self.extras[12], output_number_default(16)),
         }
     }
-    fn output_indices(&self) -> [Option<usize>; 15] {
+    fn output_indices(&self) -> [Option<usize>; 17] {
         [
             Some(self.thrust),
             Some(self.turn),
@@ -1371,6 +1445,8 @@ impl Program {
             self.extras[8],
             self.extras[9],
             self.extras[10],
+            self.extras[11],
+            self.extras[12],
         ]
     }
     fn map_roots(&mut self, map: impl Fn(usize) -> usize) {
@@ -2584,7 +2660,7 @@ mod tests {
         let graph = program.graph_json();
         assert!(graph.starts_with("{\"version\":1,\"nodes\":["));
         assert_eq!(graph.matches("\"reachable\":").count(), 14);
-        assert_eq!(graph.matches("\"kind\":\"output\"").count(), 15);
+        assert_eq!(graph.matches("\"kind\":\"output\"").count(), 17);
         assert!(graph.contains(r#"{"id":0,"kind":"sensor","type":"scalar","label":"energy","inputs":[],"bindings":["sensor"],"reachable":true}"#));
         assert!(graph.contains(r#"{"id":1,"kind":"reference","type":"scalar","label":"sensor","inputs":[0],"bindings":["alias"],"reachable":true}"#));
         assert!(graph.contains(r#"{"id":2,"kind":"constant","type":"integer","label":"42","inputs":[],"bindings":["unused"],"reachable":false}"#));
@@ -2607,6 +2683,8 @@ mod tests {
             ("invest.digestion", "0.2"),
             ("invest.armor", "0.2"),
             ("invest.sensing", "0.2"),
+            ("feed", "1"),
+            ("invest.attack", "0"),
         ] {
             assert!(graph.contains(&format!(
                 "{{\"id\":\"output:{name}\",\"kind\":\"output\",\"name\":\"{name}\",\"type\":\"scalar\",\"value\":null,\"guard\":null,\"default\":\"{default}\"}}"
@@ -2615,6 +2693,56 @@ mod tests {
         assert!(graph.contains(r#"{"id":"write:ri001","kind":"write","name":"ri001","type":"integer","value":5,"guard":6,"default":null}"#));
         assert!(graph.contains(r#"{"id":"clear:ri001","kind":"clear","name":"ri001","type":"integer","value":null,"guard":7,"default":null}"#));
         assert_eq!(program.graph_json(), graph, "inspection is deterministic");
+    }
+
+    #[test]
+    fn trophic_outputs_are_optional_typed_and_survive_mutation_roundtrips() {
+        let legacy = Program::compile("thrust=0;turn=0;divide=false;").unwrap();
+        let defaults = legacy.evaluate(&Inputs::default());
+        assert_eq!(defaults.feed, 1.0);
+        assert_eq!(defaults.invest_attack, 0.0);
+        assert!(!legacy.to_source().unwrap().contains("feed ="));
+        assert!(!legacy.to_source().unwrap().contains("invest.attack ="));
+        let source = "thrust=0;turn=0;divide=false;feed=2;invest.attack=-1;";
+        let output = Program::compile(source).unwrap().evaluate(&Inputs::default());
+        assert_eq!(output.feed, 1.0);
+        assert_eq!(output.invest_attack, 0.0);
+        for invalid in [
+            "feed=true;", "invest.attack=false;", "feed=0;feed=1;",
+            "invest.attack=0;invest.attack=1;", "let feed=1;", "let maturity=1;",
+        ] {
+            assert!(Program::compile(&format!("thrust=0;turn=0;divide=false;{invalid}")).is_err());
+        }
+        let program = Program::compile("thrust=.2;turn=food.angle;divide=maturity>=1;feed=1-gut.fraction;invest.attack=prey.attack*.5;rf001=digestion.rate+growth.rate+exudation.rate;").unwrap();
+        for kind in [MutationKind::Any, MutationKind::Constant, MutationKind::Expression, MutationKind::Reference] {
+            for seed in 1..50 {
+                if let Some(mutation) = program.mutate(seed, kind) { assert_roundtrip(&mutation); }
+            }
+        }
+    }
+
+    #[test]
+    fn trophic_sensors_append_stable_scalar_ids_and_read_current_inputs() {
+        assert_eq!(Sensor::ALL[45], Sensor::SenseRange);
+        assert_eq!(Sensor::ALL[46], Sensor::BodyAttack);
+        assert_eq!(Sensor::ALL[58], Sensor::PreyPhotosynthesis);
+        let inputs = Inputs {
+            body_attack: 0.2, gut_energy: 32.0, gut_capacity: 80.0, gut_fraction: 0.4,
+            digestion_rate: 4.1, growth_rate: 0.03, birth_size: 0.8, maturity: 0.5,
+            lifespan: 300.0, exudation_rate: 0.8, prey_integrity: 0.3,
+            prey_attack: 0.1, prey_photosynthesis: 0.6, ..Inputs::default()
+        };
+        let expected = [0.2, 32.0, 80.0, 0.4, 4.1, 0.03, 0.8, 0.5, 300.0, 0.8, 0.3, 0.1, 0.6];
+        for (sensor, value) in Sensor::ALL[46..].iter().zip(expected) {
+            assert_eq!(sensor.ty(), Type::Number);
+            assert_eq!(sensor.read(&inputs), Value::Scalar(value));
+            let source = format!("rf001={};thrust=0;turn=0;divide=false;", sensor.name());
+            let program = Program::compile(&source).unwrap();
+            let mut memory = Registers::default();
+            program.evaluate_cell(&inputs, &mut memory, &mut EvalScratch::default());
+            assert_eq!(memory.value("rf001"), Some(&Value::Scalar(value)));
+            assert!(Program::compile(&format!("{}=0;thrust=0;turn=0;divide=false;", sensor.name())).is_err());
+        }
     }
 
     #[test]
@@ -2857,7 +2985,7 @@ mod tests {
 
         let explicit = format!(
             "{idle}absorb=0;invest.propulsion=-1;invest.photosynthesis=2;\
-             invest.digestion=0.75;invest.armor=0.375;invest.sensing=1;"
+             invest.digestion=0.75;invest.armor=0.375;invest.sensing=1;feed=.25;invest.attack=.625;"
         );
         let p = Program::compile(&explicit).unwrap();
         let o = p.evaluate(&Inputs::default());
@@ -2867,6 +2995,8 @@ mod tests {
         assert_eq!(o.invest_digestion, 0.75);
         assert_eq!(o.invest_armor, 0.375);
         assert_eq!(o.invest_sensing, 1.0);
+        assert_eq!(o.feed, 0.25);
+        assert_eq!(o.invest_attack, 0.625);
         // Physical body normalization belongs to the simulation. The language
         // preserves independently authored requests even when their sum > 1.
         assert!(o.invest_photosynthesis + o.invest_digestion + o.invest_armor > 1.0);
@@ -3165,6 +3295,8 @@ mod tests {
                 restored.invest_digestion,
                 restored.invest_armor,
                 restored.invest_sensing,
+                restored.feed,
+                restored.invest_attack,
             ] {
                 assert!(value.is_finite() && (0.0..=1.0).contains(&value));
             }

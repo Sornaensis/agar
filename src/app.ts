@@ -123,7 +123,7 @@ function renderCatalogCards(): void {
   const items = (isGenome ? allGenomes() : allEnvironments()).filter(item => (item.name + ' ' + (item.description || '')).toLowerCase().includes(catalogQuery.toLowerCase()));
   const card = (item: GenomeDocument | EnvironmentDocument): string => {
     const kind = isGenome ? 'genome' : 'environment';
-    return `<article class="catalog-card ${kind}-card"><button class="card-open" data-action="open-${kind}" data-id="${esc(item.id)}" aria-label="Open ${kind} ${esc(item.name)}">${isGenome ? `<span class="card-identity">${icon('dna')}</span>` : environmentThumb(item as EnvironmentDocument)}<span class="card-copy"><span class="card-title">${esc(item.name)}</span><span class="card-description">${esc(item.description || (isGenome ? '' : `${(item as EnvironmentDocument).config.sources.length} sources · ${(item as EnvironmentDocument).config.foodRate} food / second`))}</span></span><span class="card-chevron">${icon('chevron')}</span></button>${menu(kind,item.id,item.name,isBuiltin(item.id))}</article>`;
+    return `<article class="catalog-card ${kind}-card"><button class="card-open" data-action="open-${kind}" data-id="${esc(item.id)}" aria-label="Open ${kind} ${esc(item.name)}">${isGenome ? `<span class="card-identity">${icon('dna')}</span>` : environmentThumb(item as EnvironmentDocument)}<span class="card-copy"><span class="card-title">${esc(item.name)}</span><span class="card-description">${esc(item.description || (isGenome ? '' : `${(item as EnvironmentDocument).config.sources.length} sources · ${(item as EnvironmentDocument).config.foodRate} organic particles / s`))}</span></span><span class="card-chevron">${icon('chevron')}</span></button>${menu(kind,item.id,item.name,isBuiltin(item.id))}</article>`;
   };
   target.innerHTML = [false,true].map(builtin => {
     const group = items.filter(item => isBuiltin(item.id) === builtin);
@@ -258,7 +258,7 @@ function newSimulationDialog(template?: BuiltinSimulation, environmentId?: strin
           const genome = findGenome(item.genomeId); if (!genome) throw new Error('A starting genome no longer exists.');
           return { count: item.count, source: genome.source, name: genome.name };
         });
-        const engine = await Engine.load(); applyEnvironment(engine, environmentConfig); engine.setMutationRate(0.1); engine.resetEmpty(seed);
+        const engine = await Engine.load(); applyEnvironment(engine, environmentConfig); engine.setMutationRate(0.1); engine.resetEmpty(seed, environmentConfig.foodRate > 0 ? 360 : 0);
         const names: Record<string, string> = {};
         for (const item of startingGenomes) {
           const id = engine.compile(item.source); names[String(id)] = item.name;
@@ -329,6 +329,10 @@ function renderInspector(): void {
   updateInspector();
 }
 function metricRow(label: string, value: string): string { return `<div class="metric-row"><span>${label}</span><strong>${value}</strong></div>`; }
+function trophicRole(cell: Cell): 'Autotroph' | 'Heterotroph' | 'Mixotroph' | 'Non-feeding' {
+  const photosynthesis = cell.bodyPhotosynthesis >= 0.05, digestion = cell.bodyDigestion >= 0.05;
+  return photosynthesis && digestion ? 'Mixotroph' : photosynthesis ? 'Autotroph' : digestion ? 'Heterotroph' : 'Non-feeding';
+}
 function memoryValue(value: unknown): string {
   if (typeof value === 'number') return Number.isInteger(value) ? String(value) : Number(value.toPrecision(6)).toString();
   if (Array.isArray(value)) return '[' + value.map(memoryValue).join(', ') + ']';
@@ -339,8 +343,8 @@ function updateInspector(): void {
   const cell = active.world.cells.find(item => item.id === selectedId);
   if (!cell) { renderInspector(); return; }
   if (inspectorView === 'overview') {
-    $('inspector-content').innerHTML = `<div class="inspector-metrics">${metricRow('Energy', Math.round(cell.energy) + ' / ' + Math.round(cell.energyCapacity))}${metricRow('Size',cell.size.toFixed(2)+'×')}${metricRow('Integrity',Math.round(cell.integrity*100)+'%')}${metricRow('Nutrients',cell.nutrientStored.toFixed(2)+' / '+cell.nutrientCapacity.toFixed(2))}${metricRow('Age',clock(cell.age))}${metricRow('Generation',String(cell.generation))}${metricRow('Upkeep',(cell.basalMetabolism+cell.memoryCost).toFixed(2)+' / s')}</div><h3>Body</h3><div class="body-allocation">${(['Propulsion','Photosynthesis','Digestion','Armor','Sensing'] as const).map((name,index) => {
-      const value = [cell.bodyPropulsion,cell.bodyPhotosynthesis,cell.bodyDigestion,cell.bodyArmor,cell.bodySensing][index];
+    $('inspector-content').innerHTML = `<div class="inspector-metrics">${metricRow('Feeding strategy',trophicRole(cell))}${metricRow('Energy', Math.round(cell.energy) + ' / ' + Math.round(cell.energyCapacity))}${metricRow('Biomass / division',cell.size.toFixed(2)+' / '+(2*cell.birthSize).toFixed(2))}${metricRow('Growth',cell.growthRate.toFixed(3)+' / s')}${metricRow('Gut',cell.gutEnergy.toFixed(1)+' / '+cell.gutCapacity.toFixed(1))}${metricRow('Digestion',cell.digestionRate.toFixed(2)+' energy / s')}${metricRow('Photosynthesis',cell.photosynthesisRate.toFixed(2)+' energy / s')}${metricRow('Integrity',Math.round(cell.integrity*100)+'%')}${metricRow('Minerals',cell.nutrientStored.toFixed(2)+' / '+cell.nutrientCapacity.toFixed(2))}${metricRow('Age',clock(cell.age)+' / '+clock(cell.lifespan))}${metricRow('Generation',String(cell.generation))}${metricRow('Upkeep',(cell.basalMetabolism+cell.memoryCost).toFixed(2)+' / s')}</div><h3>Body allocation</h3><div class="body-allocation">${(['Propulsion','Photosynthesis','Digestion','Armor','Sensing','Attack'] as const).map((name,index) => {
+      const value = [cell.bodyPropulsion,cell.bodyPhotosynthesis,cell.bodyDigestion,cell.bodyArmor,cell.bodySensing,cell.bodyAttack][index];
       return `<div class="allocation-row"><span>${name}</span><div class="allocation-track"><i style="width:${Math.max(0,Math.min(100,value*100))}%"></i></div><span>${Math.round(value*100)}%</span></div>`;
     }).join('')}</div>`;
   } else if (inspectorView === 'memory') {
@@ -395,19 +399,32 @@ function addOrganismDialog(): void {
   dialog.querySelector<HTMLInputElement>('#organism-search')!.focus();
 }
 const metricDefinitions = [
-  ['population','Organisms'],['food','Food'],['births','Births'],['deaths','Deaths'],
+  ['population','Organisms'],['food','Organic particles'],['births','Births'],['deaths','Deaths'],
   ['generation','Generation'],['mutations','Mutated births'],['predation','Predation deaths'],['attacks','Bites'],
 ] as const;
 function metricsMarkup(): string {
   const cards = (definitions: ReadonlyArray<readonly [string,string]>): string => definitions.map(([key,label]) => `<article class="metric-card"><span>${label}</span><strong id="metric-${key}">—</strong></article>`).join('');
   return `<div class="page metrics-page"><div class="metrics-grid">${cards(metricDefinitions.slice(0,4))}</div>
     <section class="chart-panel"><div class="section-heading"><h2>Population</h2><span id="history-duration"></span></div><svg class="metrics-chart" id="history-chart" viewBox="0 0 1000 240" preserveAspectRatio="none" role="img" aria-label="Population history"></svg></section>
-    <section class="nutrient-panel"><h2>Nutrients</h2><div class="metrics-grid nutrient-metrics">${[['water','Water'],['food','Food'],['cells','Organisms'],['total','Total']].map(([key,label])=>`<div class="metric-card"><span>${label}</span><strong id="nutrient-${key}">—</strong></div>`).join('')}</div></section>
+    <section class="trophic-panel"><div class="section-heading"><h2>Food chain</h2><span title="Based on current tissue allocations; a cell can change strategy by remodeling.">Current capabilities</span></div><div class="metrics-grid">${cards([['autotrophs','Autotrophs'],['heterotrophs','Heterotrophs'],['mixotrophs','Mixotrophs'],['hunters','Attack-capable']])}</div><div class="energy-flow">${[['production','Photosynthesis'],['digestion','Digestion'],['exudation','Organic release']].map(([key,label])=>`<div><span>${label}</span><strong id="flow-${key}">—</strong></div>`).join('')}</div><p class="muted">Light → producers → organic particles and prey → consumers. Minerals return to the water through decay.</p></section>
+    <section class="nutrient-panel"><h2>Minerals</h2><div class="metrics-grid nutrient-metrics">${[['water','Water'],['food','Organic particles'],['cells','Organisms & guts'],['total','Total']].map(([key,label])=>`<div class="metric-card"><span>${label}</span><strong id="nutrient-${key}">—</strong></div>`).join('')}</div></section>
     <details class="metrics-secondary"><summary>Evolution & interactions</summary><div class="metrics-grid">${cards(metricDefinitions.slice(4))}</div></details></div>`;
 }
 function renderMetrics(world: WorldSnapshot): void {
   const values: Record<string,number> = { population:world.cells.length,food:world.food.length,births:world.births,deaths:world.deaths,generation:world.cells.reduce((max,cell)=>Math.max(max,cell.generation),0),mutations:world.mutatedBirths,predation:world.predationCount,attacks:world.attackCount };
   for (const [key] of metricDefinitions) $('metric-'+key).textContent = String(values[key]);
+  const trophic = { autotrophs: 0, heterotrophs: 0, mixotrophs: 0, hunters: 0 };
+  const flow = { production: 0, digestion: 0, exudation: 0 };
+  for (const cell of world.cells) {
+    const role = trophicRole(cell);
+    if (role === 'Autotroph') trophic.autotrophs++;
+    if (role === 'Heterotroph') trophic.heterotrophs++;
+    if (role === 'Mixotroph') trophic.mixotrophs++;
+    if (cell.bodyAttack >= 0.05) trophic.hunters++;
+    flow.production += cell.photosynthesisRate; flow.digestion += cell.digestionRate; flow.exudation += cell.exudationRate;
+  }
+  for (const [key,value] of Object.entries(trophic)) $('metric-'+key).textContent = String(value);
+  for (const [key,value] of Object.entries(flow)) $('flow-'+key).textContent = value.toFixed(1)+' energy / s';
   for (const [key,value] of Object.entries({water:world.nutrientDissolvedTotal,food:world.nutrientFoodTotal,cells:world.nutrientCellTotal,total:world.nutrientTotal})) $('nutrient-'+key).textContent=value.toFixed(1);
   $('nutrient-total').title = world.nutrientInputTotal.toFixed(1)+' mineral units introduced since this simulation began.';
   const history = [...active!.metadata.history.filter(point=>point.time<world.time),{time:world.time,population:world.cells.length}];
@@ -426,7 +443,7 @@ function settingsMarkup(): string {
   const world=active!.world,environment=world.environment;
   return `<div class="page"><div class="settings-grid">
     <section class="settings-panel"><h2>Simulation</h2><div class="form-field"><label for="setting-name">Name</label><input id="setting-name" data-setting="name" maxlength="80" value="${esc(active!.metadata.name)}"></div>
-    ${rangeField('food','Food / second',world.foodRate,0,60,1)}${rangeField('mutation','Mutation chance',Math.round(world.mutationRate*100),0,100,1,'%')}
+    ${rangeField('food','External organic input / s',world.foodRate,0,60,1)}${rangeField('mutation','Mutation chance',Math.round(world.mutationRate*100),0,100,1,'%')}
     <p class="muted">Seed ${active!.metadata.seed} · ${esc(active!.metadata.environmentName)}</p></section>
     <section class="settings-panel"><h2>Display</h2><div class="form-field"><label for="setting-overlay">Field</label><select id="setting-overlay" data-setting="overlay">${[['none','None'],['light','Light'],['heat','Temperature'],['flow','Water flow'],['nutrients','Dissolved nutrients']].map(([value,label])=>`<option value="${value}"${prefs.overlay===value?' selected':''}>${label}</option>`).join('')}</select></div>
     <label class="toggle-field"><span>Sensing range</span><input type="checkbox" role="switch" data-setting="sensors"${prefs.sensors?' checked':''}></label><label class="toggle-field"><span>Movement trails</span><input type="checkbox" role="switch" data-setting="trails"${prefs.trails?' checked':''}></label></section>
@@ -597,7 +614,7 @@ document.addEventListener('change',event=>{
     if(key==='name'){
       active.metadata.name=validateName(input.value);
       const heading=document.querySelector('.simulation-title h1');if(heading)heading.textContent=active.metadata.name;
-    }else if(key==='food')active.engine.setFoodRate(inputNumber(input,'Food supply',0,60));
+    }else if(key==='food')active.engine.setFoodRate(inputNumber(input,'External organic input',0,60));
     else if(key==='mutation')active.engine.setMutationRate(inputNumber(input,'Mutation chance',0,100)/100);
     else{
       const environment=active.world.environment;

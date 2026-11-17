@@ -56,7 +56,7 @@ function validate(network) {
   const nodes = new Map(network.nodes.map(node => [node.id, node]));
   assert.equal(nodes.size, network.nodes.length, 'Projected node IDs are unique');
   assert.equal(new Set(network.edges.map(edge => edge.id)).size, network.edges.length, 'Parallel ports have distinct edge identities');
-  assert.equal(network.nodes.filter(node => node.kind === 'output').length, 15);
+  assert.equal(network.nodes.filter(node => node.kind === 'output').length, 17);
   assert.ok(network.nodes.every(node => !['constant', 'reference'].includes(node.kind)), 'Literal and alias boxes are absent');
   for (const edge of network.edges) {
     const from = nodes.get(edge.from), to = nodes.get(edge.to);
@@ -84,7 +84,7 @@ function assertSlice(network, slice, maximum) {
 }
 const legacy = 'thrust=0;turn=0;divide=false;';
 const minimal = project(legacy).network;
-assert.equal(minimal.nodes.length, 15);
+assert.equal(minimal.nodes.length, 17);
 assert.equal(minimal.edges.length, 0);
 assert.equal(minimal.nodes.find(node => node.id === 'output:thrust').implicit, false);
 assert.equal(minimal.nodes.find(node => node.id === 'output:photosynthesize').constants[0].value, '0');
@@ -204,7 +204,7 @@ const banks = Array.from({ length: 999 }, (_, index) => {
     .map(([prefix, value]) => `${prefix}${suffix}=${value};clear ${prefix}${suffix};`).join('');
 }).join('\n');
 const complete = project(legacy + banks);
-assert.equal(complete.graph.roots.length, 10005);
+assert.equal(complete.graph.roots.length, 10007);
 assert.equal(complete.network.nodes.filter(node => node.kind === 'register').length, 4995);
 assert.equal(complete.network.nodes.find(node => node.id === 'register:rv999').rootIds.length, 2);
 assertSlice(complete.network, networkSlice(complete.network, null), 112);
@@ -231,4 +231,4 @@ assert.ok(inlineUses.every(value => value.bindings === sharedAliases), 'All uses
 assert.equal([...new Set(inlineUses.map(value => value.bindings))].reduce((sum, aliases) => sum + aliases.length, 0), 6000, 'Stored aliases do not multiply with consumer count');
 assertSlice(fanOutNetwork, networkSlice(fanOutNetwork, null), 112);
 
-console.log(`Genome network checks passed: ${PRESETS.length} real preset layouts, ${variants} typed variants, builtin/alias projection, all primitive registers, read/write/clear timing, exact ports, literal defaults, 8192-node chains, 10005 roots, linear alias metadata, and bounded bidirectional navigation.`);
+console.log(`Genome network checks passed: ${PRESETS.length} real preset layouts, ${variants} typed variants, builtin/alias projection, all primitive registers, read/write/clear timing, exact ports, literal defaults, 8192-node chains, 10007 roots, linear alias metadata, and bounded bidirectional navigation.`);

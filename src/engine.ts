@@ -16,6 +16,8 @@ export interface Cell {
   nutrientStored: number; nutrientCapacity: number; nutrientLevel: number; nutrientAngle: number; nutrientUptakeRate: number;
   bodyPropulsion: number; bodyPhotosynthesis: number; bodyDigestion: number; bodyArmor: number; bodySensing: number;
   senseRange: number; remodelingRate: number; bodyUpkeep: number;
+  bodyAttack: number; gutEnergy: number; gutCapacity: number; gutNutrients: number;
+  digestionRate: number; growthRate: number; birthSize: number; maturity: number; lifespan: number; exudationRate: number;
 }
 export interface Food { x: number; y: number; energy: number; nutrients: number }
 export type SourceKind = 0 | 1 | 2 | 3;
@@ -64,7 +66,7 @@ export function validateGenomeGraph(value: unknown): GenomeGraph {
   if (!value || typeof value !== 'object') return fail();
   const graph = value as GenomeGraph;
   if (graph.version !== 1 || !Array.isArray(graph.nodes) || graph.nodes.length > 8192
-    || !Array.isArray(graph.roots) || graph.roots.length > 10005) return fail();
+    || !Array.isArray(graph.roots) || graph.roots.length > 10007) return fail();
   const types = new Set(['integer', 'scalar', 'boolean', 'string', 'vec2']);
   const kinds = new Set(['constant', 'sensor', 'register', 'populated', 'reference', 'unary', 'binary', 'conditional', 'call']);
   for (let index = 0; index < graph.nodes.length; index++) {
@@ -88,7 +90,7 @@ export function validateGenomeGraph(value: unknown): GenomeGraph {
 }
 export const MAX_PROGRAM_BYTES = 262_144;
 export const MAX_STATE_BYTES = 128 * 1024 * 1024;
-const CELL_STRIDE = 53;
+const CELL_STRIDE = 63;
 export type MutationKind = 0 | 1 | 2 | 3;
 export interface GenomeRecord { source: string; parentId: number; mutationKind: MutationKind }
 export interface MutationResult { id: number; changed: boolean; reason: string }
@@ -335,7 +337,9 @@ export class Engine {
         integrity:data[n+38], photosynthesisRate:data[n+39],
         nutrientStored:data[n+40], nutrientCapacity:data[n+41], nutrientLevel:data[n+42], nutrientAngle:data[n+43], nutrientUptakeRate:data[n+44],
         bodyPropulsion:data[n+45], bodyPhotosynthesis:data[n+46], bodyDigestion:data[n+47], bodyArmor:data[n+48], bodySensing:data[n+49],
-        senseRange:data[n+50], remodelingRate:data[n+51], bodyUpkeep:data[n+52] });
+        senseRange:data[n+50], remodelingRate:data[n+51], bodyUpkeep:data[n+52],
+        bodyAttack:data[n+53], gutEnergy:data[n+54], gutCapacity:data[n+55], gutNutrients:data[n+56],
+        digestionRate:data[n+57], growthRate:data[n+58], birthSize:data[n+59], maturity:data[n+60], lifespan:data[n+61], exudationRate:data[n+62] });
     }
     for (let i = 0; i < data[3]; i++) {
       const n = 12 + cells.length * CELL_STRIDE + i * 4;

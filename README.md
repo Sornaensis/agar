@@ -1,6 +1,6 @@
 # agar
 
-A playable, client-only artificial life foundation: a TypeScript interface and canvas renderer backed by an actual Rust WebAssembly simulation. Food and independently programmed single cells move through light, temperature, current, and nutrient fields. Cells spend energy and minerals to grow, and allocate their bodies among competing capabilities.
+A playable, client-only artificial life foundation: a TypeScript interface and canvas renderer backed by an actual Rust WebAssembly simulation. Organic particles and independently programmed single cells move through light, temperature, current, and mineral fields. Autotrophs turn light into energy and release organics; heterotrophs digest particles or prey; mixotrophs invest in both pathways. Cells spend energy and minerals to grow, and allocate their bodies among competing capabilities.
 
 ## Run
 
@@ -19,11 +19,11 @@ Open the local URL printed by Vite. Start a preset from **Simulation**, or creat
 | --- | --- |
 | **Simulation** | Open a saved run, start one of three presets, or combine an environment with starting populations. Saved runs reopen paused. |
 | **Environments** | Browse built-in and saved recipes. Create a recipe or edit an existing one as a new copy; rename, export, import, and delete saved recipes. |
-| **Genomes** | Browse seven built-in programs and saved genomes. Create or edit a new copy, check types, try a valid mutation, inspect its graph, and save it. Saved genomes can be renamed, exported, imported, or deleted. |
+| **Genomes** | Browse eight built-in programs and saved genomes. Create or edit a new copy, check types, try a valid mutation, inspect its graph, and save it. Saved genomes can be renamed, exported, imported, or deleted. |
 
 An open simulation has **Player**, **Metrics**, **Settings**, and **Genomes** views. The player fills the available content area, with **Play/Pause**, a **1× / 2× / 5× / 10×** speed selector, and **Add organism** at the top right. The searchable genome picker adds exactly one cell. Click an organism to inspect its state, live memory, and read-only program or dependency graph. You can save its program to the genome catalog without changing that organism.
 
-Metrics show population history, births, deaths, evolution, predation, and the nutrient budget. Settings contain mutation rate, food supply, ambient conditions, and display overlays. The simulation's Genomes view lists programs represented by living organisms. Environment sources are authored in the environment editor, keeping placement tools out of the player.
+Metrics show population history, feeding strategies, photosynthesis/digestion/release rates, births, deaths, predation, and the mineral budget. Settings contain mutation rate, external organic input, ambient conditions, and display overlays. The simulation's Genomes view lists programs represented by living organisms. Environment sources are authored in the environment editor, keeping placement tools out of the player.
 
 Library cards open directly, with secondary actions in each card's menu. Saved items and built-ins are grouped separately. Environment editors put the habitat preview beside its settings: select a source to adjust it, or choose a source tool and click the preview to place one. Genome editors keep graph inspection and type checking beside the code, with mutation choices in a disclosure. Arrow keys move between tabs; **Space** toggles playback when the player is focused.
 
@@ -58,6 +58,8 @@ A checkpoint retains exact positions and velocities, food, evolving fields, ener
 Only the open simulation advances. Switching to a catalog or hiding the browser tab suspends advancement; there is no offline catch-up. Reopening a saved simulation pauses it until **Play**. Web Locks prevent two tabs from writing competing versions of the same run. A recent unsaved interval can be lost if the browser or device closes abruptly; closing-page saves are best effort.
 
 Data belongs to this browser and site origin. Clearing site storage, using another browser/profile, or changing the site's origin will not carry it over. Export genomes and environments as JSON to keep portable copies. Simulation checkpoints currently remain in this browser; the UI does not import or export runs.
+
+Checkpoint v2 includes gut contents, attack tissue, growth rates, and division birth mass. Earlier v1 worlds are migrated without erasing programs, mutations, registers, or their environment settings. They continue under the new biological rules. **Start a fresh Mixed ecosystem to use the new producer-led recipe**; existing runs keep their original populations and external food supply.
 
 The rename to **agar** preserves existing browser saves. New portable files use `agar.genome` and `agar.environment`; exports from earlier versions remain accepted.
 
@@ -121,7 +123,7 @@ grow = if size < 2 && energy > 70 * size then 1 else 0;
 divide = size >= 2 && energy > 125 * size && age > 5;
 ```
 
-Programs compile into immutable, typed expression graphs. A `let` names a signal expression; it does not capture a sensor value once at compilation. Each 1/30-second tick supplies a fresh, shared pre-step world snapshot. The three required outputs are `thrust`, `turn`, and `divide`. Optional action outputs are `grow`, `photosynthesize`, `engulf`, `bite`, `defend`, and `repair`, all defaulting to zero/false. `absorb` defaults to 1, and the five `invest.*` body targets each default to 0.2. Legacy programs therefore retain a balanced body and automatically absorb available minerals.
+Programs compile into immutable, typed expression graphs. A `let` names a signal expression; it does not capture a sensor value once at compilation. Each 1/30-second tick supplies a fresh, shared pre-step world snapshot. The three required outputs are `thrust`, `turn`, and `divide`. Optional action outputs are `grow`, `photosynthesize`, `engulf`, `bite`, `defend`, and `repair`, all defaulting to zero/false. `feed` and `absorb` default to 1. The original five `invest.*` body targets default to 0.2; the new `invest.attack` defaults to 0. Legacy source remains valid, but attacking now requires an explicit attack allocation. Set all six targets when designing a specialist.
 
 The expression language remains pure; explicit register rules define the next memory state. A tick computes `(sensors, old memory) → (action requests, next memory)`. There is no immediate assignment inside an expression, I/O, recursion, or user-controlled loop. Arithmetic, comparisons, booleans, strings, 2D vectors, conditionals, and bounded built-ins are supported. Rust applies the requested actions under the world's energy, contact, and capacity rules. Invalid code leaves the running world untouched.
 
@@ -190,99 +192,117 @@ The **8,192 limit counts expression nodes**, rather than characters or cells. So
 
 The immutable genome registry is limited to **2,048 entries and 64 MiB of estimated source/program storage**. A mutation that cannot fit keeps the valid parent genome. Compilation errors leave the world untouched.
 
-## Environment and interactions
+## Food chain and environments
 
-Open **Environments** to use Still water, Sunlit pond, or Thermal currents, or create a new recipe. Its editor controls ambient conditions, food supply, starting minerals, and up to 16 light, heat, vortex, and nutrient sources. Click the preview to place a source; its position, strength, and radius can be adjusted or the source removed. Negative heat cools water, and a vortex's sign reverses its rotation. Preview overlays show light, temperature, water flow, and dissolved nutrients.
+The model separates three things: **usable energy**, **structural biomass**, and **minerals**. There is no separate carbon resource in this version. Food particles represent organic material: photosynthetic exudates, remains, or an optional external feed.
 
-A new simulation initializes its dynamic fields from the chosen recipe. Simulation **Settings** can change food supply and ambient conditions for that run; the saved recipe remains independent. Reopening a run restores its evolved fields rather than resetting them.
+| Strategy | Energy source | Required investment | Main limitation |
+| --- | --- | --- | --- |
+| Autotroph | Light | Photosynthesis | Shared light, minerals for growth, and defense costs |
+| Heterotroph | Organic particles or prey | Digestion | Finding food, gut capacity, digestive throughput, and assimilation losses |
+| Mixotroph | Both | Photosynthesis and digestion | Both capabilities share the same finite body budget |
+| Predator | Prey, and optionally particles | Attack plus digestion | Injury/contact requirements, handling cost, digestion time, and defensive prey |
 
-Light is sampled immediately from bounded sources. Temperature is a persistent coarse field that spreads and moves with the current. Currents are prescribed periodic flows and vortices: cells feel drag relative to the water and food drifts with it. This version does not solve Navier–Stokes or model objects displacing water.
+Predation is a heterotrophic strategy, not an extra source of energy. No genome name grants a privileged role. The live Metrics classification uses actual tissue fractions: at least 5% photosynthesis is photosynthetic capacity, and at least 5% digestion is digestive capacity. Cells with both are mixotrophs. Attack-capable counts overlap those groups. These are capability labels; the energy-rate readings show what the cells actually achieve.
 
-| Optional output | Behavior |
+**Sunlit pond** and **Thermal currents** begin without externally supplied particles and have zero continuing organic input. Producers release organics and cells eventually become remains. **Still water** deliberately retains external feeding for heterotroph experiments. A new simulation starts with 360 supplied particles only when its recipe has a positive external input rate. Existing saved runs retain their own settings.
+
+The environment editor controls ambient conditions, external organic input, starting minerals, and up to 16 light, heat, vortex, and nutrient sources. Light is sampled from bounded sources. Heat is a persistent coarse field that spreads and moves with the current. Currents are prescribed flows and vortices; cells experience drag relative to the water and particles drift with it. This is a lightweight flow field, without a full fluid solver.
+
+## Feeding and predation
+
+`feed` is a numeric 0–1 effort controlling both organic intake and digestion. Set it to zero for a strict autotroph. A full gut already limits intake: do not turn feeding off solely because the gut is full, since that also pauses digestion.
+
+Particles and captured prey enter a finite gut. Capacity is `100 × size × (body.digestion / 0.2)` raw energy. Processing is bounded by `6 × size × (body.digestion / 0.2) × feed` raw energy/s. Only 65% becomes usable reserve energy; the remainder dissipates. Capturing a cell therefore cannot instantly refill reserves. Gut minerals are transferred proportionally as material is processed; excess free minerals return to the water.
+
+`photosynthesize` requests light harvesting, limited by tissue, local light, and competition. At least 12% of gross production is allocated to organic release; production beyond reserve capacity can also be released. It becomes particles when space is available; energy that cannot fit the particle budget dissipates. Releases appear outside the producer membrane so consumers can reach them. Nearby releases merge outside the producer body, avoiding a new particle for every cell on every tick. Exudates contain energy but no invented minerals. Organic material decays, returning its minerals to water while energy dissipates.
+
+| Output | Behavior |
 | --- | --- |
-| `photosynthesize` | Numeric 0–1 request for light-derived energy; active uptake costs energy and cells share a finite local light budget. |
-| `engulf` | Boolean request to consume a touching cell when the engine's size and energy requirements allow it. |
-| `bite` | Numeric 0–1 attack effort against a sensed prey target in contact. |
-| `defend` | Numeric 0–1 effort that reduces incoming bite damage at an energy cost. |
-| `repair` | Numeric 0–1 request to restore membrane integrity by spending energy. |
+| `bite` | Spend energy to wound the sensed prey in contact. Requires attack tissue; digestion does not increase damage. |
+| `engulf` | Request capture of touching prey with **integrity ≤ 35%** and no more than **1 / 1.6** of the attacker's biomass. Attack and digestion tissue, gut room, energy, and a handling cooldown are also required. |
+| `defend` | Spend energy on active defense; armor also provides passive protection. |
+| `repair` | Spend energy to restore integrity. Cost scales with body mass. |
 
-New signals include `energy.fraction`, `memory.used`, `memory.cost`, `light.level`, `light.angle`, `temperature.value`, `temperature.angle`, `flow.x`, `flow.y`, `flow.speed`, `flow.angle`, `integrity`, and prey/threat sensing. Angle signals are relative to the cell's heading. All sensors use the same pre-step world and memory state.
+Prey sensing prefers a non-kin target, with a same-genome fallback, including larger cells. Programs can inspect prey size and capabilities to decide whether to attack; the engulf size restriction still applies. Threat sensing detects nearby attack-capable cells of comparable or larger size; it reports capability, not intent. New `prey.integrity`, `prey.attack`, and `prey.photosynthesis` signals allow selective hunting and avoidance.
 
-Predation targets keep stable IDs through a tick. A prey body can be consumed only once, bite damage is resolved together, and killed cells cannot regain energy and revive. Recovered energy and the energy equivalent of biomass are accounted for once; recoverable remains become food. All prey minerals are recovered into the eater or the environment. Digestion controls bite strength and the cooldown between successful engulfments; armor controls passive protection, active defense, and thermal resistance. See [engine/ABI.md](engine/ABI.md) for the exact ecological coefficients and resolution rules.
+Targets retain stable IDs throughout a tick. A body can be consumed only once; simultaneous bite damage cannot resurrect a killed cell. Gut contents, reserves, and embodied growth energy are counted once during predation and death. All minerals remain in a cell, a particle, or the water, even when the particle limit is full. See [engine/ABI.md](engine/ABI.md) for exact coefficients and resolution rules.
 
-## Nutrient cycle
+## Mineral cycle
 
-There is one generic mineral resource, separate from energy. **Every unit of biomass binds one mineral**, and a cell can additionally store up to `2 × size` free minerals. Founders start with size 1 and a reserve of 0.5. Growth consumes one stored mineral and 20 energy per biomass added; light alone cannot create biomass.
+Each unit of biomass binds **one mineral**. A cell can store another `2 × size` free minerals. A founder starts at size 1 with 0.5 free minerals. Growth needs both energy and minerals; light alone cannot create biomass.
 
-Minerals circulate through dissolved water, food, cell bodies, and reserves:
+- `absorb` takes dissolved minerals independently of digestive tissue. Its maximum rate is `0.25 × sqrt(size) × absorb` minerals/s, limited by local supply, energy, and reserve space. It costs one energy per mineral absorbed. Cells sharing a scarce patch share its supply proportionally.
+- Supplied particles carry 0.25 minerals and 18–24 raw energy each. Intake and digestion transfer energy and minerals in the same proportion. Exudates carry no minerals; remains carry the minerals of the dead organism, including its gut.
+- Particle decay returns minerals to water at 2%/s. Diffusion and currents transport dissolved minerals conservatively across the wrapping world.
+- Division splits body minerals, free reserves, and gut minerals. Remodeling only rearranges existing tissue.
 
-- The water starts with 0.3 minerals per 20 × 20 patch. Currents transport minerals, and diffusion spreads them across patch boundaries and both wrapping seams. These transfers conserve mass.
-- `absorb` controls dissolved uptake. Full uptake with the balanced digestive allocation takes up to `0.25 × size` minerals/s and costs one energy per mineral actually absorbed. Cells competing for a scarce patch share it proportionally. Digestion investment scales this rate.
-- Introduced food carries 0.25 minerals per particle as well as 18–24 energy. Eating is partial and limited by digestive throughput; energy and minerals leave a particle in the same proportion. Cells can eat for either resource, and excess minerals return to water.
-- Food decays at 2%/s exponentially, returning its minerals to the water while its energy dissipates. Deaths and predation recycle all body and reserve minerals. Even a full food-particle limit cannot discard mineral mass.
-- Division splits biomass and free reserves equally. Remodeling changes allocation within an existing body and neither creates nor consumes minerals.
+Nutrient springs, introduced cells, and externally supplied particles are explicit inputs. A full-strength spring adds 1.5 minerals/s across its radius. **Metrics** shows minerals in water, organic particles, and organisms including guts, plus their total. Internal recycling never adds to the cumulative input ledger.
 
-Nutrient springs, introduced cells, and newly supplied food are explicit material inputs. A full-strength spring adds 1.5 minerals/s total, spread over its radius. Radius changes distribution, not total production. **Metrics** reports dissolved, food, and cell minerals plus total material and cumulative inputs. A new simulation starts a ledger from the configured water, founders, and food; checkpoints retain that ledger.
-
-Use `nutrient.stored`, `nutrient.capacity`, and `nutrient.fraction` to inspect reserves. `nutrient.level` reports bilinearly sampled mineral mass per patch; `nutrient.angle` points toward increasing concentration relative to the cell's heading. Uptake withdraws from the patch containing the cell after movement. Sensors remain frozen for the tick, while newly absorbed minerals can fund growth later in that same tick.
+Use `nutrient.stored`, `nutrient.capacity`, and `nutrient.fraction` for free reserves. `nutrient.level` samples the dissolved field, and `nutrient.angle` points toward increasing concentration. `gut.energy`, `gut.capacity`, and `gut.fraction` describe undigested contents. `digestion.rate` reports usable energy gained/s; `exudation.rate` reports organic energy actually released/s. Sensors observe pre-step state.
 
 ## Invested cell capabilities
 
-Five numeric outputs set desired fractions of the cell's body. Each target clamps to 0–1. Targets totaling more than one normalize proportionally; a smaller total leaves an unspecialized core. Defaults are 0.2 for each capability, so specify all five when designing a specialist.
+Six numeric outputs request fractions of the cell's body. Each clamps to 0–1. A sum above one normalizes proportionally; a smaller sum leaves unspecialized core. Defaults are 0.2 for the original five capabilities and zero for attack. Specify all six explicitly for a specialist.
 
-| Output | What its actual allocation changes |
+| Output | What the actual tissue provides |
 | --- | --- |
-| `invest.propulsion` | Acceleration, turning ability, and movement energy cost |
-| `invest.photosynthesis` | Light absorption capacity and its active upkeep; local light is still shared |
-| `invest.digestion` | Food-processing throughput, dissolved uptake, bite strength, and engulf cooldown |
-| `invest.armor` | Passive bite protection, active defense, and resistance to thermal stress |
-| `invest.sensing` | Food, neighbor, prey, and threat sensing range: `40 + 400 × fraction` |
+| `invest.propulsion` | Acceleration, turning, and associated movement cost |
+| `invest.photosynthesis` | Light harvesting capacity and active upkeep |
+| `invest.digestion` | Gut capacity and organic processing throughput |
+| `invest.armor` | Passive protection, active defense, and thermal resistance |
+| `invest.sensing` | Food, neighbor, prey, and threat reach: `40 + 400 × fraction` |
+| `invest.attack` | Bite strength and prey handling; higher tissue upkeep |
 
-Targets are requests for gradual remodeling. Cells can reassign at most `0.08 × size` biomass/s, paying **12 energy per biomass reassigned**. Changes take effect for actions on the next tick. Existing mass is moved between specialties and core, so switching a capability off gives no energy refund. Specialized mass also costs upkeep: resting metabolism is `(0.35 + 0.30 × assigned fraction) × size × (0.5 + temperature.value)` energy/s. A balanced body retains the original `0.65 × size` cost at neutral temperature.
+A newly introduced founder adopts its normalized investment targets on the first tick. Daughters inherit the parent's actual tissues. Subsequent changes remodel at most `0.08 × size` biomass/s and cost **12 energy per biomass reassigned**. They affect actions on the next tick and give no refund when a capability is removed. All signal reads still use the shared pre-step state.
 
-The actual fractions are available as `body.propulsion`, `body.photosynthesis`, `body.digestion`, `body.armor`, and `body.sensing`; `body.unassigned` reports core, and `sense.range` reports current reach. The inspector shows these actual allocations, reserve capacity, uptake, remodeling, and body upkeep. Body upkeep is already included in the displayed basal cost.
+Each non-attack allocation costs `0.30 × fraction × size` energy/s in tissue upkeep; attack costs `0.80 × fraction × size`. Basal use is `(0.35 × size + tissue upkeep) × (0.5 + temperature.value)`. Attack therefore has a continuing cost even when a predator is not hunting.
+
+Actual fractions are `body.propulsion`, `body.photosynthesis`, `body.digestion`, `body.armor`, `body.sensing`, and `body.attack`; `body.unassigned` reports core. The inspector shows these allocations alongside gut contents, growth, and lifespan. Green internal bodies indicate photosynthetic tissue, an amber vesicle reflects gut fullness, and a small red chevron marks attack tissue; membrane color still identifies the genome.
 
 ```text
-# A mineral-seeking phototroph; provide light in the environment.
-invest.propulsion = 0.12;
-invest.photosynthesis = 0.50;
-invest.digestion = 0.20;
-invest.armor = 0.08;
+# A strict autotroph. Provide light and dissolved minerals.
+invest.propulsion = 0.10;
+invest.photosynthesis = 0.55;
+invest.digestion = 0;
+invest.armor = 0.25;
 invest.sensing = 0.10;
+invest.attack = 0;
 
-let needs_minerals = nutrient.fraction < 0.25;
-turn = clamp((if needs_minerals then nutrient.angle else light.angle) * 1.8, -1, 1);
-thrust = if needs_minerals then 0.5 else 0.08;
+feed = 0;
 absorb = 1;
-photosynthesize = if light.level > 0.08 then 1 else 0;
-grow = if size < 2 && energy.fraction > 0.45
-       && nutrient.stored > 0.02 then 1 else 0;
-divide = size >= 2 && energy.fraction > 0.72;
+photosynthesize = 1;
+turn = clamp(light.angle * 1.8, -1, 1);
+thrust = if light.level < 0.5 then 0.25 else 0;
+defend = if threat.visible then 1 else 0;
+repair = if integrity < 0.95 then 0.5 else 0;
+grow = if maturity < 1 && energy.fraction > 0.5 then 1 else 0;
+divide = maturity >= 1 && energy.fraction > 0.65;
 ```
 
-The existing typed mutation rules also cover the new signals and explicitly authored targets. All seven example genomes now specify body allocations. Their success depends on available energy, minerals, food, and competition.
+Eight built-in programs include strict **Phototroph**, **Forager**, **Predator**, and **Mixotroph** strategies. Typed mutations can change allocations and feeding rules without making an invalid program. Their ecological success remains dependent on the environment and competition.
 
-## Growth and metabolism
+## Growth and lifecycle
 
-`size` measures biomass and 2D area relative to a newly introduced cell. Founders start at **1**, the minimum daughter size is **0.5**, and the maximum size is **4**. Radius is `7 × sqrt(size)`: doubling biomass doubles area, not radius.
+`size` measures biomass and 2D area relative to a founder. Introduced cells start at **1**. Bounds remain **0.5–4**, and radius is `7 × sqrt(size)`. Doubling biomass doubles area, not radius.
 
-`grow` is a pure numeric output clamped to 0–1. Full growth adds up to **0.25 biomass/second**, costing **20 energy and one stored mineral per biomass**. Growth is capped by available energy, mineral reserves, and maximum size. Zero stops growth; negative values do not shrink cells or refund energy. A poor growth program can spend its last energy and die. Use a reserve condition such as `energy > 70 * size && nutrient.stored > 0.02` to avoid that.
+`grow` requests 0–1 effort. Full growth adds at most **`0.05 × sqrt(size)` biomass/s**, costing **80 energy and one stored mineral per biomass**. Growth preserves 20% of the enlarged energy capacity, and stops when minerals, reserve energy, or size limit prevent it. Negative requests clamp to zero; they never shrink a cell or refund energy. `growth.rate` reports the biomass actually built/s.
 
 | Quantity | Rule |
 | --- | --- |
-| Resting energy use | `(0.35 + 0.30 × assigned body fraction) × size × (0.5 + temperature.value)` per second |
-| Register upkeep | `0.0025 × populated registers` per second, in addition to resting cost |
-| Movement energy use | `1.45 × thrust × size × (body.propulsion / 0.2)` per second, in addition to resting cost |
-| Energy storage | `200 × size` maximum |
-| Free mineral storage | `2 × size` maximum, separate from the minerals bound in biomass |
-| Division requirements | `size ≥ 1`, `energy ≥ 90 × size`, an expired four-second cooldown, and a free cell slot |
-| Division cost | `12 × size` energy, then energy, biomass, and free minerals split equally; body fractions are inherited |
+| Energy capacity | `200 × size` |
+| Free mineral capacity | `2 × size`, in addition to body/gut minerals |
+| Register upkeep | `0.0025 × populated registers` energy/s |
+| Movement cost | `1.45 × thrust × size × (body.propulsion / 0.2)` energy/s |
+| Division requirements | At least **twice birth biomass**, `energy ≥ 90 × size`, a 12-second cooldown, and a free cell slot |
+| Division cost | `12 × size` energy; remaining energy, biomass, free minerals, and gut contents split equally |
+| Lifespan | 300 simulated seconds; age is chronological and the retained parent's age continues after division |
 
-Division conserves biomass: a size-2 cell becomes two size-1 cells. A size-1 cell can divide into two size-0.5 cells, which must grow before dividing again. Programs omitting `grow` still compile, but their offspring cannot create more biomass through division alone.
+`birth.size` records the starting mass for the current growth cycle. `maturity` runs from zero at that mass to one after doubling. A size-1 founder must grow to size 2 before producing two size-1 cells. Both halves then set their birth size to the split mass and must grow again. Daughters start at age zero with empty registers; the retained parent keeps its memory and age. Programs without growth remain valid but cannot divide immediately from founder mass.
 
-Larger cells have greater food-contact reach, larger collision bodies, and more resistance to displacement. Size alone does not improve sensing range or commanded acceleration; body allocation determines those abilities. The inspector shows current size, resting cost, energy and mineral capacity, and actual capabilities; rendering and selection follow the actual radius. Compare **Conserver** (target size 1), **Drifter** (1.5), **Forager** (2), and **Giant** (3.5). Each target is a condition in the genome, so discrete growth steps can overshoot it slightly.
+Cells die from depleted energy, destroyed integrity, or reaching `lifespan`. Remains include structural material, stored resources, and undigested material. A finite lifetime makes recycling part of a sustained ecosystem rather than requiring every producer to be killed by a predator.
 
-Growth expressions and the `size` sensor use the same typed mutation system as the other signals. Mutations can change growth rates, target sizes, and energy thresholds while preserving program validity.
+Larger cells have greater contact reach, capacity, collision mass, and upkeep. Growth is slower relative to mass as cells get larger. Size alone does not improve sensing or commanded acceleration; these depend on body allocation.
 
 ## Mutations
 
@@ -354,10 +374,13 @@ npm run test:graph
 npm run test:language
 npm run test:storage
 npm run test:session
+npm run test:food-chain
 ```
 
-The 128 native tests cover the language, synchronous registers, valid mutations, editor analysis, energy/mineral accounting, body capabilities, physical interactions, and complete checkpoints. Checkpoint tests exercise all 4,995 occupied registers, exact future mutation behavior, and atomic rejection of corrupt or inconsistent state.
+Native tests cover the language, synchronous registers, valid mutations, editor analysis, energy/mineral accounting, body capabilities, physical interactions, and complete checkpoints. Checkpoint tests exercise all 4,995 occupied registers, exact future mutation behavior, and atomic rejection of corrupt or inconsistent state.
 
 WASM integration checks exercise the actual compiled engine, including the 8,192-node limit and byte-identical continuation after restoring into an independent instance. Graph tests cover bounded navigation and typed dependencies. Language checks compare the editor catalog with Rust names and compiled result types, and verify typed register suggestions, comment/string isolation, and UTF-16 cursor ranges. Storage/session checks cover portable copies, immutable built-ins, rejected imports, transaction failures, aligned checkpoint metadata, asynchronous save ordering, and exclusive ownership of an open run.
+
+The food-chain check compares several fixed-seed mixed ecosystems with mutation disabled, reports trophic populations over time, and checks producer-to-consumer energy transfer. It is a regression check, not a guarantee of perpetual coexistence. The recorded before/after runs and their limitations are in [experiments/README.md](experiments/README.md).
 
 The same seed and action sequence are reproducible within the same engine runtime; cross-platform bit-identical floating-point replay is not promised.

@@ -265,6 +265,14 @@ canvas#world { display: block; position: absolute; inset: 0; width: 100%; height
 .nutrient-metrics .metric-card strong { font-size: 23px; }
 .nutrient-panel { padding: 4px 0 23px; }
 .nutrient-panel h2 { margin-bottom: 22px; font-size: 14px; }
+.trophic-panel { padding: 4px 0 24px; }
+.trophic-panel h2 { font-size: 14px; }
+.trophic-panel .section-heading > span { color: var(--muted); font-size: 11px; }
+.trophic-panel .metrics-grid { margin-bottom: 15px; }
+.energy-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.energy-flow span { display: block; color: #979d9e; font-size: 11px; }
+.energy-flow strong { display: block; margin-top: 6px; color: #d8ddde; font: 13px var(--mono); }
+.trophic-panel > p { margin: 17px 0 0; font-size: 11px; line-height: 1.6; }
 .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px 48px; max-width: 1080px; }
 .settings-panel { padding: 24px 0; border-top: 1px solid #373a3a; }
 .settings-panel h2 { font-size: 16px; margin-bottom: 25px; }

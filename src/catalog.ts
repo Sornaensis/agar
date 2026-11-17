@@ -17,13 +17,13 @@ export const BUILTIN_GENOMES: readonly GenomeDocument[] = freeze(PRESETS.map(pre
 
 export const BUILTIN_ENVIRONMENTS: readonly EnvironmentDocument[] = freeze([
   {
-    id: 'builtin:environment:still-water', name: 'Still water', description: 'A calm habitat with a steady food supply.', createdAt: 0, updatedAt: 0,
+    id: 'builtin:environment:still-water', name: 'Still water', description: 'A calm, externally fed sandbox for heterotrophs.', createdAt: 0, updatedAt: 0,
     config: { foodRate: 6, ambientTemperature: 0.5, ambientLight: 0, currentStrength: 0, initialNutrients: 0.3, sources: [] },
   },
   {
-    id: 'builtin:environment:sunlit-pond', name: 'Sunlit pond', description: 'Light, a warm patch, a gentle vortex, and a nutrient spring.', createdAt: 0, updatedAt: 0,
+    id: 'builtin:environment:sunlit-pond', name: 'Sunlit pond', description: 'Light and minerals support producers; organic food comes from living cells and their remains.', createdAt: 0, updatedAt: 0,
     config: {
-      foodRate: 6, ambientTemperature: 0.5, ambientLight: 0.12, currentStrength: 3, initialNutrients: 0.3,
+      foodRate: 0, ambientTemperature: 0.5, ambientLight: 0.4, currentStrength: 3, initialNutrients: 0.3,
       sources: [
         { kind: 0, x: 624, y: 364.8, strength: 0.95, radius: 280 },
         { kind: 1, x: 936, y: 243.2, strength: 0.35, radius: 180 },
@@ -33,10 +33,11 @@ export const BUILTIN_ENVIRONMENTS: readonly EnvironmentDocument[] = freeze([
     },
   },
   {
-    id: 'builtin:environment:thermal-currents', name: 'Thermal currents', description: 'Warm and cool patches joined by moving, nutrient-rich water.', createdAt: 0, updatedAt: 0,
+    id: 'builtin:environment:thermal-currents', name: 'Thermal currents', description: 'A producer-powered habitat with warm and cool currents and a mineral spring.', createdAt: 0, updatedAt: 0,
     config: {
-      foodRate: 4, ambientTemperature: 0.5, ambientLight: 0.2, currentStrength: 8, initialNutrients: 0.5,
+      foodRate: 0, ambientTemperature: 0.5, ambientLight: 0.45, currentStrength: 8, initialNutrients: 0.5,
       sources: [
+        { kind: 0, x: 600, y: 380, strength: 0.35, radius: 320 },
         { kind: 1, x: 300, y: 240, strength: 0.65, radius: 220 },
         { kind: 1, x: 900, y: 520, strength: -0.65, radius: 220 },
         { kind: 2, x: 600, y: 380, strength: 0.5, radius: 360 },
@@ -52,22 +53,23 @@ export interface BuiltinSimulation {
 }
 export const BUILTIN_SIMULATIONS: readonly BuiltinSimulation[] = freeze([
   {
-    id: 'builtin:simulation:foragers', name: 'Foragers', description: 'Food-seeking cells in still water.',
+    id: 'builtin:simulation:foragers', name: 'Foragers', description: 'Heterotrophs in a deliberately food-supplied habitat.',
     environmentId: 'builtin:environment:still-water', seed: 42,
     populations: [{ genomeId: 'builtin:genome:forager', count: 22 }],
   },
   {
-    id: 'builtin:simulation:sunlit-pond', name: 'Sunlit pond', description: 'Photosynthetic cells following light and nutrients.',
+    id: 'builtin:simulation:sunlit-pond', name: 'Sunlit pond', description: 'Pure autotrophs build a population from light and minerals.',
     environmentId: 'builtin:environment:sunlit-pond', seed: 42,
     populations: [{ genomeId: 'builtin:genome:phototroph', count: 22 }],
   },
   {
-    id: 'builtin:simulation:mixed-ecosystem', name: 'Mixed ecosystem', description: 'Foragers, phototrophs, and predators sharing one pond.',
+    id: 'builtin:simulation:mixed-ecosystem', name: 'Mixed ecosystem', description: 'Many producers support a few foragers, mixotrophs, and predators. Survival depends on the food chain.',
     environmentId: 'builtin:environment:sunlit-pond', seed: 42,
     populations: [
-      { genomeId: 'builtin:genome:forager', count: 14 },
-      { genomeId: 'builtin:genome:phototroph', count: 14 },
-      { genomeId: 'builtin:genome:predator', count: 4 },
+      { genomeId: 'builtin:genome:phototroph', count: 72 },
+      { genomeId: 'builtin:genome:forager', count: 6 },
+      { genomeId: 'builtin:genome:mixotroph', count: 4 },
+      { genomeId: 'builtin:genome:predator', count: 2 },
     ],
   },
 ]);

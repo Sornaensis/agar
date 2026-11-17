@@ -2,94 +2,123 @@ export interface Preset { name: string; description: string; source: string }
 export const PRESETS: Preset[] = [
   {
     name: 'Forager',
-    description: 'Invest in digestion and sensing. Gather food and minerals, then grow and divide.',
-    source: `# Follow food. Wander when nothing is near.
-let wander = sin(age * 0.7 + id) * 0.6;
-let seek = clamp(food.angle * 1.8, -1, 1);
+    description: 'Heterotroph. Digest organic food, avoid attackers, and grow before dividing.',
+    source: `# Organic food supplies energy; dissolved minerals supply extra building material.
+let danger = threat.visible;
+let away = if threat.angle > 0 then threat.angle - 3.141593
+           else threat.angle + 3.141593;
+let seeking = food.visible && gut.fraction < 0.8;
+let wander = sin(age * 0.7 + id) * 0.5;
+turn = if danger then clamp(away * 2, -1, 1)
+       else if seeking then clamp(food.angle * 1.8, -1, 1) else wander;
+thrust = if danger then 0.8 else if seeking then 0.45
+         else if gut.fraction > 0.3 then 0.05 else 0.15;
 
-turn = if food.visible then seek else wander;
-thrust = if food.visible then 0.8 else 0.45;
+# Keep feeding enabled so stored food can continue digesting.
+feed = 1;
+photosynthesize = 0;
+absorb = if nutrient.fraction < 0.5 then 1 else 0;
+defend = if danger then 0.4 else 0;
+repair = if integrity < 0.9 && energy.fraction > 0.6 then 0.3 else 0;
+grow = if maturity < 1 && energy.fraction > 0.65
+          && nutrient.stored > 0.05 then 0.75 else 0;
+divide = maturity >= 1 && energy.fraction > 0.72;
 
-# Growth needs stored nutrients as well as energy.
-absorb = 1;
-grow = if size < 2 && energy > 70 * size && nutrient.stored > 0.02 then 1 else 0;
-divide = size >= 2 && energy > 125 * size && age > 5;
-
-# All five targets are explicit; the body changes gradually.
-invest.propulsion = 0.25;
+invest.propulsion = 0.22;
 invest.photosynthesis = 0;
-invest.digestion = 0.35;
-invest.armor = 0.10;
-invest.sensing = 0.30;`,
+invest.digestion = 0.45;
+invest.armor = 0.12;
+invest.sensing = 0.21;
+invest.attack = 0;`,
   },
   {
     name: 'Drifter',
-    description: 'Drift with a modest motor and an inexpensive body. Grow gradually to 1.5× biomass.',
-    source: `# Gentle spirals through the food field.
-let wave = sin(age * 0.45 + id);
+    description: 'Heterotroph. A modest motor and 40% unassigned core keep a drifting feeder inexpensive.',
+    source: `# Drift gently; use the motor to escape or reach nearby food.
+let danger = threat.visible;
+let away = if threat.angle > 0 then threat.angle - 3.141593
+           else threat.angle + 3.141593;
+let seeking = food.visible && gut.fraction < 0.6;
+turn = if danger then clamp(away * 2, -1, 1)
+       else if seeking then clamp(food.angle * 1.5, -1, 1)
+       else sin(age * 0.45 + id) * 0.22;
+thrust = if danger then 0.75 else if seeking then 0.3 else 0.06;
+feed = 1;
+photosynthesize = 0;
+absorb = if nutrient.fraction < 0.5 then 1 else 0;
+defend = if danger then 0.3 else 0;
+grow = if maturity < 1 && energy.fraction > 0.7
+          && nutrient.stored > 0.05 then 0.5 else 0;
+divide = maturity >= 1 && energy.fraction > 0.8;
 
-turn = wave * 0.22;
-thrust = 0.38;
-
-# Grow slowly, keeping an energy reserve.
-absorb = 1;
-grow = if size < 1.5 && energy > 90 * size && nutrient.stored > 0.02 then 0.5 else 0;
-divide = size >= 1.5 && energy > 145 * size && age > 8;
-
-# The remaining 35% is unassigned core.
-invest.propulsion = 0.12;
+invest.propulsion = 0.08;
 invest.photosynthesis = 0;
 invest.digestion = 0.30;
-invest.armor = 0.08;
-invest.sensing = 0.15;`,
+invest.armor = 0.10;
+invest.sensing = 0.12;
+invest.attack = 0;`,
   },
   {
     name: 'Conserver',
-    description: 'Stay small and leave 40% of the body unassigned to reduce maintenance.',
-    source: `# Sense, then respond with pure expressions.
-let hungry = energy < 100 * size;
-let seek = clamp(food.angle * 2, -1, 1);
-let wander = sin(age * 0.4 + id) * 0.5;
-
-turn = if food.visible then seek else wander;
-thrust = if food.visible then 0.7
-         else if hungry then 0.3 else 0.15;
-
+    description: 'Heterotroph. Spend little on movement, retain an energy reserve, and mature slowly.',
+    source: `let danger = threat.visible;
+let hungry = energy.fraction < 0.55 && gut.fraction < 0.4;
+let away = if threat.angle > 0 then threat.angle - 3.141593
+           else threat.angle + 3.141593;
+let seeking = food.visible && gut.fraction < 0.7;
+turn = if danger then clamp(away * 2, -1, 1)
+       else if seeking then clamp(food.angle * 2, -1, 1)
+       else sin(age * 0.4 + id) * 0.4;
+thrust = if danger then 0.75 else if seeking then 0.35
+         else if hungry then 0.12 else 0.03;
+feed = 1;
+photosynthesize = 0;
 absorb = if nutrient.fraction < 0.6 then 1 else 0;
-grow = if size < 1 && energy > 70 * size && nutrient.stored > 0.02 then 1 else 0;
-divide = size >= 1 && energy > 140 * size && age > 6;
+defend = if danger then 0.3 else 0;
+grow = if maturity < 1 && energy.fraction > 0.75
+          && nutrient.stored > 0.05 then 0.35 else 0;
+divide = maturity >= 1 && energy.fraction > 0.85;
 
-invest.propulsion = 0.15;
+# Leave 40% unassigned, while retaining digestion and a lookout.
+invest.propulsion = 0.10;
 invest.photosynthesis = 0;
-invest.digestion = 0.25;
-invest.armor = 0.05;
-invest.sensing = 0.15;`,
+invest.digestion = 0.28;
+invest.armor = 0.08;
+invest.sensing = 0.14;
+invest.attack = 0;`,
   },
   {
     name: 'Giant',
-    description: 'A large digestive investment supports growth to 3.5× biomass, given enough minerals.',
-    source: `# A larger body has a larger appetite.
-let target = 3.5;
-let seek = clamp(food.angle * 1.8, -1, 1);
-let wander = sin(age * 0.6 + id) * 0.5;
+    description: 'Heterotroph. Invest in digestion and armor; a large body takes time and food to build.',
+    source: `let target = max(3.5, 2 * birth.size);
+let danger = threat.visible;
+let away = if threat.angle > 0 then threat.angle - 3.141593
+           else threat.angle + 3.141593;
+let seeking = food.visible && gut.fraction < 0.8;
+turn = if danger then clamp(away * 2, -1, 1)
+       else if seeking then clamp(food.angle * 1.8, -1, 1)
+       else sin(age * 0.6 + id) * 0.4;
+thrust = if danger then 0.8 else if seeking then 0.4 else 0.1;
+feed = 1;
+photosynthesize = 0;
+absorb = if nutrient.fraction < 0.6 then 1 else 0;
+defend = if danger then 0.5 else 0;
+repair = if integrity < 0.9 && energy.fraction > 0.6 then 0.3 else 0;
+grow = if size < target && energy.fraction > 0.65
+          && nutrient.stored > 0.05 then 0.8 else 0;
+divide = size >= target && maturity >= 1 && energy.fraction > 0.8;
 
-turn = if food.visible then seek else wander;
-thrust = if food.visible then 0.85 else 0.4;
-
-absorb = 1;
-grow = if size < target && energy > 60 * size && nutrient.stored > 0.02 then 1 else 0;
-divide = size >= target && energy > 125 * size && age > 10;
-
-invest.propulsion = 0.20;
+invest.propulsion = 0.12;
 invest.photosynthesis = 0;
-invest.digestion = 0.40;
-invest.armor = 0.15;
-invest.sensing = 0.25;`,
+invest.digestion = 0.43;
+invest.armor = 0.25;
+invest.sensing = 0.20;
+invest.attack = 0;`,
   },
   {
     name: 'Rememberer',
-    description: 'Keeps a food bearing, a search counter, and a feeding mode in typed memory.',
-    source: `# Reads see the previous tick. Writes commit together.
+    description: 'Heterotroph. Remember food bearings and a feeding mode while keeping watch for attackers.',
+    source: `# Reads see old memory. Writes commit together after this tick.
 ri001 = ri001 + 1 when !food.visible;
 clear ri001 when food.visible;
 rf001 = food.angle when food.visible;
@@ -99,70 +128,134 @@ rb001 = if energy.fraction < 0.35 then true
 rs001 = if food.visible then "forage" else "search";
 rv001 = vec(flow.x, flow.y);
 
+let danger = threat.visible;
+let away = if threat.angle > 0 then threat.angle - 3.141593
+           else threat.angle + 3.141593;
 let remembered = populated(rf001) && ri001 < 90;
-let wander = sin(age * 0.7 + id) * 0.6;
-turn = if food.visible then clamp(food.angle * 1.8, -1, 1)
-       else if remembered then clamp(rf001, -1, 1) else wander;
-thrust = if rs001 == "forage" then 0.8
-         else if rb001 || length(rv001) > 10 then 0.5 else 0.3;
-absorb = 1;
-grow = if size < 2 && energy.fraction > 0.45 && nutrient.stored > 0.02 then 1 else 0;
-divide = size >= 2 && energy.fraction > 0.72;
+turn = if danger then clamp(away * 2, -1, 1)
+       else if food.visible then clamp(food.angle * 1.8, -1, 1)
+       else if remembered then clamp(rf001, -1, 1)
+       else sin(age * 0.7 + id) * 0.5;
+thrust = if danger then 0.8
+         else if rs001 == "forage" && gut.fraction < 0.8 then 0.42
+         else if rb001 || length(rv001) > 10 then 0.2 else 0.05;
+feed = 1;
+photosynthesize = 0;
+absorb = if nutrient.fraction < 0.6 then 1 else 0;
+defend = if danger then 0.4 else 0;
+grow = if maturity < 1 && energy.fraction > 0.65
+          && nutrient.stored > 0.05 then 0.6 else 0;
+divide = maturity >= 1 && energy.fraction > 0.78;
 
-invest.propulsion = 0.25;
+invest.propulsion = 0.20;
 invest.photosynthesis = 0;
-invest.digestion = 0.30;
-invest.armor = 0.10;
-invest.sensing = 0.35;`,
+invest.digestion = 0.40;
+invest.armor = 0.12;
+invest.sensing = 0.28;
+invest.attack = 0;`,
   },
   {
     name: 'Phototroph',
-    description: 'Build a photosynthetic body. Seek light and mineral-rich water, and avoid excess heat.',
-    source: `# Try the Sunlit pond environment, or place a light.
+    description: 'Autotroph. Turn light and dissolved minerals into growth; release organic food for consumers.',
+    source: `# A pure producer: no organic feeding and no digestive tissue.
+let danger = threat.visible;
 let hot = temperature.value > 0.8;
-let needs_minerals = nutrient.fraction < 0.25;
-let away = if temperature.angle > 0
-           then temperature.angle - 3.141593
+let needs_minerals = nutrient.fraction < 0.15;
+let flee = if threat.angle > 0 then threat.angle - 3.141593
+           else threat.angle + 3.141593;
+let cool = if temperature.angle > 0 then temperature.angle - 3.141593
            else temperature.angle + 3.141593;
-turn = if hot then clamp(away * 1.5, -1, 1)
+turn = if danger then clamp(flee * 2, -1, 1)
+       else if hot then clamp(cool * 1.5, -1, 1)
        else if needs_minerals then clamp(nutrient.angle * 1.8, -1, 1)
        else clamp(light.angle * 1.8, -1, 1);
-thrust = if hot then 0.85 else if needs_minerals then 0.5
-         else if light.level < 0.6 then 0.45 else 0.08;
-photosynthesize = if light.level > 0.08 then 1 else 0;
-absorb = 1;
-repair = if integrity < 0.9 && energy.fraction > 0.4 then 0.5 else 0;
-grow = if size < 2 && energy.fraction > 0.45 && nutrient.stored > 0.02 then 1 else 0;
-divide = size >= 2 && energy.fraction > 0.72;
+thrust = if danger then 0.8 else if hot then 0.6
+         else if needs_minerals then 0.15
+         else if light.level < 0.35 then 0.12 else 0.025;
+feed = 0;
+photosynthesize = 1;
+absorb = if nutrient.fraction < 0.7 then 1 else 0;
+defend = if danger then 0.4 else 0;
+repair = if integrity < 0.9 && energy.fraction > 0.6 then 0.3 else 0;
+grow = if maturity < 1 && energy.fraction > 0.62
+          && nutrient.stored > 0.1 then 0.65 else 0;
+divide = maturity >= 1 && energy.fraction > 0.75;
 
-# Digestion also enables uptake from the water.
-invest.propulsion = 0.12;
-invest.photosynthesis = 0.50;
-invest.digestion = 0.20;
-invest.armor = 0.08;
-invest.sensing = 0.10;`,
+# Mineral absorption is independent of digestion.
+invest.propulsion = 0.06;
+invest.photosynthesis = 0.70;
+invest.digestion = 0;
+invest.armor = 0.14;
+invest.sensing = 0.10;
+invest.attack = 0;`,
   },
   {
     name: 'Predator',
-    description: 'Invest in movement, digestion, and armor. Recycle prey into energy and minerals.',
-    source: `# Targets are chosen by the engine from the sensed world.
-let hunt = prey.visible && !prey.same_genome;
-let seek = if hunt then prey.angle else food.angle;
-let wander = sin(age * 0.6 + id) * 0.5;
-turn = if hunt || food.visible then clamp(seek * 2, -1, 1) else wander;
-thrust = if hunt then 0.95 else if food.visible then 0.8 else 0.4;
-engulf = hunt && size >= 1.6 * prey.size;
-bite = if hunt then 1 else 0;
-defend = if threat.visible then 0.6 else 0;
-repair = if integrity < 0.9 && energy.fraction > 0.4 then 0.5 else 0;
-absorb = 1;
-grow = if size < 3 && energy.fraction > 0.4 && nutrient.stored > 0.02 then 1 else 0;
-divide = size >= 3 && energy.fraction > 0.78 && age > 10;
+    description: 'Heterotroph. Split a finite body between attacking and digesting; hunt only when hungry.',
+    source: `# Organic feeding and attacks share a finite gut.
+let hungry = energy.fraction < 0.72 && gut.fraction < 0.35;
+let vulnerable = prey.visible && !prey.same_genome
+                 && prey.attack < body.attack;
+let hunt = hungry && vulnerable;
+# Contact distance follows the cells' radius = 7 * sqrt(size).
+let contact = prey.distance <= 7 * (sqrt(size) + sqrt(prey.size)) + 0.75;
+let seeking = food.visible && gut.fraction < 0.7;
+let escape = threat.visible && threat.size > size * 1.25;
+let away = if threat.angle > 0 then threat.angle - 3.141593
+           else threat.angle + 3.141593;
+turn = if escape then clamp(away * 2, -1, 1)
+       else if hunt then clamp(prey.angle * 2, -1, 1)
+       else if seeking then clamp(food.angle * 1.8, -1, 1)
+       else sin(age * 0.6 + id) * 0.4;
+thrust = if escape then 0.85 else if hunt then 0.6
+         else if seeking then 0.4 else if gut.fraction > 0.3 then 0.04 else 0.12;
+feed = 1;
+photosynthesize = 0;
+bite = if hunt && contact then 0.8 else 0;
+engulf = hunt && contact && prey.integrity <= 0.35
+         && size >= 1.6 * prey.size && gut.fraction < 0.35;
+defend = if escape then 0.5 else 0;
+repair = if integrity < 0.9 && energy.fraction > 0.6 then 0.3 else 0;
+absorb = if nutrient.fraction < 0.6 then 1 else 0;
+grow = if maturity < 1 && energy.fraction > 0.7
+          && nutrient.stored > 0.05 then 0.6 else 0;
+divide = maturity >= 1 && energy.fraction > 0.8;
 
-invest.propulsion = 0.28;
+# Attack tissue has to displace another capability.
+invest.propulsion = 0.23;
 invest.photosynthesis = 0;
-invest.digestion = 0.35;
-invest.armor = 0.17;
-invest.sensing = 0.20;`,
+invest.digestion = 0.28;
+invest.armor = 0.12;
+invest.sensing = 0.12;
+invest.attack = 0.25;`,
+  },
+  {
+    name: 'Mixotroph',
+    description: 'Mixotroph. Combine light harvesting with organic feeding, trading specialist capacity for flexibility.',
+    source: `let danger = threat.visible;
+let away = if threat.angle > 0 then threat.angle - 3.141593
+           else threat.angle + 3.141593;
+let seeking = food.visible && gut.fraction < 0.55 && energy.fraction < 0.8;
+turn = if danger then clamp(away * 2, -1, 1)
+       else if seeking then clamp(food.angle * 1.8, -1, 1)
+       else clamp(light.angle * 1.8, -1, 1);
+thrust = if danger then 0.8 else if seeking then 0.35
+         else if light.level < 0.3 then 0.12 else 0.035;
+feed = 1;
+photosynthesize = if light.level > 0.08 then 1 else 0;
+absorb = if nutrient.fraction < 0.6 then 1 else 0;
+defend = if danger then 0.4 else 0;
+repair = if integrity < 0.9 && energy.fraction > 0.6 then 0.3 else 0;
+grow = if maturity < 1 && energy.fraction > 0.7
+          && nutrient.stored > 0.05 then 0.5 else 0;
+divide = maturity >= 1 && energy.fraction > 0.8;
+
+# Both energy paths share the same body budget.
+invest.propulsion = 0.12;
+invest.photosynthesis = 0.35;
+invest.digestion = 0.30;
+invest.armor = 0.10;
+invest.sensing = 0.13;
+invest.attack = 0;`,
   },
 ];

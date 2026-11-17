@@ -1,0 +1,874 @@
+{
+  "provenance": {
+    "abi": 4,
+    "checkpointVersion": 1,
+    "wasmSha256": "4ec1fc31df63f8c8a086723a643137e62644cf064846810031eef909d55c31f5",
+    "recipe": {
+      "source": "ri001=ri001+1;rf001=energy.fraction;rb001=food.visible;rs001=\"v1\";rv001=vec(flow.x,flow.y);thrust=.2;turn=sin(age);divide=false;",
+      "mutation": {
+        "parent": 1,
+        "seed": 7,
+        "kind": 2
+      },
+      "reset": {
+        "seed": 73,
+        "initialFood": 0
+      },
+      "founders": [
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          1
+        ]
+      ],
+      "steps": 3
+    }
+  },
+  "header": [
+    3,
+    0.10000000149011612,
+    2,
+    0,
+    0,
+    0,
+    0,
+    1200,
+    760,
+    384,
+    1200,
+    6
+  ],
+  "genomes": [
+    {
+      "id": 1,
+      "source": "ri001=ri001+1;rf001=energy.fraction;rb001=food.visible;rs001=\"v1\";rv001=vec(flow.x,flow.y);thrust=.2;turn=sin(age);divide=false;",
+      "graph": {
+        "version": 1,
+        "nodes": [
+          {
+            "id": 0,
+            "kind": "register",
+            "type": "integer",
+            "label": "ri001",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 1,
+            "kind": "constant",
+            "type": "integer",
+            "label": "1",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 2,
+            "kind": "binary",
+            "type": "integer",
+            "label": "+",
+            "inputs": [
+              0,
+              1
+            ],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 3,
+            "kind": "sensor",
+            "type": "scalar",
+            "label": "energy.fraction",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 4,
+            "kind": "sensor",
+            "type": "boolean",
+            "label": "food.visible",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 5,
+            "kind": "constant",
+            "type": "string",
+            "label": "\"v1\"",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 6,
+            "kind": "sensor",
+            "type": "scalar",
+            "label": "flow.x",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 7,
+            "kind": "sensor",
+            "type": "scalar",
+            "label": "flow.y",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 8,
+            "kind": "call",
+            "type": "vec2",
+            "label": "vec",
+            "inputs": [
+              6,
+              7
+            ],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 9,
+            "kind": "constant",
+            "type": "scalar",
+            "label": "0.2",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 10,
+            "kind": "sensor",
+            "type": "scalar",
+            "label": "age",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 11,
+            "kind": "call",
+            "type": "scalar",
+            "label": "sin",
+            "inputs": [
+              10
+            ],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 12,
+            "kind": "constant",
+            "type": "boolean",
+            "label": "false",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          }
+        ],
+        "roots": [
+          {
+            "id": "output:thrust",
+            "kind": "output",
+            "name": "thrust",
+            "type": "scalar",
+            "value": 9,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "output:turn",
+            "kind": "output",
+            "name": "turn",
+            "type": "scalar",
+            "value": 11,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "output:divide",
+            "kind": "output",
+            "name": "divide",
+            "type": "boolean",
+            "value": 12,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "output:grow",
+            "kind": "output",
+            "name": "grow",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0"
+          },
+          {
+            "id": "output:photosynthesize",
+            "kind": "output",
+            "name": "photosynthesize",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0"
+          },
+          {
+            "id": "output:engulf",
+            "kind": "output",
+            "name": "engulf",
+            "type": "boolean",
+            "value": null,
+            "guard": null,
+            "default": "false"
+          },
+          {
+            "id": "output:bite",
+            "kind": "output",
+            "name": "bite",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0"
+          },
+          {
+            "id": "output:defend",
+            "kind": "output",
+            "name": "defend",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0"
+          },
+          {
+            "id": "output:repair",
+            "kind": "output",
+            "name": "repair",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0"
+          },
+          {
+            "id": "output:absorb",
+            "kind": "output",
+            "name": "absorb",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "1"
+          },
+          {
+            "id": "output:invest.propulsion",
+            "kind": "output",
+            "name": "invest.propulsion",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "output:invest.photosynthesis",
+            "kind": "output",
+            "name": "invest.photosynthesis",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "output:invest.digestion",
+            "kind": "output",
+            "name": "invest.digestion",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "output:invest.armor",
+            "kind": "output",
+            "name": "invest.armor",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "output:invest.sensing",
+            "kind": "output",
+            "name": "invest.sensing",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "write:ri001",
+            "kind": "write",
+            "name": "ri001",
+            "type": "integer",
+            "value": 2,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "write:rf001",
+            "kind": "write",
+            "name": "rf001",
+            "type": "scalar",
+            "value": 3,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "write:rb001",
+            "kind": "write",
+            "name": "rb001",
+            "type": "boolean",
+            "value": 4,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "write:rs001",
+            "kind": "write",
+            "name": "rs001",
+            "type": "string",
+            "value": 5,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "write:rv001",
+            "kind": "write",
+            "name": "rv001",
+            "type": "vec2",
+            "value": 8,
+            "guard": null,
+            "default": null
+          }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "source": "let _g0 = ri001;\nlet _g1 = 1;\nlet _g2 = _g0 + _g1;\nlet _g3 = energy.fraction;\nlet _g4 = food.visible;\nlet _g5 = \"v1\";\nlet _g6 = flow.x;\nlet _g7 = flow.y;\nlet _g8 = -_g7;\nlet _g9 = vec(_g6, _g8);\nlet _g10 = 0.2;\nlet _g11 = age;\nlet _g12 = sin(_g11);\nlet _g13 = false;\nlet _g14 = 0.0;\nthrust = _g10;\nturn = _g12;\ndivide = _g13;\ngrow = _g14;\nri001 = _g2;\nrf001 = _g3;\nrb001 = _g4;\nrs001 = _g5;\nrv001 = _g9;\n",
+      "graph": {
+        "version": 1,
+        "nodes": [
+          {
+            "id": 0,
+            "kind": "register",
+            "type": "integer",
+            "label": "ri001",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 1,
+            "kind": "constant",
+            "type": "integer",
+            "label": "1",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 2,
+            "kind": "binary",
+            "type": "integer",
+            "label": "+",
+            "inputs": [
+              0,
+              1
+            ],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 3,
+            "kind": "sensor",
+            "type": "scalar",
+            "label": "energy.fraction",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 4,
+            "kind": "sensor",
+            "type": "boolean",
+            "label": "food.visible",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 5,
+            "kind": "constant",
+            "type": "string",
+            "label": "\"v1\"",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 6,
+            "kind": "sensor",
+            "type": "scalar",
+            "label": "flow.x",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 7,
+            "kind": "sensor",
+            "type": "scalar",
+            "label": "flow.y",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 8,
+            "kind": "unary",
+            "type": "scalar",
+            "label": "-",
+            "inputs": [
+              7
+            ],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 9,
+            "kind": "call",
+            "type": "vec2",
+            "label": "vec",
+            "inputs": [
+              6,
+              8
+            ],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 10,
+            "kind": "constant",
+            "type": "scalar",
+            "label": "0.2",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 11,
+            "kind": "sensor",
+            "type": "scalar",
+            "label": "age",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 12,
+            "kind": "call",
+            "type": "scalar",
+            "label": "sin",
+            "inputs": [
+              11
+            ],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 13,
+            "kind": "constant",
+            "type": "boolean",
+            "label": "false",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 14,
+            "kind": "constant",
+            "type": "scalar",
+            "label": "0.0",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          }
+        ],
+        "roots": [
+          {
+            "id": "output:thrust",
+            "kind": "output",
+            "name": "thrust",
+            "type": "scalar",
+            "value": 10,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "output:turn",
+            "kind": "output",
+            "name": "turn",
+            "type": "scalar",
+            "value": 12,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "output:divide",
+            "kind": "output",
+            "name": "divide",
+            "type": "boolean",
+            "value": 13,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "output:grow",
+            "kind": "output",
+            "name": "grow",
+            "type": "scalar",
+            "value": 14,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "output:photosynthesize",
+            "kind": "output",
+            "name": "photosynthesize",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0"
+          },
+          {
+            "id": "output:engulf",
+            "kind": "output",
+            "name": "engulf",
+            "type": "boolean",
+            "value": null,
+            "guard": null,
+            "default": "false"
+          },
+          {
+            "id": "output:bite",
+            "kind": "output",
+            "name": "bite",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0"
+          },
+          {
+            "id": "output:defend",
+            "kind": "output",
+            "name": "defend",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0"
+          },
+          {
+            "id": "output:repair",
+            "kind": "output",
+            "name": "repair",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0"
+          },
+          {
+            "id": "output:absorb",
+            "kind": "output",
+            "name": "absorb",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "1"
+          },
+          {
+            "id": "output:invest.propulsion",
+            "kind": "output",
+            "name": "invest.propulsion",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "output:invest.photosynthesis",
+            "kind": "output",
+            "name": "invest.photosynthesis",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "output:invest.digestion",
+            "kind": "output",
+            "name": "invest.digestion",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "output:invest.armor",
+            "kind": "output",
+            "name": "invest.armor",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "output:invest.sensing",
+            "kind": "output",
+            "name": "invest.sensing",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "write:ri001",
+            "kind": "write",
+            "name": "ri001",
+            "type": "integer",
+            "value": 2,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "write:rf001",
+            "kind": "write",
+            "name": "rf001",
+            "type": "scalar",
+            "value": 3,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "write:rb001",
+            "kind": "write",
+            "name": "rb001",
+            "type": "boolean",
+            "value": 4,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "write:rs001",
+            "kind": "write",
+            "name": "rs001",
+            "type": "string",
+            "value": 5,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "write:rv001",
+            "kind": "write",
+            "name": "rv001",
+            "type": "vec2",
+            "value": 9,
+            "guard": null,
+            "default": null
+          }
+        ]
+      }
+    }
+  ],
+  "cells": [
+    {
+      "packed": [
+        1,
+        1,
+        6.2932233810424805,
+        113.23809051513672,
+        7.923076152801514,
+        2.9604501724243164,
+        0.3672066628932953,
+        95.45344543457031,
+        0.10000000149011612,
+        0,
+        0,
+        7,
+        0,
+        120,
+        0,
+        0,
+        120,
+        0,
+        1,
+        200,
+        0.6499999761581421,
+        5,
+        0.012500000186264515,
+        0,
+        0,
+        0.5,
+        0,
+        0,
+        0,
+        0,
+        0,
+        120,
+        0,
+        0,
+        0,
+        120,
+        0,
+        0,
+        1,
+        0,
+        0.5249999761581421,
+        2,
+        0.2829919159412384,
+        2.070378303527832,
+        0.25,
+        0.20000000298023224,
+        0.20000000298023224,
+        0.20000000298023224,
+        0.20000000298023224,
+        0.20000000298023224,
+        120,
+        0,
+        0.30000001192092896
+      ],
+      "memory": [
+        {
+          "name": "ri001",
+          "type": "integer",
+          "value": 3
+        },
+        {
+          "name": "rf001",
+          "type": "scalar",
+          "value": 0.4774676289667188
+        },
+        {
+          "name": "rb001",
+          "type": "boolean",
+          "value": false
+        },
+        {
+          "name": "rs001",
+          "type": "string",
+          "value": "v1"
+        },
+        {
+          "name": "rv001",
+          "type": "vec2",
+          "value": [
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "packed": [
+        2,
+        2,
+        213.77633666992188,
+        29.376569747924805,
+        -3.9858438968658447,
+        7.460057258605957,
+        2.071120023727417,
+        90.78247833251953,
+        0.10000000149011612,
+        0,
+        0,
+        7,
+        0,
+        120,
+        0,
+        0,
+        120,
+        0,
+        1,
+        200,
+        0.6499999761581421,
+        5,
+        0.012500000186264515,
+        0,
+        0,
+        0.5,
+        0,
+        0,
+        0,
+        0,
+        0,
+        120,
+        0,
+        0,
+        0,
+        120,
+        0,
+        0,
+        1,
+        0,
+        0.5249999761581421,
+        2,
+        0.2804258465766907,
+        -2.208502769470215,
+        0.25,
+        0.20000000298023224,
+        0.20000000298023224,
+        0.20000000298023224,
+        0.20000000298023224,
+        0.20000000298023224,
+        120,
+        0,
+        0.30000001192092896
+      ],
+      "memory": [
+        {
+          "name": "ri001",
+          "type": "integer",
+          "value": 3
+        },
+        {
+          "name": "rf001",
+          "type": "scalar",
+          "value": 0.4541128071655332
+        },
+        {
+          "name": "rb001",
+          "type": "boolean",
+          "value": false
+        },
+        {
+          "name": "rs001",
+          "type": "string",
+          "value": "v1"
+        },
+        {
+          "name": "rv001",
+          "type": "vec2",
+          "value": [
+            0,
+            0
+          ]
+        }
+      ]
+    }
+  ]
+}

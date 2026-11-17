@@ -383,6 +383,29 @@ export class Renderer {
     context.rotate(cell.angle);
     const size = radius * (96 / 21.5);
     context.drawImage(this.sprite(color), -size / 2, -size / 2, size, size);
+    if (cell.bodyPhotosynthesis >= 0.05) {
+      context.fillStyle = 'rgba(136,211,137,0.85)';
+      context.beginPath();
+      context.ellipse(-radius * 0.32, -radius * 0.36, radius * 0.22, radius * 0.13, -0.5, 0, Math.PI * 2);
+      context.ellipse(-radius * 0.38, radius * 0.32, radius * 0.21, radius * 0.12, 0.5, 0, Math.PI * 2);
+      context.fill();
+    }
+    if (cell.gutEnergy > 0 && cell.gutCapacity > 0) {
+      const fullness = clamp(cell.gutEnergy / cell.gutCapacity, 0, 1);
+      context.fillStyle = `rgba(222,170,102,${0.35 + fullness * 0.5})`;
+      context.beginPath();
+      context.arc(radius * 0.15, radius * 0.08, radius * (0.12 + 0.22 * Math.sqrt(fullness)), 0, Math.PI * 2);
+      context.fill();
+    }
+    if (cell.bodyAttack >= 0.05) {
+      context.strokeStyle = 'rgba(235,143,129,0.85)';
+      context.lineWidth = 1.1;
+      context.beginPath();
+      context.moveTo(radius * 0.62, -radius * 0.35);
+      context.lineTo(radius * 1.05, 0);
+      context.lineTo(radius * 0.62, radius * 0.35);
+      context.stroke();
+    }
     context.restore();
     if (cell.photosynthesisRate > 0.05) {
       context.save();

@@ -1,0 +1,739 @@
+{
+  "startedAt": "2026-11-17T12:38:14.396Z",
+  "wasmSha256": "4ec1fc31df63f8c8a086723a643137e62644cf064846810031eef909d55c31f5",
+  "wasmBytes": 340316,
+  "template": "Mixed ecosystem",
+  "environment": {
+    "id": "builtin:environment:sunlit-pond",
+    "name": "Sunlit pond",
+    "description": "Light, a warm patch, a gentle vortex, and a nutrient spring.",
+    "createdAt": 0,
+    "updatedAt": 0,
+    "config": {
+      "foodRate": 6,
+      "ambientTemperature": 0.5,
+      "ambientLight": 0.12,
+      "currentStrength": 3,
+      "initialNutrients": 0.3,
+      "sources": [
+        {
+          "kind": 0,
+          "x": 624,
+          "y": 364.8,
+          "strength": 0.95,
+          "radius": 280
+        },
+        {
+          "kind": 1,
+          "x": 936,
+          "y": 243.2,
+          "strength": 0.35,
+          "radius": 180
+        },
+        {
+          "kind": 2,
+          "x": 240,
+          "y": 478.8,
+          "strength": 0.25,
+          "radius": 260
+        },
+        {
+          "kind": 3,
+          "x": 576,
+          "y": 418,
+          "strength": 0.7,
+          "radius": 220
+        }
+      ]
+    }
+  },
+  "populations": [
+    {
+      "genomeId": "builtin:genome:forager",
+      "count": 14,
+      "id": "builtin:genome:forager",
+      "name": "Forager",
+      "source": "# Follow food. Wander when nothing is near.\nlet wander = sin(age * 0.7 + id) * 0.6;\nlet seek = clamp(food.angle * 1.8, -1, 1);\n\nturn = if food.visible then seek else wander;\nthrust = if food.visible then 0.8 else 0.45;\n\n# Growth needs stored nutrients as well as energy.\nabsorb = 1;\ngrow = if size < 2 && energy > 70 * size && nutrient.stored > 0.02 then 1 else 0;\ndivide = size >= 2 && energy > 125 * size && age > 5;\n\n# All five targets are explicit; the body changes gradually.\ninvest.propulsion = 0.25;\ninvest.photosynthesis = 0;\ninvest.digestion = 0.35;\ninvest.armor = 0.10;\ninvest.sensing = 0.30;",
+      "description": "Invest in digestion and sensing. Gather food and minerals, then grow and divide.",
+      "createdAt": 0,
+      "updatedAt": 0
+    },
+    {
+      "genomeId": "builtin:genome:phototroph",
+      "count": 14,
+      "id": "builtin:genome:phototroph",
+      "name": "Phototroph",
+      "source": "# Try the Sunlit pond environment, or place a light.\nlet hot = temperature.value > 0.8;\nlet needs_minerals = nutrient.fraction < 0.25;\nlet away = if temperature.angle > 0\n           then temperature.angle - 3.141593\n           else temperature.angle + 3.141593;\nturn = if hot then clamp(away * 1.5, -1, 1)\n       else if needs_minerals then clamp(nutrient.angle * 1.8, -1, 1)\n       else clamp(light.angle * 1.8, -1, 1);\nthrust = if hot then 0.85 else if needs_minerals then 0.5\n         else if light.level < 0.6 then 0.45 else 0.08;\nphotosynthesize = if light.level > 0.08 then 1 else 0;\nabsorb = 1;\nrepair = if integrity < 0.9 && energy.fraction > 0.4 then 0.5 else 0;\ngrow = if size < 2 && energy.fraction > 0.45 && nutrient.stored > 0.02 then 1 else 0;\ndivide = size >= 2 && energy.fraction > 0.72;\n\n# Digestion also enables uptake from the water.\ninvest.propulsion = 0.12;\ninvest.photosynthesis = 0.50;\ninvest.digestion = 0.20;\ninvest.armor = 0.08;\ninvest.sensing = 0.10;",
+      "description": "Build a photosynthetic body. Seek light and mineral-rich water, and avoid excess heat.",
+      "createdAt": 0,
+      "updatedAt": 0
+    },
+    {
+      "genomeId": "builtin:genome:predator",
+      "count": 4,
+      "id": "builtin:genome:predator",
+      "name": "Predator",
+      "source": "# Targets are chosen by the engine from the sensed world.\nlet hunt = prey.visible && !prey.same_genome;\nlet seek = if hunt then prey.angle else food.angle;\nlet wander = sin(age * 0.6 + id) * 0.5;\nturn = if hunt || food.visible then clamp(seek * 2, -1, 1) else wander;\nthrust = if hunt then 0.95 else if food.visible then 0.8 else 0.4;\nengulf = hunt && size >= 1.6 * prey.size;\nbite = if hunt then 1 else 0;\ndefend = if threat.visible then 0.6 else 0;\nrepair = if integrity < 0.9 && energy.fraction > 0.4 then 0.5 else 0;\nabsorb = 1;\ngrow = if size < 3 && energy.fraction > 0.4 && nutrient.stored > 0.02 then 1 else 0;\ndivide = size >= 3 && energy.fraction > 0.78 && age > 10;\n\ninvest.propulsion = 0.28;\ninvest.photosynthesis = 0;\ninvest.digestion = 0.35;\ninvest.armor = 0.17;\ninvest.sensing = 0.20;",
+      "description": "Invest in movement, digestion, and armor. Recycle prey into energy and minerals.",
+      "createdAt": 0,
+      "updatedAt": 0
+    }
+  ],
+  "mutationRate": 0,
+  "initialFood": 360,
+  "seeds": [
+    42,
+    7,
+    2026
+  ],
+  "sampleSeconds": [
+    0,
+    30,
+    120,
+    300
+  ],
+  "results": [
+    {
+      "seed": 42,
+      "wallSeconds": 25.159,
+      "samples": [
+        {
+          "seconds": 0,
+          "population": 32,
+          "foodParticles": 360,
+          "births": 0,
+          "deaths": 0,
+          "foodParticlesEaten": 0,
+          "predations": 0,
+          "biteTicks": 0,
+          "photosynthesisEnergy": 0,
+          "lineages": [
+            {
+              "name": "Forager",
+              "count": 14,
+              "biomass": 14,
+              "energy": 1314.438,
+              "meanEnergy": 93.888,
+              "meanEnergyFraction": 0.469,
+              "meanSize": 1,
+              "meanIntegrity": 1,
+              "meanLight": 0.184,
+              "photosynthesisRate": 0,
+              "maxGeneration": 0
+            },
+            {
+              "name": "Phototroph",
+              "count": 14,
+              "biomass": 14,
+              "energy": 1307.008,
+              "meanEnergy": 93.358,
+              "meanEnergyFraction": 0.467,
+              "meanSize": 1,
+              "meanIntegrity": 1,
+              "meanLight": 0.288,
+              "photosynthesisRate": 0,
+              "maxGeneration": 0
+            },
+            {
+              "name": "Predator",
+              "count": 4,
+              "biomass": 4,
+              "energy": 390.781,
+              "meanEnergy": 97.695,
+              "meanEnergyFraction": 0.488,
+              "meanSize": 1,
+              "meanIntegrity": 1,
+              "meanLight": 0.172,
+              "photosynthesisRate": 0,
+              "maxGeneration": 0
+            }
+          ]
+        },
+        {
+          "seconds": 30,
+          "population": 26,
+          "foodParticles": 89,
+          "births": 19,
+          "deaths": 25,
+          "foodParticlesEaten": 531,
+          "predations": 25,
+          "biteTicks": 1175,
+          "photosynthesisEnergy": 786.513,
+          "lineages": [
+            {
+              "name": "Forager",
+              "count": 17,
+              "biomass": 32.079,
+              "energy": 2671.173,
+              "meanEnergy": 157.128,
+              "meanEnergyFraction": 0.413,
+              "meanSize": 1.887,
+              "meanIntegrity": 0.811,
+              "meanLight": 0.242,
+              "photosynthesisRate": 0,
+              "maxGeneration": 2
+            },
+            {
+              "name": "Phototroph",
+              "count": 1,
+              "biomass": 1.6,
+              "energy": 143.77,
+              "meanEnergy": 143.77,
+              "meanEnergyFraction": 0.449,
+              "meanSize": 1.6,
+              "meanIntegrity": 1,
+              "meanLight": 0.679,
+              "photosynthesisRate": 5.493,
+              "maxGeneration": 0
+            },
+            {
+              "name": "Predator",
+              "count": 8,
+              "biomass": 20.3,
+              "energy": 2014.072,
+              "meanEnergy": 251.759,
+              "meanEnergyFraction": 0.505,
+              "meanSize": 2.537,
+              "meanIntegrity": 0.965,
+              "meanLight": 0.241,
+              "photosynthesisRate": 0,
+              "maxGeneration": 2
+            }
+          ]
+        },
+        {
+          "seconds": 120,
+          "population": 17,
+          "foodParticles": 47,
+          "births": 30,
+          "deaths": 45,
+          "foodParticlesEaten": 1208,
+          "predations": 45,
+          "biteTicks": 1850,
+          "photosynthesisEnergy": 861.673,
+          "lineages": [
+            {
+              "name": "Forager",
+              "count": 0,
+              "biomass": 0,
+              "energy": 0,
+              "meanEnergy": null,
+              "meanEnergyFraction": null,
+              "meanSize": null,
+              "meanIntegrity": null,
+              "meanLight": null,
+              "photosynthesisRate": 0,
+              "maxGeneration": null
+            },
+            {
+              "name": "Phototroph",
+              "count": 0,
+              "biomass": 0,
+              "energy": 0,
+              "meanEnergy": null,
+              "meanEnergyFraction": null,
+              "meanSize": null,
+              "meanIntegrity": null,
+              "meanLight": null,
+              "photosynthesisRate": 0,
+              "maxGeneration": null
+            },
+            {
+              "name": "Predator",
+              "count": 17,
+              "biomass": 46.117,
+              "energy": 4182.348,
+              "meanEnergy": 246.02,
+              "meanEnergyFraction": 0.461,
+              "meanSize": 2.713,
+              "meanIntegrity": 0.93,
+              "meanLight": 0.35,
+              "photosynthesisRate": 0,
+              "maxGeneration": 3
+            }
+          ]
+        },
+        {
+          "seconds": 300,
+          "population": 18,
+          "foodParticles": 50,
+          "births": 35,
+          "deaths": 49,
+          "foodParticlesEaten": 2299,
+          "predations": 45,
+          "biteTicks": 1850,
+          "photosynthesisEnergy": 861.673,
+          "lineages": [
+            {
+              "name": "Forager",
+              "count": 0,
+              "biomass": 0,
+              "energy": 0,
+              "meanEnergy": null,
+              "meanEnergyFraction": null,
+              "meanSize": null,
+              "meanIntegrity": null,
+              "meanLight": null,
+              "photosynthesisRate": 0,
+              "maxGeneration": null
+            },
+            {
+              "name": "Phototroph",
+              "count": 0,
+              "biomass": 0,
+              "energy": 0,
+              "meanEnergy": null,
+              "meanEnergyFraction": null,
+              "meanSize": null,
+              "meanIntegrity": null,
+              "meanLight": null,
+              "photosynthesisRate": 0,
+              "maxGeneration": null
+            },
+            {
+              "name": "Predator",
+              "count": 18,
+              "biomass": 52.775,
+              "energy": 3861.888,
+              "meanEnergy": 214.549,
+              "meanEnergyFraction": 0.364,
+              "meanSize": 2.932,
+              "meanIntegrity": 0.901,
+              "meanLight": 0.301,
+              "photosynthesisRate": 0,
+              "maxGeneration": 4
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "seed": 7,
+      "wallSeconds": 29.743,
+      "samples": [
+        {
+          "seconds": 0,
+          "population": 32,
+          "foodParticles": 360,
+          "births": 0,
+          "deaths": 0,
+          "foodParticlesEaten": 0,
+          "predations": 0,
+          "biteTicks": 0,
+          "photosynthesisEnergy": 0,
+          "lineages": [
+            {
+              "name": "Forager",
+              "count": 14,
+              "biomass": 14,
+              "energy": 1331.891,
+              "meanEnergy": 95.135,
+              "meanEnergyFraction": 0.476,
+              "meanSize": 1,
+              "meanIntegrity": 1,
+              "meanLight": 0.13,
+              "photosynthesisRate": 0,
+              "maxGeneration": 0
+            },
+            {
+              "name": "Phototroph",
+              "count": 14,
+              "biomass": 14,
+              "energy": 1321.873,
+              "meanEnergy": 94.42,
+              "meanEnergyFraction": 0.472,
+              "meanSize": 1,
+              "meanIntegrity": 1,
+              "meanLight": 0.299,
+              "photosynthesisRate": 0,
+              "maxGeneration": 0
+            },
+            {
+              "name": "Predator",
+              "count": 4,
+              "biomass": 4,
+              "energy": 376.737,
+              "meanEnergy": 94.184,
+              "meanEnergyFraction": 0.471,
+              "meanSize": 1,
+              "meanIntegrity": 1,
+              "meanLight": 0.361,
+              "photosynthesisRate": 0,
+              "maxGeneration": 0
+            }
+          ]
+        },
+        {
+          "seconds": 30,
+          "population": 34,
+          "foodParticles": 63,
+          "births": 16,
+          "deaths": 14,
+          "foodParticlesEaten": 513,
+          "predations": 14,
+          "biteTicks": 550,
+          "photosynthesisEnergy": 829.431,
+          "lineages": [
+            {
+              "name": "Forager",
+              "count": 22,
+              "biomass": 42.392,
+              "energy": 3426.302,
+              "meanEnergy": 155.741,
+              "meanEnergyFraction": 0.398,
+              "meanSize": 1.927,
+              "meanIntegrity": 0.877,
+              "meanLight": 0.222,
+              "photosynthesisRate": 0,
+              "maxGeneration": 1
+            },
+            {
+              "name": "Phototroph",
+              "count": 6,
+              "biomass": 10.158,
+              "energy": 985.128,
+              "meanEnergy": 164.188,
+              "meanEnergyFraction": 0.472,
+              "meanSize": 1.693,
+              "meanIntegrity": 0.999,
+              "meanLight": 0.72,
+              "photosynthesisRate": 34.658,
+              "maxGeneration": 0
+            },
+            {
+              "name": "Predator",
+              "count": 6,
+              "biomass": 15.4,
+              "energy": 1714.753,
+              "meanEnergy": 285.792,
+              "meanEnergyFraction": 0.569,
+              "meanSize": 2.567,
+              "meanIntegrity": 1,
+              "meanLight": 0.426,
+              "photosynthesisRate": 0,
+              "maxGeneration": 1
+            }
+          ]
+        },
+        {
+          "seconds": 120,
+          "population": 16,
+          "foodParticles": 55,
+          "births": 33,
+          "deaths": 49,
+          "foodParticlesEaten": 1196,
+          "predations": 46,
+          "biteTicks": 1489,
+          "photosynthesisEnergy": 1528.127,
+          "lineages": [
+            {
+              "name": "Forager",
+              "count": 0,
+              "biomass": 0,
+              "energy": 0,
+              "meanEnergy": null,
+              "meanEnergyFraction": null,
+              "meanSize": null,
+              "meanIntegrity": null,
+              "meanLight": null,
+              "photosynthesisRate": 0,
+              "maxGeneration": null
+            },
+            {
+              "name": "Phototroph",
+              "count": 0,
+              "biomass": 0,
+              "energy": 0,
+              "meanEnergy": null,
+              "meanEnergyFraction": null,
+              "meanSize": null,
+              "meanIntegrity": null,
+              "meanLight": null,
+              "photosynthesisRate": 0,
+              "maxGeneration": null
+            },
+            {
+              "name": "Predator",
+              "count": 16,
+              "biomass": 45.917,
+              "energy": 4140.778,
+              "meanEnergy": 258.799,
+              "meanEnergyFraction": 0.446,
+              "meanSize": 2.87,
+              "meanIntegrity": 0.918,
+              "meanLight": 0.327,
+              "photosynthesisRate": 0,
+              "maxGeneration": 3
+            }
+          ]
+        },
+        {
+          "seconds": 300,
+          "population": 18,
+          "foodParticles": 51,
+          "births": 36,
+          "deaths": 50,
+          "foodParticlesEaten": 2282,
+          "predations": 46,
+          "biteTicks": 1489,
+          "photosynthesisEnergy": 1528.127,
+          "lineages": [
+            {
+              "name": "Forager",
+              "count": 0,
+              "biomass": 0,
+              "energy": 0,
+              "meanEnergy": null,
+              "meanEnergyFraction": null,
+              "meanSize": null,
+              "meanIntegrity": null,
+              "meanLight": null,
+              "photosynthesisRate": 0,
+              "maxGeneration": null
+            },
+            {
+              "name": "Phototroph",
+              "count": 0,
+              "biomass": 0,
+              "energy": 0,
+              "meanEnergy": null,
+              "meanEnergyFraction": null,
+              "meanSize": null,
+              "meanIntegrity": null,
+              "meanLight": null,
+              "photosynthesisRate": 0,
+              "maxGeneration": null
+            },
+            {
+              "name": "Predator",
+              "count": 18,
+              "biomass": 52.816,
+              "energy": 4300.103,
+              "meanEnergy": 238.895,
+              "meanEnergyFraction": 0.404,
+              "meanSize": 2.934,
+              "meanIntegrity": 0.831,
+              "meanLight": 0.255,
+              "photosynthesisRate": 0,
+              "maxGeneration": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "seed": 2026,
+      "wallSeconds": 23.95,
+      "samples": [
+        {
+          "seconds": 0,
+          "population": 32,
+          "foodParticles": 360,
+          "births": 0,
+          "deaths": 0,
+          "foodParticlesEaten": 0,
+          "predations": 0,
+          "biteTicks": 0,
+          "photosynthesisEnergy": 0,
+          "lineages": [
+            {
+              "name": "Forager",
+              "count": 14,
+              "biomass": 14,
+              "energy": 1292.755,
+              "meanEnergy": 92.34,
+              "meanEnergyFraction": 0.462,
+              "meanSize": 1,
+              "meanIntegrity": 1,
+              "meanLight": 0.189,
+              "photosynthesisRate": 0,
+              "maxGeneration": 0
+            },
+            {
+              "name": "Phototroph",
+              "count": 14,
+              "biomass": 14,
+              "energy": 1329.872,
+              "meanEnergy": 94.991,
+              "meanEnergyFraction": 0.475,
+              "meanSize": 1,
+              "meanIntegrity": 1,
+              "meanLight": 0.165,
+              "photosynthesisRate": 0,
+              "maxGeneration": 0
+            },
+            {
+              "name": "Predator",
+              "count": 4,
+              "biomass": 4,
+              "energy": 379.67,
+              "meanEnergy": 94.918,
+              "meanEnergyFraction": 0.475,
+              "meanSize": 1,
+              "meanIntegrity": 1,
+              "meanLight": 0.18,
+              "photosynthesisRate": 0,
+              "maxGeneration": 0
+            }
+          ]
+        },
+        {
+          "seconds": 30,
+          "population": 25,
+          "foodParticles": 97,
+          "births": 17,
+          "deaths": 24,
+          "foodParticlesEaten": 523,
+          "predations": 24,
+          "biteTicks": 1107,
+          "photosynthesisEnergy": 489.235,
+          "lineages": [
+            {
+              "name": "Forager",
+              "count": 14,
+              "biomass": 27.871,
+              "energy": 2421.297,
+              "meanEnergy": 172.95,
+              "meanEnergyFraction": 0.433,
+              "meanSize": 1.991,
+              "meanIntegrity": 0.73,
+              "meanLight": 0.219,
+              "photosynthesisRate": 0,
+              "maxGeneration": 2
+            },
+            {
+              "name": "Phototroph",
+              "count": 3,
+              "biomass": 4.483,
+              "energy": 391.61,
+              "meanEnergy": 130.537,
+              "meanEnergyFraction": 0.428,
+              "meanSize": 1.494,
+              "meanIntegrity": 1,
+              "meanLight": 0.532,
+              "photosynthesisRate": 12.354,
+              "maxGeneration": 0
+            },
+            {
+              "name": "Predator",
+              "count": 8,
+              "biomass": 22.358,
+              "energy": 1865.281,
+              "meanEnergy": 233.16,
+              "meanEnergyFraction": 0.414,
+              "meanSize": 2.795,
+              "meanIntegrity": 0.96,
+              "meanLight": 0.249,
+              "photosynthesisRate": 0,
+              "maxGeneration": 1
+            }
+          ]
+        },
+        {
+          "seconds": 120,
+          "population": 17,
+          "foodParticles": 48,
+          "births": 34,
+          "deaths": 49,
+          "foodParticlesEaten": 1207,
+          "predations": 48,
+          "biteTicks": 1766,
+          "photosynthesisEnergy": 1460.751,
+          "lineages": [
+            {
+              "name": "Forager",
+              "count": 0,
+              "biomass": 0,
+              "energy": 0,
+              "meanEnergy": null,
+              "meanEnergyFraction": null,
+              "meanSize": null,
+              "meanIntegrity": null,
+              "meanLight": null,
+              "photosynthesisRate": 0,
+              "maxGeneration": null
+            },
+            {
+              "name": "Phototroph",
+              "count": 0,
+              "biomass": 0,
+              "energy": 0,
+              "meanEnergy": null,
+              "meanEnergyFraction": null,
+              "meanSize": null,
+              "meanIntegrity": null,
+              "meanLight": null,
+              "photosynthesisRate": 0,
+              "maxGeneration": null
+            },
+            {
+              "name": "Predator",
+              "count": 17,
+              "biomass": 48.917,
+              "energy": 4239.07,
+              "meanEnergy": 249.357,
+              "meanEnergyFraction": 0.427,
+              "meanSize": 2.877,
+              "meanIntegrity": 0.93,
+              "meanLight": 0.2,
+              "photosynthesisRate": 0,
+              "maxGeneration": 2
+            }
+          ]
+        },
+        {
+          "seconds": 300,
+          "population": 18,
+          "foodParticles": 39,
+          "births": 39,
+          "deaths": 53,
+          "foodParticlesEaten": 2304,
+          "predations": 48,
+          "biteTicks": 1766,
+          "photosynthesisEnergy": 1460.751,
+          "lineages": [
+            {
+              "name": "Forager",
+              "count": 0,
+              "biomass": 0,
+              "energy": 0,
+              "meanEnergy": null,
+              "meanEnergyFraction": null,
+              "meanSize": null,
+              "meanIntegrity": null,
+              "meanLight": null,
+              "photosynthesisRate": 0,
+              "maxGeneration": null
+            },
+            {
+              "name": "Phototroph",
+              "count": 0,
+              "biomass": 0,
+              "energy": 0,
+              "meanEnergy": null,
+              "meanEnergyFraction": null,
+              "meanSize": null,
+              "meanIntegrity": null,
+              "meanLight": null,
+              "photosynthesisRate": 0,
+              "maxGeneration": null
+            },
+            {
+              "name": "Predator",
+              "count": 18,
+              "biomass": 52.319,
+              "energy": 4239.816,
+              "meanEnergy": 235.545,
+              "meanEnergyFraction": 0.402,
+              "meanSize": 2.907,
+              "meanIntegrity": 0.785,
+              "meanLight": 0.268,
+              "photosynthesisRate": 0,
+              "maxGeneration": 3
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
