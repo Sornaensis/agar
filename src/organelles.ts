@@ -2,10 +2,10 @@ import type { OrganelleKind } from './engine';
 
 /** Display names mirror the engine's physical families; the Rust body is authoritative. */
 export const ORGANELLE_CATALOG: ReadonlyArray<Readonly<{ kind: OrganelleKind; name: string; minimumMass: number; description: string; color: string }>> = Object.freeze([
-  { kind: 'core', name: 'Core', minimumMass: 0.04, description: 'Essential assembly machinery and basic metabolism. Each daughter needs a functional core.', color: '#d9c3f2' },
+  { kind: 'core', name: 'Core', minimumMass: 0.04, description: 'Translates family-specific assembly proteins and assembles organs using shared finite throughput. Each daughter needs a functional core.', color: '#d9c3f2' },
   { kind: 'photosynthetic', name: 'Photosynthetic unit', minimumMass: 0.04, description: 'Converts shared light into energy. Requires internal room and exposed membrane.', color: '#83d49b' },
   { kind: 'metabolic', name: 'Metabolic complex', minimumMass: 0.03, description: 'Raises energy-processing throughput; it needs an external energy source.', color: '#d9bc7c' },
-  { kind: 'digestive', name: 'Digestive vacuole', minimumMass: 0.04, description: 'Stores captured organic material and processes it into usable reserves.', color: '#e8b875' },
+  { kind: 'digestive', name: 'Digestive vacuole', minimumMass: 0.04, description: 'Stores exudate, tissue and waste separately. Processing is shared: tissue produces waste, and refractory waste is slower and yields less energy.', color: '#e8b875' },
   { kind: 'reserve', name: 'Reserve vacuole', minimumMass: 0.04, description: 'Adds energy and mineral storage. Its compartment occupies internal space.', color: '#a3b9c6' },
   { kind: 'transporter', name: 'Mineral transporter', minimumMass: 0.015, description: 'Absorbs dissolved minerals through the membrane at a paid, supply-limited rate.', color: '#7bd5b5' },
   { kind: 'phagocyte', name: 'Phagocytic cup', minimumMass: 0.025, description: 'Captures contacting particles and manageable objects into digestive space.', color: '#d7aa72' },

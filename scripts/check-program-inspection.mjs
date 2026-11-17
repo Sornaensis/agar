@@ -52,7 +52,7 @@ assert.equal(trace.bindings.find(item => item.name === 'tracked').value,'');
 assert.equal(trace.outputs.find(item => item.name === 'target.flagellum.count').value,2);
 assert.equal(trace.outputs.find(item => item.name === 'target.flagellum.count').type,'integer');
 assert.equal(trace.outputs.find(item => item.name === 'scan.target').type,'string');
-assert.equal(trace.signals.length,144); assert.equal(trace.outputs.length,78);
+assert.equal(trace.signals.length,169); assert.equal(trace.outputs.length,81);
 const bodyBefore=engine.cellBody(cellId);
 assert.ok(bodyBefore.spaceUsed<=bodyBefore.spaceCapacity);
 assert.ok(bodyBefore.surfaceUsed<=bodyBefore.surfaceCapacity);

@@ -8,13 +8,33 @@ The 1,200 × 760 world is toroidal and advances at a fixed 1/30 second. Programs
 
 Envelope area, material mass, usable energy, digestive contents, and embodied structural energy are distinct ledgers. Radius is `7 × sqrt(body.area)`. Growing the enclosing frame costs minerals and energy; it creates space without creating organelles. Organelle material must come from cell reserves. Internal footprints are limited by body area, and membrane attachment capacity scales with perimeter. Damaged or incomplete structures still occupy space and retain their material.
 
-The former area-4 ceiling is removed. The remaining geometric bound is `(760 / 8 / 7)²`, approximately 184.18 area units: the largest diameter is one quarter of the world's shorter dimension. This bounds toroidal contact geometry, separately from physical growth costs. There is no population cap. Food remains bounded to 1,200 particles; the genome registry remains bounded to 2,048 entries and 64 MiB of estimated allocations. Allocations and identifier exhaustion fail explicitly.
+The former area-4 ceiling is removed. The remaining geometric bound is `(760 / 8 / 7)²`, approximately 184.18 area units: the largest diameter is one quarter of the world's shorter dimension. This bounds toroidal contact geometry, separately from physical growth costs. There is no population cap or maximum cell age. Energy exhaustion, damage and loss of essential machinery still cause death. Organic particles have no count cap; the genome registry remains bounded to 2,048 entries and 64 MiB of estimated allocations. Allocations and identifier exhaustion fail explicitly.
 
-Every organelle has a stable local identifier, family, built mass, integrity, and recorded embodied energy. Family targets do not grant capabilities. Positive construction effort approaches a requested count and unit mass using available resources and assembly throughput. Competing requests share finite budgets; source statement order does not confer priority. Lowering targets leaves structures intact until explicit recycling. Recycling and repair are paid operations. Core machinery cannot be dismantled below the viable minimum. Compartment loss releases accounted overflow instead of deleting stored material.
+Every organelle has a stable local identifier, family, built mass, integrity, and recorded embodied energy. Family targets do not grant capabilities. Family-specific expression spends minerals and energy to produce persistent assembly proteins. Count/size targets assemble organs only from matching protein already present before the tick. Translation and assembly share core work and physical budgets; leaving an irrelevant gene on still produces costly protein. Competing requests share finite budgets; source statement order does not confer priority. Lowering targets leaves structures intact until explicit recycling. Recycling and repair are paid operations. Core machinery cannot be dismantled below the viable minimum. Compartment loss releases accounted overflow instead of deleting stored material.
 
 Every introduced founder has area 1, one core of mass 0.04, 68 usable energy and 0.6 free minerals. Core compartments hold those finite reserves. The introduction ledger records 99.2 energy (68 usable, 7.8 embodied and 23.4 fabrication heat) and 0.99 mineral material (0.39 structure and 0.6 reserve). No optional organelles are present. The same constructor is used for every genome; the program must build its own capabilities through ordinary paid ticks. Mutations change construction requests, not existing physical organs.
 
-Division requires doubled grown frame, sufficient reserves, core machinery for two viable bodies, and a feasible partition. Actual discrete organs are assigned to daughters; they are not copied. Producers must construct sufficient photosynthetic hardware for both descendants if both are to remain producers. The parent retains memory; the daughter starts with empty registers. Death returns the remaining accounted material and recoverable energy once. Damage, dismantling, division, and death cannot create minerals or recover unrecorded construction energy.
+Division requires doubled grown frame, sufficient reserves, core machinery for two viable bodies, and a feasible partition. Actual discrete organs are assigned to daughters; they are not copied. Protein pools and their embodied energy split proportionally with cytoplasm. Producers must construct sufficient photosynthetic hardware for both descendants if both are to remain producers. The parent retains memory; the daughter starts with empty registers. Death returns the remaining accounted material and recoverable energy once. Damage, dismantling, division, and death cannot create minerals or recover unrecorded construction energy.
+
+### Protein expression and assembly
+
+`protein.<family>` reports conserved construction material awaiting assembly. It counts toward body mass and internal space at one space unit per material unit. Its upkeep is 0.6 energy per material per second and its half-life is 45 seconds. Turnover returns its mineral mass and dissipates its embodied energy; released room/material can fund work on later ticks.
+
+Translation uses 60% of the family's construction energy and 0.6 units of shared core work per material; assembly uses the remaining 40% and 0.4 work. Shared capacity is `0.55 × functional core mass` per second. Thus `0.6 × synthesized mass + 0.4 × assembled mass`, plus other paid work, cannot exceed that tick's common work budget. There is no per-family protein-stock quota; energy, minerals and actual packing limit synthesis. Expression can continue after targets are complete, so programs should regulate it using protein stock and built mass.
+
+### Organic substrates
+
+Organic kinds retain separate energy/mineral gut pools and are not interchangeable:
+
+| Kind | ID | Relative processing speed | Usable energy yield | Decay / second |
+| --- | ---: | ---: | ---: | ---: |
+| Exudate | 0 | 1.2 | 0.80 | 0.040 |
+| Tissue | 1 | 0.7 | 0.65 | 0.012 |
+| Waste | 2 | 0.35 | 0.32 | 0.006 |
+
+The three `digest.*` efforts share one digestive/metabolic work budget. Tissue processing leaves 20% of its raw energy and mineral content as Waste; the remaining unassimilated energy dissipates. Waste processing recovers 32% of energy and 50% of minerals; the rest dissipates or returns as dissolved minerals, without creating another equal-value meal. Exudate comes from photosynthetic release and supplied organic particles. Death and extracted cell reserves contribute tissue. An engulfed cell's existing gut retains its substrate identity, preventing waste from becoming fresh tissue through predation. All transfers preserve mineral mass and cannot create energy.
+
+Same-kind nearby emissions may merge by adding their exact contents. Counts never cause particle deletion or conversion. Generic senses report appearance and contact properties, not a semantic prey/edibility classification.
 
 ### Organelle families
 
@@ -46,12 +66,12 @@ An immutable typed graph computes `(current measurements, old memory) → (reque
 ```text
 # Counts are integers; unit sizes are material mass.
 target.core.count = 2;
-build.core = 1;
+express.core = if organelle.core.mass + protein.core < 0.08 then 1 else 0;
 target.flagellum.count = 2;
 target.flagellum.size = 0.08;
-build.flagellum = if energy.fraction > 0.65 then 0.4 else 0;
+express.flagellum = if energy.fraction > 0.65 && organelle.flagellum.mass + protein.flagellum < 0.16 then 0.4 else 0;
 target.photoreceptor.count = 2;
-build.photoreceptor = 0.3;
+express.photoreceptor = if organelle.photoreceptor.mass + protein.photoreceptor < 0.02 then 0.3 else 0;
 
 rs001 = object.token when object.valid;
 clear rs001 when !object.available;
@@ -67,7 +87,7 @@ divide = body.division_ready;
 
 ### Outputs
 
-There are **78 outputs**: 11 base actions, four controls for each of 16 families, then three scan controls. `thrust`, `turn`, and `divide` are required exactly once. All other outputs are optional. Scalar destinations accept integer expressions; integer, boolean, and string destinations require their declared type.
+There are **81 outputs**: 11 base actions, four controls for each of 16 families, three scan controls, then three digestive enzyme controls. `thrust`, `turn`, and `divide` are required exactly once. All other outputs are optional. Scalar destinations accept integer expressions; integer, boolean, and string destinations require their declared type.
 
 | Output | Type | Omitted value / range |
 | --- | --- | --- |
@@ -79,10 +99,13 @@ There are **78 outputs**: 11 base actions, four controls for each of 16 families
 | `absorb`, `feed` | scalar | 1; clamp 0–1 |
 | `target.<family>.count` | integer | 0; negative results clamp to 0 |
 | `target.<family>.size` | scalar | Family minimum; clamp from that minimum to 10¹², with physical construction further limited by geometry and resources |
-| `build.<family>`, `recycle.<family>` | scalar | 0; clamp 0–1 |
+| `express.<family>`, `recycle.<family>` | scalar | 0; clamp 0–1 |
 | `scan.bearing` | scalar | 0; wrap body-relative radians to [−π, π) |
 | `scan.width` | scalar | 2π; full angular width clamped to 0–2π |
 | `scan.target` | string | Empty token |
+| `digest.exudate`, `digest.tissue`, `digest.waste` | scalar | 1, 1, 0.35 respectively; clamp 0–1 |
+
+The old `build.<family>` spelling aliases the same `express.<family>` destination and protein mechanics. Defining both spellings for one family is a duplicate-output error. Canonical schema/graph names use `express.*`; source text is preserved.
 
 Counts remain integer-typed: `2` is accepted, `2.0` and `2 / 1` are scalar expressions and rejected. Huge target counts do not allocate huge arrays; the physical construction allocator admits only affordable progress. Omitted body controls leave existing organs intact. Scan controls take effect next tick; a remembered token can request reacquisition only through ordinary current visibility. Each cell retains at most eight tracks; a track expires after a gap longer than 30 ticks (one simulated second). Tokens are never reused for replacement objects.
 
@@ -125,7 +148,7 @@ String literals use double quotes and accept `\"`, `\\`, `\n`, `\r`, `\t`, and f
 
 ### Read signals
 
-There are **144 read signals**. Scalars are finite numbers; `organelle.<family>.count` is integer; availability, validity, and division-ready flags are boolean; tokens are strings; vectors are `vec2`.
+There are **169 read signals**. Scalars are finite numbers; `organelle.<family>.count` is integer; availability, validity, and division-ready flags are boolean; tokens are strings; vectors are `vec2`.
 
 | Group | Signals |
 | --- | --- |
@@ -133,6 +156,8 @@ There are **144 read signals**. Scalars are finite numbers; `organelle.<family>.
 | Body | `body.area`, `body.mass`, `body.birth_area`, `body.maturity`, `body.division_ready` |
 | Packing | `body.space.free`, `.used`, `.capacity`; `body.surface.free`, `.used`, `.capacity` |
 | Reserves and digestion | `nutrient.stored`, `.capacity`, `.fraction`; `gut.energy`, `.capacity`, `.fraction`; `digestion.rate`, `growth.rate`, `lifespan`, `exudation.rate` |
+| Gut composition | `gut.exudate.energy`, `.nutrients`; `gut.tissue.energy`, `.nutrients`; `gut.waste.energy`, `.nutrients` |
+| Protein and construction | `protein.<family>`; `expression.rate`, `assembly.rate`, `assembly.capacity` |
 | Actual organelles | `organelle.<family>.count`, `.mass`, `.capacity`, `.damaged`, `.building`, for each family above |
 | Light | `light.available`, `.valid`, `.level`, `.bearing` |
 | Heat | `heat.available`, `.valid`, `.value`, `.bearing` |
@@ -159,7 +184,7 @@ Limits are **8,192 expression nodes**, **65,536 tokens**, **256 KiB UTF-8 source
 
 Mutation kinds are any (0), constant (1), expression (2), and reference (3). Each mutation parses the exact inherited source, selects one reachable node, and patches only its source location. Constants retain their primitive types and bounds. Expression mutations replace one compatible operator/function token or insert/remove one typed unary operation. Binary operator replacement preserves precedence, so unparenthesized neighboring operands do not regroup. References use compatible sensors, same-type register addresses, or earlier visible bindings. Mutations cannot introduce forward references, cycles, ill-typed guards, or illegal addresses. Register write destinations and omitted outputs remain unchanged, including omitted `grow`.
 
-The complete patched source is typechecked again and becomes the child’s executable program. Every byte outside the edited node is retained, including comments, whitespace, declaration names, and unused definitions. Descendants inherit that source and accumulate one change per mutation; mutation never flattens the program into generated bindings. Checkpoint version 3 requires the compiled graph to match the exact stored source. Source maps are transient and reconstructed when inspecting or mutating a genome. Numeric compatibility is by type, not physical units. Validity does not guarantee survival or useful behavior.
+The complete patched source is typechecked again and becomes the child’s executable program. Every byte outside the edited node is retained, including comments, whitespace, declaration names, and unused definitions. Descendants inherit that source and accumulate one change per mutation; mutation never flattens the program into generated bindings. Checkpoint versions 3 and 4 require the compiled graph to match the exact stored source. Source maps are transient and reconstructed when inspecting or mutating a genome. Numeric compatibility is by type, not physical units. Validity does not guarantee survival or useful behavior.
 
 No applicable change, oversized generated source, or exhausted registry capacity safely retains the parent. Default daughter mutation probability is 0.10. Mutation uses a separate deterministic stream derived from seed, tick, and cell IDs. Existing variants are reused before capacity checks, allowing reset to replay existing lineages. Division always pays its ordinary cost, including fallback inheritance. Successful automatic variants increment `mutation_count`; skipped attempts increment `mutation_skipped_count`. Draft mutations affect neither counter.
 
@@ -167,15 +192,15 @@ No applicable change, oversized generated source, or exhausted registry capacity
 
 Light, heat, flow, dissolved minerals, and organic cues are local fields. Sources supply light, heat, currents, or minerals. Photosynthetic organisms compete for the same finite local photons and minerals. Consumers require actual capture/digestive machinery and accessible organic material. Hunters additionally pay for movement, piercing/capture, and any receptors they use. A mixed organism must fit and maintain both sets of machinery.
 
-Usable reserves, raw gut energy, mineral reserves, frame material, organelle material, and embodied structural energy remain distinct. Digestive assimilation retains the existing 65% efficiency; inorganic minerals do not turn into free usable energy. Loss of storage capacity follows the same explicit overflow path as recycling or damage. Ecological outcomes emerge from resource and physical constraints; there are no guild quotas or guaranteed predator persistence.
+Usable reserves, raw gut energy, mineral reserves, frame material, organelle material, and embodied structural energy remain distinct. Digestive assimilation and residue depend on the substrate, as listed above; inorganic minerals do not turn into free usable energy. Loss of storage capacity follows the same explicit overflow path as recycling or damage. Ecological outcomes emerge from resource and physical constraints; there are no guild quotas or guaranteed predator persistence.
 
-## WASM API, version 9
+## WASM API, version 10
 
 The module exports `memory`. Pointers/lengths use bytes, except snapshot lengths, which count elements: float64 for the world and float32 for the environment. Returned buffers are engine-owned: read the matching length and copy immediately before other allocating calls. Refresh JavaScript views after memory growth. Never free engine-owned buffers. Caller-allocated source buffers must be freed once with their exact pointer/length.
 
 | Exports | Behavior |
 | --- | --- |
-| `abi_version() -> u32` | Returns 9 |
+| `abi_version() -> u32` | Returns 10 |
 | `alloc(len) -> ptr`, `dealloc(ptr, len)` | Allocate/free a zeroed source buffer; above 256 KiB returns null |
 | `compile_genome(ptr, len) -> u32` | UTF-8 source → ID ≥ 1; zero plus readable error on failure |
 | `analyze_genome(ptr, len) -> ptr`, `genome_analysis_len()` | Authoritative compiler analysis as engine-owned UTF-8 JSON; no genome registration or simulation mutation |
@@ -191,7 +216,7 @@ The module exports `memory`. Pointers/lengths use bytes, except snapshot lengths
 | `error_ptr()`, `error_len()` | Latest UTF-8 error |
 | `reset(seed, genome_id) -> u32` | Recreate world; 1 on success, 0 plus readable error on invalid genome or allocation failure |
 | `seed_cells(genome_id, count: f64, x: f32, y: f32) -> u32` | Introduce the requested minimal cells atomically; return count added. Count must be a finite nonnegative integer within the addressable ID range. Invalid counts, ID exhaustion, and allocation failure return zero with a readable error; count zero is a successful no-op. Negative/nonfinite coordinates scatter globally; otherwise within 38 units |
-| `add_food(x: f32, y: f32, count) -> u32` | Add food; return count added. Negative/nonfinite coordinates scatter globally; otherwise within 45 units |
+| `add_food(x: f32, y: f32, count: f64) -> u32` | Add the requested exudate particles atomically; return count added or zero with a readable error. Counts must be finite nonnegative integers representable by the engine. Negative/nonfinite coordinates scatter globally; otherwise within 45 units |
 | `set_food_rate(rate: f32)` | Set 0–60 particles/s; nonfinite input becomes zero |
 | `tick(steps) -> u32` | Run at most 120 steps; 1 on success, 0 plus readable error if a step cannot allocate. Earlier completed steps in the batch remain valid |
 | `snapshot_ptr()`, `snapshot_len()` | Build/read float64 world snapshot; length in elements |
@@ -208,7 +233,7 @@ The module exports `memory`. Pointers/lengths use bytes, except snapshot lengths
 | `environment_snapshot_ptr()`, `environment_snapshot_len()` | Build/read fields and sources; length in floats |
 | `predation_count()`, `attack_count()` | Predation deaths / contact bite hits since reset |
 | `photosynthesis_total() -> f64` | Gross absorbed light energy since reset |
-| `reset_empty(seed, initial_food)` | Reset dynamics and counters, retain the environment recipe, food/mutation rates, and genome registry; create requested food (up to 1,200) and no cells |
+| `reset_empty(seed, initial_food: f64) -> u32` | Reset dynamics/counters and create the requested exudate particles with no cells. Retain the environment recipe, rates and genomes. Returns 1 on success, 0 plus error on invalid count/allocation failure; rejection preserves the current world. |
 | `alloc_state(len)` | Allocate a checkpoint input buffer, 20 bytes–128 MiB; release using `dealloc(ptr, len)` |
 | `save_state_ptr()`, `save_state_len()` | Build/read an owned versioned checkpoint; length in bytes; copy immediately |
 | `restore_state(ptr, len) -> u32` | Validate and atomically replace world and registry; 1 success, 0 rejection with `error_ptr/len` feedback |
@@ -235,17 +260,17 @@ Ranges use zero-based UTF-16 offsets with exclusive ends, suitable for JavaScrip
 
 Valid source has no diagnostics. Invalid source returns the first compiler error; completed earlier declarations and the partial node count remain available after parser/type errors. Lexical errors return no bindings and a zero node count because lexing precedes parsing. `sourceBytes` counts the input's UTF-8 bytes, independently of its UTF-16 length. Oversized input is rejected before parsing, with an empty range at the document start.
 
-Analysis changes only its transient response buffer. It does not consume genome IDs or registry space, change the latest engine error, advance RNGs or cells, or alter checkpoint bytes. It remains available when the genome registry is full. The native ABI accepts a null pointer for empty or oversized input; other nonempty inputs must provide a readable UTF-8 source buffer. Copy the returned JSON before another allocating engine call, and free only the caller's source buffer. The analysis JSON schema is unchanged in ABI 9.
+Analysis changes only its transient response buffer. It does not consume genome IDs or registry space, change the latest engine error, advance RNGs or cells, or alter checkpoint bytes. It remains available when the genome registry is full. The native ABI accepts a null pointer for empty or oversized input; other nonempty inputs must provide a readable UTF-8 source buffer. Copy the returned JSON before another allocating engine call, and free only the caller's source buffer. The analysis JSON schema is unchanged in ABI 10.
 
 ### World snapshot
 
-Layout: `12 + cells × 135 + food × 4` floats. The first 39 floats of each cell are physical/rendering state; the following 16 groups of six floats summarize organelle families in the order above. The world snapshot uses float64 values and a JavaScript `Float64Array`, preserving the entire u32 cell-ID range. Persistent state uses complete checkpoints.
+Layout: `12 + cells × 158 + food × 5` floats. The first 39 floats of each cell are physical/rendering state; the following 16 groups of six floats summarize organelle families in the order above. The world snapshot uses float64 values and a JavaScript `Float64Array`, preserving the entire u32 cell-ID range. Persistent state uses complete checkpoints.
 
 ```text
 Header (12): tick, time, cell_count, food_count, total_births,
              total_deaths, total_eaten, width, height, reserved_zero,
              max_food, food_rate
-Each food (4): x, y, energy, nutrients
+Each food (5): x, y, energy, nutrients, kind (0 exudate, 1 tissue, 2 waste)
 ```
 
 | Cell offset | Field |
@@ -280,7 +305,7 @@ Each food (4): x, y, energy, nutrients
 | 27 | `digestion_rate` |
 | 28 | `growth_rate` |
 | 29 | `maturity` |
-| 30 | `lifespan` |
+| 30 | `lifespan` (0: no fixed maximum) |
 | 31 | `exudation_rate` |
 | 32 | `body_upkeep` |
 | 33 | `space_used` |
@@ -292,7 +317,9 @@ Each food (4): x, y, energy, nutrients
 
 For family index `k`, offsets `39 + 6k` through `44 + 6k` are **count, mass, capacity, damaged mass, building mass, functional mass**. All summaries describe actual structures. `division_ready` is 0/1. Basal metabolism includes body upkeep and current thermal scaling, excluding action/register/construction costs. Digestive rate reports usable energy after assimilation loss; photosynthesis reports harvested gross energy. `optical_range` is built hardware reach, not a free genome signal.
 
-The reserved header field is zero and is not a population limit. Float64 world identifiers preserve all u32 cell IDs exactly; counters are exact through 2⁵³, with u64 counters retained internally. The environment rendering buffer remains float32.
+Cell offsets 135–137 contain gut energies for exudate/tissue/waste; 138–140 contain their mineral masses; 141–156 contain protein stock mass in family order; 157 is actual synthesis mass per second. The old aggregate gut fields equal the sums of their three compartments.
+
+The reserved header field and `max_food` are zero; neither is a population or particle limit. Float64 world identifiers preserve all u32 cell IDs exactly; counters are exact through 2⁵³, with u64 counters retained internally. The environment rendering buffer remains float32.
 
 ### Body inspection
 
@@ -306,12 +333,13 @@ The reserved header field is zero and is not a population limit. Float64 world i
   surfaceUsed: number; surfaceCapacity: number;
   organs: {id: number; kind: string; mass: number; integrity: number;
     functional: boolean; minimumMass: number; embodiedEnergy: number}[];
-  requested: {kind: string; count: number; size: number; build: number; recycle: number}[];
+  requested: {kind: string; count: number; size: number; build: number; recycle: number; proteinMass: number}[];
   constructionRate: number; recyclingRate: number; repairRate: number;
+  synthesisRate: number; assemblyCapacity: number;
 }
 ```
 
-Requested outputs describe the genome's commands. Organs, packing, and achieved rates describe the actual body. The body buffer, language schema, program source, analysis, graph, memory, and expression-preview buffers are independent. Copy returned buffers before another allocating WASM call.
+The JSON `build` field retains its compatibility spelling and reports expression effort. `proteinMass` is each family's actual stock. Requested outputs describe the genome's commands. Organs, packing, and achieved rates describe the actual body. The body buffer, language schema, program source, analysis, graph, memory, and expression-preview buffers are independent. Copy returned buffers before another allocating WASM call.
 
 ### Environment snapshot
 
@@ -363,13 +391,13 @@ The evaluation buffer is independent of source, analysis, graph, memory, and fie
 
 ### Genome graph
 
-Graph JSON remains version 1 in ABI 9: `{version: 1, nodes: [...], roots: [...]}`. Inspection does not evaluate programs, advance the world, change memory, or register genomes. Invalid IDs clear the graph buffer and report an error.
+Graph JSON remains version 1 in ABI 10: `{version: 1, nodes: [...], roots: [...]}`. Inspection does not evaluate programs, advance the world, change memory, or register genomes. Invalid IDs clear the graph buffer and report an error.
 
 Nodes contain `id`, `kind`, `type`, `label`, `inputs`, `bindings`, and `reachable`. IDs are compiler-array indexes. Inputs preserve operand order and duplicates and precede their consumer's index. Conditional operands are condition, then branch, else branch. Types are `integer`, `scalar`, `boolean`, `string`, and `vec2`. Kinds are `constant`, `sensor`, `register`, `populated`, `reference`, `unary`, `binary`, `conditional`, and `call`. Unused nodes remain present, marked unreachable, so graph counts match the 8,192-node budget.
 
-Roots contain `id`, `kind`, `name`, `type`, `value`, `guard`, and `default`. All **78 output roots** are included in metadata order: 11 base actions, family-major count/size/build/recycle controls, then bearing/width/target scan controls. An authored output references its expression and has a null default; an omitted output has null value and a JSON-literal string default, such as `"0"`, `"false"`, or `"\"\""` for an empty token. Defaults do not create expression nodes or mutate source.
+Roots contain `id`, `kind`, `name`, `type`, `value`, `guard`, and `default`. All **81 output roots** are included in metadata order: 11 base actions, family-major count/size/expression/recycle controls, bearing/width/target scan controls, then exudate/tissue/waste enzyme controls. An authored output references its expression and has a null default; an omitted output has null value and a JSON-literal string default, such as `"0"`, `"false"`, or `"\"\""` for an empty token. Defaults do not create expression nodes or mutate source.
 
-Register roots are `write:<address>` or `clear:<address>` with the destination type. Clear values are null. A null guard means unconditional. There are at most **10,068 roots**: 78 outputs plus one write and one clear for 4,995 registers. Reads and occupancy checks refer to old memory; writes/clears describe next memory. No same-tick dependency runs from a write back into a read.
+Register roots are `write:<address>` or `clear:<address>` with the destination type. Clear values are null. A null guard means unconditional. There are at most **10,071 roots**: 81 outputs plus one write and one clear for 4,995 registers. Reads and occupancy checks refer to old memory; writes/clears describe next memory. No same-tick dependency runs from a write back into a read.
 
 #### Frontend network projection
 
@@ -381,11 +409,11 @@ Constant writes, constant guards, unconditional clears, and omitted output defau
 
 ### Persistent checkpoints
 
-Current checkpoint format is **3**, using the `CELLAR01` magic, a separate version, exact byte length, FNV-1a corruption checksum, and bounded little-endian values. The checksum is not authentication; every decoded value is independently checked. Checkpoints preserve actual frame and organelles, integrity, resource/embodied-energy ledgers, construction progress, gut contents, memory occupancy and values, sensor tracks and scan controls, sources/fields, deterministic RNG state, counters, and the genome registry with lineage.
+Current checkpoint format is **4**, using the `CELLAR01` magic, a separate version, exact byte length, FNV-1a corruption checksum, and bounded little-endian values. The checksum is not authentication; every decoded value is independently checked. Checkpoints preserve actual frame and organelles, integrity, resource/embodied-energy ledgers, construction progress, protein stocks and their embodied energy, separate gut substrates and particle kinds, memory occupancy and values, sensor tracks and scan controls, sources/fields, deterministic RNG state, counters, and the genome registry with lineage.
 
-Version-1 and version-2 body schemas are explicitly unsupported. They cannot be silently interpreted as paid structures or hardware-gated observations. Existing exports are preserved; create a new simulation with rewritten genomes. Future unknown versions are also rejected. Version-3 checkpoints from ABI 8 remain supported: they hold actual physical organs, not a recipe to recreate. The ABI 9 introduction change does not reset existing cells or rewrite their programs.
+Version-1 and version-2 body schemas are explicitly unsupported. They cannot be silently interpreted as paid structures or hardware-gated observations. Existing exports are preserved; create a new simulation with rewritten genomes. Future unknown versions are also rejected. Version-3 checkpoints remain supported. Existing organs, energy, minerals, memory and program source are preserved; formerly unclassified particles and gut contents import as tissue, and protein pools initialize empty. New digestion/expression rules govern subsequent evolution, so continuation is deterministic within the new engine but is not an exact replay of the old engine. Saving writes version 4.
 
-Stored programs retain exact expression trees and source. Restore recompiles source and requires its typed graph to match the stored graph. It validates backward references, scopes, register types/addresses, output types, finite physical state, IDs, resource bounds, and complete input consumption before atomically replacing the world. A failed restore leaves the current world unchanged. Save size remains bounded at 128 MiB; writing stops before exceeding the limit and reports allocation failures. Cell counts are bounded by encoded data and available memory, not a population ceiling.
+Stored programs retain exact expression trees and source. Restore recompiles source and requires its typed graph to match the stored graph. It validates backward references, scopes, register types/addresses, output types, finite physical state, IDs, resource bounds, and complete input consumption before atomically replacing the world. A failed restore leaves the current world unchanged. Save size remains bounded at 128 MiB; writing stops before exceeding the limit and reports allocation failures. Cell and particle counts are bounded by encoded data and available memory, not biological ceilings. Age is validated as finite nonnegative state rather than against a lifespan.
 
 `resetEmpty(seed, initialFood)` prepares an empty world with the current environment and rates; the UI then introduces cells carrying the chosen genomes. Adding one organism introduces exactly one minimal cell, whose program grows its specialized body.
 

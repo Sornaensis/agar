@@ -25,7 +25,15 @@ const SURFACE_PER_RADIUS: f64 = 0.9;
 const RECYCLE_ENERGY_PER_MASS: f64 = 8.0;
 const REPAIR_ENERGY_PER_MASS: f64 = 60.0;
 const MAINTENANCE_RESERVE_FRACTION: f64 = 0.15;
+/// Translation and assembly together retain the original construction budget.
+/// The split represents the work to synthesize a family-specific protein and
+/// then fold/install it in the organ. Both stages share the same core machinery.
+pub const PROTEIN_SYNTHESIS_FRACTION: f64 = 0.6;
+pub const PROTEIN_HALF_LIFE: f64 = 45.0;
+pub const PROTEIN_INTERNAL_FOOTPRINT: f64 = 1.0;
+pub const PROTEIN_UPKEEP: f64 = 0.6;
 const EPS: f64 = 1e-12;
+const RESOURCE_COUNT: usize = 5 + FAMILY_COUNT;
 // A finished organ occupies at least .007 area. There can additionally be one
 // incomplete construction per family; counts are bounded by actual geometry.
 const MAX_ORGANS: usize = (MAX_AREA * INTERNAL_PER_AREA / 0.007) as usize + FAMILY_COUNT + 1;
@@ -158,6 +166,8 @@ impl OrganelleKind {
 pub struct BodyControls {
     pub target_counts: [u32; FAMILY_COUNT],
     pub target_sizes: [f64; FAMILY_COUNT],
+    /// Gene expression / translation effort. Existing callers retain the field
+    /// name, but protein must now be paid for before it can assemble an organ.
     pub build: [f64; FAMILY_COUNT],
     pub recycle: [f64; FAMILY_COUNT],
 }
@@ -288,6 +298,8 @@ pub struct WorkReport {
     pub dissipated_energy: f64,
     /// Includes scaffold construction, but repair only replaces existing mass.
     pub constructed_mass: f64,
+    /// Translated family-specific protein, still awaiting final assembly.
+    pub synthesized_mass: f64,
     pub recycled_mass: f64,
     pub repaired_mass: f64,
     pub area_grown: f64,
@@ -300,6 +312,10 @@ pub struct Body {
     pub organs: Vec<Organelle>,
     pub next_organelle_id: u32,
     pub scaffold_energy: f64,
+    /// Conserved, family-specific assembly protein. It occupies room and is
+    /// inherited, but is not functional organelle mass.
+    pub precursor_mass: [f64; FAMILY_COUNT],
+    pub precursor_energy: [f64; FAMILY_COUNT],
 }
 
 fn nonnegative(value: f64) -> f64 {
@@ -337,6 +353,8 @@ impl Body {
                 * SCAFFOLD_MASS_PER_AREA
                 * SCAFFOLD_ENERGY_PER_MASS
                 * EMBODIED_FRACTION,
+            precursor_mass: [0.0; FAMILY_COUNT],
+            precursor_energy: [0.0; FAMILY_COUNT],
         };
         let budget = body.introduction_budget();
         debug_assert!(body.validate().is_ok());
@@ -351,6 +369,8 @@ impl Body {
             organs: Vec::new(),
             next_organelle_id: 1,
             scaffold_energy: SCAFFOLD_MASS_PER_AREA * SCAFFOLD_ENERGY_PER_MASS * EMBODIED_FRACTION,
+            precursor_mass: [0.0; FAMILY_COUNT],
+            precursor_energy: [0.0; FAMILY_COUNT],
         };
         // Test specimens isolate feeding, sensing, storage and inheritance.
         // Their full fabrication cost is recorded just like production input.
@@ -434,10 +454,17 @@ impl Body {
         self.area * SCAFFOLD_MASS_PER_AREA
     }
     pub fn structural_mass(&self) -> f64 {
-        self.scaffold_mass() + self.organs.iter().map(|o| o.mass).sum::<f64>()
+        self.scaffold_mass()
+            + self.organs.iter().map(|o| o.mass).sum::<f64>()
+            + self.precursor_mass.iter().sum::<f64>()
     }
     pub fn embodied_energy(&self) -> f64 {
-        self.scaffold_energy + self.organs.iter().map(|o| o.embodied_energy).sum::<f64>()
+        self.scaffold_energy
+            + self.organs.iter().map(|o| o.embodied_energy).sum::<f64>()
+            + self.precursor_energy.iter().sum::<f64>()
+    }
+    pub fn precursor(&self, kind: OrganelleKind) -> f64 {
+        self.precursor_mass[kind as usize]
     }
     pub fn count(&self, kind: OrganelleKind) -> u32 {
         self.organs.iter().filter(|o| o.kind == kind).count() as u32
@@ -481,7 +508,8 @@ impl Body {
             .organs
             .iter()
             .map(Organelle::internal_space)
-            .sum::<f64>();
+            .sum::<f64>()
+            + self.precursor_mass.iter().sum::<f64>() * PROTEIN_INTERNAL_FOOTPRINT;
         SpaceBudget {
             capacity,
             used,
@@ -522,6 +550,7 @@ impl Body {
     pub fn upkeep(&self) -> f64 {
         // Damaged material remains costly to support; empty envelope is not free.
         0.16 * self.area
+            + PROTEIN_UPKEEP * self.precursor_mass.iter().sum::<f64>()
             + self
                 .organs
                 .iter()
@@ -606,10 +635,12 @@ impl Body {
         }
     }
 
-    /// Perform construction, recycling, scaffold growth and repair from one
-    /// immutable starting snapshot. All demands share energy, material, space,
-    /// surface and assembly time by progressive proportional allocation. Work
-    /// blocked by one resource cannot deadlock unrelated repair or frame growth.
+    /// Translate family-specific proteins, assemble organs, recycle, grow and
+    /// repair from one starting snapshot. These demands share finite core work,
+    /// energy, material and room. Assembly additionally requires its family's
+    /// protein from before this tick: a newly expressed gene grants no instant
+    /// capability. Expression continues until the genome switches it off, even
+    /// when a target is complete, so surplus protein has real costs.
     ///
     /// Newly created room, recovered resources and new machinery are available
     /// on the following call, never reused for additional work this tick.
@@ -630,11 +661,35 @@ impl Body {
             return report;
         }
         let capacities = self.capacities();
+        let starting_space = self.space().free;
+        let starting_surface = self.surface().free;
+        let mut protein_energy_density = [0.0; FAMILY_COUNT];
+        // Turnover recovers material but not energy. Neither the released room
+        // nor the recovered minerals can fund new work in this same snapshot.
+        let decay_fraction = -(-std::f64::consts::LN_2 * dt / PROTEIN_HALF_LIFE).exp_m1();
+        for k in 0..FAMILY_COUNT {
+            if self.precursor_mass[k] > 0.0 {
+                protein_energy_density[k] = self.precursor_energy[k] / self.precursor_mass[k];
+            }
+            let mass = self.precursor_mass[k] * decay_fraction;
+            let energy = self.precursor_energy[k] * decay_fraction;
+            self.precursor_mass[k] = (self.precursor_mass[k] - mass).max(0.0);
+            self.precursor_energy[k] = (self.precursor_energy[k] - energy).max(0.0);
+            report.minerals_recovered += mass;
+            report.dissipated_energy += energy;
+        }
         let mut demands = Vec::new();
         // Finite output effort controls rates, not an allocation of arbitrarily
         // many target records. A family can start at most one incomplete unit.
         for kind in OrganelleKind::ALL {
             let k = kind as usize;
+            let expression = effort(controls.build[k]);
+            if expression > 0.0 {
+                demands.push(Demand::synthesis(
+                    kind,
+                    0.12 * self.area.sqrt() * dt * expression,
+                ));
+            }
             let count = controls.target_counts[k] as usize;
             let target = if controls.target_sizes[k].is_finite() {
                 controls.target_sizes[k].clamp(kind.min_mass(), kind.maximum_mass())
@@ -682,11 +737,11 @@ impl Body {
             let current = indices.iter().map(|&i| self.organs[i].mass).sum::<f64>();
             let choose_build = wanted > current + EPS && !build.is_empty();
             let (mut selected, request_effort) = if choose_build {
-                (build, effort(controls.build[k]))
+                (build, 1.0)
             } else if !recycle.is_empty() {
                 (recycle, effort(controls.recycle[k]))
             } else {
-                (build, effort(controls.build[k]))
+                (build, 1.0)
             };
             if request_effort == 0.0 || selected.is_empty() {
                 continue;
@@ -759,13 +814,15 @@ impl Body {
                 }
             }
         }
-        let resources = [
+        let mut resources = [0.0; RESOURCE_COUNT];
+        resources[..5].copy_from_slice(&[
             (*energy - MAINTENANCE_RESERVE_FRACTION * capacities.energy).max(0.0),
             minerals.max(0.0),
-            self.space().free,
-            self.surface().free,
+            starting_space,
+            starting_surface,
             capacities.assembly * dt,
-        ];
+        ]);
+        resources[5..].copy_from_slice(&self.precursor_mass);
         let allocated = allocate(&demands, resources);
         // No indices change until all old-index demands have been applied.
         let mut new_organs = Vec::new();
@@ -783,8 +840,27 @@ impl Body {
             report.energy_spent += cost;
             report.minerals_spent += mineral_cost;
             match demand.operation {
-                Operation::Build => {
+                Operation::Synthesis => {
+                    let k = demand.kind as usize;
                     let embodied = cost * EMBODIED_FRACTION;
+                    self.precursor_mass[k] += amount;
+                    self.precursor_energy[k] += embodied;
+                    report.synthesized_mass += amount;
+                    report.dissipated_energy += cost - embodied;
+                }
+                Operation::Build => {
+                    if demand.index.is_none() && self.next_organelle_id == u32::MAX {
+                        report.identifier_exhausted = true;
+                        report.energy_spent -= cost;
+                        report.minerals_spent -= mineral_cost;
+                        continue;
+                    }
+                    let k = demand.kind as usize;
+                    let protein_energy = amount * protein_energy_density[k];
+                    self.precursor_mass[k] = (self.precursor_mass[k] - amount).max(0.0);
+                    self.precursor_energy[k] = (self.precursor_energy[k] - protein_energy).max(0.0);
+                    let new_embodied = cost * EMBODIED_FRACTION;
+                    let embodied = protein_energy + new_embodied;
                     if let Some(index) = demand.index {
                         let organ = &mut self.organs[index];
                         // Newly grown material is intact; existing damage is not
@@ -794,12 +870,6 @@ impl Body {
                         organ.mass += amount;
                         organ.embodied_energy += embodied;
                     } else {
-                        if self.next_organelle_id == u32::MAX {
-                            report.identifier_exhausted = true;
-                            report.energy_spent -= cost;
-                            report.minerals_spent -= mineral_cost;
-                            continue;
-                        }
                         new_organs.push(Organelle {
                             id: self.next_organelle_id,
                             kind: demand.kind,
@@ -810,7 +880,7 @@ impl Body {
                         self.next_organelle_id += 1;
                     }
                     report.constructed_mass += amount;
-                    report.dissipated_energy += cost - embodied;
+                    report.dissipated_energy += cost - new_embodied;
                 }
                 Operation::Grow => {
                     let area = amount / SCAFFOLD_MASS_PER_AREA;
@@ -879,9 +949,11 @@ impl Body {
             organs: Vec::new(),
             next_organelle_id: self.next_organelle_id,
             scaffold_energy: self.scaffold_energy * 0.5,
+            precursor_mass: self.precursor_mass.map(|mass| mass * 0.5),
+            precursor_energy: self.precursor_energy.map(|energy| energy * 0.5),
         };
         let mut daughters = [blank.clone(), blank];
-        let mut used = [[0.0; 2]; 2];
+        let mut used = [[daughters[0].space().used, 0.0]; 2];
         let mut core = [0.0; 2];
         let required = CORE_MASS_PER_AREA * daughters[0].area;
         let internal = daughters[0].space().capacity;
@@ -963,6 +1035,26 @@ impl Body {
             self.organs.len() <= MAX_ORGANS,
             "too many organs for supported geometry",
         )?;
+        for kind in OrganelleKind::ALL {
+            let k = kind as usize;
+            ensure(
+                self.precursor_mass[k].is_finite()
+                    && self.precursor_mass[k] >= 0.0
+                    && self.precursor_mass[k] <= INTERNAL_PER_AREA * MAX_AREA,
+                "invalid assembly protein mass",
+            )?;
+            ensure(
+                self.precursor_energy[k].is_finite()
+                    && self.precursor_energy[k] >= 0.0
+                    && self.precursor_energy[k]
+                        <= self.precursor_mass[k]
+                            * kind.construction_cost()
+                            * PROTEIN_SYNTHESIS_FRACTION
+                            * EMBODIED_FRACTION
+                            + EPS,
+                "invalid assembly protein energy ledger",
+            )?;
+        }
         let mut ids = std::collections::HashSet::with_capacity(self.organs.len());
         let mut incomplete = [false; FAMILY_COUNT];
         for organ in &self.organs {
@@ -1025,8 +1117,23 @@ impl Body {
             writer.f64(organ.integrity);
             writer.f64(organ.embodied_energy);
         }
+        for k in 0..FAMILY_COUNT {
+            writer.f64(self.precursor_mass[k]);
+            writer.f64(self.precursor_energy[k]);
+        }
     }
+    #[cfg(test)]
     pub(crate) fn read_checkpoint(reader: &mut Reader<'_>) -> CheckpointResult<Self> {
+        Self::read_checkpoint_version(reader, 4)
+    }
+    pub(crate) fn read_checkpoint_version(
+        reader: &mut Reader<'_>,
+        version: u32,
+    ) -> CheckpointResult<Self> {
+        ensure(
+            matches!(version, 3 | 4),
+            "unsupported body checkpoint version",
+        )?;
         let area = reader.range(MIN_AREA, MAX_AREA)?;
         let scaffold_energy = reader.f64()?;
         let next_organelle_id = reader.u32()?;
@@ -1048,11 +1155,21 @@ impl Body {
                 embodied_energy: reader.f64()?,
             });
         }
+        let mut precursor_mass = [0.0; FAMILY_COUNT];
+        let mut precursor_energy = [0.0; FAMILY_COUNT];
+        if version >= 4 {
+            for k in 0..FAMILY_COUNT {
+                precursor_mass[k] = reader.f64()?;
+                precursor_energy[k] = reader.f64()?;
+            }
+        }
         let body = Self {
             area,
             organs,
             next_organelle_id,
             scaffold_energy,
+            precursor_mass,
+            precursor_energy,
         };
         body.validate()?;
         Ok(body)
@@ -1061,6 +1178,7 @@ impl Body {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Operation {
+    Synthesis,
     Build,
     Recycle,
     Grow,
@@ -1071,23 +1189,46 @@ struct Demand {
     kind: OrganelleKind,
     index: Option<usize>,
     amount: f64,
-    /// Energy, minerals, internal room, membrane room, assembly time (mass units).
-    costs: [f64; 5],
+    /// Energy, minerals, room, membrane, shared core work; then one protein
+    /// inventory constraint per family.
+    costs: [f64; RESOURCE_COUNT],
+}
+fn resource_costs(common: [f64; 5]) -> [f64; RESOURCE_COUNT] {
+    let mut costs = [0.0; RESOURCE_COUNT];
+    costs[..5].copy_from_slice(&common);
+    costs
 }
 impl Demand {
+    fn synthesis(kind: OrganelleKind, amount: f64) -> Self {
+        Self {
+            operation: Operation::Synthesis,
+            kind,
+            index: None,
+            amount,
+            costs: resource_costs([
+                kind.construction_cost() * PROTEIN_SYNTHESIS_FRACTION,
+                1.0,
+                PROTEIN_INTERNAL_FOOTPRINT,
+                0.0,
+                PROTEIN_SYNTHESIS_FRACTION,
+            ]),
+        }
+    }
     fn build(kind: OrganelleKind, index: Option<usize>, amount: f64) -> Self {
+        let mut costs = resource_costs([
+            kind.construction_cost() * (1.0 - PROTEIN_SYNTHESIS_FRACTION),
+            0.0,
+            (kind.internal_footprint() - PROTEIN_INTERNAL_FOOTPRINT).max(0.0),
+            kind.surface_footprint(),
+            1.0 - PROTEIN_SYNTHESIS_FRACTION,
+        ]);
+        costs[5 + kind as usize] = 1.0;
         Self {
             operation: Operation::Build,
             kind,
             index,
             amount,
-            costs: [
-                kind.construction_cost(),
-                1.0,
-                kind.internal_footprint(),
-                kind.surface_footprint(),
-                1.0,
-            ],
+            costs,
         }
     }
     fn recycle(kind: OrganelleKind, index: usize, amount: f64) -> Self {
@@ -1096,7 +1237,7 @@ impl Demand {
             kind,
             index: Some(index),
             amount,
-            costs: [RECYCLE_ENERGY_PER_MASS, 0.0, 0.0, 0.0, 0.7],
+            costs: resource_costs([RECYCLE_ENERGY_PER_MASS, 0.0, 0.0, 0.0, 0.7]),
         }
     }
     fn growth(amount: f64) -> Self {
@@ -1105,7 +1246,7 @@ impl Demand {
             kind: OrganelleKind::Core,
             index: None,
             amount,
-            costs: [SCAFFOLD_ENERGY_PER_MASS, 1.0, 0.0, 0.0, 1.0],
+            costs: resource_costs([SCAFFOLD_ENERGY_PER_MASS, 1.0, 0.0, 0.0, 1.0]),
         }
     }
     fn repair(kind: OrganelleKind, index: usize, amount: f64) -> Self {
@@ -1114,18 +1255,18 @@ impl Demand {
             kind,
             index: Some(index),
             amount,
-            costs: [REPAIR_ENERGY_PER_MASS, 1.0, 0.0, 0.0, 1.0],
+            costs: resource_costs([REPAIR_ENERGY_PER_MASS, 1.0, 0.0, 0.0, 1.0]),
         }
     }
 }
 
 /// Weighted max-min allocation of requested completion fractions. Once a
 /// resource binds, only its consumers stop; other demands continue fairly.
-fn allocate(demands: &[Demand], mut resources: [f64; 5]) -> Vec<f64> {
+fn allocate(demands: &[Demand], mut resources: [f64; RESOURCE_COUNT]) -> Vec<f64> {
     let mut allocation = vec![0.0; demands.len()];
     let mut active = vec![true; demands.len()];
-    for _ in 0..=5 {
-        let mut needed = [0.0; 5];
+    for _ in 0..=RESOURCE_COUNT {
+        let mut needed = [0.0; RESOURCE_COUNT];
         for (index, demand) in demands.iter().enumerate() {
             if active[index] {
                 for (r, need) in needed.iter_mut().enumerate() {
@@ -1158,7 +1299,8 @@ fn allocate(demands: &[Demand], mut resources: [f64; 5]) -> Vec<f64> {
         let mut froze = false;
         for (index, demand) in demands.iter().enumerate() {
             if active[index]
-                && (0..5).any(|r| needed[r] > 0.0 && resources[r] <= EPS && demand.costs[r] > 0.0)
+                && (0..RESOURCE_COUNT)
+                    .any(|r| needed[r] > 0.0 && resources[r] <= EPS && demand.costs[r] > 0.0)
             {
                 active[index] = false;
                 froze = true;
@@ -1207,6 +1349,7 @@ mod tests {
             );
             result.dissipated_energy += report.dissipated_energy;
             result.constructed_mass += report.constructed_mass;
+            result.synthesized_mass += report.synthesized_mass;
             result.recycled_mass += report.recycled_mass;
             result.repaired_mass += report.repaired_mass;
             assert!(body.validate().is_ok());
@@ -1248,6 +1391,8 @@ mod tests {
         assert_eq!(body.organs[0].mass, OrganelleKind::Core.min_mass());
         assert_eq!(body.organs[0].id, 1);
         assert_eq!(body.next_organelle_id, 2);
+        assert_eq!(body.precursor_mass, [0.0; FAMILY_COUNT]);
+        assert_eq!(body.precursor_energy, [0.0; FAMILY_COUNT]);
         close(body.energy_capacity(), 80.0);
         close(body.mineral_capacity(), 1.0);
         close(budget.energy, 68.0);
@@ -1268,6 +1413,196 @@ mod tests {
         }
     }
     #[test]
+    fn expression_is_paid_family_specific_and_cannot_assemble_in_the_same_tick() {
+        let (mut body, _) = Body::founder();
+        let (mut energy, mut minerals) = (1000.0, 100.0);
+        let initial_energy = energy + body.embodied_energy();
+        let initial_material = minerals + body.structural_mass();
+        let mut expression = BodyControls::default();
+        expression.build[OrganelleKind::Flagellum as usize] = 1.0;
+        // With no target, protein is still translated and held at a cost.
+        let first = body.work(
+            0.0,
+            &expression,
+            0.0,
+            &mut energy,
+            &mut minerals,
+            1.0,
+            MAX_AREA,
+        );
+        assert!(first.synthesized_mass > 0.0);
+        assert_eq!(first.constructed_mass, 0.0);
+        assert_eq!(body.organs.len(), 1);
+        close(
+            body.precursor(OrganelleKind::Flagellum),
+            first.synthesized_mass,
+        );
+        assert!(body.upkeep() > 0.178);
+        let mut wrong_family = controls(OrganelleKind::Photosynthetic, 1, 0.04);
+        wrong_family.build.fill(0.0);
+        let second = body.work(
+            0.0,
+            &wrong_family,
+            0.0,
+            &mut energy,
+            &mut minerals,
+            1.0,
+            MAX_AREA,
+        );
+        assert_eq!(second.constructed_mass, 0.0);
+        assert_eq!(body.count(OrganelleKind::Photosynthetic), 0);
+        // Switching expression off does not erase the protein or prevent its
+        // matching target from assembling on a later tick.
+        let mut correct_family = controls(OrganelleKind::Flagellum, 1, 0.03);
+        correct_family.build.fill(0.0);
+        let third = body.work(
+            0.0,
+            &correct_family,
+            0.0,
+            &mut energy,
+            &mut minerals,
+            1.0,
+            MAX_AREA,
+        );
+        assert_eq!(third.synthesized_mass, 0.0);
+        assert!(body.capacities().thrust > 0.0);
+        close(initial_material, minerals + body.structural_mass());
+        close(
+            initial_energy,
+            energy
+                + body.embodied_energy()
+                + first.dissipated_energy
+                + second.dissipated_energy
+                + third.dissipated_energy,
+        );
+        body.validate().unwrap();
+    }
+    #[test]
+    fn all_expressed_genes_and_assembly_compete_for_one_core_work_budget() {
+        let (mut body, _) = Body::founder();
+        let (mut energy, mut minerals) = (10000.0, 100.0);
+        let mut request = BodyControls::default();
+        request.build.fill(1.0);
+        request.target_counts.fill(2);
+        let capacity = body.capacities().assembly;
+        let first = body.work(
+            0.0,
+            &request,
+            0.0,
+            &mut energy,
+            &mut minerals,
+            1.0,
+            MAX_AREA,
+        );
+        close(
+            first.synthesized_mass * PROTEIN_SYNTHESIS_FRACTION,
+            capacity,
+        );
+        assert_eq!(first.constructed_mass, 0.0);
+        for kind in OrganelleKind::ALL {
+            close(
+                body.precursor(kind),
+                first.synthesized_mass / FAMILY_COUNT as f64,
+            );
+        }
+        let capacity = body.capacities().assembly;
+        let second = body.work(
+            0.0,
+            &request,
+            0.0,
+            &mut energy,
+            &mut minerals,
+            1.0,
+            MAX_AREA,
+        );
+        assert!(second.synthesized_mass > 0.0 && second.constructed_mass > 0.0);
+        let work = second.synthesized_mass * PROTEIN_SYNTHESIS_FRACTION
+            + second.constructed_mass * (1.0 - PROTEIN_SYNTHESIS_FRACTION);
+        assert!(work <= capacity + EPS);
+        assert_eq!(
+            body.capacities().thrust,
+            0.0,
+            "small protein allocations are not a motor"
+        );
+        body.validate().unwrap();
+    }
+    #[test]
+    fn unused_protein_turnover_recovers_material_and_dissipates_embodied_energy() {
+        let (mut body, _) = Body::founder();
+        let k = OrganelleKind::Photosynthetic as usize;
+        body.precursor_mass[k] = 0.1;
+        body.precursor_energy[k] = 0.1
+            * OrganelleKind::Photosynthetic.construction_cost()
+            * PROTEIN_SYNTHESIS_FRACTION
+            * EMBODIED_FRACTION;
+        let (mut energy, mut minerals) = (68.0, 0.5);
+        let initial_material = minerals + body.structural_mass();
+        let initial_energy = energy + body.embodied_energy();
+        let space = body.space().used;
+        let report = body.work(
+            0.0,
+            &BodyControls::default(),
+            0.0,
+            &mut energy,
+            &mut minerals,
+            PROTEIN_HALF_LIFE,
+            MAX_AREA,
+        );
+        close(body.precursor_mass[k], 0.05);
+        close(report.minerals_recovered, 0.05);
+        close(space - body.space().used, 0.05 * PROTEIN_INTERNAL_FOOTPRINT);
+        assert_eq!(report.energy_spent, 0.0);
+        assert_eq!(report.energy_recovered, 0.0);
+        close(initial_material, minerals + body.structural_mass());
+        close(
+            initial_energy,
+            energy + body.embodied_energy() + report.dissipated_energy,
+        );
+        body.validate().unwrap();
+    }
+    #[test]
+    fn precursor_pools_partition_conservatively_and_old_bodies_start_without_them() {
+        let (mut body, _) = Body::fixture(BodyFixture::Bare);
+        body.area = 2.0;
+        body.scaffold_energy *= 2.0;
+        let k = OrganelleKind::Flagellum as usize;
+        body.precursor_mass[k] = 0.1;
+        body.precursor_energy[k] = 0.1
+            * OrganelleKind::Flagellum.construction_cost()
+            * PROTEIN_SYNTHESIS_FRACTION
+            * EMBODIED_FRACTION;
+        let (a, b) = body.partition().unwrap();
+        close(a.precursor_mass[k], 0.05);
+        close(b.precursor_mass[k], 0.05);
+        close(
+            a.structural_mass() + b.structural_mass(),
+            body.structural_mass(),
+        );
+        close(
+            a.embodied_energy() + b.embodied_energy(),
+            body.embodied_energy(),
+        );
+        a.validate().unwrap();
+        b.validate().unwrap();
+
+        let (old, _) = Body::fixture(BodyFixture::Producer);
+        let mut writer = Writer::new();
+        old.write_checkpoint(&mut writer);
+        // Version 3 ended after the individual organelle records.
+        writer.0.truncate(writer.0.len() - FAMILY_COUNT * 16);
+        let mut reader = Reader::new(&writer.0);
+        assert_eq!(Body::read_checkpoint_version(&mut reader, 3).unwrap(), old);
+        assert!(reader.finished());
+        assert!(Body::read_checkpoint(&mut Reader::new(&writer.0)).is_err());
+
+        let mut bad = a;
+        bad.precursor_energy[k] = 100.0;
+        assert!(bad.validate().is_err());
+        bad.precursor_energy[k] = 0.0;
+        bad.precursor_mass[k] = f64::NAN;
+        assert!(bad.validate().is_err());
+    }
+    #[test]
     fn minimal_core_must_build_a_second_core_before_growing_divisible_frame() {
         let (mut body, budget) = Body::founder();
         let (mut energy, mut minerals) = (budget.energy, budget.minerals);
@@ -1283,9 +1618,12 @@ mod tests {
         );
         assert_eq!(body, before);
         assert_eq!(unsupported.energy_spent, 0.0);
-        let request = controls(OrganelleKind::Core, 2, 0.04);
+        let mut request = controls(OrganelleKind::Core, 2, 0.04);
         let mut heat = 0.0;
         for _ in 0..1500 {
+            if body.count(OrganelleKind::Core) >= 2 && body.building(OrganelleKind::Core) == 0.0 {
+                request.build[OrganelleKind::Core as usize] = 0.0;
+            }
             let report = body.work(
                 1.0,
                 &request,
@@ -1351,6 +1689,17 @@ mod tests {
         );
         assert_eq!(initial, body);
         requests.build[OrganelleKind::Flagellum as usize] = 1.0;
+        run(
+            &mut body,
+            &requests,
+            0.0,
+            0.0,
+            &mut energy,
+            &mut minerals,
+            1,
+        );
+        assert_eq!(body.count(OrganelleKind::Flagellum), 0);
+        assert!(body.precursor(OrganelleKind::Flagellum) > 0.0);
         run(
             &mut body,
             &requests,
@@ -1429,6 +1778,7 @@ mod tests {
             180,
         );
         request.target_counts[OrganelleKind::Flagellum as usize] = 0;
+        request.build[OrganelleKind::Flagellum as usize] = 0.0;
         request.recycle[OrganelleKind::Flagellum as usize] = 1.0;
         let recycled = run(
             &mut body,
@@ -1484,11 +1834,13 @@ mod tests {
             1.0 / 30.0,
             MAX_AREA,
         );
-        close(body.mass(OrganelleKind::Photoreceptor), 0.0003);
-        close(body.mass(OrganelleKind::Thermoreceptor), 0.0003);
+        close(body.precursor(OrganelleKind::Photoreceptor), 0.0003);
+        close(body.precursor(OrganelleKind::Thermoreceptor), 0.0003);
+        close(body.mass(OrganelleKind::Photoreceptor), 0.0);
+        close(body.mass(OrganelleKind::Thermoreceptor), 0.0);
         let a = Demand::build(OrganelleKind::Cortex, None, 1.0);
         let b = Demand::growth(1.0);
-        let allocation = allocate(&[a, b], [100.0, 2.0, 0.0, 0.0, 1.0]);
+        let allocation = allocate(&[a, b], resource_costs([100.0, 2.0, 0.0, 0.0, 1.0]));
         close(allocation[0], 0.0);
         close(allocation[1], 1.0);
     }
@@ -1517,6 +1869,17 @@ mod tests {
         );
         assert!(body.area > 1.0);
         assert_eq!(body.count(OrganelleKind::Flagellum), 0);
+        body.work(
+            0.0,
+            &request,
+            0.0,
+            &mut energy,
+            &mut minerals,
+            1.0,
+            MAX_AREA,
+        );
+        assert!(body.precursor(OrganelleKind::Flagellum) > 0.0);
+        assert_eq!(body.functional_mass(OrganelleKind::Flagellum), 0.0);
         body.work(
             0.0,
             &request,
@@ -1587,6 +1950,7 @@ mod tests {
     fn concurrent_core_recycling_cannot_authorize_unsupported_growth() {
         let (mut body, _) = Body::fixture(BodyFixture::Bare);
         let mut request = controls(OrganelleKind::Core, 1, 0.04);
+        request.build[OrganelleKind::Core as usize] = 0.0;
         request.recycle[OrganelleKind::Core as usize] = 1.0;
         let (mut energy, mut minerals) = (1000.0, 100.0);
         for _ in 0..300 {
@@ -1820,15 +2184,17 @@ mod tests {
         }
         close(body.area, 2.0);
         let mut request = controls(OrganelleKind::Flagellum, 3, 0.03);
-        body.work(
-            0.0,
-            &request,
-            0.0,
-            &mut energy,
-            &mut minerals,
-            1.0 / 30.0,
-            MAX_AREA,
-        );
+        for _ in 0..2 {
+            body.work(
+                0.0,
+                &request,
+                0.0,
+                &mut energy,
+                &mut minerals,
+                1.0 / 30.0,
+                MAX_AREA,
+            );
+        }
         assert!(body.building(OrganelleKind::Flagellum) > 0.0);
         let (a, b) = body.partition().unwrap();
         for mut daughter in [a, b] {

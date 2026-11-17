@@ -2,10 +2,11 @@ export interface Preset { name: string; description: string; source: string }
 
 type OrganTargets = ReadonlyArray<readonly [string, number]>;
 type EnergyPath = 'light' | 'organic' | 'mixed';
+type DigestionProfile = 'scavenger' | 'recycler' | 'hunter';
 
 /** Expand the complete reactive development program into ordinary editable source. */
 function program(organs: OrganTargets, path: EnergyPath, behavior: string, minimumBuildEnergy = 18,
-  areaTarget = 'body.birth_area * 2'): string {
+  areaTarget = 'body.birth_area * 2', digestion: DigestionProfile = 'scavenger'): string {
   const powered = path === 'light' ? 'light_path' : path === 'organic' ? 'digest_path && capture_path'
     : 'light_path && digest_path && capture_path';
   const orientation = path === 'light' ? '' : ' && mobile && seeing && feeling';
@@ -18,9 +19,24 @@ function program(organs: OrganTargets, path: EnergyPath, behavior: string, minim
     flagellum: path === 'light' ? 'false' : 'powered && processing && supplied && !mobile',
     optical: 'powered && processing && supplied && mobile && !seeing',
     mechanoreceptor: 'powered && processing && supplied && mobile && !feeling',
+    reserve: 'established && core_ready && organelle.reserve.capacity < 1',
   };
   const paired = organs.map(([family]) => `organelle.${family}.count >= 2 && organelle.${family}.building < 0.000001`).join('\n              && ');
-  return `# Every newborn has only one core. Build an energy path before expanding.
+  const digestionProgram = path === 'light' ? 'digest.exudate = 0;\ndigest.tissue = 0;\ndigest.waste = 0;'
+    : digestion === 'hunter' ? `# Spend most processing work on tissue; waste is a poor hunting return.
+digest.exudate = 0.5;
+digest.tissue = 1;
+digest.waste = if gut.tissue.energy + gut.exudate.energy < 1 then 0.3 else 0.05;`
+    : digestion === 'recycler' ? `# A drifting recycler keeps processing refractory material between encounters.
+digest.exudate = 0.7;
+digest.tissue = 0.4;
+digest.waste = 1;`
+    : `# Prefer easy energy; spend spare digestive work recovering waste.
+digest.exudate = 1;
+digest.tissue = 0.7;
+digest.waste = if gut.exudate.energy + gut.tissue.energy < 1 then 1 else 0.1;`;
+  return `# Every introduced cell has one core. Express an energy path before expanding.
+# Protein synthesis and assembly are separate; unused stocks occupy room and decay.
 let light_path = organelle.photosynthetic.capacity >= 1;
 let digest_path = organelle.digestive.capacity >= 1;
 let capture_path = organelle.phagocyte.capacity >= 1;
@@ -36,18 +52,24 @@ let funded = energy > ${minimumBuildEnergy} && nutrient.stored > 0.002;
 let area_target = ${areaTarget};
 let core_ready = organelle.core.count >= 2 && organelle.core.building < 0.000001
                  && organelle.core.capacity + 0.000001 >= area_target;
-let expanding = established && core_ready;
+let expanding = established && core_ready && body.area >= area_target * 0.75;
+let copies = if expanding then 2 else 1;
 let paired = ${paired};
 
-# Duplicate the core before filling the remaining space; it supports frame growth.
+# Duplicate the core, grow room, then prepare organs for both daughters.
 target.core.count = 2;
 target.core.size = max(0.04, area_target * 0.02);
-build.core = if established && energy > 50 && nutrient.stored > 0.01 then 1 else 0;
-${organs.map(([family, mass]) => `target.${family}.count = 2;
+let core_missing = max(0, max(0.08, area_target * 0.04) - organelle.core.mass);
+express.core = if established && energy > 50 && nutrient.stored > 0.01
+                 && protein.core < min(0.012, core_missing) then 1 else 0;
+${organs.map(([family, mass]) => `target.${family}.count = copies;
 target.${family}.size = ${mass};
-build.${family} = if funded && (${first[family] ?? 'false'} || expanding) then 1 else 0;`).join('\n')}
+let missing_${family} = max(0, ${mass} * copies - organelle.${family}.mass);
+express.${family} = if funded && (${first[family] ?? 'false'} || expanding)
+                   && protein.${family} < min(0.012, missing_${family}) then 1 else 0;`).join('\n')}
 
 ${behavior.trim()}
+${digestionProgram}
 
 absorb = if nutrient.fraction < 0.85 then 1 else 0;
 repair = if integrity < 0.98 && energy > 40 then 0.4 else 0;
@@ -93,7 +115,7 @@ export const PRESETS: Preset[] = [
   },
   {
     name: 'Drifter',
-    description: 'Let currents bring encounters; use a small motor and contact feeding.',
+    description: 'Drift between encounters and reserve digestive work for slow, refractory waste.',
     source: program(scavenger.map(([kind,mass]) => [kind,kind === 'flagellum' ? 0.025 : mass] as const), 'organic', `${surroundings}
 turn = if blocked || large_near then clamp(slide * 1.5, -1, 1)
        else if chemical.valid && chemical.organic > 0.001 && gut.fraction < 0.3 then clamp(chemical.organic_bearing, -1, 1)
@@ -102,7 +124,7 @@ thrust = if blocked || large_near then 0.45
          else if soft_contact || gut.fraction > 0.3 then 0 else 0.08;
 feed = 1;
 engulf = gut.fraction < 0.6;
-photosynthesize = 0;`),
+photosynthesize = 0;`, 18, 'body.birth_area * 2', 'recycler'),
   },
   {
     name: 'Conserver',
@@ -158,7 +180,7 @@ photosynthesize = 0;`),
   },
   {
     name: 'Phototroph',
-    description: 'Build photosynthetic units and transporters, using paid light and chemical sensors.',
+    description: 'Express a light-harvesting pathway, then grow sensors and duplicate organs for division.',
     source: program(producer, 'light', `# Harvesting light and measuring light are separate capabilities.
 let hot = heat.available && heat.valid && heat.value > 0.8;
 let cool = if heat.bearing > 0 then heat.bearing - 3.141593
@@ -174,7 +196,7 @@ photosynthesize = 1;`),
   },
   {
     name: 'Predator',
-    description: 'Approach visible objects when hungry and test contacted surfaces with a built piercer.',
+    description: 'Develop a piercer, approach visible objects and prioritize tissue digestion.',
     source: program(hunter, 'organic', `# Neither vision nor contact reveals another cell’s genome, diet or energy.
 let hungry = energy.fraction < 0.7 && gut.fraction < 0.45;
 let visible = object.available && object.valid;
@@ -191,7 +213,7 @@ feed = 1;
 photosynthesize = 0;
 bite = if hungry && touching then 0.8 else 0;
 engulf = hungry && touching;
-defend = if touching then 0.2 else 0;`),
+defend = if touching then 0.2 else 0;`, 18, 'body.birth_area * 2', 'hunter'),
   },
   {
     name: 'Mixotroph',

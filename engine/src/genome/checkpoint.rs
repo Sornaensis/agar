@@ -177,7 +177,12 @@ impl Program {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn read_checkpoint(r: &mut Reader<'_>) -> Result<Self> {
+        Self::read_checkpoint_version(r, 4)
+    }
+
+    pub(crate) fn read_checkpoint_version(r: &mut Reader<'_>, version: u32) -> Result<Self> {
         let count = r.count(MAX_NODES)?;
         ensure(count > 0, "genome has no expressions")?;
         let mut nodes: Vec<Node> = Vec::with_capacity(count);
@@ -186,7 +191,9 @@ impl Program {
             let scope = r.count(MAX_NODES)?;
             let op = match r.u8()? {
                 0 => Op::Constant(read_value(r)?),
-                1 => Op::Sensor(Sensor::ALL[r.index(Sensor::ALL.len())?]),
+                1 => Op::Sensor(
+                    Sensor::ALL[r.index(if version == 3 { 144 } else { Sensor::ALL.len() })?],
+                ),
                 2 => Op::Register(read_register(r)?),
                 3 => Op::Populated(read_register(r)?),
                 4 => Op::Reference(r.index(index)?),
@@ -254,7 +261,7 @@ impl Program {
                         c == b'_' || c.is_ascii_alphabetic() || (i > 0 && c.is_ascii_digit())
                     })
                     && !Register::reserved(&name)
-                    && !OUTPUT_NAMES.contains(&name.as_str())
+                    && output_index(&name).is_none()
                     && Sensor::lookup(&name).is_none()
                     && Function::lookup(&name).is_none()
                     && !matches!(
@@ -289,7 +296,12 @@ impl Program {
             )?;
         }
         let mut roots = [None; OUTPUT_NAMES.len()];
-        for (index, root) in roots.iter_mut().enumerate() {
+        let output_count = if version == 3 {
+            DIGEST_OUTPUT_START
+        } else {
+            OUTPUT_COUNT
+        };
+        for (index, root) in roots.iter_mut().enumerate().take(output_count) {
             *root = r.option(nodes.len())?;
             if let Some(id) = *root {
                 ensure(

@@ -201,7 +201,7 @@ for (const sensor of BUILTIN_SIGNALS) {
 const roots = compileProgram(required).roots;
 for (const item of BUILTIN_OUTPUTS) assert.equal(roots.find(root => root.kind === 'output' && root.name === item.name).type, item.type);
 assert.equal(roots.find(root => root.name === 'feed').default, '1');
-assert.equal(roots.find(root => root.name === 'build.optical').default, '0');
+assert.equal(roots.find(root => root.name === 'express.optical').default, '0');
 assert.equal(roots.find(root => root.name === 'target.flagellum.count').default, '0');
 compileProgram(`${required} feed = true;`, false);
 compileProgram(`${required} build.piercer = false;`, false);
@@ -211,8 +211,8 @@ compileProgram(`${required} feed = 1 - gut.fraction; build.piercer = energy.frac
 compileProgram(`rf001 = object.area; rs001 = object.token; rv001 = object.offset; ${required}`);
 compileProgram(`ri001 = object.area; ${required}`, false);
 compileProgram(`object.area = 1; ${required}`, false);
-assert.equal(BUILTIN_SIGNALS.length, 144);
-assert.equal(BUILTIN_OUTPUTS.length, 78);
+assert.equal(BUILTIN_SIGNALS.length, 169);
+assert.equal(BUILTIN_OUTPUTS.length, 81);
 const schemaPointer = api.language_schema_ptr();
 const schema = JSON.parse(decode(schemaPointer,api.language_schema_len()));
 assert.equal(schema.version,3);

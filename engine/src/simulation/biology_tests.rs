@@ -111,7 +111,12 @@ fn preassembled_test_fixture_is_independent_of_the_program_and_every_introductio
         0.0,
         "incomplete growth supplies no thrust"
     );
-    assert!(b.cells[0].body.mass(Kind::Flagellum) > 0.0);
+    assert!(b.cells[0].body.precursor_mass[Kind::Flagellum as usize] > 0.0);
+    assert_eq!(
+        b.cells[0].body.mass(Kind::Flagellum),
+        0.0,
+        "translation precedes assembly"
+    );
     assert!(b.energy_total() < initial_energy);
     close(initial_material, b.nutrient_total());
     assert_eq!(a.cells[0].body.count(Kind::Flagellum), 0);
@@ -171,13 +176,19 @@ fn idle_and_action_only_genomes_cannot_gain_specialization_without_construction(
 
 #[test]
 fn universal_newborn_builds_feeding_organs_and_a_paid_conservative_daughter() {
-    let source = "let feeding = organelle.digestive.capacity>=1 && organelle.phagocyte.capacity>=1; \
+    let source = "let digestion = organelle.digestive.capacity>=1; \
+        let feeding = digestion && organelle.phagocyte.capacity>=1; \
         let processing = organelle.metabolic.capacity>=1; \
+        let portions = if processing then 2 else 1; \
         thrust=0;turn=0;photosynthesize=0;absorb=0;feed=1; \
-        target.digestive.count=if processing then 2 else 1; target.digestive.size=.04; build.digestive=1; \
-        target.phagocyte.count=if processing then 2 else 1; target.phagocyte.size=.025; build.phagocyte=1; \
-        target.metabolic.count=if feeding then 2 else 0; target.metabolic.size=.03; build.metabolic=1; \
-        target.core.count=2; target.core.size=.04; build.core=if processing && energy>50 then 1 else 0; \
+        target.digestive.count=portions; target.digestive.size=.04; \
+        express.digestive=if organelle.digestive.mass<.04*portions && protein.digestive<.008 then 1 else 0; \
+        target.phagocyte.count=portions; target.phagocyte.size=.025; \
+        express.phagocyte=if digestion && organelle.phagocyte.mass<.025*portions && protein.phagocyte<.008 then 1 else 0; \
+        target.metabolic.count=if feeding then 2 else 0; target.metabolic.size=.03; \
+        express.metabolic=if feeding && organelle.metabolic.mass<.06 && protein.metabolic<.008 then 1 else 0; \
+        target.core.count=2; target.core.size=.04; \
+        express.core=if processing && energy>50 && organelle.core.mass<.08 && protein.core<.008 then 1 else 0; \
         grow=if body.maturity<1 && energy>90 then .8 else 0; \
         divide=body.division_ready && energy>120;";
     let mut fed = World::empty(73);
@@ -274,9 +285,20 @@ fn completing_a_flagellum_pays_now_and_changes_movement_only_next_tick() {
     world.step(&mut programs);
     close(world.cells[0].vx, 0.0);
     close(world.cells[0].vy, 0.0);
-    assert!(world.cells[0].body.functional_mass(Kind::Flagellum) > 0.0);
-    assert!(world.cells[0].construction_rate > 0.0);
+    assert_eq!(world.cells[0].body.functional_mass(Kind::Flagellum), 0.0);
+    assert!(world.cells[0].synthesis_rate > 0.0);
     assert!(world.energy_total() < before);
+    let mut completed = false;
+    for _ in 0..30 {
+        world.step(&mut programs);
+        close(world.cells[0].vx, 0.0);
+        if world.cells[0].body.functional_mass(Kind::Flagellum) > 0.0 {
+            assert!(world.cells[0].construction_rate > 0.0);
+            completed = true;
+            break;
+        }
+    }
+    assert!(completed);
     world.step(&mut programs);
     assert!(world.cells[0].vx > 0.0);
     close(material, world.nutrient_total());
@@ -298,7 +320,7 @@ fn mixture_keeps_a_closed_mineral_ledger_through_growth_recycling_damage_and_dea
     }
     world.add_food(-1.0, -1.0, 40);
     mature(&mut world.cells[0]);
-    world.cells[1].age = LIFESPAN - DT;
+    world.cells[1].integrity = 0.0;
     for tick in 0..420 {
         if tick == 60 {
             world.environment.add_nutrients(100.0, 100.0, 3.0);
@@ -353,8 +375,11 @@ fn broken_storage_spills_energy_and_minerals_without_erasing_contents() {
     let cell = &mut world.cells[0];
     cell.energy = cell.energy_capacity();
     cell.nutrient_stored = cell.nutrient_capacity();
-    cell.gut_energy = cell.gut_capacity();
-    cell.gut_nutrients = cell.body.capacities().gut_minerals;
+    cell.ingest(
+        OrganicKind::Tissue,
+        cell.gut_capacity(),
+        cell.body.capacities().gut_minerals,
+    );
     let energy = world.energy_total();
     let minerals = world.nutrient_total();
     let structure = world.cells[0].body.structural_mass();
@@ -378,8 +403,7 @@ fn dismantling_occupied_compartments_returns_all_material_and_accounts_energy_lo
     let mut world = world(BodyFixture::Scavenger);
     let cell = &mut world.cells[0];
     cell.energy = cell.energy_capacity();
-    cell.gut_energy = 40.0;
-    cell.gut_nutrients = 0.6;
+    cell.ingest(OrganicKind::Tissue, 40.0, 0.6);
     let energy = world.energy_total();
     let minerals = world.nutrient_total();
     let mut heat = 0.0;
@@ -650,10 +674,10 @@ fn a_paid_producer_can_grow_and_reproduce_from_light_and_dissolved_minerals() {
     }
     assert_eq!(
         world.births, 1,
-        "a complete paid producer lifecycle must finish before senescence"
+        "a complete paid producer lifecycle must finish within the test interval"
     );
     assert_eq!(world.cells.len(), 2);
-    assert!(world.time() < LIFESPAN);
+    assert!(world.time() < 290.0);
     assert!(world.photosynthesis_total > 0.0);
     assert!(world.cells.iter().all(|c| c.gut_energy == 0.0));
     close(world.nutrient_total(), material);
@@ -663,7 +687,7 @@ fn a_paid_producer_can_grow_and_reproduce_from_light_and_dissolved_minerals() {
 fn capturing_and_digesting_are_separate_and_conversion_has_a_real_energy_loss() {
     let mut world = world(BodyFixture::Scavenger);
     world.cells[0].energy = 50.0;
-    world.particle(300.0, 300.0, 20.0, 0.4);
+    world.particle(OrganicKind::Exudate, 300.0, 300.0, 20.0, 0.4);
     let capacities = caps(&world);
     let outputs = [Outputs {
         feed: 1.0,
@@ -680,14 +704,14 @@ fn capturing_and_digesting_are_separate_and_conversion_has_a_real_energy_loss() 
     let mut processing = [capacities[0].metabolism * DT];
     world.digest(&outputs, &capacities, &mut processing);
     let processed = before - world.cells[0].gut_energy;
-    assert!(processed > 0.0 && processed <= capacities[0].digestion * DT);
+    assert!(processed > 0.0 && processed <= capacities[0].digestion * DIGESTION_SPEED[0] * DT);
     close(
         world.cells[0].energy - 50.0,
-        processed * ASSIMILATION_EFFICIENCY,
+        processed * ASSIMILATION_EFFICIENCY[0],
     );
     close(
         energy - world.energy_total(),
-        processed * (1.0 - ASSIMILATION_EFFICIENCY),
+        processed * (1.0 - ASSIMILATION_EFFICIENCY[0]),
     );
     close(world.nutrient_total(), material);
 }
@@ -700,17 +724,18 @@ fn mineral_full_gut_blocks_capture_and_no_optical_sensor_is_needed_for_contact_f
             organ.integrity = 0.0;
         }
     }
-    world.cells[0].gut_nutrients = world.cells[0].body.capacities().gut_minerals;
-    world.particle(300.0, 300.0, 12.0, 0.4);
+    let limit = world.cells[0].body.capacities().gut_minerals;
+    world.cells[0].ingest(OrganicKind::Tissue, 1.0, limit);
+    world.particle(OrganicKind::Exudate, 300.0, 300.0, 12.0, 0.4);
     let capacities = caps(&world);
     let outputs = [Outputs {
         feed: 1.0,
         ..Outputs::default()
     }];
     world.eat(&outputs, &capacities);
-    close(world.cells[0].gut_energy, 0.0);
+    close(world.cells[0].gut_energy, 1.0);
     close(world.food[0].energy, 12.0);
-    world.cells[0].gut_nutrients = 0.0;
+    world.cells[0].scale_gut(0.0);
     world.eat(&outputs, &capacities);
     assert!(world.cells[0].gut_energy > 0.0);
     assert_eq!(capacities[0].optical_sensing, 0.0);
@@ -790,20 +815,42 @@ fn engulfing_transfers_one_whole_body_once_and_pays_before_the_meal() {
 }
 
 #[test]
-fn senescence_returns_all_body_and_gut_material_even_when_particles_are_full() {
+fn death_returns_body_and_all_gut_substrates_beyond_the_former_particle_cap() {
     let mut world = world(BodyFixture::Scavenger);
-    world.add_food(-1.0, -1.0, MAX_FOOD);
-    world.cells[0].gut_energy = 20.0;
-    world.cells[0].gut_nutrients = 0.5;
-    world.cells[0].age = LIFESPAN - DT;
+    assert_eq!(world.add_food(-1.0, -1.0, 1300), 1300);
+    world.cells[0].ingest(OrganicKind::Exudate, 5.0, 0.1);
+    world.cells[0].ingest(OrganicKind::Tissue, 10.0, 0.3);
+    world.cells[0].ingest(OrganicKind::Waste, 5.0, 0.1);
+    world.cells[0].integrity = 0.0;
     let material = world.nutrient_total();
     let energy = world.energy_total();
     world.step(&mut registry(IDLE));
     assert!(world.cells.is_empty());
     assert_eq!(world.deaths, 1);
-    assert_eq!(world.food.len(), MAX_FOOD);
+    assert!(world.food.len() > 1300);
+    for kind in OrganicKind::ALL {
+        assert!(world.food.iter().any(|f| f.kind == kind));
+    }
     close(world.nutrient_total(), material);
     assert!(world.energy_total() <= energy);
+}
+
+#[test]
+fn a_healthy_producer_has_no_five_minute_lifetime_limit() {
+    let mut world = world(BodyFixture::Producer);
+    world.environment.configure(0.5, 1.0, 0.0);
+    let mut programs =
+        registry("thrust=0;turn=0;divide=false;grow=0;photosynthesize=1;feed=0;absorb=0;");
+    let id = world.cells[0].id;
+    let material = world.nutrient_total();
+    advance(&mut world, &mut programs, 10830);
+    assert_eq!(world.cells.len(), 1);
+    assert_eq!(world.cells[0].id, id);
+    assert!(world.cells[0].age > 360.0);
+    assert!(world.cells[0].energy > 0.0 && world.cells[0].integrity == 1.0);
+    assert_eq!(world.deaths, 0);
+    close(world.nutrient_total(), material);
+    assert_eq!(world.sense_cell(id).unwrap().lifespan, 0.0);
 }
 
 #[test]
@@ -813,14 +860,16 @@ fn resource_imports_count_actual_introductions_and_reset_replaces_old_history() 
     for recipe in BodyFixture::ALL {
         world.try_seed_fixture(1, 2, -1.0, -1.0, recipe).unwrap();
     }
-    world.add_food(-1.0, -1.0, MAX_FOOD);
-    let full = world.nutrient_input_total();
+    assert_eq!(world.add_food(-1.0, -1.0, 2501), 2501);
+    let before_extra = world.nutrient_input_total();
     assert!(world.try_seed_cells(1, usize::MAX, 100.0, 100.0).is_err());
-    assert_eq!(world.add_food(100.0, 100.0, 5), 0);
-    close(world.nutrient_input_total(), full);
-    close(world.nutrient_total(), full);
+    assert_eq!(world.add_food(100.0, 100.0, 5), 5);
+    assert_eq!(world.food.len(), 2506);
+    let total = before_extra + 5.0 * FOOD_NUTRIENTS;
+    close(world.nutrient_input_total(), total);
+    close(world.nutrient_total(), total);
     world.environment.set_initial_nutrients(0.1);
-    close(world.nutrient_total(), full);
+    close(world.nutrient_total(), total);
     world.reset(11, 1);
     let (_, budget) = Body::founder();
     close(
@@ -1006,5 +1055,280 @@ fn dark_scavenger_completes_a_meal_dependent_lifecycle_with_accounted_food() {
         .all(|cell| cell.body.viable() && cell.gut_capacity() > 0.0));
     assert!(fed.energy_input_total() > founder_inputs);
     close(unfed.energy_input_total(), founder_inputs);
-    assert!(fed.time() < LIFESPAN);
+    assert!(fed.time() < 300.0);
+}
+
+#[test]
+fn digestive_substrates_have_distinct_costs_yields_and_conservative_residue() {
+    let mut rates = Vec::new();
+    for kind in OrganicKind::ALL {
+        let mut world = world(BodyFixture::Scavenger);
+        world.cells[0].energy = 50.0;
+        world.cells[0].nutrient_stored = 0.0;
+        world.cells[0].ingest(kind, 10.0, 0.3);
+        let capacities = caps(&world);
+        let outputs = [Outputs {
+            feed: 1.0,
+            digest: [1.0; 3],
+            ..Outputs::default()
+        }];
+        let material = world.nutrient_total();
+        let energy = world.energy_total();
+        let mut processing = [capacities[0].metabolism * DT];
+        world.digest(&outputs, &capacities, &mut processing);
+        let raw = 10.0 - world.cells[0].gut_energy;
+        assert!(raw > 0.0);
+        close(
+            world.cells[0].energy - 50.0,
+            raw * ASSIMILATION_EFFICIENCY[kind as usize],
+        );
+        close(world.nutrient_total(), material);
+        let residue = if kind == OrganicKind::Tissue {
+            0.2
+        } else {
+            0.0
+        };
+        close(
+            energy - world.energy_total(),
+            raw * (1.0 - ASSIMILATION_EFFICIENCY[kind as usize] - residue),
+        );
+        assert_eq!(!world.food.is_empty(), kind == OrganicKind::Tissue);
+        assert!(world.food.iter().all(|f| f.kind == OrganicKind::Waste));
+        rates.push(raw);
+    }
+    assert!(rates[0] > rates[1] && rates[1] > rates[2]);
+}
+
+#[test]
+fn digestive_preferences_share_capacity_and_can_leave_a_substrate_untouched() {
+    let mut world = world(BodyFixture::Scavenger);
+    world.cells[0].energy = 20.0;
+    world.cells[0].nutrient_stored = 0.0;
+    for kind in OrganicKind::ALL {
+        world.cells[0].ingest(kind, 10.0, 0.1);
+    }
+    let capacities = caps(&world);
+    let outputs = [Outputs {
+        feed: 1.0,
+        digest: [1.0, 0.5, 0.0],
+        ..Outputs::default()
+    }];
+    let mut processing = [capacities[0].metabolism * DT];
+    let budget = (capacities[0].digestion * DT).min(processing[0]);
+    world.digest(&outputs, &capacities, &mut processing);
+    let spent_exudate = (10.0 - world.cells[0].gut[0].energy) / DIGESTION_SPEED[0];
+    let spent_tissue = (10.0 - world.cells[0].gut[1].energy) / DIGESTION_SPEED[1];
+    close(spent_exudate + spent_tissue, budget);
+    close(spent_exudate, 2.0 * spent_tissue);
+    close(world.cells[0].gut[2].energy, 10.0);
+    close(
+        world.cells[0].gut_energy,
+        world.cells[0].gut.iter().map(|p| p.energy).sum(),
+    );
+}
+
+#[test]
+fn tissue_then_waste_reprocessing_cannot_regenerate_edible_energy_or_material() {
+    let mut world = world(BodyFixture::Scavenger);
+    world.cells[0].energy = 50.0;
+    world.cells[0].nutrient_stored = 0.0;
+    world.cells[0].ingest(OrganicKind::Tissue, 20.0, 0.4);
+    let capacities = caps(&world);
+    let outputs = [Outputs {
+        feed: 1.0,
+        digest: [1.0; 3],
+        ..Outputs::default()
+    }];
+    let material = world.nutrient_total();
+    let mut last_energy = world.energy_total();
+    for _ in 0..3000 {
+        let mut processing = [capacities[0].metabolism * DT];
+        world.digest(&outputs, &capacities, &mut processing);
+        // Accounted transfer of all residue back to the gut isolates the most
+        // favorable possible recycling loop, without adding new substrate.
+        for food in std::mem::take(&mut world.food) {
+            assert_eq!(food.kind, OrganicKind::Waste);
+            world.cells[0].ingest(food.kind, food.energy, food.nutrients);
+        }
+        let energy = world.energy_total();
+        assert!(energy <= last_energy + 1e-9);
+        last_energy = energy;
+        close(world.nutrient_total(), material);
+        if world.cells[0].gut_energy <= 1e-10 {
+            break;
+        }
+    }
+    assert!(world.cells[0].gut_energy <= 1e-10);
+    close(
+        world.cells[0].energy,
+        50.0 + 20.0 * 0.65 + 20.0 * 0.2 * 0.32,
+    );
+    close(world.cells[0].nutrient_stored, 0.4 * 0.8 + 0.4 * 0.2 * 0.5);
+}
+
+#[test]
+fn particle_capture_partition_and_overflow_preserve_substrate_identity() {
+    let mut world = world(BodyFixture::Scavenger);
+    mature(&mut world.cells[0]);
+    for kind in OrganicKind::ALL {
+        world.cells[0].ingest(
+            kind,
+            3.0 * (kind as u8 + 1) as f64,
+            0.03 * (kind as u8 + 1) as f64,
+        );
+    }
+    let before = world.cells[0].gut;
+    world.step(&mut registry(DIVIDE));
+    assert_eq!(world.cells.len(), 2);
+    for kind in OrganicKind::ALL {
+        let k = kind as usize;
+        close(
+            world.cells.iter().map(|c| c.gut[k].energy).sum(),
+            before[k].energy,
+        );
+        close(
+            world.cells.iter().map(|c| c.gut[k].nutrients).sum(),
+            before[k].nutrients,
+        );
+    }
+    for cell in &mut world.cells {
+        for organ in &mut cell.body.organs {
+            if organ.kind == Kind::Digestive {
+                organ.integrity = 0.0;
+            }
+        }
+    }
+    world.spill_excess_stores();
+    for kind in OrganicKind::ALL {
+        let k = kind as usize;
+        close(
+            world
+                .food
+                .iter()
+                .filter(|f| f.kind == kind)
+                .map(|f| f.energy)
+                .sum(),
+            before[k].energy,
+        );
+        close(
+            world
+                .food
+                .iter()
+                .filter(|f| f.kind == kind)
+                .map(|f| f.nutrients)
+                .sum(),
+            before[k].nutrients,
+        );
+    }
+    assert!(world
+        .cells
+        .iter()
+        .all(|c| c.gut_energy == 0.0 && c.gut_nutrients == 0.0));
+}
+
+#[test]
+fn local_merging_never_blends_tissue_waste_and_exudate() {
+    let mut world = World::empty(9);
+    let emissions: Vec<_> = OrganicKind::ALL
+        .into_iter()
+        .flat_map(|kind| (0..4).map(move |_| OrganicEmission::new(kind, 200.0, 200.0, 8.0, 0.1)))
+        .collect();
+    world.emit_organic_batch(emissions);
+    assert_eq!(world.food.len(), 6);
+    for kind in OrganicKind::ALL {
+        close(
+            world
+                .food
+                .iter()
+                .filter(|f| f.kind == kind)
+                .map(|f| f.energy)
+                .sum(),
+            32.0,
+        );
+        close(
+            world
+                .food
+                .iter()
+                .filter(|f| f.kind == kind)
+                .map(|f| f.nutrients)
+                .sum(),
+            0.4,
+        );
+    }
+}
+
+#[test]
+fn moving_growing_emitters_accumulate_packets_instead_of_spawning_microscopic_debris() {
+    let mut world = World::empty(11);
+    let mut emitted_energy = [0.0; 3];
+    let mut emitted_minerals = [0.0; 3];
+    // Cross spatial buckets and the torus seam while continuously growing.
+    // Before the displacement fix this made 18,000 microscopic particles.
+    for tick in 0..6000 {
+        let x = wrap(1100.0 + tick as f64 * 0.3, WIDTH);
+        let y = wrap(700.0 + tick as f64 * 0.1, HEIGHT);
+        let radius = 7.0 + tick as f64 * 0.001;
+        let mut emissions = Vec::new();
+        for kind in OrganicKind::ALL {
+            let k = kind as usize;
+            let energy = 0.005 + k as f64 * 0.001;
+            let minerals = 0.0001 + k as f64 * 0.00001;
+            let mut emission = OrganicEmission::new(kind, x + radius + 2.5, y, energy, minerals);
+            emission.outside = Some((x, y, radius));
+            emissions.push(emission);
+            emitted_energy[k] += energy;
+            emitted_minerals[k] += minerals;
+        }
+        world.emit_organic_batch(emissions);
+        for kind in OrganicKind::ALL {
+            // The newest not-yet-full packet is the one still receiving this
+            // cell's material. Full packets remain where they were released.
+            let active = world
+                .food
+                .iter()
+                .rev()
+                .find(|food| food.kind == kind)
+                .unwrap();
+            assert!(
+                delta(active.x - x, WIDTH).hypot(delta(active.y - y, HEIGHT)) + 1e-8
+                    >= radius + 2.5
+            );
+        }
+    }
+    assert_eq!(
+        world.food.len(),
+        6,
+        "Only two physically filled packets per substrate are needed"
+    );
+    for kind in OrganicKind::ALL {
+        let k = kind as usize;
+        let packets: Vec<_> = world.food.iter().filter(|f| f.kind == kind).collect();
+        assert_eq!(packets.len(), 2);
+        assert!(packets
+            .iter()
+            .all(|food| food.energy <= ORGANIC_PACKET_ENERGY + 1e-10));
+        close(
+            packets.iter().map(|food| food.energy).sum(),
+            emitted_energy[k],
+        );
+        close(
+            packets.iter().map(|food| food.nutrients).sum(),
+            emitted_minerals[k],
+        );
+    }
+}
+
+#[test]
+fn a_large_excretion_batch_stays_outside_the_emitter_across_the_torus_seam() {
+    let mut world = World::empty(29);
+    let mut emission = OrganicEmission::new(OrganicKind::Waste, 1210.0, 759.0, 200.0, 4.0);
+    emission.outside = Some((1199.0, 759.0, 8.5));
+    world.emit_organic_batch(vec![emission]);
+    assert_eq!(world.food.len(), 9);
+    close(world.food.iter().map(|f| f.energy).sum(), 200.0);
+    close(world.food.iter().map(|f| f.nutrients).sum(), 4.0);
+    for food in &world.food {
+        assert!(delta(food.x - 1199.0, WIDTH).hypot(delta(food.y - 759.0, HEIGHT)) + 1e-8 >= 11.0);
+        assert_eq!(food.kind, OrganicKind::Waste);
+    }
 }

@@ -30,7 +30,7 @@ let commonBody;
 for(const p of PRESETS){
   const api=await fresh(),id=compile(api,p.source);
   assert.equal('starterBody' in p,false,'A genome is not paired with an external body recipe');
-  const roots=graph(api,id).roots;assert.equal(roots.filter(r=>r.kind==='output').length,78);
+  const roots=graph(api,id).roots;assert.equal(roots.filter(r=>r.kind==='output').length,81);
   assert.ok(!hasLegacyReference(p.source),'No legacy resource or semantic target oracle in authored programs');
   seed(api,id,1);const before=snapshot(api).cells[0],initial=body(api,before.id);
   assert.equal(before.area,1);assert.equal(before.energy,68);assert.equal(before.capacity,80);
@@ -40,7 +40,9 @@ for(const p of PRESETS){
   commonBody??=physical;assert.deepEqual(physical,commonBody,`${p.name} begins with the same physical body`);
   const after=advance(api,1).cells[0];assert.ok(after);
   const constructed=Object.values(after.organs).reduce((sum,organ)=>sum+organ.mass,0)-.04;
-  assert.ok(constructed>0&&constructed<=.022/30+1e-10,'A program starts bounded, paid construction instead of receiving complete organs');
+  assert.equal(constructed,0,'Newly expressed proteins cannot assemble into organs in the same tick');
+  const expressed=Object.values(after.proteins).reduce((sum,mass)=>sum+mass,0);
+  assert.ok(expressed>0&&expressed*.6<=.022/30+1e-10,'The genome begins bounded, paid protein synthesis');
   assert.ok(after.energy<before.energy&&after.nutrients<before.nutrients,'Initial construction spends the shared resource reserves');
 }
 // Action requests alone do not grant hardware, even with food and light present.
@@ -102,7 +104,7 @@ console.log(`Organelle food-chain checks passed: ${PRESETS.length} genomes share
 if(measure){
   const template=BUILTIN_SIMULATIONS.find(s=>s.id==='builtin:simulation:mixed-ecosystem'),env=BUILTIN_ENVIRONMENTS.find(e=>e.id===template.environmentId);
   const populations=template.populations.map(row=>({...BUILTIN_GENOMES.find(g=>g.id===row.genomeId),...row}));
-  const study={startedAt:new Date().toISOString(),abi:9,checkpointVersion:3,wasmSha256:createHash('sha256').update(bytes).digest('hex'),wasmBytes:bytes.length,
+  const study={startedAt:new Date().toISOString(),abi:10,checkpointVersion:4,wasmSha256:createHash('sha256').update(bytes).digest('hex'),wasmBytes:bytes.length,
     template:template.name,environment:env,populations,mutationRate,seeds,durationSeconds:duration,
     sampleSeconds:[...new Set([...([0,15,30,60,120,180].filter(seconds=>seconds<=duration)),duration])].sort((a,b)=>a-b),results:[]};
   const round=n=>Math.round(n*1000)/1000;

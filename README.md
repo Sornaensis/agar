@@ -23,13 +23,13 @@ Open the local URL printed by Vite. In **Simulation**, start a preset or choose 
 
 An open simulation has **Player**, **Metrics**, **Settings** and **Genomes** tabs. The player has Play/Pause, 1×/2×/5×/10× speed and **Add organism**. Choose a genome to add one cell. Click a cell for **Overview**, **Body**, **Memory** and **Program**. Its program and memory are read-only; saving its genome creates a separate catalog document.
 
-The Body inspector compares actual organ counts and mass with the last construction requests. Expand a family to inspect stable local unit IDs, built mass, integrity and functional state. Internal space, membrane attachment use and achieved construction/recycling/repair rates remain visible. Metrics includes resource totals, introduced material and energy, harvested light, populations and feeding capabilities.
+The Body inspector compares actual organ counts and mass with the last construction requests. Expand a family to inspect stable local unit IDs, built mass, integrity and functional state. Internal space, membrane attachment use, family-specific protein stocks and achieved expression/assembly/recycling/repair rates remain visible. Metrics includes resource totals, introduced material and energy, harvested light, populations and feeding capabilities.
 
 Built-ins stay unchanged. Editing or importing creates independent catalog items. Running simulations own their programs and environment state, so catalog renames and deletions do not alter existing worlds.
 
 ## Bodies and capabilities
 
-`body.area` is paid envelope area; `body.mass` is actual material in the scaffold, organs, reserve minerals and gut minerals. Usable energy, raw gut energy and embodied structural energy are separate. Energy does not add material mass. Compartment contents occupy their reserved capacity without being counted twice as internal space.
+`body.area` is paid envelope area; `body.mass` is actual material in the scaffold, organs, assembly proteins, reserve minerals and gut minerals. Usable energy, raw gut energy and embodied structural energy are separate. Energy does not add material mass. Compartment contents occupy their reserved capacity without being counted twice as internal space.
 
 Growing the envelope creates room and increases upkeep and drag. It does not grant a motor, sensor or energy source. Organs use internal space; membrane-facing modules also use finite attachment capacity that scales with perimeter. Incomplete and damaged organs retain their material and occupied space.
 
@@ -56,25 +56,40 @@ The genome is the body plan. An introduced cell has area 1, one core of mass 0.0
 
 Programs must establish an energy source before spending their reserves on further development. The built-ins use actual organelle state to sequence construction, then build duplicates for division. This ordering is part of their visible source and can be edited or mutated. Changing a target changes future construction; it never replaces the living cell's existing organs.
 
-Construction requests share assembly time, energy, minerals, internal room and attachment space. Allocation uses a common starting snapshot; new space, recovered resources and newly functional machinery are used on following ticks. Lowering a target does not remove anything without explicit recycling. Recycling costs processing energy and returns only accounted material and a fraction of retained structural energy. Capacity loss spills excess contents into the environment instead of silently discarding them.
+Each `express.<family>` produces that family’s assembly proteins from minerals and energy. Proteins persist between ticks, occupy internal space, add upkeep and turn over into returned minerals plus heat. Count/size targets assemble organs from matching proteins already present at the start of the tick; expressing a gene cannot create a functional organ immediately. Expression and assembly share finite core throughput, energy and space. Leaving every gene on can fill the cell with unused protein and delay the machinery it needs. Regulate expression using `protein.<family>`, actual organ mass and resource reserves. Allocation uses a common starting snapshot; new space, recovered resources and newly functional machinery are used on following ticks. Lowering a target does not remove anything without explicit recycling. Recycling costs processing energy and returns only accounted material and a fraction of retained structural energy. Capacity loss spills excess contents into the environment instead of silently discarding them.
 
 Division requires doubled birth area, sufficient energy, cooldown and a feasible packing of actual organs with a viable core in each half. Discrete organs are assigned, never cloned. Build duplicate essential capabilities before division if both daughters should inherit them. The retained parent keeps its memory and age; the daughter starts with empty registers and no object tracks. Mutations affect the inherited program, not the inherited body.
 
-There is **no fixed population cap**. Resources, mortality, browser memory and execution time constrain practical populations. The former area-4 growth ceiling is gone. A separate geometry bound keeps cell radius at or below 95 world units, one eighth of the shorter world dimension; maximum envelope area is about 184.18. Collision queries use actual radii. These are simulation abstractions, not biological fidelity claims.
+There is **no fixed population cap, organic-particle count cap or age-based death timer**. Cells die from physical damage, loss of essential machinery or exhausted energy. Age remains observable; the compatibility signal `lifespan` is zero, meaning no fixed maximum. Resources, mortality, browser memory and execution time constrain practical populations. The former area-4 growth ceiling is gone. A separate geometry bound keeps cell radius at or below 95 world units, one eighth of the shorter world dimension; maximum envelope area is about 184.18. Collision queries use actual radii. These are simulation abstractions, not biological fidelity claims.
+
+## Organic matter and digestion
+
+Organic matter retains its composition through ingestion, gut storage, spills, death and division:
+
+| Material | Origin | Processing |
+| --- | --- | --- |
+| Exudate | Released photosynthetic surplus and supplied organic meals | Fast, readily assimilated carbon source |
+| Tissue | Dead cells, extracted cell contents and engulfed structural material | Slower, nutrient-rich processing that leaves digestive residue |
+| Waste | Unassimilated tissue residue | Slow, low-yield recovery; the remainder dissipates or remineralizes |
+
+`digest.exudate`, `digest.tissue` and `digest.waste` allocate the same finite digestive throughput. Their default efforts are 1, 1 and 0.35. They cannot grant digestion without a functioning digestive organ. Read `gut.<kind>.energy` and `.nutrients` to choose which enzymes to prioritize; `feed` still regulates ingestion. Gut composition of an engulfed organism stays intact instead of turning its waste back into fresh tissue. Decay returns minerals to the environment and dissipates energy. Same-kind local merging combines accounted contents; particle counts never trigger deletion or artificial conversion.
+
+Particle appearance differs, but genome sensors continue to report physical properties and local chemical cues rather than an omniscient food/prey category.
 
 ## Genome language
 
 Programs are immutable typed expression graphs. Each 1/30-second tick computes `(current signals, old memory) → (action requests, next memory)`. `let` names an expression recomputed every tick. Arithmetic, comparisons, booleans, bounded strings, 2D vectors, conditionals and pure built-ins are supported; there are no user loops, I/O or immediate writes inside expressions.
 
 ```text
-# Build a source of energy before adding a motor.
+# Express a source of energy before adding a motor.
+# Stop expression when built mass plus stored proteins meets the target.
 let powered = organelle.photosynthetic.capacity > 0;
 target.photosynthetic.count = 1;
 target.photosynthetic.size = 0.08;
-build.photosynthetic = if energy > 12 then 1 else 0;
+express.photosynthetic = if energy > 12 && organelle.photosynthetic.mass + protein.photosynthetic < 0.08 then 1 else 0;
 target.flagellum.count = 1;
 target.flagellum.size = 0.04;
-build.flagellum = if powered && energy.fraction > 0.6 then 1 else 0;
+express.flagellum = if powered && energy.fraction > 0.6 && organelle.flagellum.mass + protein.flagellum < 0.04 then 1 else 0;
 recycle.flagellum = 0;
 
 turn = 0;
@@ -85,9 +100,9 @@ divide = false;
 
 `thrust`, `turn` and `divide` are required. Other action requests are `grow`, `photosynthesize`, `engulf`, `bite`, `defend`, `repair`, `absorb` and `feed`. Optional actions default to zero/false except `absorb` and `feed`, which default to 1. Hardware and resource checks determine what a request achieves.
 
-Every organelle family has `target.<family>.count` (integer), `target.<family>.size` (scalar), `build.<family>` and `recycle.<family>` (0–1 effort). Omitted count is zero, size uses the family minimum, and both efforts are zero. Plain `2` is integer; `2.0` is scalar, so scalar counts require `int()`. Actual family signals are `organelle.<family>.count`, `.mass`, `.capacity`, `.damaged` and `.building`. Capacity is equivalent minimum-sized functional units; building is material still missing before incomplete units first become functional.
+Every organelle family has `target.<family>.count` (integer), `target.<family>.size` (scalar), `express.<family>` and `recycle.<family>` (0–1 effort). Omitted count is zero, size uses the family minimum, and both efforts are zero. Plain `2` is integer; `2.0` is scalar, so scalar counts require `int()`. Actual family signals are `organelle.<family>.count`, `.mass`, `.capacity`, `.damaged` and `.building`. Capacity is equivalent minimum-sized functional units; building is material still missing before incomplete units first become functional. `protein.<family>` is matching stored construction material; `expression.rate`, `assembly.rate` and `assembly.capacity` expose achieved synthesis, achieved assembly and shared core throughput. The old `build.<family>` spelling remains a compatibility alias for expression, with the same paid protein mechanism.
 
-The editor reference documents all **144 read signals and 78 write signals**, with authoritative types checked against Rust metadata. See [the implemented organelle design](design/organelles.md) and [engine/ABI.md](engine/ABI.md) for the detailed rules and interfaces.
+The editor reference documents all **169 read signals and 81 write signals**, with authoritative types checked against Rust metadata. See [the implemented organelle design](design/organelles.md) and [engine/ABI.md](engine/ABI.md) for the detailed rules and interfaces.
 
 ### Physical sensing
 
@@ -139,7 +154,7 @@ In an organism's read-only Program view, hover, place the caret or select an exp
 
 IndexedDB stores documents and complete worlds; localStorage stores preferences and editor drafts. Changing runs checkpoint every two seconds and after key actions, and reopen paused. The save indicator reports failures. Only the open, visible simulation advances; there is no offline catch-up. Web Locks protect a run from competing writers in multiple tabs. Clearing browser site data removes its local saves; export genomes and environments for portable copies.
 
-**Current formats: engine ABI 9, checkpoint 3, genome language 3.** Genome JSON exports use `agar.genome` version 2 with `languageVersion: 3`; environment JSON remains version 1. Plain `.cell` source is checked with the current compiler. Checkpoint-3 simulations from ABI 8 retain their actual organs and continue normally; the common minimal introduction changes newly added cells only.
+**Current formats: engine ABI 10, checkpoint 4, genome language 3.** Genome JSON exports use `agar.genome` version 2 with `languageVersion: 3`; environment JSON remains version 1. Plain `.cell` source is checked with the current compiler. Checkpoint-3 simulations retain their actual organs, resources, memory and source. Their previously unclassified organic particles and gut contents import as tissue; their new protein pools start empty. The next save uses checkpoint 4. Continued runs use the updated physical rules, so historical trajectories change. The old `build.*` source spelling is accepted as expression; programs can be edited to regulate their protein stocks explicitly.
 
 The organelle model is an intentional compatibility break. Checkpoints 1/2 are rejected before replacing the engine state. Older saved genomes remain viewable, renameable and exportable, but must be manually updated in a new copy before introduction. Their investment fractions and omniscient sensors are not silently converted into free organs. Saved records and old files remain preserved. New and old browser documents keep the same storage namespace.
 

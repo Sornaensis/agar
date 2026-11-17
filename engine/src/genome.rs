@@ -16,7 +16,8 @@ pub const REGISTER_COUNT: usize = 999;
 pub const REGISTER_ENERGY_COST: f64 = 0.0025;
 const MAX_STRING_BYTES: usize = 128;
 
-pub const DEFAULT_PROGRAM: &str = r#"# Every newborn has one core. This program must build its own energy path.
+pub const DEFAULT_PROGRAM: &str = r#"# Every newborn has one core. This program must express its own energy machinery.
+# Protein stocks are bounded by feedback, not by a free body recipe.
 let light_path = organelle.photosynthetic.capacity >= 1;
 let processing = organelle.metabolic.capacity >= 1;
 let supplied = organelle.transporter.capacity >= 1;
@@ -36,16 +37,20 @@ divide = body.division_ready && energy > 120
          && organelle.transporter.count >= 2 && organelle.transporter.building < 0.000001;
 target.photosynthetic.count = 2;
 target.photosynthetic.size = 0.10;
-build.photosynthetic = if funded && (!light_path || powered && core_ready) then 1 else 0;
+express.photosynthetic = if funded && (!light_path || powered && core_ready)
+    && protein.photosynthetic < min(0.012, max(0, 0.2 - organelle.photosynthetic.mass)) then 1 else 0;
 target.metabolic.count = 2;
 target.metabolic.size = 0.03;
-build.metabolic = if funded && light_path && (!processing || powered && core_ready) then 1 else 0;
+express.metabolic = if funded && light_path && (!processing || powered && core_ready)
+    && protein.metabolic < min(0.012, max(0, 0.06 - organelle.metabolic.mass)) then 1 else 0;
 target.transporter.count = 2;
 target.transporter.size = 0.02;
-build.transporter = if funded && light_path && processing && (!supplied || core_ready) then 1 else 0;
+express.transporter = if funded && light_path && processing && (!supplied || core_ready)
+    && protein.transporter < min(0.012, max(0, 0.04 - organelle.transporter.mass)) then 1 else 0;
 target.core.count = 2;
 target.core.size = max(0.04, body.birth_area * 0.04);
-build.core = if powered && energy > 50 && nutrient.stored > 0.01 then 1 else 0;
+express.core = if powered && energy > 50 && nutrient.stored > 0.01
+    && protein.core < min(0.012, max(0, max(0.08, body.birth_area * 0.08) - organelle.core.mass)) then 1 else 0;
 "#;
 
 /// Owned, physically built machinery, sampled before this tick's construction.
@@ -89,6 +94,16 @@ pub struct Inputs {
     pub gut_energy: f64,
     pub gut_capacity: f64,
     pub gut_fraction: f64,
+    pub gut_exudate_energy: f64,
+    pub gut_exudate_nutrients: f64,
+    pub gut_tissue_energy: f64,
+    pub gut_tissue_nutrients: f64,
+    pub gut_waste_energy: f64,
+    pub gut_waste_nutrients: f64,
+    pub expression_rate: f64,
+    pub assembly_rate: f64,
+    pub assembly_capacity: f64,
+    pub protein: [f64; FAMILY_COUNT],
     pub digestion_rate: f64,
     pub growth_rate: f64,
     pub lifespan: f64,
@@ -142,6 +157,8 @@ pub struct Outputs {
     pub repair: f64,
     pub absorb: f64,
     pub feed: f64,
+    /// Relative digestive enzyme efforts for exudate, tissue, and waste.
+    pub digest: [f64; 3],
     pub body: BodyControls,
     /// Body-relative radians. Applied to the next tick's optical sampling.
     pub scan_bearing: f64,
@@ -165,6 +182,7 @@ impl Default for Outputs {
             repair: 0.0,
             absorb: 1.0,
             feed: 1.0,
+            digest: [1.0, 1.0, 0.35],
             body: BodyControls::default(),
             scan_bearing: 0.0,
             scan_width: std::f64::consts::TAU,
@@ -556,9 +574,34 @@ enum Sensor {
     ObjectContrast,
     ObjectPigment,
     ObjectMotion,
+    GutExudateEnergy,
+    GutExudateNutrients,
+    GutTissueEnergy,
+    GutTissueNutrients,
+    GutWasteEnergy,
+    GutWasteNutrients,
+    ExpressionRate,
+    AssemblyRate,
+    AssemblyCapacity,
+    ProteinCore,
+    ProteinPhotosynthetic,
+    ProteinMetabolic,
+    ProteinDigestive,
+    ProteinReserve,
+    ProteinTransporter,
+    ProteinPhagocyte,
+    ProteinFlagellum,
+    ProteinPiercer,
+    ProteinCortex,
+    ProteinRepair,
+    ProteinPhotoreceptor,
+    ProteinThermoreceptor,
+    ProteinChemoreceptor,
+    ProteinMechanoreceptor,
+    ProteinOptical,
 }
 impl Sensor {
-    const ALL: [Self; 144] = [
+    const ALL: [Self; 169] = [
         Self::Energy,
         Self::EnergyFraction,
         Self::EnergyCapacity,
@@ -703,6 +746,31 @@ impl Sensor {
         Self::ObjectContrast,
         Self::ObjectPigment,
         Self::ObjectMotion,
+        Self::GutExudateEnergy,
+        Self::GutExudateNutrients,
+        Self::GutTissueEnergy,
+        Self::GutTissueNutrients,
+        Self::GutWasteEnergy,
+        Self::GutWasteNutrients,
+        Self::ExpressionRate,
+        Self::AssemblyRate,
+        Self::AssemblyCapacity,
+        Self::ProteinCore,
+        Self::ProteinPhotosynthetic,
+        Self::ProteinMetabolic,
+        Self::ProteinDigestive,
+        Self::ProteinReserve,
+        Self::ProteinTransporter,
+        Self::ProteinPhagocyte,
+        Self::ProteinFlagellum,
+        Self::ProteinPiercer,
+        Self::ProteinCortex,
+        Self::ProteinRepair,
+        Self::ProteinPhotoreceptor,
+        Self::ProteinThermoreceptor,
+        Self::ProteinChemoreceptor,
+        Self::ProteinMechanoreceptor,
+        Self::ProteinOptical,
     ];
     fn name(self) -> &'static str {
         match self {
@@ -850,6 +918,31 @@ impl Sensor {
             Self::ObjectContrast => "object.contrast",
             Self::ObjectPigment => "object.pigment",
             Self::ObjectMotion => "object.motion",
+            Self::GutExudateEnergy => "gut.exudate.energy",
+            Self::GutExudateNutrients => "gut.exudate.nutrients",
+            Self::GutTissueEnergy => "gut.tissue.energy",
+            Self::GutTissueNutrients => "gut.tissue.nutrients",
+            Self::GutWasteEnergy => "gut.waste.energy",
+            Self::GutWasteNutrients => "gut.waste.nutrients",
+            Self::ExpressionRate => "expression.rate",
+            Self::AssemblyRate => "assembly.rate",
+            Self::AssemblyCapacity => "assembly.capacity",
+            Self::ProteinCore => "protein.core",
+            Self::ProteinPhotosynthetic => "protein.photosynthetic",
+            Self::ProteinMetabolic => "protein.metabolic",
+            Self::ProteinDigestive => "protein.digestive",
+            Self::ProteinReserve => "protein.reserve",
+            Self::ProteinTransporter => "protein.transporter",
+            Self::ProteinPhagocyte => "protein.phagocyte",
+            Self::ProteinFlagellum => "protein.flagellum",
+            Self::ProteinPiercer => "protein.piercer",
+            Self::ProteinCortex => "protein.cortex",
+            Self::ProteinRepair => "protein.repair",
+            Self::ProteinPhotoreceptor => "protein.photoreceptor",
+            Self::ProteinThermoreceptor => "protein.thermoreceptor",
+            Self::ProteinChemoreceptor => "protein.chemoreceptor",
+            Self::ProteinMechanoreceptor => "protein.mechanoreceptor",
+            Self::ProteinOptical => "protein.optical",
         }
     }
     fn ty(self) -> Type {
@@ -898,6 +991,31 @@ impl Sensor {
     }
     fn read(self, i: &Inputs) -> Value {
         match self {
+            Self::GutExudateEnergy => Value::Scalar(finite(i.gut_exudate_energy)),
+            Self::GutExudateNutrients => Value::Scalar(finite(i.gut_exudate_nutrients)),
+            Self::GutTissueEnergy => Value::Scalar(finite(i.gut_tissue_energy)),
+            Self::GutTissueNutrients => Value::Scalar(finite(i.gut_tissue_nutrients)),
+            Self::GutWasteEnergy => Value::Scalar(finite(i.gut_waste_energy)),
+            Self::GutWasteNutrients => Value::Scalar(finite(i.gut_waste_nutrients)),
+            Self::ExpressionRate => Value::Scalar(finite(i.expression_rate)),
+            Self::AssemblyRate => Value::Scalar(finite(i.assembly_rate)),
+            Self::AssemblyCapacity => Value::Scalar(finite(i.assembly_capacity)),
+            Self::ProteinCore => Value::Scalar(finite(i.protein[0])),
+            Self::ProteinPhotosynthetic => Value::Scalar(finite(i.protein[1])),
+            Self::ProteinMetabolic => Value::Scalar(finite(i.protein[2])),
+            Self::ProteinDigestive => Value::Scalar(finite(i.protein[3])),
+            Self::ProteinReserve => Value::Scalar(finite(i.protein[4])),
+            Self::ProteinTransporter => Value::Scalar(finite(i.protein[5])),
+            Self::ProteinPhagocyte => Value::Scalar(finite(i.protein[6])),
+            Self::ProteinFlagellum => Value::Scalar(finite(i.protein[7])),
+            Self::ProteinPiercer => Value::Scalar(finite(i.protein[8])),
+            Self::ProteinCortex => Value::Scalar(finite(i.protein[9])),
+            Self::ProteinRepair => Value::Scalar(finite(i.protein[10])),
+            Self::ProteinPhotoreceptor => Value::Scalar(finite(i.protein[11])),
+            Self::ProteinThermoreceptor => Value::Scalar(finite(i.protein[12])),
+            Self::ProteinChemoreceptor => Value::Scalar(finite(i.protein[13])),
+            Self::ProteinMechanoreceptor => Value::Scalar(finite(i.protein[14])),
+            Self::ProteinOptical => Value::Scalar(finite(i.protein[15])),
             Self::Energy => Value::Scalar(finite(i.energy)),
             Self::EnergyFraction => Value::Scalar(finite(i.energy_fraction)),
             Self::EnergyCapacity => Value::Scalar(finite(i.energy_capacity)),
@@ -1460,9 +1578,10 @@ struct WriteRule {
     value: Option<usize>,
     guard: Option<usize>,
 }
-pub const OUTPUT_COUNT: usize = 11 + FAMILY_COUNT * 4 + 3;
+pub const OUTPUT_COUNT: usize = 11 + FAMILY_COUNT * 4 + 3 + 3;
 const BODY_OUTPUT_START: usize = 11;
 const SCAN_OUTPUT_START: usize = BODY_OUTPUT_START + FAMILY_COUNT * 4;
+const DIGEST_OUTPUT_START: usize = SCAN_OUTPUT_START + 3;
 const OUTPUT_NAMES: [&str; OUTPUT_COUNT] = [
     "thrust",
     "turn",
@@ -1477,72 +1596,84 @@ const OUTPUT_NAMES: [&str; OUTPUT_COUNT] = [
     "feed",
     "target.core.count",
     "target.core.size",
-    "build.core",
+    "express.core",
     "recycle.core",
     "target.photosynthetic.count",
     "target.photosynthetic.size",
-    "build.photosynthetic",
+    "express.photosynthetic",
     "recycle.photosynthetic",
     "target.metabolic.count",
     "target.metabolic.size",
-    "build.metabolic",
+    "express.metabolic",
     "recycle.metabolic",
     "target.digestive.count",
     "target.digestive.size",
-    "build.digestive",
+    "express.digestive",
     "recycle.digestive",
     "target.reserve.count",
     "target.reserve.size",
-    "build.reserve",
+    "express.reserve",
     "recycle.reserve",
     "target.transporter.count",
     "target.transporter.size",
-    "build.transporter",
+    "express.transporter",
     "recycle.transporter",
     "target.phagocyte.count",
     "target.phagocyte.size",
-    "build.phagocyte",
+    "express.phagocyte",
     "recycle.phagocyte",
     "target.flagellum.count",
     "target.flagellum.size",
-    "build.flagellum",
+    "express.flagellum",
     "recycle.flagellum",
     "target.piercer.count",
     "target.piercer.size",
-    "build.piercer",
+    "express.piercer",
     "recycle.piercer",
     "target.cortex.count",
     "target.cortex.size",
-    "build.cortex",
+    "express.cortex",
     "recycle.cortex",
     "target.repair.count",
     "target.repair.size",
-    "build.repair",
+    "express.repair",
     "recycle.repair",
     "target.photoreceptor.count",
     "target.photoreceptor.size",
-    "build.photoreceptor",
+    "express.photoreceptor",
     "recycle.photoreceptor",
     "target.thermoreceptor.count",
     "target.thermoreceptor.size",
-    "build.thermoreceptor",
+    "express.thermoreceptor",
     "recycle.thermoreceptor",
     "target.chemoreceptor.count",
     "target.chemoreceptor.size",
-    "build.chemoreceptor",
+    "express.chemoreceptor",
     "recycle.chemoreceptor",
     "target.mechanoreceptor.count",
     "target.mechanoreceptor.size",
-    "build.mechanoreceptor",
+    "express.mechanoreceptor",
     "recycle.mechanoreceptor",
     "target.optical.count",
     "target.optical.size",
-    "build.optical",
+    "express.optical",
     "recycle.optical",
     "scan.bearing",
     "scan.width",
     "scan.target",
+    "digest.exudate",
+    "digest.tissue",
+    "digest.waste",
 ];
+/// Older source keeps its spelling while sharing the exact expression output.
+fn output_index(name: &str) -> Option<usize> {
+    OUTPUT_NAMES.iter().position(|n| *n == name).or_else(|| {
+        let family = name.strip_prefix("build.")?;
+        OUTPUT_NAMES
+            .iter()
+            .position(|n| n.strip_prefix("express.") == Some(family))
+    })
+}
 fn output_type(index: usize) -> Type {
     match index {
         2 | 5 => Type::Bool,
@@ -1558,6 +1689,8 @@ fn output_type(index: usize) -> Type {
 fn output_default(index: usize) -> Value {
     match index {
         9 | 10 => Value::Scalar(1.0),
+        i if i == DIGEST_OUTPUT_START || i == DIGEST_OUTPUT_START + 1 => Value::Scalar(1.0),
+        i if i == DIGEST_OUTPUT_START + 2 => Value::Scalar(0.35),
         i if (BODY_OUTPUT_START..SCAN_OUTPUT_START).contains(&i)
             && (i - BODY_OUTPUT_START) % 4 == 1 =>
         {
@@ -2026,6 +2159,7 @@ impl Program {
             repair: number(8),
             absorb: number(9),
             feed: number(10),
+            digest: std::array::from_fn(|i| number(DIGEST_OUTPUT_START + i)),
             body,
             scan_bearing: number(SCAN_OUTPUT_START),
             scan_width: number(SCAN_OUTPUT_START + 1),
@@ -2725,7 +2859,7 @@ impl Parser {
                     .location
                     .error("expected 'let', a register write, 'clear', or an output name."));
             };
-            let output = OUTPUT_NAMES.iter().position(|n| *n == name);
+            let output = output_index(&name);
             let register = Register::parse(&name);
             if is_binding {
                 if output.is_some()
@@ -3209,13 +3343,13 @@ mod tests {
         assert!(graph.contains(r#"{"id":"output:engulf","kind":"output","name":"engulf","type":"boolean","value":null,"guard":null,"default":"false"}"#));
         for (name, default) in [
             ("absorb", "1"),
-            ("build.flagellum", "0"),
-            ("build.photosynthetic", "0"),
-            ("build.digestive", "0"),
-            ("build.cortex", "0"),
-            ("build.optical", "0"),
+            ("express.flagellum", "0"),
+            ("express.photosynthetic", "0"),
+            ("express.digestive", "0"),
+            ("express.cortex", "0"),
+            ("express.optical", "0"),
             ("feed", "1"),
-            ("build.piercer", "0"),
+            ("express.piercer", "0"),
         ] {
             assert!(graph.contains(&format!(
                 "{{\"id\":\"output:{name}\",\"kind\":\"output\",\"name\":\"{name}\",\"type\":\"scalar\",\"value\":null,\"guard\":null,\"default\":\"{default}\"}}"
@@ -3312,7 +3446,7 @@ mod tests {
             ))
             .is_err());
         }
-        assert_eq!(Sensor::ALL.len(), 144);
+        assert_eq!(Sensor::ALL.len(), 169);
         assert_eq!(
             Sensor::OrganelleFlagellumCount.read(&inputs),
             Value::Integer(7)
@@ -3674,7 +3808,63 @@ mod tests {
                 1
             );
         }
-        assert_eq!(OUTPUT_COUNT, 78);
+        assert_eq!(OUTPUT_COUNT, 81);
+    }
+
+    #[test]
+    fn expression_and_substrate_controls_are_typed_and_old_build_spelling_is_an_alias() {
+        let input = Inputs {
+            protein: std::array::from_fn(|i| i as f64 * 0.01),
+            gut_exudate_energy: 3.0,
+            gut_tissue_energy: 5.0,
+            gut_waste_energy: 7.0,
+            gut_exudate_nutrients: 0.1,
+            gut_tissue_nutrients: 0.2,
+            gut_waste_nutrients: 0.3,
+            expression_rate: 0.01,
+            assembly_rate: 0.02,
+            assembly_capacity: 0.03,
+            ..Inputs::default()
+        };
+        let source = "thrust=0;turn=0;divide=false;express.flagellum=if protein.flagellum<0.1 then 0.4 else 0;digest.exudate=-1;digest.tissue=2;digest.waste=0.25;";
+        let current = eval(source, input.clone());
+        let legacy = eval(
+            &source.replace("express.flagellum", "build.flagellum"),
+            input.clone(),
+        );
+        assert_eq!(current, legacy);
+        assert_eq!(current.body.build[7], 0.4);
+        assert_eq!(current.digest, [0.0, 1.0, 0.25]);
+        for name in [
+            "protein.flagellum",
+            "gut.tissue.energy",
+            "gut.waste.nutrients",
+            "expression.rate",
+            "assembly.capacity",
+        ] {
+            let (sensor, ty) = Sensor::lookup(name).unwrap();
+            assert_eq!(ty, Type::Number);
+            assert!(sensor.read(&input).number() > 0.0);
+        }
+        for invalid in [
+            "express.flagellum=true;",
+            "digest.tissue=vec(1,0);",
+            "protein.flagellum=1;",
+            "express.flagellum=1;build.flagellum=1;",
+        ] {
+            assert!(Program::compile(&format!("thrust=0;turn=0;divide=false;{invalid}")).is_err());
+        }
+        for kind in [
+            MutationKind::Constant,
+            MutationKind::Expression,
+            MutationKind::Reference,
+        ] {
+            for seed in 0..24 {
+                if let Some(mutation) = Program::mutate_source(source, seed, kind) {
+                    assert_roundtrip(&mutation);
+                }
+            }
+        }
     }
 
     #[test]

@@ -147,26 +147,30 @@ export class Renderer {
       }
     }
 
-    // A single path for each food layer avoids hundreds of shadows or gradients.
-    context.fillStyle = 'rgba(241,173,89,0.07)';
-    context.beginPath();
+    // Three batched material paths keep large particle populations cheap to draw.
+    const organicPaths = [new Path2D(),new Path2D(),new Path2D()];
+    const organicHalos = [new Path2D(),new Path2D(),new Path2D()];
     for (const food of world.food) {
+      const radius = (food.kind === 1 ? 1.8 : 1.2) + clamp(Math.max(food.energy / 40, food.nutrients), 0, 1) * 0.7;
+      const path = organicPaths[food.kind], halo = organicHalos[food.kind];
       for (const point of this.wrappedPositions(food.x, food.y, 5)) {
-        context.moveTo(point.x + 5, point.y);
-        context.arc(point.x, point.y, 5, 0, Math.PI * 2);
+        halo.moveTo(point.x + 5,point.y); halo.arc(point.x,point.y,5,0,Math.PI * 2);
+        if (food.kind === 1) {
+          path.moveTo(point.x,point.y-radius); path.lineTo(point.x+radius,point.y);
+          path.lineTo(point.x,point.y+radius); path.lineTo(point.x-radius,point.y); path.closePath();
+        } else if (food.kind === 2) {
+          path.rect(point.x-radius*0.7,point.y-radius*0.7,radius*1.4,radius*1.4);
+        } else {
+          path.moveTo(point.x+radius,point.y); path.arc(point.x,point.y,radius,0,Math.PI * 2);
+        }
       }
     }
-    context.fill();
-    context.fillStyle = 'rgba(237,179,108,0.82)';
-    context.beginPath();
-    for (const food of world.food) {
-      const radius = 1.4 + clamp(Math.max(food.energy / 40, food.nutrients), 0, 1) * 0.7;
-      for (const point of this.wrappedPositions(food.x, food.y, radius)) {
-        context.moveTo(point.x + radius, point.y);
-        context.arc(point.x, point.y, radius, 0, Math.PI * 2);
-      }
+    const organicColors = ['rgba(237,198,108,0.86)','rgba(225,137,122,0.9)','rgba(158,151,130,0.72)'];
+    const haloColors = ['rgba(237,198,108,0.07)','rgba(225,137,122,0.08)','rgba(158,151,130,0.035)'];
+    for (let kind=0;kind<3;kind++) {
+      context.fillStyle=haloColors[kind]; context.fill(organicHalos[kind]);
+      context.fillStyle=organicColors[kind]; context.fill(organicPaths[kind]);
     }
-    context.fill();
 
     for (const cell of world.cells) {
       const margin = Math.max(cell.radius * 2.4 + 5, cell.id === selectedId ? cell.radius + 8 / this.scale : 0);

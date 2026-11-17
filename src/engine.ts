@@ -4,23 +4,26 @@ import engineContract from './engine-contract.json';
 /** Versioned boundary to the Rust engine. All simulation runs in WASM. */
 export const ORGANELLE_KINDS = ['core','photosynthetic','metabolic','digestive','reserve','transporter','phagocyte','flagellum','piercer','cortex','repair','photoreceptor','thermoreceptor','chemoreceptor','mechanoreceptor','optical'] as const;
 export type OrganelleKind = typeof ORGANELLE_KINDS[number];
-export interface OrganelleSummary { kind: OrganelleKind; count:number; mass:number; capacity:number; damaged:number; building:number; functionalMass:number }
+export interface OrganelleSummary { kind: OrganelleKind; count:number; mass:number; capacity:number; damaged:number; building:number; functionalMass:number; protein:number }
 export interface BodyInspection {
   cellId:number; area:number; mass:number; spaceUsed:number; spaceCapacity:number; surfaceUsed:number; surfaceCapacity:number;
-  constructionRate:number; recyclingRate:number; repairRate:number;
+  constructionRate:number; recyclingRate:number; repairRate:number; synthesisRate:number; assemblyCapacity:number;
   organs: { id:number; kind:OrganelleKind; mass:number; integrity:number; functional:boolean; minimumMass:number; embodiedEnergy:number }[];
-  requested: { kind:OrganelleKind; count:number; size:number; build:number; recycle:number }[];
+  requested: { kind:OrganelleKind; count:number; size:number; build:number; recycle:number; proteinMass:number }[];
 }
 export interface LanguageSchema {version:3; signals:{name:string;type:GenomeValueType}[]; outputs:{name:string;type:GenomeValueType;required:boolean;default:GenomeValue}[];maxNodes:number;maxSourceBytes:number;registersPerType:number}
 export interface Cell {
   id:number; genomeId:number; x:number; y:number; vx:number; vy:number; angle:number; energy:number; age:number; generation:number; parentId:number;
   radius:number; bodyArea:number; bodyMass:number; birthArea:number; energyCapacity:number; basalMetabolism:number; memoryUsed:number; memoryCost:number;
   integrity:number; photosynthesisRate:number; nutrientStored:number; nutrientCapacity:number; nutrientUptakeRate:number;
-  gutEnergy:number; gutCapacity:number; gutNutrients:number; digestionRate:number; growthRate:number; maturity:number; lifespan:number; exudationRate:number;
+  gutEnergy:number; gutCapacity:number; gutNutrients:number; digestionRate:number; growthRate:number; maturity:number; exudationRate:number;
+  gutExudateEnergy:number; gutTissueEnergy:number; gutWasteEnergy:number;
+  gutExudateNutrients:number; gutTissueNutrients:number; gutWasteNutrients:number; expressionRate:number;
   bodyUpkeep:number; spaceUsed:number; spaceCapacity:number; surfaceUsed:number; surfaceCapacity:number; divisionReady:boolean; opticalRange:number;
   organelles:OrganelleSummary[];
 }
-export interface Food { x: number; y: number; energy: number; nutrients: number }
+export type OrganicKind = 0 | 1 | 2;
+export interface Food { x: number; y: number; energy: number; nutrients: number; kind:OrganicKind }
 export type SourceKind = 0 | 1 | 2 | 3;
 export interface EnvironmentSource { id: number; kind: SourceKind; x: number; y: number; strength: number; radius: number }
 export interface EnvironmentSnapshot {
@@ -87,8 +90,8 @@ export function validateGenomeEvaluation(value: unknown, expectedCellId?: number
     || new TextEncoder().encode(trace.source).length > MAX_PROGRAM_BYTES
     || !Array.isArray(trace.expressions) || !trace.expressions.length || trace.expressions.length > 8192
     || !Array.isArray(trace.bindings) || trace.bindings.length > 8192
-    || !Array.isArray(trace.signals) || trace.signals.length !== 144
-    || !Array.isArray(trace.outputs) || trace.outputs.length !== 78
+    || !Array.isArray(trace.signals) || trace.signals.length !== READ_SIGNAL_COUNT
+    || !Array.isArray(trace.outputs) || trace.outputs.length !== WRITE_SIGNAL_COUNT
     || !Array.isArray(trace.writes) || trace.writes.length > 9990) return fail();
   const range = (from: number, to: number): boolean => Number.isInteger(from) && Number.isInteger(to)
     && from >= 0 && to > from && to <= trace.source.length;
@@ -153,7 +156,7 @@ export function validateGenomeGraph(value: unknown): GenomeGraph {
   if (!value || typeof value !== 'object') return fail();
   const graph = value as GenomeGraph;
   if (graph.version !== 1 || !Array.isArray(graph.nodes) || graph.nodes.length > 8192
-    || !Array.isArray(graph.roots) || graph.roots.length > 10068) return fail();
+    || !Array.isArray(graph.roots) || graph.roots.length > 9990 + WRITE_SIGNAL_COUNT) return fail();
   const types = new Set(['integer', 'scalar', 'boolean', 'string', 'vec2']);
   const kinds = new Set(['constant', 'sensor', 'register', 'populated', 'reference', 'unary', 'binary', 'conditional', 'call']);
   for (let index = 0; index < graph.nodes.length; index++) {
@@ -177,13 +180,16 @@ export function validateGenomeGraph(value: unknown): GenomeGraph {
 }
 export const MAX_PROGRAM_BYTES = 262_144;
 export const MAX_STATE_BYTES = 128 * 1024 * 1024;
-const CELL_STRIDE = 135;
+const READ_SIGNAL_COUNT = 169;
+const WRITE_SIGNAL_COUNT = 81;
+const CELL_STRIDE = 158;
+const FOOD_STRIDE = 5;
 export type MutationKind = 0 | 1 | 2 | 3;
 export interface GenomeRecord { source: string; parentId: number; mutationKind: MutationKind }
 export interface MutationResult { id: number; changed: boolean; reason: string }
 export interface WorldSnapshot {
   tick: number; time: number; cells: Cell[]; food: Food[]; births: number; deaths: number;
-  eaten: number; width: number; height: number; maxFood: number; foodRate: number;
+  eaten: number; width: number; height: number; foodRate: number;
   mutationRate: number; mutatedBirths: number; mutationSkipped: number; genomeCount: number; genomeLimit: number;
   genomeBytes: number; genomeByteLimit: number; predationCount: number; attackCount: number; photosynthesisTotal: number;
   energyTotal:number; energyInputTotal:number;
@@ -200,7 +206,7 @@ interface WasmExports extends WebAssembly.Exports {
   genome_analysis_len(): number;
   error_ptr(): number; error_len(): number;
   reset(seed: number, genomeId: number): number;
-  reset_empty(seed: number, initialFood: number): void;
+  reset_empty(seed: number, initialFood: number): number;
   alloc_state(len: number): number;
   save_state_ptr(): number; save_state_len(): number;
   restore_state(ptr: number, len: number): number;
@@ -319,8 +325,8 @@ export class Engine {
   }
   /** Fresh dynamics and no cells; the configured environment and rates are retained. */
   resetEmpty(seed: number, initialFood = 360): void {
-    if (!Number.isInteger(initialFood) || initialFood < 0 || initialFood > 1200) throw new Error('Initial food must be between 0 and 1,200 particles.');
-    this.wasm.reset_empty(seed >>> 0, initialFood);
+    if (!Number.isSafeInteger(initialFood) || initialFood < 0) throw new Error('Initial organic particle count must be a nonnegative safe whole number.');
+    if (this.wasm.reset_empty(seed >>> 0, initialFood) !== 1) throw new Error(this.readError() || 'The simulation could not be reset with the requested organic particles.');
   }
   /** Owns all bytes; later engine calls cannot modify this checkpoint. */
   saveState(): Uint8Array {
@@ -349,7 +355,13 @@ export class Engine {
     if (error || added !== count) throw new Error(error || 'The engine could not create the requested organisms.');
     return added;
   }
-  addFood(x = -1, y = -1, count = 40): number { return this.wasm.add_food(x, y, count); }
+  addFood(x = -1, y = -1, count = 40): number {
+    if (!Number.isSafeInteger(count) || count < 0) throw new Error('Organic particle count must be a nonnegative safe whole number.');
+    const added = this.wasm.add_food(x, y, count);
+    const error = this.readError();
+    if (error || added !== count) throw new Error(error || 'The engine could not create the requested particles.');
+    return added;
+  }
   setFoodRate(rate: number): void { this.wasm.set_food_rate(rate); }
   setMutationRate(rate: number): void { this.wasm.set_mutation_rate(rate); }
   setEnvironment(temperature: number, light: number, current: number): void { this.wasm.set_environment(temperature, light, current); }
@@ -380,7 +392,7 @@ export class Engine {
   languageSchema():LanguageSchema {
     const ptr=this.wasm.language_schema_ptr(), len=this.wasm.language_schema_len();
     const schema=JSON.parse(new TextDecoder().decode(new Uint8Array(this.wasm.memory.buffer,ptr,len))) as LanguageSchema;
-    if (schema.version!==3 || schema.signals?.length!==144 || schema.outputs?.length!==78) throw new Error('The engine language schema is incompatible.');
+    if (schema.version!==3 || schema.signals?.length!==READ_SIGNAL_COUNT || schema.outputs?.length!==WRITE_SIGNAL_COUNT) throw new Error('The engine language schema is incompatible.');
     return schema;
   }
   cellBody(id:number):BodyInspection {
@@ -389,10 +401,10 @@ export class Engine {
     const body=JSON.parse(new TextDecoder().decode(new Uint8Array(this.wasm.memory.buffer,ptr,len))) as BodyInspection;
     const finite=(n:unknown):boolean=>typeof n==='number' && Number.isFinite(n) && n>=0 && n<=1e12;
     const kind=(v:unknown):boolean=>ORGANELLE_KINDS.includes(v as OrganelleKind);
-    if (!body || body.cellId!==id || ![body.area,body.mass,body.spaceUsed,body.spaceCapacity,body.surfaceUsed,body.surfaceCapacity,body.constructionRate,body.recyclingRate,body.repairRate].every(finite)
+    if (!body || body.cellId!==id || ![body.area,body.mass,body.spaceUsed,body.spaceCapacity,body.surfaceUsed,body.surfaceCapacity,body.constructionRate,body.recyclingRate,body.repairRate,body.synthesisRate,body.assemblyCapacity].every(finite)
       || !Array.isArray(body.organs) || body.organs.length>24000 || !body.organs.every(o=>o && Number.isInteger(o.id) && o.id>0 && kind(o.kind) && [o.mass,o.integrity,o.minimumMass,o.embodiedEnergy].every(finite) && o.integrity<=1 && typeof o.functional==='boolean')
       || new Set(body.organs.map(o=>o.id)).size!==body.organs.length
-      || !Array.isArray(body.requested) || body.requested.length!==16 || !body.requested.every((r,i)=>r.kind===ORGANELLE_KINDS[i] && Number.isInteger(r.count) && r.count>=0 && [r.size,r.build,r.recycle].every(finite) && r.build<=1 && r.recycle<=1)) {
+      || !Array.isArray(body.requested) || body.requested.length!==16 || !body.requested.every((r,i)=>r.kind===ORGANELLE_KINDS[i] && Number.isInteger(r.count) && r.count>=0 && [r.size,r.build,r.recycle,r.proteinMass].every(finite) && r.build<=1 && r.recycle<=1)) {
       throw new Error('The engine returned an invalid body inspection.');
     }
     return body;
@@ -451,25 +463,27 @@ export class Engine {
     const ptr = this.wasm.snapshot_ptr();
     const data = new Float64Array(this.wasm.memory.buffer, ptr, this.wasm.snapshot_len());
     if (data.length < 12 || !Number.isInteger(data[2]) || data[2] < 0 || !Number.isInteger(data[3]) || data[3] < 0
-      || data.length !== 12 + data[2] * CELL_STRIDE + data[3] * 4) throw new Error('The world snapshot has an invalid layout.');
+      || data.length !== 12 + data[2] * CELL_STRIDE + data[3] * FOOD_STRIDE) throw new Error('The world snapshot has an invalid layout.');
     const cells: Cell[] = [];
     const food: Food[] = [];
     for (let i = 0; i < data[2]; i++) {
       const n = 12 + i * CELL_STRIDE;
       const organelles:OrganelleSummary[] = ORGANELLE_KINDS.map((kind,index)=>{
-        const k=n+39+index*6;return {kind,count:data[k],mass:data[k+1],capacity:data[k+2],damaged:data[k+3],building:data[k+4],functionalMass:data[k+5]};
+        const k=n+39+index*6;return {kind,count:data[k],mass:data[k+1],capacity:data[k+2],damaged:data[k+3],building:data[k+4],functionalMass:data[k+5],protein:data[n+141+index]};
       });
       cells.push({id:data[n],genomeId:data[n+1],x:data[n+2],y:data[n+3],vx:data[n+4],vy:data[n+5],angle:data[n+6],energy:data[n+7],age:data[n+8],generation:data[n+9],parentId:data[n+10],radius:data[n+11],
         bodyArea:data[n+12],bodyMass:data[n+13],birthArea:data[n+14],energyCapacity:data[n+15],basalMetabolism:data[n+16],memoryUsed:data[n+17],memoryCost:data[n+18],integrity:data[n+19],photosynthesisRate:data[n+20],
-        nutrientStored:data[n+21],nutrientCapacity:data[n+22],nutrientUptakeRate:data[n+23],gutEnergy:data[n+24],gutCapacity:data[n+25],gutNutrients:data[n+26],digestionRate:data[n+27],growthRate:data[n+28],maturity:data[n+29],lifespan:data[n+30],exudationRate:data[n+31],bodyUpkeep:data[n+32],spaceUsed:data[n+33],spaceCapacity:data[n+34],surfaceUsed:data[n+35],surfaceCapacity:data[n+36],divisionReady:data[n+37]!==0,opticalRange:data[n+38],organelles});
+        nutrientStored:data[n+21],nutrientCapacity:data[n+22],nutrientUptakeRate:data[n+23],gutEnergy:data[n+24],gutCapacity:data[n+25],gutNutrients:data[n+26],digestionRate:data[n+27],growthRate:data[n+28],maturity:data[n+29],exudationRate:data[n+31],bodyUpkeep:data[n+32],spaceUsed:data[n+33],spaceCapacity:data[n+34],surfaceUsed:data[n+35],surfaceCapacity:data[n+36],divisionReady:data[n+37]!==0,opticalRange:data[n+38],
+        gutExudateEnergy:data[n+135],gutTissueEnergy:data[n+136],gutWasteEnergy:data[n+137],gutExudateNutrients:data[n+138],gutTissueNutrients:data[n+139],gutWasteNutrients:data[n+140],expressionRate:data[n+157],organelles});
     }
     for (let i = 0; i < data[3]; i++) {
-      const n = 12 + cells.length * CELL_STRIDE + i * 4;
-      food.push({ x:data[n], y:data[n+1], energy:data[n+2], nutrients:data[n+3] });
+      const n = 12 + cells.length * CELL_STRIDE + i * FOOD_STRIDE;
+      if (![0,1,2].includes(data[n+4])) throw new Error('The world snapshot has an invalid organic material kind.');
+      food.push({ x:data[n], y:data[n+1], energy:data[n+2], nutrients:data[n+3], kind:data[n+4] as OrganicKind });
     }
     // Copy every snapshot value before further calls: Rust may grow its memory.
     const state = { tick:data[0], time:data[1], cells, food, births:data[4], deaths:data[5], eaten:data[6],
-      width:data[7], height:data[8], maxFood:data[10], foodRate:data[11] };
+      width:data[7], height:data[8], foodRate:data[11] };
     return { ...state, mutationRate: this.wasm.mutation_rate(), mutatedBirths: this.wasm.mutation_count(),
       mutationSkipped: this.wasm.mutation_skipped_count(), genomeCount: this.wasm.genome_count(), genomeLimit: this.wasm.genome_limit(),
       genomeBytes: this.wasm.genome_bytes(), genomeByteLimit: this.wasm.genome_byte_limit(),

@@ -65,12 +65,12 @@ const sensorRows: ReadonlyArray<readonly [string, PrimitiveType, string]> = [
   ['memory.used', 'scalar', 'Number of populated registers at the start of this tick.'],
   ['memory.cost', 'scalar', 'Register maintenance in energy per second: 0.0025 × memory.used.'],
   ['body.area', 'scalar', 'Supported envelope area. Its frame and membrane must be grown using energy and minerals; collision radius is 7 × sqrt(body.area).'],
-  ['body.mass', 'scalar', 'Actual mineral material: frame, organelles, free reserves and gut minerals, each counted once. Energy does not add material mass.'],
+  ['body.mass', 'scalar', 'Actual mineral material: frame, organelles, assembly proteins, free reserves and gut minerals, each counted once. Energy does not add material mass.'],
   ['body.birth_area', 'scalar', 'Envelope area at this organism’s most recent birth or division.'],
   ['body.maturity', 'scalar', 'Envelope growth toward division, clamped to 0–1. Area must double from body.birth_area. Other physical requirements still apply.'],
   ['body.division_ready', 'boolean', 'Whether the current body can divide: sufficient area, energy, cooldown, viable cores and a conservative organelle partition.'],
-  ['body.space.free', 'scalar', 'Unused internal space. Organelles and storage compartments occupy room even while damaged or incomplete.'],
-  ['body.space.used', 'scalar', 'Internal space occupied by organs and their compartments. Contents are not counted a second time.'],
+  ['body.space.free', 'scalar', 'Unused internal space. Assembly proteins, organelles and storage compartments occupy room even while organs are damaged or incomplete.'],
+  ['body.space.used', 'scalar', 'Internal space occupied by assembly proteins, organs and their compartments. Contents are not counted a second time.'],
   ['body.space.capacity', 'scalar', 'Internal capacity supported by the paid envelope.'],
   ['body.surface.free', 'scalar', 'Unused membrane attachment capacity. External organs need both anchors and internal support.'],
   ['body.surface.used', 'scalar', 'Membrane attachment capacity occupied by built and incomplete organs.'],
@@ -83,7 +83,7 @@ const sensorRows: ReadonlyArray<readonly [string, PrimitiveType, string]> = [
   ['gut.fraction', 'scalar', 'Gut energy divided by digestive capacity, clamped to 0–1. Zero when capacity is absent.'],
   ['digestion.rate', 'scalar', 'Usable energy gained from digestion per second during the last completed tick, after assimilation losses.'],
   ['growth.rate', 'scalar', 'Envelope area added per second during the last completed tick.'],
-  ['lifespan', 'scalar', 'Maximum organism age in seconds.'],
+  ['lifespan', 'scalar', 'Compatibility signal, always zero: cells have no age limit. Use age for elapsed lifetime; survival depends on resources and structural integrity.'],
   ['exudation.rate', 'scalar', 'Raw organic energy released as particles per second during the last completed tick.'],
   ...ORGANELLE_CATALOG.flatMap(({kind, name}) => [
     [`organelle.${kind}.count`, 'integer', `Actual ${name.toLowerCase()} instance count, including unfinished or damaged instances.`],
@@ -125,6 +125,18 @@ const sensorRows: ReadonlyArray<readonly [string, PrimitiveType, string]> = [
   ['object.contrast', 'scalar', 'Measured optical contrast. Selection depends on visibility, angle and distance, never hidden energy.'],
   ['object.pigment', 'scalar', 'Measured visible surface appearance. This is not a species, feeding-strategy or edible flag.'],
   ['object.motion', 'vec2', 'Estimated relative motion of the visible object in the cell’s body frame. Zero when invalid.'],
+  ['gut.exudate.energy', 'scalar', 'Raw energy in captured soluble organic releases. Exudate is readily processed; it is separate from usable energy.'],
+  ['gut.exudate.nutrients', 'scalar', 'Mineral material carried with exudate in the gut. Digestion can transfer it to free reserves.'],
+  ['gut.tissue.energy', 'scalar', 'Raw energy in captured cell tissue. Tissue takes more digestive work than exudate and produces refractory waste.'],
+  ['gut.tissue.nutrients', 'scalar', 'Mineral material in captured cell tissue. Some remains in the waste produced during digestion.'],
+  ['gut.waste.energy', 'scalar', 'Residual raw energy in captured waste. Waste is slow to process and yields less usable energy.'],
+  ['gut.waste.nutrients', 'scalar', 'Mineral material in captured waste. Processing returns unassimilated minerals to the surrounding water.'],
+  ['expression.rate', 'scalar', 'Assembly-protein material synthesized per second during the last completed tick. Synthesis spends energy and minerals and shares finite core throughput with assembly and growth.'],
+  ['assembly.rate', 'scalar', 'Organelle material assembled per second during the last completed tick. Assembly consumes previously synthesized proteins of the matching family.'],
+  ['assembly.capacity', 'scalar', 'Current shared core work capacity in material-equivalent units per second. Protein synthesis, organelle assembly, frame growth, recycling and repair compete for it.'],
+  ...ORGANELLE_CATALOG.map(({kind, name}) => [
+    `protein.${kind}`, 'scalar', `Unassembled ${name.toLowerCase()} protein material. Only this family can use it. Stocks consume internal space and upkeep, turn over with a 45-second half-life, and partition at division. Express only what the body can use.`,
+  ] as [string, PrimitiveType, string]),
 ];
 export const BUILTIN_SIGNALS: readonly GenomeSymbol[] = Object.freeze(sensorRows.map(([name, type, description]) =>
   symbol(name, 'signal', type, `${name}: ${type}`, `${description} Sampled before actions this tick.`)));
@@ -142,16 +154,19 @@ export const BUILTIN_OUTPUTS: readonly GenomeSymbol[] = Object.freeze([
   output('defend', 'scalar', 'Active defense effort, clamped to 0–1; defaults to 0. Built cortex adds passive resistance; active defense also costs energy.'),
   output('repair', 'scalar', 'Paid repair effort, clamped to 0–1; defaults to 0. The core provides slow repair; repair complexes raise throughput. Damaged organs retain their material and space until repaired or recycled.'),
   output('absorb', 'scalar', 'Mineral uptake effort, clamped to 0–1; defaults to 1. Requires built mineral transporters, energy, local supply and reserve room.'),
-  output('feed', 'scalar', 'Organic intake and digestion effort, clamped to 0–1; defaults to 1. Capture and digestion require the corresponding built machinery; ingested energy is processed with assimilation losses.'),
+  output('feed', 'scalar', 'Overall organic intake and digestion effort, clamped to 0–1; defaults to 1. Capture and digestion require built machinery. The digest.* controls divide finite processing work between gut contents.'),
   ...ORGANELLE_CATALOG.flatMap(({kind, name, minimumMass}) => [
-    output(`target.${kind}.count`, 'integer', `Requested number of ${name.toLowerCase()} instances; nonnegative integer, default 0. This does not create or remove organs by itself. Use build.${kind} or recycle.${kind}.`),
+    output(`target.${kind}.count`, 'integer', `Assembly target for ${name.toLowerCase()} instances; nonnegative integer, default 0. Matching proteins assemble toward this target. express.${kind} supplies protein; recycle.${kind} dismantles excess units.`),
     output(`target.${kind}.size`, 'scalar', `Requested material per ${name.toLowerCase()} instance; default and minimum ${minimumMass}. Actual instances can differ through partial construction or damage.`),
-    output(`build.${kind}`, 'scalar', `Construction effort toward the ${name.toLowerCase()} count and size targets, clamped to 0–1; default 0. Shares finite assembly, energy, minerals, internal room and membrane space with all other requests. Capabilities update on the next tick.`),
+    output(`express.${kind}`, 'scalar', `Expression effort for ${name.toLowerCase()} assembly proteins, clamped to 0–1; default 0. Synthesis spends energy and minerals, shares core throughput, and occupies internal space. Existing proteins assemble toward targets on later ticks even after expression stops. Excess stock has upkeep and decays; use protein.${kind} and actual organ mass for feedback.`),
     output(`recycle.${kind}`, 'scalar', `Explicit dismantling effort for ${name.toLowerCase()} material above its targets, clamped to 0–1; default 0. Costs time and energy, recovers only accounted material and retained energy, and spills excess contents safely. Essential core remains protected.`),
   ]),
   output('scan.bearing', 'scalar', 'Body-relative scan center in radians, wrapped to −π…π; defaults to 0. Takes effect on the following tick.'),
   output('scan.width', 'scalar', 'Requested scan width in radians, clamped to 0…2π; defaults to a full circle. Built detector coverage, visibility and occlusion still limit observations. Takes effect on the following tick.'),
   output('scan.target', 'string', 'Optional opaque token to reacquire within the next physical scan; defaults to an empty string. It grants no access outside the detector’s observable region.'),
+  output('digest.exudate', 'scalar', 'Processing effort for gut exudate, clamped to 0–1; defaults to 1. Relatively fast digestion converts 80% of its raw energy to usable reserves. Shares processing capacity with tissue and waste.'),
+  output('digest.tissue', 'scalar', 'Processing effort for gut tissue, clamped to 0–1; defaults to 1. Slower than exudate: 65% of raw energy becomes usable reserves, 20% remains in waste and 15% dissipates. Some minerals remain in the waste.'),
+  output('digest.waste', 'scalar', 'Processing effort for gut waste, clamped to 0–1; defaults to 0.35. Slow refractory digestion converts 32% of raw energy to usable reserves. Remaining energy dissipates and unassimilated minerals return to water.'),
 ]);
 
 export const LANGUAGE_KEYWORDS: readonly GenomeSymbol[] = Object.freeze([
@@ -169,6 +184,11 @@ export const GENOME_SYMBOLS: readonly GenomeSymbol[] = Object.freeze([
   ...BUILTIN_FUNCTIONS, ...BUILTIN_SIGNALS, ...BUILTIN_OUTPUTS, ...LANGUAGE_KEYWORDS,
 ]);
 const symbolByName = new Map(GENOME_SYMBOLS.map(item => [item.name, item]));
+const compatibilityOutputs = new Map(ORGANELLE_CATALOG.map(({kind}) => {
+  const canonical = symbolByName.get(`express.${kind}`)!;
+  const name = `build.${kind}`;
+  return [name, symbol(name, 'output', 'scalar', `${name} = scalar;`, `Compatibility spelling for express.${kind}. It now requests paid protein synthesis, followed by assembly on later ticks. Use express.${kind} in new programs. ${canonical.description}`)] as const;
+}));
 
 export const LANGUAGE_RULES = Object.freeze([
   'number in a signature means integer or scalar. Integers promote to scalar when mixed with scalars, and integer values may be assigned to scalar outputs or registers. Scalar-to-integer assignment needs int().',
@@ -200,7 +220,7 @@ export function lookupGenomeSymbol(name: string, bindings: readonly GenomeBindin
   const binding = bindings.find(item => item.name === name);
   if (binding) return symbol(name, 'binding', binding.type, `${name}: ${binding.type}`,
     'Immutable local signal. Its expression is recomputed from the current inputs and old register values each tick.');
-  return symbolByName.get(name) ?? registerSymbol(name);
+  return symbolByName.get(name) ?? compatibilityOutputs.get(name) ?? registerSymbol(name);
 }
 
 export type GenomeTokenKind = 'keyword' | 'boolean' | 'number' | 'string' | 'comment' | 'operator'
@@ -247,7 +267,7 @@ export function tokenizeGenome(source: string): GenomeToken[] {
     } else if (/[A-Za-z_]/.test(character)) {
       pos++;
       while (/[A-Za-z0-9_.]/.test(source[pos] ?? '')) pos++;
-      const name = source.slice(start, pos), known = symbolByName.get(name), register = registerSymbol(name);
+      const name = source.slice(start, pos), known = symbolByName.get(name) ?? compatibilityOutputs.get(name), register = registerSymbol(name);
       if (name === 'true' || name === 'false') { kind = 'boolean'; type = 'boolean'; }
       else if (register) { kind = 'register'; type = register.type as PrimitiveType; }
       else if (known) {
@@ -442,7 +462,10 @@ const outputExamples: Readonly<Record<string, string>> = Object.freeze({
   photosynthesize: 'photosynthesize = 1;', engulf: 'engulf = contact.valid && gut.fraction < 0.5;',
   bite: 'bite = if contact.valid && gut.fraction < 0.5 then 0.8 else 0;', defend: 'defend = if contact.valid then 0.5 else 0;',
   repair: 'repair = if integrity < 0.9 && energy.fraction > 0.5 then 0.5 else 0;', absorb: 'absorb = if nutrient.fraction < 0.8 then 1 else 0;',
-  feed: 'feed = 1;', 'scan.bearing': 'scan.bearing = sin(age * 0.2) * 1.5;', 'scan.width': 'scan.width = 3.141593;',
+  feed: 'feed = 1;', 'digest.exudate': 'digest.exudate = if gut.exudate.energy > 0 then 1 else 0;',
+  'digest.tissue': 'digest.tissue = if gut.tissue.energy > 0 then 0.8 else 0;',
+  'digest.waste': 'digest.waste = if gut.exudate.energy + gut.tissue.energy < 1 then 1 else 0.1;',
+  'scan.bearing': 'scan.bearing = sin(age * 0.2) * 1.5;', 'scan.width': 'scan.width = 3.141593;',
   'scan.target': 'scan.target = if populated(rs001) then rs001 else "";',
 });
 
@@ -454,6 +477,10 @@ export function genomeSymbolDocumentation(item: GenomeSymbol): GenomeSymbolDocum
   }
   if (item.category === 'output') {
     const family = ORGANELLE_CATALOG.find(entry => item.name.includes(`.${entry.kind}`));
+    if (family && (item.name.startsWith('express.') || item.name.startsWith('build.'))) {
+      return { example: `target.${family.kind}.count = 2;\ntarget.${family.kind}.size = ${family.minimumMass};\nlet missing = max(0, ${family.minimumMass * 2} - organelle.${family.kind}.mass);\nexpress.${family.kind} = if energy > 30 && protein.${family.kind} < min(0.01, missing) then 1 else 0;`,
+        notes: ['Expression makes family-specific assembly proteins, not an instant organ. Synthesis and assembly share finite core throughput.', 'Protein already present at the beginning of a tick can assemble toward targets. It occupies internal space, has upkeep, and decays if unused.', 'Switch expression off when protein covers the remaining target. Lowering a target requires explicit recycling to remove an existing organ.'] };
+    }
     const fallback = item.name.endsWith('.count') ? '2' : item.name.endsWith('.size') ? String(family?.minimumMass ?? 0.04) : '0.3';
     const typeNote = item.type === 'integer' ? 'Requires an integer expression such as 2 or int(value); 2.0 is a scalar.'
       : item.type === 'string' ? 'Requires a bounded string expression. Object tokens can be kept in string registers.'

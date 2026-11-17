@@ -65,6 +65,11 @@ impl World {
             ] {
                 w.f64(v);
             }
+            for pool in &c.gut {
+                w.f64(pool.energy);
+                w.f64(pool.nutrients);
+            }
+            w.f64(c.synthesis_rate);
             c.body.write_checkpoint(w);
             c.memory.write_checkpoint(w);
             w.text(&c.scan_target);
@@ -92,9 +97,14 @@ impl World {
             for v in [f.x, f.y, f.energy, f.nutrients] {
                 w.f64(v);
             }
+            w.u8(f.kind as u8);
         }
     }
-    pub(crate) fn read_checkpoint(r: &mut Reader<'_>, genome_count: usize) -> Result<Self> {
+    pub(crate) fn read_checkpoint(
+        r: &mut Reader<'_>,
+        genome_count: usize,
+        version: u32,
+    ) -> Result<Self> {
         let mut counts = [0; 8];
         for v in &mut counts {
             *v = r.u64()?;
@@ -149,7 +159,7 @@ impl World {
             let vy = r.range(-1e12, 1e12)?;
             let angle = r.range(0.0, TAU)?;
             let energy = r.range(0.0, 1e12)?;
-            let age = r.range(0.0, LIFESPAN)?;
+            let age = r.range(0.0, 1e100)?;
             let cooldown = r.range(0.0, DIVISION_COOLDOWN)?;
             let integrity = r.range(0.0, 1.0)?;
             let nutrient_stored = r.range(0.0, 1e12)?;
@@ -163,7 +173,35 @@ impl World {
             let engulf_cooldown = r.range(0.0, 2.0)?;
             let scan_bearing = r.range(-PI, PI)?;
             let scan_width = r.range(0.0, TAU)?;
-            let body = Body::read_checkpoint(r)?;
+            let mut gut = [OrganicMatter::default(); 3];
+            let synthesis_rate;
+            if version >= 4 {
+                for pool in &mut gut {
+                    pool.energy = r.range(0.0, 1e12)?;
+                    pool.nutrients = r.range(0.0, 1e12)?;
+                    ensure(
+                        pool.energy > 0.0 || pool.nutrients == 0.0,
+                        "empty substrate pool contains minerals",
+                    )?;
+                }
+                synthesis_rate = r.range(0.0, 1e100)?;
+                let pooled_energy: f64 = gut.iter().map(|pool| pool.energy).sum();
+                let pooled_nutrients: f64 = gut.iter().map(|pool| pool.nutrients).sum();
+                ensure(
+                    (pooled_energy - gut_energy).abs() <= 1e-9 + gut_energy * 1e-10
+                        && (pooled_nutrients - gut_nutrients).abs() <= 1e-9 + gut_nutrients * 1e-10,
+                    "gut substrate totals disagree",
+                )?;
+            } else {
+                // Version 3 did not retain provenance. Preserve the complete
+                // mixed meal as tissue; never infer history from its ratio.
+                gut[OrganicKind::Tissue as usize] = OrganicMatter {
+                    energy: gut_energy,
+                    nutrients: gut_nutrients,
+                };
+                synthesis_rate = 0.0;
+            }
+            let body = Body::read_checkpoint_version(r, version)?;
             let memory = Registers::read_checkpoint(r)?;
             let scan_target = Rc::from(r.text(128)?);
             let mut requested = BodyControls::default();
@@ -229,6 +267,7 @@ impl World {
                 nutrient_stored,
                 gut_energy,
                 gut_nutrients,
+                gut,
                 birth_area,
                 photosynthesis_rate: rates[0],
                 uptake_rate: rates[1],
@@ -236,6 +275,7 @@ impl World {
                 growth_rate: rates[3],
                 exudation_rate: rates[4],
                 construction_rate: rates[5],
+                synthesis_rate,
                 recycling_rate: rates[6],
                 repair_rate: rates[7],
                 engulf_cooldown,
@@ -253,8 +293,7 @@ impl World {
                 c.alive()
                     && c.body.area <= MAX_AREA
                     && birth_area > 0.0
-                    && birth_area <= c.body.area + 1e-10
-                    && age < LIFESPAN,
+                    && birth_area <= c.body.area + 1e-10,
                 "invalid living body",
             )?;
             ensure(
@@ -270,15 +309,31 @@ impl World {
             )?;
             cells.push(c);
         }
-        let count = r.count(MAX_FOOD)?;
-        let mut food = Vec::with_capacity(count);
+        let count = r.u32()? as usize;
+        let particle_bytes = if version >= 4 { 41 } else { 40 };
+        ensure(
+            count <= r.remaining() / particle_bytes,
+            "particle count exceeds checkpoint data",
+        )?;
+        let mut food = Vec::new();
+        food.try_reserve_exact(count)
+            .map_err(|_| "Not enough memory to restore organic particles".to_owned())?;
         let mut food_ids = std::collections::HashSet::new();
+        food_ids
+            .try_reserve(count)
+            .map_err(|_| "Not enough memory to restore organic particle identities".to_owned())?;
         for _ in 0..count {
             let id = r.u64()?;
             let x = r.range(0.0, WIDTH)?;
             let y = r.range(0.0, HEIGHT)?;
             let energy = r.range(0.0, 24.0)?;
             let nutrients = r.range(0.0, 1e100)?;
+            let kind = if version >= 4 {
+                OrganicKind::from_index(r.u8()?)
+                    .ok_or("Invalid simulation save: unknown organic substrate.")?
+            } else {
+                OrganicKind::Tissue
+            };
             ensure(
                 id > 0
                     && id < next_food_id
@@ -290,6 +345,7 @@ impl World {
             )?;
             food.push(Food {
                 id,
+                kind,
                 x,
                 y,
                 energy,
@@ -427,5 +483,46 @@ mod tests {
                 "failed restore changed live state"
             );
         }
+    }
+    #[test]
+    fn old_cells_and_uncapped_particles_roundtrip_with_exact_gut_substrates() {
+        let mut live = Engine::new();
+        let id = live.compile("thrust=0;turn=0;divide=false;feed=0;absorb=0;");
+        live.world.reset_empty(31, 2501);
+        live.world
+            .try_seed_fixture(id, 1, 200.0, 200.0, BodyFixture::Scavenger)
+            .unwrap();
+        live.world.cells[0].age = 401.0;
+        for kind in OrganicKind::ALL {
+            let food = live.world.food.pop().unwrap();
+            live.world.cells[0].ingest(kind, food.energy, food.nutrients);
+        }
+        let before = checkpoint::save(&live).unwrap();
+        let restored = checkpoint::restore(&before).unwrap();
+        assert_eq!(restored.world.food.len(), 2498);
+        assert_eq!(restored.world.cells[0].age, 401.0);
+        assert_eq!(restored.world.cells[0].gut, live.world.cells[0].gut);
+        assert_eq!(checkpoint::save(&restored).unwrap(), before);
+        let mut forged = checkpoint::restore(&before).unwrap();
+        forged.world.cells[0].gut[0].energy += 1.0;
+        let bytes = checkpoint::save(&forged).unwrap();
+        assert!(!live.restore_state(&bytes));
+        assert!(
+            live.error.contains("gut substrate totals"),
+            "{}",
+            live.error
+        );
+        assert_eq!(checkpoint::save(&live).unwrap(), before);
+    }
+
+    #[test]
+    fn failed_organic_introduction_and_reset_preserve_the_world_atomically() {
+        let mut live = Engine::new();
+        live.world.reset_empty(12, 5);
+        let before = checkpoint::save(&live).unwrap();
+        assert!(live.world.try_add_food(100.0, 100.0, usize::MAX).is_err());
+        assert_eq!(checkpoint::save(&live).unwrap(), before);
+        assert!(live.world.try_reset_empty(37, usize::MAX).is_err());
+        assert_eq!(checkpoint::save(&live).unwrap(), before);
     }
 }

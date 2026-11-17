@@ -1,6 +1,6 @@
 # Organelle growth and physical sensing
 
-**Status: implemented in engine ABI 9 / body and language version 3.** This replaces the six `invest.*` targets with structures a cell must build, maintain, and inherit. The genome determines the body's development and remains a pure reactive program with synchronous registers. These are simulation rules, not a claim of biological fidelity.
+**Status: implemented in engine ABI 10 / checkpoint 4 / language 3.** This replaces the six `invest.*` targets with structures a cell must build, maintain, and inherit. The genome determines the body's development and remains a pure reactive program with synchronous registers. These are simulation rules, not a claim of biological fidelity.
 
 ## 1. Starting point and intended change
 
@@ -13,10 +13,10 @@ Construction is constrained by space, materials, energy, and assembly throughput
 Use a uniform-depth 2D abstraction. Store these quantities separately:
 
 - **Envelope area** determines collision radius, internal space, and light interception geometry. Radius is proportional to the square root of area. Supported area requires paid structural frame and membrane material.
-- **Material mass** equals scaffold plus organelles plus unbound reserve/gut minerals, each counted once. Retain the existing mineral currency as the conserved material proxy; this is not a carbon chemistry model. Energy does not create inertial mass. Mineral-free organic energy still occupies digestive/storage capacity; inertia uses material plus displaced water.
+- **Material mass** equals scaffold plus organelles plus unassembled proteins plus unbound reserve/gut minerals, each counted once. Retain the existing mineral currency as the conserved material proxy; this is not a carbon chemistry model. Energy does not create inertial mass. Mineral-free organic energy still occupies digestive/storage capacity; inertia uses material plus displaced water.
 - **Usable energy**, **undigested energy**, and **embodied structural energy** have distinct ledgers. Construction spends usable energy; only an explicitly retained portion becomes recoverable structural energy. The rest dissipates.
 
-Internal occupancy is the essential core, organelle footprints, and storage compartments. Compartment contents occupy their reserved compartment capacity, rather than being counted twice. External structures consume membrane attachment space and internal support machinery. Membrane capacity scales with perimeter, so doubling area does not double attachment capacity.
+Internal occupancy includes the essential core, organelle footprints, unassembled protein stocks, and storage compartments. Compartment contents occupy their reserved compartment capacity, rather than being counted twice. External structures consume membrane attachment space and internal support machinery. Membrane capacity scales with perimeter, so doubling area does not double attachment capacity.
 
 Required invariants are:
 
@@ -57,7 +57,7 @@ Minimum unit size prevents infinitely many free sensors. Larger sensors improve 
 
 ## 4. Construction and body growth
 
-Construction requests compete for one finite assembly budget. Compute all demands from the same snapshot, then proportionally allocate the available energy, minerals, internal area, membrane space, and assembly time. Resolve deterministic ties by module family and stable local identifier, never statement order. Large requested counts must not allocate large arrays; instantiate only affordable progress.
+Family-specific `express.*` controls synthesize paid assembly proteins. Proteins occupy internal space, cost upkeep and turn over; they are not functional organs. Count/size targets assemble organs from matching protein present before the current tick. Expression and assembly compete for one finite core-work budget. Compute all demands from the same snapshot, then proportionally allocate the available energy, minerals, internal area, membrane space, and assembly time. Resolve deterministic ties by module family and stable local identifier, never statement order. Large requested counts must not allocate large arrays; instantiate only affordable progress.
 
 Build an envelope before filling its new space. Frame growth consumes energy and minerals, changes collision geometry, and raises upkeep and drag. Organelle construction fills existing capacity. Incomplete structures occupy space and hold material but provide no capability below their functional threshold. Above it, capability follows built size and integrity. Completion or growth affects actions on the following tick.
 
@@ -70,13 +70,13 @@ Lower targets do not instantly remove organs. Build/recycle requests for one fam
 Outputs remain declarative and statically typed. The following is valid language-version-3 code:
 
 ```text
-# Targets describe a body; build controls the effort spent approaching it.
+# Targets describe organs; expression supplies matching construction proteins.
 target.flagellum.count = 2;          # integer, nonnegative
 target.flagellum.size = 0.08;        # scalar, module material units
-build.flagellum = if energy.fraction > 0.65 then 1 else 0;
+express.flagellum = if energy.fraction > 0.65 && organelle.flagellum.mass + protein.flagellum < 0.16 then 1 else 0;
 target.photoreceptor.count = 1;
 target.photoreceptor.size = 0.02;
-build.photoreceptor = 0.3;
+express.photoreceptor = if organelle.photoreceptor.mass + protein.photoreceptor < 0.02 then 0.3 else 0;
 recycle.flagellum = 0;
 
 grow = if body.space.free < 0.05 then 0.5 else 0;
@@ -85,7 +85,9 @@ thrust = if energy.fraction > 0.3 then 0.4 else 0;
 divide = body.maturity >= 1 && body.division_ready;
 ```
 
-`build.*` and `recycle.*` are scalars clamped to 0–1; counts are nonnegative integers and sizes are bounded finite scalars. Targets are recomputed each tick. Omitted count targets are zero, size targets use the module's minimum, and construction/recycling requests are zero. Existing organs therefore remain intact without outputs. Lower targets remove organs only with explicit recycling effort. No organelle address bank or new register type is needed.
+`express.*` and `recycle.*` are scalars clamped to 0–1; counts are nonnegative integers and sizes are bounded finite scalars. Targets are recomputed each tick. Omitted count targets are zero, size targets use the module's minimum, and expression/recycling requests are zero. Existing organs remain intact without outputs; existing protein may finish previously requested assembly after expression is switched off. `build.*` is retained as a source compatibility alias for `express.*`. Lower targets remove organs only with explicit recycling effort. No organelle address bank or new register type is needed.
+
+Read `protein.<family>` for matching construction stock and `expression.rate`, `assembly.rate`, `assembly.capacity` for actual translation/assembly and common work capacity. Indiscriminate expression continues after organs meet their targets, occupying room and spending resources on unused protein. The built-ins regulate synthesis with actual mass, protein supply, energy and developmental phase.
 
 Expose actual `organelle.<family>.count`, `.mass`, `.capacity`, `.damaged`, and `.building`, alongside free space and surface. Program requests cannot claim capacity that has not been built. `body.division_ready` reports physical eligibility, not whether the program requested division.
 
@@ -113,9 +115,9 @@ Built-in programs prioritize an initial energy-acquisition path, use actual func
 
 Division requires sufficient grown frame, energy, core machinery and a feasible partition of actual organelles. Distributed material and reserves split conservatively. Discrete organs are assigned to daughters deterministically; they cannot be cloned. Organelles that support fission must first accumulate enough material for two functional units and pay their splitting cost. A daughter may inherit no flagellum or chloroplast; the genome must anticipate this, or the lineage may fail.
 
-Preflight both daughters' packing and essential core requirements. If an organelle cannot fit either partition, division waits; no silent resizing or deletion is allowed. Construction records follow their physical structures. The parent resamples tracks from its new position; the daughter starts with no tracks. Preserve current memory inheritance: the parent keeps registers; the daughter starts empty. Mutations change the inherited program; new organs still require construction. Age, lifespan, and unrelated ecosystem rules need not change.
+Preflight both daughters' packing and essential core requirements. If an organelle cannot fit either partition, division waits; no silent resizing or deletion is allowed. Construction records follow their physical structures. The parent resamples tracks from its new position; the daughter starts with no tracks. Preserve current memory inheritance: the parent keeps registers; the daughter starts empty. Mutations change the inherited program; new organs still require construction. Age is recorded without a maximum lifespan. Cell death follows energy exhaustion, damage or loss of essential machinery; no age timer kills a healthy cell.
 
-Damage reduces effective machinery without automatically freeing its occupied space. Repair consumes resources; destroyed material becomes debris. Capacity loss uses the same overflow path as dismantling. Death releases frame, organelles, reserves, and gut contents once.
+Damage reduces effective machinery without automatically freeing its occupied space. Repair consumes resources; destroyed material becomes debris. Capacity loss uses the same overflow path as dismantling. Death releases frame, organelles, assembly proteins, reserves, and gut contents once. Structural material and accessible cell reserves are tissue. Existing gut exudate, tissue and waste retain their identities through engulfing, spills and death; predation never upgrades waste into fresh tissue.
 
 Producers compete for light and minerals, consumers for accessible organic material, and hunters need capture/damage, digestion, movement, and appropriate sensing. Mixed strategies occupy both sets of machinery. Retain finite local light sharing and digestive assimilation losses. Physical tradeoffs should produce scarcity without guild quotas, free reseeding, or protected predators.
 
@@ -128,19 +130,27 @@ Producers compete for light and minerals, consumers for accessible organic mater
 
 Acceptance must demonstrate: no net energy/material gain over build/recycle/divide/death cycles; bounded space at every intermediate step; no capabilities from unbuilt modules; fair simultaneous resource allocation independent of source order; safe storage loss; no organelle duplication at division; absent sensors reveal no hidden state; generic observations do not encode organism class; stale tokens cannot target replacements; deterministic checkpoint continuation; and viable complete producer–consumer growth/reproduction cycles from paid founder budgets. Multi-seed ecosystem runs should report extinctions as well as persistence, without claiming guaranteed equilibrium.
 
-This is a body/language schema change. Give older saves and genomes an explicit unsupported-version explanation unless a separately designed, tested conversion is added; do not reinterpret old body fractions or omniscient readings as paid organelles silently. Preserve old exported files. This implementation deliberately rejects older body/language versions and preserves their saved records. Compatibility conversion remains a separate future task. Numerical coefficients are exposed in the source and remain tunable; ecological persistence is measured rather than guaranteed.
+This is a body/language schema change. Give older saves and genomes an explicit unsupported-version explanation unless a separately designed, tested conversion is added; do not reinterpret old body fractions or omniscient readings as paid organelles silently. Preserve old exported files. This implementation rejects pre-organelle checkpoint versions 1/2 and preserves their saved records. A tested checkpoint-3 import keeps actual organs/source, classifies legacy untyped organic matter as tissue, and starts new protein pools empty. New saves use checkpoint 4; future trajectories use the updated rules. Numerical coefficients are exposed in the source and remain tunable; ecological persistence is measured rather than guaranteed.
 
 
 ## 9. Implemented limits and inspection
 
 - There are 16 organelle families. Each record has a local identity, material mass, integrity, and embodied energy. `.count` includes incomplete units; `.building` is the material still missing before unfinished units become functional. `.capacity` is effective mass divided by that family’s minimum functional mass.
-- Supported area is 0.25 to `(760 / (8 * 7))²` (about 184.18). The upper bound keeps a cell’s diameter within one quarter of the shorter torus dimension. Local collision and photon queries account for actual body radius. It is independent of population; there is no fixed organism count ceiling.
+- Supported area is 0.25 to `(760 / (8 * 7))²` (about 184.18). The upper bound keeps a cell’s diameter within one quarter of the shorter torus dimension. Local collision and photon queries account for actual body radius. It is independent of population; there is no fixed organism or organic-particle count ceiling.
 - The scaffold costs 0.35 material per unit of area. Internal capacity is `0.9 * area`; membrane attachment capacity is `0.9 * sqrt(area)`. Contents use the capacity of their physical compartments and do not occupy the same internal space twice.
 - Growth uses a finite shared assembly budget. New space, machinery, and recovered material cannot fund another construction request in the same tick. Continuous actions use the machinery present at the beginning of the tick. Energy and mineral overflow after compartment damage, recycling, or division follows one explicit spill path.
 - Optical sensing requires illumination, checks line of sight against local cell silhouettes, and quantizes appearance and motion according to hardware. Additional optical units broaden angular coverage; more effective sensor mass improves reach and resolution. Direction and width requests apply to the next tick.
 - Each cell retains at most eight observation tracks. A track expires after 30 unobserved ticks (one second). Opaque strings are stable for continuous observations and are never reused for a different object. Remembered tokens cannot bypass range, light, occlusion, or field of view. The daughter starts with no tracks; the parent must reacquire from its new position.
 - Organic chemical cues are dimensionless, transported, diffused, and decaying local fields. They are emitted by organic decay, exudation, and damage. They are neither food energy nor mineral material and cannot be consumed.
-- The Body inspector exposes actual space, membrane usage, individual organelles, functional thresholds, damage, the latest construction requests, and achieved construction/recycling/repair rates. The program viewer retains native typed expression values and all 144 read signals / 78 write signals.
-- Checkpoint version 3 stores individual organs, resource ledgers, scan settings, observation identity sequences, and the organic cue field. The world snapshot uses 64-bit values to preserve exact 32-bit organism IDs. Source packages include the current WASM artifact and static GitHub Pages build.
+- The Body inspector exposes actual space, membrane usage, individual organelles, functional thresholds, damage, the latest construction requests, and protein stocks and achieved expression/assembly/recycling/repair rates. The program viewer retains native typed expression values and all 169 read signals / 81 write signals.
+- Checkpoint version 4 stores individual organs, family protein stocks and embodied energy, typed particles and gut pools, resource ledgers, scan settings, observation identity sequences, and the organic cue field. The world snapshot uses 64-bit values to preserve exact 32-bit organism IDs. Source packages include the current WASM artifact and static GitHub Pages build.
 
 The acceptance checks live in the Rust body/simulation/sensing suites and the WASM, language, inspection, storage, and food-chain scripts. Measurements in `experiments/` identify their engine ABI and binary hash; older studies describe the earlier model.
+
+## 10. Organic matter and expression tradeoffs
+
+Organic matter has three physical substrate classes: soluble exudate, cell tissue and digestive waste. Each keeps its energy and mineral contents through storage and transfers. `digest.exudate`, `digest.tissue` and `digest.waste` allocate finite digestive work; `gut.<kind>.energy` and `.nutrients` expose owned gut contents. Tissue is slower than exudate and leaves waste; waste is slower again and yields less usable energy. Waste processing and decay return the unrecovered mineral portion to water and dissipate energy. No recycling or predation loop increases food quality or creates resources.
+
+Protein synthesis consumes minerals and 60% of the organ family's construction energy; final assembly consumes the remaining 40%. The matching work costs share `0.55 × functional core mass` per second. Protein occupies one unit of internal space per material, adds 0.6 energy upkeep per mass per second, and turns over with a 45-second half-life. No per-family stock limit exists. Targets alone provide no organs; expression alone can fill a cell with useless stock. Feedback and developmental ordering determine whether the same starting resources become productive machinery or wasteful upkeep.
+
+Correctness checks cover healthy cells past 300 seconds, particle creation/restoration above 1,200, subtype preservation, distinct digestion yields, shared enzyme capacity, nonproductive-expression cost, delayed assembly, exact material conservation, no net energy creation, and pool inheritance/checkpoint continuation.

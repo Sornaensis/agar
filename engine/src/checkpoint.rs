@@ -8,7 +8,7 @@ use crate::{
 
 pub(crate) const MAX_STATE_BYTES: usize = 128 * 1024 * 1024;
 const MAGIC: &[u8; 8] = b"CELLAR01";
-const VERSION: u32 = 3;
+const VERSION: u32 = 4;
 pub(crate) type Result<T> = std::result::Result<T, String>;
 
 pub(crate) fn ensure(ok: bool, message: &str) -> Result<()> {
@@ -206,8 +206,8 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
     let mut r = Reader::new(bytes);
     ensure(r.take(8)? == MAGIC, "unknown save format")?;
     let version = r.u32()?;
-    if version != VERSION {
-        return Err(format!("Unsupported simulation version {version}. This save uses a different body/language model. Agar now requires organelle version 3. The saved simulation is preserved; create a new simulation to use physical organelles."));
+    if !matches!(version, 3 | VERSION) {
+        return Err(format!("Unsupported simulation version {version}. This save uses a different body/language model. Agar supports physical-organelle saves 3 and 4. The saved simulation is preserved; create a new simulation to use physical organelles."));
     }
     ensure(r.u32()? as usize == bytes.len(), "incorrect save length")?;
     ensure(r.u32()? == checksum(&bytes[20..]), "checksum mismatch")?;
@@ -225,15 +225,15 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
         // Both the retained exact expression graph and its editable source are validated.
         let compiled =
             Program::compile(&source).map_err(|error| format!("Invalid saved genome: {error}"))?;
-        let program = Program::read_checkpoint(&mut r)?;
+        let program = Program::read_checkpoint_version(&mut r, version)?;
         ensure(
             program.checkpoint_source_matches(&compiled, &source, parent == 0),
             "genome source does not match its compiled program",
         )?;
         let mut genome = Genome::new(source, program, parent, kind);
-        if version == 1 {
-            // The new Program has two additional roots. Old allocation sizes do
-            // not describe its storage; charge the bounded allocations just read.
+        if version == 3 {
+            // Added digestion roots enlarge Program storage. Older source and
+            // expression graphs stay exact; charge current decoded allocations.
             ensure(
                 genome.bytes <= MAX_GENOME_BYTES,
                 "migrated genome exceeds its allocation budget",
@@ -249,7 +249,7 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
             "genome registry exceeds 64 MiB",
         )?;
     }
-    let world = World::read_checkpoint(&mut r, genomes.len())?;
+    let world = World::read_checkpoint(&mut r, genomes.len(), version)?;
     ensure(r.finished(), "trailing data")?;
     Ok(Engine {
         genomes,
@@ -390,7 +390,7 @@ mod tests {
         let mut live = live_engine();
         let before = save(&live).unwrap();
         assert!(!live.restore_state(bytes));
-        assert!(live.error.contains("organelle version 3"));
+        assert!(live.error.contains("physical-organelle saves 3 and 4"));
         assert_eq!(save(&live).unwrap(), before);
         let mut version2 = before.clone();
         version2[8..12].copy_from_slice(&2u32.to_le_bytes());
