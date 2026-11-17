@@ -89,6 +89,7 @@ impl Environment {
             organic: field(r, 0.0, 1e6)?,
             nutrient_inputs,
             next_source_id,
+            scratch: FieldScratch::default(),
         })
     }
 }

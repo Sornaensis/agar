@@ -276,18 +276,21 @@ impl Value {
         }
     }
     fn convert(self, ty: Type) -> Self {
-        match ty {
-            Type::Number if self.ty().numeric() => Self::Scalar(finite(self.number())),
-            Type::Integer if self.ty().numeric() => Self::Integer(
-                finite(self.number())
+        match (ty, self) {
+            // Every i32 is exactly representable as f64 and is within MAX_SIGNAL.
+            // Keep typed integer nodes on the integer path instead of round-tripping
+            // through floating-point clamping and truncation on every evaluation.
+            (Type::Integer, value @ Self::Integer(_)) => value,
+            (Type::Number, Self::Integer(value)) => Self::Scalar(value as f64),
+            (Type::Number, Self::Scalar(value)) => Self::Scalar(finite(value)),
+            (Type::Integer, Self::Scalar(value)) => Self::Integer(
+                finite(value)
                     .clamp(i32::MIN as f64, i32::MAX as f64)
                     .trunc() as i32,
             ),
-            Type::Vector => {
-                let v = self.vector();
-                Self::Vector([finite(v[0]), finite(v[1])])
-            }
-            _ => self,
+            (Type::Vector, Self::Vector(v)) => Self::Vector([finite(v[0]), finite(v[1])]),
+            (Type::Vector, _) => Self::Vector([0.0; 2]),
+            (_, value) => value,
         }
     }
     fn source(&self) -> String {
@@ -1311,14 +1314,16 @@ fn binary_value(op: Binary, a: &Value, b: &Value, ty: Type) -> Value {
         }));
     }
     if ty == Type::Integer {
-        let (x, y) = (a.number() as i64, b.number() as i64);
+        let (Value::Integer(x), Value::Integer(y)) = (a, b) else {
+            unreachable!("compiled integer arithmetic must have integer operands")
+        };
         let v = match op {
-            Add => x + y,
-            Subtract => x - y,
-            Multiply => x * y,
+            Add => x.saturating_add(*y),
+            Subtract => x.saturating_sub(*y),
+            Multiply => x.saturating_mul(*y),
             _ => 0,
         };
-        return Value::Integer(v.clamp(i32::MIN as i64, i32::MAX as i64) as i32);
+        return Value::Integer(v);
     }
     let (x, y) = (a.number(), b.number());
     Value::Scalar(finite(match op {
@@ -2098,7 +2103,8 @@ impl Program {
     }
     fn evaluate_nodes(&self, inputs: &Inputs, memory: &Registers, values: &mut Vec<Value>) {
         values.clear();
-        values.reserve(self.nodes.len().saturating_sub(values.capacity()));
+        // reserve() is relative to len (now zero), not to the existing capacity.
+        values.reserve(self.nodes.len());
         for node in &self.nodes {
             let value = match &node.op {
                 Op::Constant(value) => value.clone(),

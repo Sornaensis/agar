@@ -374,6 +374,7 @@ impl World {
             rng: Rng(rng),
             seed,
             environment,
+            eval_scratch: EvalScratch::default(),
         };
         // Individual compartment bounds cannot detect a forged but locally
         // plausible reserve or particle. Preserve the complete world's ledger.

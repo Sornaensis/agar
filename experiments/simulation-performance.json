@@ -1,0 +1,216 @@
+{
+  "runtime": "v24.22.1",
+  "runtimeFlags": [
+    "--no-liftoff"
+  ],
+  "platform": "linux",
+  "architecture": "x64",
+  "seed": 42,
+  "measuredTicks": 300,
+  "samples": 5,
+  "warmupCheckInterval": 120,
+  "note": "Release WASM in Node/V8. Tick and Rust snapshot export timings only; not browser rendering or JS object hydration. Medians of repeated identical trajectories, alternating engine order.",
+  "engines": [
+    {
+      "name": "baseline",
+      "sha256": "45069f25af88c2853f2b222365f967f5edb8432abca6eb53d09a29c13adda130"
+    },
+    {
+      "name": "optimized",
+      "sha256": "4b4e311006a913a6e4c8dcef6247b2ff82848678775fa31d66f29438334f0a6b"
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "mixed-ecosystem",
+      "warmupTicks": 1800,
+      "initialPopulations": [
+        [
+          "Phototroph",
+          72
+        ],
+        [
+          "Forager",
+          6
+        ],
+        [
+          "Mixotroph",
+          4
+        ],
+        [
+          "Predator",
+          2
+        ]
+      ],
+      "initialParticles": 0,
+      "finalPopulation": 85,
+      "finalParticles": 106,
+      "births": 9,
+      "deaths": 8,
+      "mutations": 2,
+      "checkpointIdentical": true,
+      "renderBuffersIdentical": true,
+      "measurements": [
+        {
+          "engine": "baseline",
+          "tickMs": 5.502365023333332,
+          "tickSamplesMs": [
+            4.758216990000001,
+            6.27232183666667,
+            5.502365023333332,
+            5.197137803333341,
+            5.757662526666658
+          ],
+          "snapshotExportMs": 0.7651722333333358
+        },
+        {
+          "engine": "optimized",
+          "tickMs": 5.22375115666667,
+          "tickSamplesMs": [
+            5.168085799999996,
+            5.662595346666664,
+            5.369534196666658,
+            5.216152756666682,
+            5.22375115666667
+          ],
+          "snapshotExportMs": 0.6814930999998372
+        }
+      ],
+      "speedup": 1.0533359760659902,
+      "tickTimeReductionPercent": 5.06352932757409
+    },
+    {
+      "name": "dense-producers",
+      "warmupTicks": 900,
+      "initialPopulations": [
+        [
+          "Phototroph",
+          400
+        ]
+      ],
+      "initialParticles": 0,
+      "finalPopulation": 400,
+      "finalParticles": 296,
+      "births": 0,
+      "deaths": 0,
+      "mutations": 0,
+      "checkpointIdentical": true,
+      "renderBuffersIdentical": true,
+      "measurements": [
+        {
+          "engine": "baseline",
+          "tickMs": 11.681556326666662,
+          "tickSamplesMs": [
+            11.681556326666662,
+            11.416501353333345,
+            11.924317956666686,
+            11.66732852000001,
+            12.208377233333351
+          ],
+          "snapshotExportMs": 0.7534529333332709
+        },
+        {
+          "engine": "optimized",
+          "tickMs": 11.224848399999997,
+          "tickSamplesMs": [
+            11.066551973333311,
+            11.224848399999997,
+            12.781367613333327,
+            11.137707343333362,
+            11.307662136666671
+          ],
+          "snapshotExportMs": 0.43206503333349244
+        }
+      ],
+      "speedup": 1.0406872244855143,
+      "tickTimeReductionPercent": 3.9096496553639115
+    },
+    {
+      "name": "particle-heavy",
+      "warmupTicks": 600,
+      "initialPopulations": [
+        [
+          "Forager",
+          80
+        ]
+      ],
+      "initialParticles": 10000,
+      "finalPopulation": 80,
+      "finalParticles": 9549,
+      "births": 0,
+      "deaths": 0,
+      "mutations": 0,
+      "checkpointIdentical": true,
+      "renderBuffersIdentical": true,
+      "measurements": [
+        {
+          "engine": "baseline",
+          "tickMs": 38.46825026666668,
+          "tickSamplesMs": [
+            38.46825026666668,
+            40.87766216333335,
+            39.40305163666674,
+            37.48506703333337,
+            36.77057327333333
+          ],
+          "snapshotExportMs": 0.43746883333369624
+        },
+        {
+          "engine": "optimized",
+          "tickMs": 28.308492620000035,
+          "tickSamplesMs": [
+            29.35639035,
+            29.449452280000067,
+            28.234857976666632,
+            28.308492620000035,
+            27.965204519999972
+          ],
+          "snapshotExportMs": 0.3472527000005357
+        }
+      ],
+      "speedup": 1.3588943354577894,
+      "tickTimeReductionPercent": 26.410761020420594
+    },
+    {
+      "name": "dynamic-fields",
+      "warmupTicks": 300,
+      "initialPopulations": [],
+      "initialParticles": 0,
+      "finalPopulation": 0,
+      "finalParticles": 0,
+      "births": 0,
+      "deaths": 0,
+      "mutations": 0,
+      "checkpointIdentical": true,
+      "renderBuffersIdentical": true,
+      "measurements": [
+        {
+          "engine": "baseline",
+          "tickMs": 1.9860735133332976,
+          "tickSamplesMs": [
+            2.1554401000000265,
+            1.9932931133332508,
+            1.9860735133332976,
+            1.878771710000001,
+            1.9004815899999812
+          ],
+          "snapshotExportMs": 0.6001555333340851
+        },
+        {
+          "engine": "optimized",
+          "tickMs": 2.0107741233332974,
+          "tickSamplesMs": [
+            2.020339723333309,
+            2.0109476800000023,
+            1.9907065266666661,
+            2.0107741233332974,
+            1.9993957500000639
+          ],
+          "snapshotExportMs": 0.6164864666662955
+        }
+      ],
+      "speedup": 0.987715870363871,
+      "tickTimeReductionPercent": -1.2436906204214004
+    }
+  ]
+}

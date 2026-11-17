@@ -218,3 +218,20 @@ node scripts/check-preset-navigation.mjs
 ```
 
 Tests cover physical accounting and packing, sensor gates, conservative inheritance, safe mutations, checkpoint replay, real WASM interfaces, editor/Rust metadata agreement, graph bounds and persistence failures. The short preset-navigation fixture tests escape from a real resistant contact followed by particle capture and digestion. Ecosystem checks report survival and extinctions across fixed seeds; they do not guarantee permanent coexistence.
+
+## Simulation performance
+
+See [PERFORMANCE.md](PERFORMANCE.md) for the measured optimization results,
+correctness checks, and recommended architecture changes. The comparison harness
+runs actual release WASM engines on the same fixed-seed worlds and checks complete
+checkpoint and render-buffer equality at sampled boundaries.
+
+```sh
+npm run bench:simulation
+npm run bench:simulation -- --baseline /path/to/original/engine/pkg/agar_engine.wasm --output experiments/comparison.json
+```
+
+The benchmark uses V8's optimizing WASM tier from the start to avoid timing tier
+transitions. It reports simulation tick and Rust snapshot-export times separately;
+browser rendering and JavaScript snapshot-object construction are outside those
+timings. Build both compared engines with the same Rust toolchain.

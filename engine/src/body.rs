@@ -221,6 +221,32 @@ pub struct SpaceBudget {
     pub free: f64,
 }
 
+/// Derived values for one organelle family in an immutable body snapshot.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OrganelleSummary {
+    pub count: u32,
+    pub mass: f64,
+    pub functional_mass: f64,
+    pub capacity: f64,
+    pub damaged: f64,
+    pub building: f64,
+}
+
+impl Default for OrganelleSummary {
+    fn default() -> Self {
+        Self {
+            count: 0,
+            // Iterator::sum::<f64>() starts at negative zero. Keep empty
+            // families bit-identical to the individual query methods.
+            mass: -0.0,
+            functional_mass: -0.0,
+            capacity: -0.0,
+            damaged: -0.0,
+            building: -0.0,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct BodyCapacities {
     pub energy: f64,
@@ -502,6 +528,24 @@ impl Body {
             .map(Organelle::building)
             .sum()
     }
+    /// Collect all family signals in one pass, retaining each family's original
+    /// summation order. The returned values are valid until the body changes.
+    pub fn family_summaries(&self) -> [OrganelleSummary; FAMILY_COUNT] {
+        let mut summaries = [OrganelleSummary::default(); FAMILY_COUNT];
+        for organ in &self.organs {
+            let summary = &mut summaries[organ.kind as usize];
+            summary.count += 1;
+            summary.mass += organ.mass;
+            summary.functional_mass += organ.functional_mass();
+            summary.damaged += organ.mass * (1.0 - organ.integrity);
+            summary.building += organ.building();
+        }
+        for kind in OrganelleKind::ALL {
+            let summary = &mut summaries[kind as usize];
+            summary.capacity = summary.functional_mass / kind.min_mass();
+        }
+        summaries
+    }
     pub fn space(&self) -> SpaceBudget {
         let capacity = INTERNAL_PER_AREA * self.area;
         let used = self
@@ -567,11 +611,23 @@ impl Body {
                 .sum::<f64>()
     }
     pub fn capacities(&self) -> BodyCapacities {
-        use OrganelleKind::*;
         let mut mass = [0.0; FAMILY_COUNT];
         for organ in &self.organs {
             mass[organ.kind as usize] += organ.functional_mass();
         }
+        self.capacities_from_functional_mass(mass)
+    }
+    /// Reuse an already collected family snapshot without another organ scan.
+    pub fn capacities_from_summaries(
+        &self,
+        summaries: &[OrganelleSummary; FAMILY_COUNT],
+    ) -> BodyCapacities {
+        // capacities() starts its accumulation at positive zero, unlike the
+        // independent family query sums used by family_summaries().
+        self.capacities_from_functional_mass(summaries.map(|s| 0.0 + s.functional_mass))
+    }
+    fn capacities_from_functional_mass(&self, mass: [f64; FAMILY_COUNT]) -> BodyCapacities {
+        use OrganelleKind::*;
         let core = mass[Core as usize];
         let reserve = mass[Reserve as usize];
         let digestive = mass[Digestive as usize];
@@ -679,9 +735,17 @@ impl Body {
             report.dissipated_energy += energy;
         }
         let mut demands = Vec::new();
+        // Reuse the temporary storage across families; selected demands are
+        // drained in their original order while the backing buffers stay here.
+        let mut indices: Vec<usize> = Vec::new();
+        let mut build = Vec::new();
+        let mut recycle = Vec::new();
         // Finite output effort controls rates, not an allocation of arbitrarily
         // many target records. A family can start at most one incomplete unit.
         for kind in OrganelleKind::ALL {
+            indices.clear();
+            build.clear();
+            recycle.clear();
             let k = kind as usize;
             let expression = effort(controls.build[k]);
             if expression > 0.0 {
@@ -696,16 +760,14 @@ impl Body {
             } else {
                 kind.min_mass()
             };
-            let indices: Vec<usize> = self
-                .organs
-                .iter()
-                .enumerate()
-                .filter(|(_, organ)| organ.kind == kind)
-                .map(|(index, _)| index)
-                .collect();
+            indices.extend(
+                self.organs
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, organ)| organ.kind == kind)
+                    .map(|(index, _)| index),
+            );
             let keep = count.min(indices.len());
-            let mut build = Vec::new();
-            let mut recycle = Vec::new();
             for &index in indices.iter().take(keep) {
                 let organ = &self.organs[index];
                 if target > organ.mass + EPS {
@@ -736,12 +798,12 @@ impl Body {
             let wanted = target * controls.target_counts[k] as f64;
             let current = indices.iter().map(|&i| self.organs[i].mass).sum::<f64>();
             let choose_build = wanted > current + EPS && !build.is_empty();
-            let (mut selected, request_effort) = if choose_build {
-                (build, 1.0)
+            let (selected, request_effort) = if choose_build {
+                (&mut build, 1.0)
             } else if !recycle.is_empty() {
-                (recycle, effort(controls.recycle[k]))
+                (&mut recycle, effort(controls.recycle[k]))
             } else {
-                (build, 1.0)
+                (&mut build, 1.0)
             };
             if request_effort == 0.0 || selected.is_empty() {
                 continue;
@@ -750,7 +812,7 @@ impl Body {
                 // Full requested end state must remain viable. Intermediate
                 // partial removals then cannot cross an essential threshold.
                 let mut final_core = self.functional_mass(OrganelleKind::Core);
-                for demand in &selected {
+                for demand in selected.iter() {
                     let original = &self.organs[demand.index.unwrap()];
                     let mut after = original.clone();
                     after.mass = (after.mass - demand.amount).max(0.0);
@@ -763,10 +825,10 @@ impl Body {
             let requested = selected.iter().map(|d| d.amount).sum::<f64>();
             let family_rate = 0.12 * self.area.sqrt() * dt * request_effort;
             let scale = (family_rate / requested).min(1.0);
-            for demand in &mut selected {
+            for demand in selected.iter_mut() {
                 demand.amount *= scale;
             }
-            demands.extend(selected);
+            demands.extend(selected.drain(..));
         }
         let max_area = if max_area.is_finite() {
             max_area.clamp(MIN_AREA, MAX_AREA)
@@ -930,7 +992,7 @@ impl Body {
     }
 
     pub fn can_partition(&self) -> bool {
-        self.partition().is_some()
+        self.assign_partition(|_, _| {})
     }
     pub fn division_ready(&self) -> bool {
         self.can_partition()
@@ -941,9 +1003,6 @@ impl Body {
     /// Linear scaffold accounting includes membrane support material throughout
     /// the envelope, so redistributing it preserves its paid material/energy.
     pub fn partition(&self) -> Option<(Self, Self)> {
-        if self.area * 0.5 < MIN_AREA || !self.viable() {
-            return None;
-        }
         let blank = Self {
             area: self.area * 0.5,
             organs: Vec::new(),
@@ -953,11 +1012,42 @@ impl Body {
             precursor_energy: self.precursor_energy.map(|energy| energy * 0.5),
         };
         let mut daughters = [blank.clone(), blank];
-        let mut used = [[daughters[0].space().used, 0.0]; 2];
+        if !self.assign_partition(|side, organ| daughters[side].organs.push(organ.clone())) {
+            return None;
+        }
+        for daughter in &mut daughters {
+            daughter.organs.sort_by_key(|o| o.id);
+        }
+        let [a, b] = daughters;
+        Some((a, b))
+    }
+
+    /// Share the exact greedy placement between feasibility and materialization.
+    /// Checking readiness needs the placements, but no daughter bodies or cloned
+    /// organ records. Visit order and arithmetic match actual division.
+    fn assign_partition(&self, mut place: impl FnMut(usize, &Organelle)) -> bool {
+        let area = self.area * 0.5;
+        if area < MIN_AREA || !self.viable() {
+            return false;
+        }
+        if self
+            .organs
+            .iter()
+            .filter(|organ| organ.kind == OrganelleKind::Core && organ.functional_mass() > 0.0)
+            .take(2)
+            .count()
+            < 2
+        {
+            // A single discrete core can never make both daughters viable.
+            return false;
+        }
+        let precursor_mass = self.precursor_mass.map(|mass| mass * 0.5);
+        let protein_space = precursor_mass.iter().sum::<f64>() * PROTEIN_INTERNAL_FOOTPRINT;
+        let mut used = [[protein_space, 0.0]; 2];
         let mut core = [0.0; 2];
-        let required = CORE_MASS_PER_AREA * daughters[0].area;
-        let internal = daughters[0].space().capacity;
-        let surface = daughters[0].surface().capacity;
+        let required = CORE_MASS_PER_AREA * area;
+        let internal = INTERNAL_PER_AREA * area;
+        let surface = SURFACE_PER_RADIUS * area.sqrt();
         let fits = |side: usize, organ: &Organelle, used: &[[f64; 2]; 2]| {
             used[side][0] + organ.internal_space() <= internal + EPS
                 && used[side][1] + organ.surface_space() <= surface + EPS
@@ -996,23 +1086,16 @@ impl Body {
             } else if fits(1 - first, organ, &used) {
                 1 - first
             } else {
-                return None;
+                return false;
             };
             used[side][0] += organ.internal_space();
             used[side][1] += organ.surface_space();
             if is_core {
                 core[side] += organ.functional_mass();
             }
-            daughters[side].organs.push(organ.clone());
+            place(side, organ);
         }
-        if core.iter().any(|&mass| mass + EPS < required) {
-            return None;
-        }
-        for daughter in &mut daughters {
-            daughter.organs.sort_by_key(|o| o.id);
-        }
-        let [a, b] = daughters;
-        Some((a, b))
+        !core.iter().any(|&mass| mass + EPS < required)
     }
 
     pub fn validate(&self) -> CheckpointResult<()> {
@@ -1356,6 +1439,82 @@ mod tests {
         }
         result
     }
+
+    #[test]
+    fn family_snapshot_matches_individual_queries_bit_for_bit() {
+        fn check(body: &Body) {
+            let summaries = body.family_summaries();
+            for kind in OrganelleKind::ALL {
+                let summary = summaries[kind as usize];
+                assert_eq!(summary.count, body.count(kind));
+                for (actual, expected) in [
+                    (summary.mass, body.mass(kind)),
+                    (summary.functional_mass, body.functional_mass(kind)),
+                    (summary.capacity, body.capacity(kind)),
+                    (summary.damaged, body.damaged(kind)),
+                    (summary.building, body.building(kind)),
+                ] {
+                    assert_eq!(actual.to_bits(), expected.to_bits(), "{kind:?}");
+                }
+            }
+            let actual = body.capacities_from_summaries(&summaries);
+            let expected = body.capacities();
+            macro_rules! check_capacities {
+                ($($field:ident),+ $(,)?) => {
+                    $(assert_eq!(actual.$field.to_bits(), expected.$field.to_bits(), stringify!($field));)+
+                };
+            }
+            check_capacities!(
+                energy,
+                minerals,
+                gut_energy,
+                gut_minerals,
+                photosynthesis,
+                metabolism,
+                digestion,
+                uptake,
+                thrust,
+                turn,
+                capture,
+                piercing,
+                protection,
+                repair,
+                assembly,
+                light_sensing,
+                heat_sensing,
+                chemical_sensing,
+                mechanical_sensing,
+                optical_sensing,
+                optical_range,
+                energy_storage,
+                mineral_storage,
+                gut_storage,
+                propulsion,
+                phagocytosis,
+                attack,
+                defense,
+            );
+        }
+
+        let (mut body, _) = Body::founder();
+        check(&body); // Most families are absent, including signed-zero sums.
+        for round in 0..8 {
+            for kind in OrganelleKind::ALL {
+                body.organs.push(Organelle {
+                    id: body.next_organelle_id,
+                    kind,
+                    mass: kind.min_mass() * [0.3, 0.999, 1.0, 1.7][round % 4],
+                    integrity: [0.0, 0.199, 0.2, 0.63, 1.0][round % 5],
+                    embodied_energy: 0.0,
+                });
+                body.next_organelle_id += 1;
+            }
+            check(&body); // Interleaved families, incomplete and damaged organs.
+        }
+        body.organs.reverse();
+        check(&body); // Preserve the order of each sum, not a reordered total.
+    }
+
     #[test]
     fn all_test_specimens_are_paid_packed_and_have_explicit_physical_specialization() {
         for recipe in BodyFixture::ALL {
@@ -1974,6 +2133,7 @@ mod tests {
             let (mut body, _) = Body::fixture(recipe);
             body.area = 2.0;
             body.scaffold_energy *= 2.0;
+            assert!(body.can_partition());
             let (a, b) = body
                 .partition()
                 .expect("paid full-grown recipe can partition");

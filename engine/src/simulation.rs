@@ -455,6 +455,8 @@ pub struct World {
     next_food_id: u64,
     rng: Rng,
     seed: u32,
+    // Derived evaluation storage is reusable, never serialized as world state.
+    eval_scratch: EvalScratch,
 }
 impl World {
     pub fn empty(seed: u32) -> Self {
@@ -480,6 +482,7 @@ impl World {
             next_food_id: 1,
             rng: Rng::new(seed),
             seed,
+            eval_scratch: EvalScratch::default(),
         }
     }
     pub fn reset(&mut self, seed: u32, genome_id: u32) {
@@ -699,25 +702,47 @@ impl World {
         self.observations(Some(i)).0.into_iter().next()
     }
     fn observations(&self, selected: Option<usize>) -> (Vec<Inputs>, Vec<Tracking>) {
+        let caps: Vec<_> = self.cells.iter().map(|c| c.body.capacities()).collect();
+        self.observations_with_capacities(selected, &caps)
+    }
+    fn observations_with_capacities(
+        &self,
+        selected: Option<usize>,
+        capacities: &[BodyCapacities],
+    ) -> (Vec<Inputs>, Vec<Tracking>) {
         let mut cell_grid = Grid::new();
         let mut food_grid = Grid::new();
         let mut max_radius: f64 = 0.0;
-        for (i, c) in self.cells.iter().enumerate() {
-            if c.alive() {
-                cell_grid.insert(c.x, c.y, i);
-                max_radius = max_radius.max(c.radius());
+        let spatial_sensing = capacities.iter().enumerate().any(|(i, caps)| {
+            selected.is_none_or(|which| which == i)
+                && (caps.optical_sensing > 0.0 || caps.mechanical_sensing > 0.0)
+        });
+        if spatial_sensing {
+            for (i, c) in self.cells.iter().enumerate() {
+                if c.alive() {
+                    cell_grid.insert(c.x, c.y, i);
+                    max_radius = max_radius.max(c.radius());
+                }
+            }
+            for (i, f) in self.food.iter().enumerate() {
+                food_grid.insert(f.x, f.y, i);
             }
         }
-        for (i, f) in self.food.iter().enumerate() {
-            food_grid.insert(f.x, f.y, i);
-        }
-        let mut result = Vec::new();
-        let mut tracks = Vec::new();
+        // Compute a target's appearance at most once in this immutable phase.
+        // Worlds without physical sensors need neither the index nor this cache.
+        let mut appearances = vec![None; if spatial_sensing { self.cells.len() } else { 0 }];
+        let count = if selected.is_some() {
+            1
+        } else {
+            self.cells.len()
+        };
+        let mut result = Vec::with_capacity(count);
+        let mut tracks = Vec::with_capacity(count);
         for (index, cell) in self.cells.iter().enumerate() {
             if selected.is_some_and(|which| which != index) {
                 continue;
             }
-            let caps = cell.body.capacities();
+            let caps = &capacities[index];
             let space = cell.body.space();
             let surface = cell.body.surface();
             let mut input = Inputs {
@@ -764,13 +789,13 @@ impl World {
                 exudation_rate: cell.exudation_rate,
                 ..Inputs::default()
             };
-            for (i, kind) in Kind::ALL.iter().copied().enumerate() {
+            for (i, family) in cell.body.family_summaries().iter().enumerate() {
                 input.organelle[i] = OrganelleInput {
-                    count: cell.body.count(kind).min(i32::MAX as u32) as i32,
-                    mass: cell.body.mass(kind),
-                    capacity: cell.body.capacity(kind),
-                    damaged: cell.body.damaged(kind),
-                    building: cell.body.building(kind),
+                    count: family.count.min(i32::MAX as u32) as i32,
+                    mass: family.mass,
+                    capacity: family.capacity,
+                    damaged: family.damaged,
+                    building: family.building,
                 };
             }
             let bearing = |(x, y): (f64, f64)| {
@@ -780,7 +805,6 @@ impl World {
                     relative_angle(y.atan2(x) - cell.angle)
                 }
             };
-            let (lg, hg) = self.environment.gradients(cell.x, cell.y);
             if caps.light_sensing > 0.0 {
                 input.light_available = true;
                 input.light_valid = true;
@@ -790,7 +814,11 @@ impl World {
                     0.0005,
                 )
                 .clamp(0.0, 1.0);
-                input.light_bearing = measure(bearing(lg), caps.light_sensing, 0.002);
+                input.light_bearing = measure(
+                    bearing(self.environment.light_gradient(cell.x, cell.y)),
+                    caps.light_sensing,
+                    0.002,
+                );
             }
             if caps.heat_sensing > 0.0 {
                 input.heat_available = true;
@@ -801,7 +829,11 @@ impl World {
                     0.0005,
                 )
                 .clamp(0.0, 1.0);
-                input.heat_bearing = measure(bearing(hg), caps.heat_sensing, 0.002);
+                input.heat_bearing = measure(
+                    bearing(self.environment.temperature_gradient(cell.x, cell.y)),
+                    caps.heat_sensing,
+                    0.002,
+                );
             }
             if caps.chemical_sensing > 0.0 {
                 input.chemical_available = true;
@@ -909,24 +941,26 @@ impl World {
                 let reach = (caps.optical_range + max_radius).max(cell.radius() + max_radius + 1.0);
                 for i in cell_grid.nearby_radius(cell.x, cell.y, reach) {
                     let c = &self.cells[i];
-                    if c.id == cell.id || !c.alive() {
+                    if c.id == cell.id {
                         continue;
                     }
-                    let pigment = (c.body.functional_mass(Kind::Photosynthetic)
-                        / c.body.structural_mass()
-                        * 2.0)
-                        .clamp(0.0, 1.0);
+                    let (radius, pigment) = *appearances[i].get_or_insert_with(|| {
+                        let pigment = (c.body.functional_mass(Kind::Photosynthetic)
+                            / c.body.structural_mass()
+                            * 2.0)
+                            .clamp(0.0, 1.0);
+                        (c.radius(), pigment)
+                    });
                     consider(Observation {
                         entity: (c.id as u64) << 1,
                         dx: delta(c.x - cell.x, WIDTH),
                         dy: delta(c.y - cell.y, HEIGHT),
-                        radius: c.radius(),
+                        radius,
                         area: c.body.area,
                         contrast: 0.45 + 0.4 * pigment,
                         pigment,
-                        vx: c.vx - cell.vx,
-                        vy: c.vy - cell.vy,
-                        resistance: c.body.capacities().protection + 0.15,
+                        motion: ObservedMotion::Relative(c.vx - cell.vx, c.vy - cell.vy),
+                        resistance: capacities[i].protection + 0.15,
                     });
                 }
                 for i in food_grid.nearby_radius(
@@ -935,7 +969,6 @@ impl World {
                     caps.optical_range.max(cell.radius()) + 3.5,
                 ) {
                     let f = &self.food[i];
-                    let (vx, vy) = self.environment.flow_at(f.x, f.y, self.time());
                     consider(Observation {
                         entity: (f.id << 1) | 1,
                         dx: delta(f.x - cell.x, WIDTH),
@@ -944,8 +977,9 @@ impl World {
                         area: (2.5 / CELL_RADIUS).powi(2),
                         contrast: [0.28, 0.4, 0.32][f.kind as usize],
                         pigment: [0.1, 0.24, 0.06][f.kind as usize],
-                        vx: vx - cell.vx,
-                        vy: vy - cell.vy,
+                        // Motion does not participate in selection or occlusion.
+                        // Sample the current only for the returned observation.
+                        motion: ObservedMotion::ParticleAt(f.x, f.y),
                         resistance: [0.02, 0.07, 0.04][f.kind as usize],
                     });
                 }
@@ -954,11 +988,12 @@ impl World {
                 input.contact_token = tracking.observe(o.entity, cell.id, self.ticks);
                 input.contact_valid = !input.contact_token.is_empty();
                 if input.contact_valid {
+                    let (vx, vy) = o.relative_motion(cell, &self.environment, self.time());
                     input.contact_offset = local_vector(o.dx, o.dy, cell.angle)
                         .map(|v| measure(v, caps.mechanical_sensing, 0.08));
                     input.contact_pressure = measure(
                         (cell.radius() + o.radius - o.dx.hypot(o.dy)).max(0.0)
-                            + (-o.vx * o.dx - o.vy * o.dy).max(0.0) / (1.0 + o.dx.hypot(o.dy)),
+                            + (-vx * o.dx - vy * o.dy).max(0.0) / (1.0 + o.dx.hypot(o.dy)),
                         caps.mechanical_sensing,
                         0.01,
                     );
@@ -970,6 +1005,7 @@ impl World {
                 input.object_token = tracking.observe(o.entity, cell.id, self.ticks);
                 input.object_valid = !input.object_token.is_empty();
                 if input.object_valid {
+                    let (vx, vy) = o.relative_motion(cell, &self.environment, self.time());
                     input.object_offset = local_vector(o.dx, o.dy, cell.angle)
                         .map(|v| measure(v, caps.optical_sensing, 0.08));
                     input.object_area = measure(o.area, caps.optical_sensing, 0.002).max(0.02);
@@ -977,7 +1013,7 @@ impl World {
                         measure(o.contrast, caps.optical_sensing, 0.001).clamp(0.0, 1.0);
                     input.object_pigment =
                         measure(o.pigment, caps.optical_sensing, 0.001).clamp(0.0, 1.0);
-                    input.object_motion = local_vector(o.vx, o.vy, cell.angle)
+                    input.object_motion = local_vector(vx, vy, cell.angle)
                         .map(|v| measure(v, caps.optical_sensing, 0.03));
                 }
             }
@@ -1055,14 +1091,18 @@ impl World {
                     .into(),
             );
         }
+        // Fields and particle decay do not change bodies. Reuse these frozen
+        // capacities for preflight, sensing, and the existing action phases.
+        let caps: Vec<_> = self.cells.iter().map(|c| c.body.capacities()).collect();
         let packet_energy: f64 = self
             .cells
             .iter()
-            .map(|c| {
+            .zip(&caps)
+            .map(|(c, cap)| {
                 c.energy.max(0.0)
                     + c.gut_energy
                     + c.body.embodied_energy()
-                    + c.body.capacities().photosynthesis * DT
+                    + cap.photosynthesis * DT
             })
             .sum();
         let packet_overhead = self
@@ -1088,9 +1128,8 @@ impl World {
         })?;
         self.environment.step(self.time());
         self.decay_food();
-        let (inputs, tracking) = self.observations(None);
-        let mut scratch = EvalScratch::default();
-        let caps: Vec<_> = self.cells.iter().map(|c| c.body.capacities()).collect();
+        let (inputs, tracking) = self.observations_with_capacities(None, &caps);
+        let scratch = &mut self.eval_scratch;
         let outputs: Vec<_> = self
             .cells
             .iter_mut()
@@ -1101,7 +1140,7 @@ impl World {
                 genomes[(c.genome_id - 1) as usize].program.evaluate_cell(
                     input,
                     &mut c.memory,
-                    &mut scratch,
+                    scratch,
                 )
             })
             .collect();
@@ -1315,8 +1354,9 @@ impl World {
         Ok(())
     }
     fn decay_food(&mut self) {
+        let retention = ORGANIC_DECAY.map(|decay| (-decay * DT).exp());
         self.food.retain_mut(|food| {
-            let retained = (-ORGANIC_DECAY[food.kind as usize] * DT).exp();
+            let retained = retention[food.kind as usize];
             let lost_energy = food.energy * (1.0 - retained);
             let lost_minerals = food.nutrients * (1.0 - retained);
             self.environment
@@ -1758,6 +1798,7 @@ impl World {
         for (i, food) in self.food.iter().enumerate() {
             grid.insert(food.x, food.y, i);
         }
+        let mut nearby = Vec::new();
         for emission in emissions {
             let OrganicEmission {
                 kind,
@@ -1772,9 +1813,10 @@ impl World {
                 self.environment.recycle_nutrients(x, y, nutrients);
                 continue;
             }
-            let mut nearby: Vec<_> = grid.nearby_radius(x, y, 24.0).collect();
+            nearby.clear();
+            nearby.extend(grid.nearby_radius(x, y, 24.0));
             nearby.sort_unstable();
-            for index in nearby {
+            for &index in &nearby {
                 let food = &mut self.food[index];
                 if food.kind != kind
                     || delta(food.x - x, WIDTH).hypot(delta(food.y - y, HEIGHT)) > 24.0
@@ -1851,21 +1893,23 @@ impl World {
                 max_radius = max_radius.max(c.radius());
             }
         }
+        let mut candidates = Vec::new();
         for i in 0..self.cells.len() {
             if !self.cells[i].alive() {
                 continue;
             }
-            let mut candidates: Vec<_> = grid
-                .nearby_radius(
+            candidates.clear();
+            candidates.extend(
+                grid.nearby_radius(
                     self.cells[i].x,
                     self.cells[i].y,
                     self.cells[i].radius() + max_radius,
                 )
-                .filter(|&j| j > i)
-                .collect();
+                .filter(|&j| j > i),
+            );
             candidates.sort_unstable();
             candidates.dedup();
-            for j in candidates {
+            for &j in &candidates {
                 let (a, b) = self.cells.split_at_mut(j);
                 let a = &mut a[i];
                 let b = &mut b[0];
@@ -1977,7 +2021,8 @@ impl World {
             self.food_rate as f64,
         ]);
         for c in &self.cells {
-            let cap = c.body.capacities();
+            let families = c.body.family_summaries();
+            let cap = c.body.capacities_from_summaries(&families);
             let space = c.body.space();
             let surface = c.body.surface();
             let used = c.memory.populated_count() as f64;
@@ -2024,15 +2069,15 @@ impl World {
             ];
             debug_assert_eq!(values.len(), 39);
             target.extend(values);
-            for kind in Kind::ALL {
+            for family in families {
                 target.extend(
                     [
-                        c.body.count(kind) as f64,
-                        c.body.mass(kind),
-                        c.body.capacity(kind),
-                        c.body.damaged(kind),
-                        c.body.building(kind),
-                        c.body.functional_mass(kind),
+                        family.count as f64,
+                        family.mass,
+                        family.capacity,
+                        family.damaged,
+                        family.building,
+                        family.functional_mass,
                     ]
                     .map(|v| v as f64),
                 );
@@ -2081,6 +2126,11 @@ impl World {
     }
 }
 #[derive(Clone)]
+enum ObservedMotion {
+    Relative(f64, f64),
+    ParticleAt(f64, f64),
+}
+#[derive(Clone)]
 struct Observation {
     entity: u64,
     dx: f64,
@@ -2089,9 +2139,19 @@ struct Observation {
     area: f64,
     contrast: f64,
     pigment: f64,
-    vx: f64,
-    vy: f64,
+    motion: ObservedMotion,
     resistance: f64,
+}
+impl Observation {
+    fn relative_motion(&self, cell: &Cell, environment: &Environment, time: f64) -> (f64, f64) {
+        match self.motion {
+            ObservedMotion::Relative(vx, vy) => (vx, vy),
+            ObservedMotion::ParticleAt(x, y) => {
+                let (vx, vy) = environment.flow_at(x, y, time);
+                (vx - cell.vx, vy - cell.vy)
+            }
+        }
+    }
 }
 /// Place a whole organic particle outside its emitter on wrapped geometry.
 /// The emission point gives the outward direction when a particle is exactly

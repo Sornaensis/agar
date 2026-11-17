@@ -23,6 +23,17 @@ pub struct Source {
     pub radius: f64,
 }
 
+/// Reusable work buffers, never serialized and never read before initialization.
+#[derive(Clone, Default)]
+struct FieldScratch {
+    advected: Vec<f64>,
+    transfers: Vec<(usize, usize, f64)>,
+    outgoing: Vec<f64>,
+    limits: Vec<f64>,
+    remaining: Vec<f64>,
+    incoming: Vec<f64>,
+}
+
 #[derive(Clone)]
 pub struct Environment {
     pub ambient_temperature: f64,
@@ -39,6 +50,7 @@ pub struct Environment {
     organic: Vec<f64>,
     nutrient_inputs: f64,
     next_source_id: u32,
+    scratch: FieldScratch,
 }
 
 impl Default for Environment {
@@ -57,6 +69,7 @@ impl Default for Environment {
             organic: vec![0.0; PATCHES],
             nutrient_inputs: DEFAULT_INITIAL_NUTRIENTS * PATCHES as f64,
             next_source_id: 1,
+            scratch: FieldScratch::default(),
         }
     }
 }
@@ -104,12 +117,13 @@ impl Environment {
         if self.organic.iter().all(|&v| v == 0.0) {
             return;
         }
-        let mut advected = vec![0.0; PATCHES];
-        for (i, value) in advected.iter_mut().enumerate() {
+        self.scratch.advected.resize(PATCHES, 0.0);
+        for i in 0..PATCHES {
             let (x, y) = Self::patch_center(i);
             let (vx, vy) = self.flow_at(x, y, time);
-            *value = self.organic_at(x - vx * DT, y - vy * DT);
+            self.scratch.advected[i] = self.organic_at(x - vx * DT, y - vy * DT);
         }
+        let advected = &self.scratch.advected;
         let diffusion = 90.0 * DT / PATCH_AREA;
         let retained = (-0.18 * DT).exp();
         for i in 0..PATCHES {
@@ -295,17 +309,24 @@ impl Environment {
         sample(&self.temperature, x, y)
     }
 
-    pub fn gradients(&self, x: f64, y: f64) -> ((f64, f64), (f64, f64)) {
+    pub fn light_gradient(&self, x: f64, y: f64) -> (f64, f64) {
         let h = 10.0;
-        let light = (
+        (
             self.light_at(x + h, y) - self.light_at(x - h, y),
             self.light_at(x, y + h) - self.light_at(x, y - h),
-        );
-        let temperature = (
+        )
+    }
+
+    pub fn temperature_gradient(&self, x: f64, y: f64) -> (f64, f64) {
+        let h = 10.0;
+        (
             self.temperature_at(x + h, y) - self.temperature_at(x - h, y),
             self.temperature_at(x, y + h) - self.temperature_at(x, y - h),
-        );
-        (light, temperature)
+        )
+    }
+
+    pub fn gradients(&self, x: f64, y: f64) -> ((f64, f64), (f64, f64)) {
+        (self.light_gradient(x, y), self.temperature_gradient(x, y))
     }
 
     pub fn flow_at(&self, x: f64, y: f64, time: f64) -> (f64, f64) {
@@ -345,12 +366,13 @@ impl Environment {
         {
             return;
         }
-        let mut advected = vec![0.0; PATCHES];
-        for (i, value) in advected.iter_mut().enumerate() {
+        self.scratch.advected.resize(PATCHES, 0.0);
+        for i in 0..PATCHES {
             let (x, y) = Self::patch_center(i);
             let (vx, vy) = self.flow_at(x, y, time);
-            *value = self.temperature_at(x - vx * DT, y - vy * DT);
+            self.scratch.advected[i] = self.temperature_at(x - vx * DT, y - vy * DT);
         }
+        let advected = &self.scratch.advected;
         // Grid spacing is 20 world units: 60 units²/s gives a stable diffusion
         // coefficient of 0.005 per neighbor at the fixed 1/30 s timestep.
         let diffusion = 60.0 * DT / 400.0;
@@ -380,8 +402,10 @@ impl Environment {
         if has_flow || nonuniform {
             // Paired finite-volume fluxes move mass between wrapped neighbors.
             // Semi-Lagrangian interpolation is deliberately reserved for heat.
-            let mut transfers = Vec::with_capacity(PATCHES * 2);
-            let mut outgoing = vec![0.0; PATCHES];
+            self.scratch.transfers.clear();
+            self.scratch.transfers.reserve(PATCHES * 2);
+            self.scratch.outgoing.resize(PATCHES, 0.0);
+            self.scratch.outgoing.fill(0.0);
             let diffusion = NUTRIENT_DIFFUSION * DT / PATCH_AREA;
             let advection = DT / 20.0;
             for i in 0..PATCHES {
@@ -414,25 +438,36 @@ impl Environment {
                         (neighbor, i, -flux)
                     };
                     if amount > 0.0 {
-                        outgoing[from] += amount;
-                        transfers.push((from, to, amount));
+                        self.scratch.outgoing[from] += amount;
+                        self.scratch.transfers.push((from, to, amount));
                     }
                 }
             }
-            let limits: Vec<f64> = outgoing
-                .iter()
-                .zip(&self.nutrients)
-                .map(|(&requested, &available)| {
-                    if requested > available {
-                        available / requested
-                    } else {
-                        1.0
-                    }
-                })
-                .collect();
-            let mut remaining = self.nutrients.clone();
-            let mut incoming = vec![0.0; PATCHES];
-            for (from, to, requested) in transfers {
+            let FieldScratch {
+                transfers,
+                outgoing,
+                limits,
+                remaining,
+                incoming,
+                ..
+            } = &mut self.scratch;
+            limits.clear();
+            limits.extend(
+                outgoing
+                    .iter()
+                    .zip(&self.nutrients)
+                    .map(|(&requested, &available)| {
+                        if requested > available {
+                            available / requested
+                        } else {
+                            1.0
+                        }
+                    }),
+            );
+            remaining.clone_from(&self.nutrients);
+            incoming.resize(PATCHES, 0.0);
+            incoming.fill(0.0);
+            for &(from, to, requested) in transfers.iter() {
                 // Budget against the old donor balance: same-step arrivals
                 // cannot be sent again, and no positivity clamp destroys mass.
                 let actual = (requested * limits[from]).min(remaining[from]);
@@ -566,6 +601,53 @@ mod tests {
             .temperature
             .iter()
             .all(|v| v.is_finite() && (0.0..=1.0).contains(v)));
+    }
+
+    #[test]
+    fn reused_work_buffers_match_fresh_checkpoint_restores_across_reset() {
+        use crate::checkpoint::{Reader, Writer};
+
+        fn state(env: &Environment) -> Vec<u8> {
+            let mut writer = Writer::new();
+            env.write_checkpoint(&mut writer);
+            assert!(!writer.failed());
+            writer.0
+        }
+
+        let mut reused = Environment::default();
+        reused.configure(0.45, 0.2, 18.0);
+        reused.add_source(1, 10.0, 10.0, 0.8, 80.0);
+        reused.add_source(2, 1195.0, 755.0, -0.7, 120.0);
+        reused.add_source(3, 30.0, 750.0, 0.4, 100.0);
+        reused.add_nutrients(1195.0, 5.0, 250.0);
+        reused.emit_organic(5.0, 755.0, 4.0);
+
+        for tick in 0..36 {
+            if tick == 12 {
+                // Leave stale work buffers in a neutral world for several ticks.
+                reused.clear_sources();
+                reused.configure(0.4, 0.0, 0.0);
+                reused.set_initial_nutrients(0.07);
+                reused.reset_dynamic();
+            } else if tick == 18 {
+                reused.configure(0.4, 0.1, 27.0);
+                reused.add_source(1, 600.0, 380.0, -0.6, 110.0);
+                reused.add_source(2, 800.0, 100.0, 0.9, 60.0);
+                reused.add_nutrients(600.0, 380.0, 12.0);
+                reused.emit_organic(1195.0, 5.0, 8.0);
+            }
+
+            let bytes = state(&reused);
+            let mut reader = Reader::new(&bytes);
+            let mut fresh = Environment::read_checkpoint(&mut reader).unwrap();
+            assert!(reader.finished());
+            assert_eq!(state(&fresh), bytes);
+
+            let time = tick as f64 * DT;
+            reused.step(time);
+            fresh.step(time);
+            assert_eq!(state(&reused), state(&fresh), "tick {tick}");
+        }
     }
 
     #[test]
