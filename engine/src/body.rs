@@ -17,6 +17,9 @@ pub const EMBODIED_FRACTION: f64 = 0.25;
 pub const RECOVERY_FRACTION: f64 = 0.5;
 pub const MIN_FUNCTIONAL_INTEGRITY: f64 = 0.2;
 pub const CORE_MASS_PER_AREA: f64 = 0.04;
+pub const FOUNDER_AREA: f64 = 1.0;
+pub const FOUNDER_ENERGY_FRACTION: f64 = 0.85;
+pub const FOUNDER_MINERAL_FRACTION: f64 = 0.6;
 const INTERNAL_PER_AREA: f64 = 0.9;
 const SURFACE_PER_RADIUS: f64 = 0.9;
 const RECYCLE_ENERGY_PER_MASS: f64 = 8.0;
@@ -242,16 +245,19 @@ pub struct BodyCapacities {
 }
 pub type Capacities = BodyCapacities;
 
+/// Preassembled specimens used only to isolate hardware in native regression
+/// tests. Production founders never select or receive one of these bodies.
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u32)]
-pub enum BodyRecipe {
+pub(crate) enum BodyFixture {
     Bare,
     Producer,
     Scavenger,
     Hunter,
     Mixed,
 }
-impl BodyRecipe {
+#[cfg(test)]
+impl BodyFixture {
     pub const ALL: [Self; 5] = [
         Self::Bare,
         Self::Producer,
@@ -259,15 +265,6 @@ impl BodyRecipe {
         Self::Hunter,
         Self::Mixed,
     ];
-    pub fn from_u32(id: u32) -> Option<Self> {
-        Self::ALL.get(id as usize).copied()
-    }
-    pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|r| r.name() == name)
-    }
-    pub fn name(self) -> &'static str {
-        ["bare", "producer", "scavenger", "hunter", "mixed"][self as usize]
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -320,7 +317,34 @@ impl Body {
     pub fn geometry_limit(width: f64, height: f64) -> f64 {
         (width.min(height) / (8.0 * BASE_RADIUS)).powi(2)
     }
-    pub fn founder(recipe: BodyRecipe) -> (Self, FounderBudget) {
+    /// Every introduced cell begins with the same minimal physical body. The
+    /// genome builds all optional machinery and the additional core needed for
+    /// division, on ordinary paid simulation ticks.
+    pub fn founder() -> (Self, FounderBudget) {
+        let kind = OrganelleKind::Core;
+        let mass = kind.min_mass();
+        let body = Self {
+            area: FOUNDER_AREA,
+            organs: vec![Organelle {
+                id: 1,
+                kind,
+                mass,
+                integrity: 1.0,
+                embodied_energy: mass * kind.construction_cost() * EMBODIED_FRACTION,
+            }],
+            next_organelle_id: 2,
+            scaffold_energy: FOUNDER_AREA
+                * SCAFFOLD_MASS_PER_AREA
+                * SCAFFOLD_ENERGY_PER_MASS
+                * EMBODIED_FRACTION,
+        };
+        let budget = body.introduction_budget();
+        debug_assert!(body.validate().is_ok());
+        (body, budget)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fixture(recipe: BodyFixture) -> (Self, FounderBudget) {
         use OrganelleKind::*;
         let mut body = Self {
             area: 1.0,
@@ -328,8 +352,8 @@ impl Body {
             next_organelle_id: 1,
             scaffold_energy: SCAFFOLD_MASS_PER_AREA * SCAFFOLD_ENERGY_PER_MASS * EMBODIED_FRACTION,
         };
-        // These are explicit physical starter bodies, never inferred by running a
-        // genome. Two small cores permit conservative inheritance after growth.
+        // Test specimens isolate feeding, sensing, storage and inheritance.
+        // Their full fabrication cost is recorded just like production input.
         let mut add = |kind: OrganelleKind, count: usize, mass: f64| {
             for _ in 0..count {
                 body.organs.push(Organelle {
@@ -345,15 +369,15 @@ impl Body {
         add(Core, 2, 0.04);
         add(Reserve, 2, 0.04);
         match recipe {
-            BodyRecipe::Bare => {}
-            BodyRecipe::Producer => {
+            BodyFixture::Bare => {}
+            BodyFixture::Producer => {
                 add(Photosynthetic, 2, 0.10);
                 add(Metabolic, 2, 0.03);
                 add(Transporter, 2, 0.015);
                 add(Photoreceptor, 2, 0.01);
             }
-            BodyRecipe::Scavenger | BodyRecipe::Hunter => {
-                let hunter = recipe == BodyRecipe::Hunter;
+            BodyFixture::Scavenger | BodyFixture::Hunter => {
+                let hunter = recipe == BodyFixture::Hunter;
                 add(Digestive, 2, if hunter { 0.05 } else { 0.06 });
                 add(Metabolic, 2, 0.03);
                 add(Transporter, 1, 0.015);
@@ -367,7 +391,7 @@ impl Body {
                     add(Cortex, 1, 0.02);
                 }
             }
-            BodyRecipe::Mixed => {
+            BodyFixture::Mixed => {
                 add(Photosynthetic, 2, 0.06);
                 add(Digestive, 2, 0.04);
                 add(Metabolic, 2, 0.03);
@@ -379,24 +403,28 @@ impl Body {
                 add(Cortex, 1, 0.02);
             }
         }
-        let construction_energy = body.scaffold_mass() * SCAFFOLD_ENERGY_PER_MASS
-            + body
+        let budget = body.introduction_budget();
+        debug_assert!(body.validate().is_ok());
+        (body, budget)
+    }
+
+    fn introduction_budget(&self) -> FounderBudget {
+        let construction_energy = self.scaffold_mass() * SCAFFOLD_ENERGY_PER_MASS
+            + self
                 .organs
                 .iter()
                 .map(|o| o.mass * o.kind.construction_cost())
                 .sum::<f64>();
-        let energy = body.energy_capacity() * 0.85;
-        let minerals = body.mineral_capacity() * 0.6;
-        let budget = FounderBudget {
+        let energy = self.energy_capacity() * FOUNDER_ENERGY_FRACTION;
+        let minerals = self.mineral_capacity() * FOUNDER_MINERAL_FRACTION;
+        FounderBudget {
             energy,
             minerals,
             introduced_energy: energy + construction_energy,
-            introduced_minerals: minerals + body.structural_mass(),
+            introduced_minerals: minerals + self.structural_mass(),
             construction_energy,
-            dissipated_energy: construction_energy - body.embodied_energy(),
-        };
-        debug_assert!(body.validate().is_ok());
-        (body, budget)
+            dissipated_energy: construction_energy - self.embodied_energy(),
+        }
     }
 
     pub fn radius(&self) -> f64 {
@@ -1186,9 +1214,9 @@ mod tests {
         result
     }
     #[test]
-    fn all_founders_are_paid_packed_and_have_no_free_hidden_specialization() {
-        for recipe in BodyRecipe::ALL {
-            let (body, budget) = Body::founder(recipe);
+    fn all_test_specimens_are_paid_packed_and_have_explicit_physical_specialization() {
+        for recipe in BodyFixture::ALL {
+            let (body, budget) = Body::fixture(recipe);
             body.validate().unwrap();
             assert!(body.viable());
             close(
@@ -1201,7 +1229,7 @@ mod tests {
             );
             assert!(budget.dissipated_energy > 0.0);
         }
-        let (bare, _) = Body::founder(BodyRecipe::Bare);
+        let (bare, _) = Body::fixture(BodyFixture::Bare);
         for kind in OrganelleKind::ALL
             .into_iter()
             .filter(|k| !matches!(k, OrganelleKind::Core | OrganelleKind::Reserve))
@@ -1211,8 +1239,92 @@ mod tests {
         assert_eq!(bare.capacities().optical_range, 0.0);
     }
     #[test]
+    fn universal_founder_has_only_one_minimum_core_and_bounded_paid_reserves() {
+        let (body, budget) = Body::founder();
+        body.validate().unwrap();
+        assert_eq!(body.area, 1.0);
+        assert_eq!(body.organs.len(), 1);
+        assert_eq!(body.organs[0].kind, OrganelleKind::Core);
+        assert_eq!(body.organs[0].mass, OrganelleKind::Core.min_mass());
+        assert_eq!(body.organs[0].id, 1);
+        assert_eq!(body.next_organelle_id, 2);
+        close(body.energy_capacity(), 80.0);
+        close(body.mineral_capacity(), 1.0);
+        close(budget.energy, 68.0);
+        close(budget.minerals, 0.6);
+        close(budget.introduced_energy, 99.2);
+        close(budget.introduced_minerals, 0.99);
+        close(
+            budget.introduced_energy,
+            budget.energy + body.embodied_energy() + budget.dissipated_energy,
+        );
+        assert!(!body.can_partition());
+        for kind in OrganelleKind::ALL
+            .into_iter()
+            .filter(|kind| *kind != OrganelleKind::Core)
+        {
+            assert_eq!(body.count(kind), 0);
+            assert_eq!(body.functional_mass(kind), 0.0);
+        }
+    }
+    #[test]
+    fn minimal_core_must_build_a_second_core_before_growing_divisible_frame() {
+        let (mut body, budget) = Body::founder();
+        let (mut energy, mut minerals) = (budget.energy, budget.minerals);
+        let before = body.clone();
+        let unsupported = body.work(
+            1.0,
+            &BodyControls::default(),
+            0.0,
+            &mut energy,
+            &mut minerals,
+            1.0,
+            MAX_AREA,
+        );
+        assert_eq!(body, before);
+        assert_eq!(unsupported.energy_spent, 0.0);
+        let request = controls(OrganelleKind::Core, 2, 0.04);
+        let mut heat = 0.0;
+        for _ in 0..1500 {
+            let report = body.work(
+                1.0,
+                &request,
+                0.0,
+                &mut energy,
+                &mut minerals,
+                1.0 / 30.0,
+                2.0,
+            );
+            heat += report.dissipated_energy;
+            if body.area + EPS >= 2.0 {
+                break;
+            }
+        }
+        close(body.area, 2.0);
+        assert_eq!(body.count(OrganelleKind::Core), 2);
+        close(
+            minerals + body.structural_mass(),
+            budget.introduced_minerals,
+        );
+        close(
+            energy + body.embodied_energy() + heat,
+            budget.energy + before.embodied_energy(),
+        );
+        let (a, b) = body
+            .partition()
+            .expect("the second core and frame were physically constructed");
+        assert_eq!(a.organs.len(), 1);
+        assert_eq!(b.organs.len(), 1);
+        assert_ne!(a.organs[0].id, b.organs[0].id);
+        close(
+            a.structural_mass() + b.structural_mass(),
+            body.structural_mass(),
+        );
+        assert!(a.viable() && b.viable());
+    }
+    #[test]
     fn targets_and_unpaid_work_never_grant_capabilities() {
-        let (mut body, _) = Body::founder(BodyRecipe::Bare);
+        let (mut body, _) = Body::fixture(BodyFixture::Bare);
         let mut requests = controls(OrganelleKind::Flagellum, u32::MAX, 0.1);
         let (mut energy, mut minerals) = (0.0, 100.0);
         let initial = body.clone();
@@ -1255,7 +1367,7 @@ mod tests {
     }
     #[test]
     fn growth_is_paid_does_not_create_machinery_and_cannot_use_new_space_this_tick() {
-        let (mut body, _) = Body::founder(BodyRecipe::Bare);
+        let (mut body, _) = Body::fixture(BodyFixture::Bare);
         let initial = body.clone();
         let (mut energy, mut minerals) = (1000.0, 100.0);
         let resources = energy + body.embodied_energy();
@@ -1291,7 +1403,7 @@ mod tests {
     }
     #[test]
     fn build_recycle_repair_cycle_conserves_material_and_only_loses_energy() {
-        let (mut body, _) = Body::founder(BodyRecipe::Bare);
+        let (mut body, _) = Body::fixture(BodyFixture::Bare);
         let (mut energy, mut minerals) = (1000.0, 100.0);
         let initial_energy = energy + body.embodied_energy();
         let initial_material = minerals + body.structural_mass();
@@ -1341,7 +1453,7 @@ mod tests {
     }
     #[test]
     fn damage_retains_occupancy_material_and_embodied_energy() {
-        let (mut body, _) = Body::founder(BodyRecipe::Hunter);
+        let (mut body, _) = Body::fixture(BodyFixture::Hunter);
         let space = body.space();
         let surface = body.surface();
         let material = body.structural_mass();
@@ -1357,7 +1469,7 @@ mod tests {
     }
     #[test]
     fn simultaneous_requests_share_resources_without_family_priority() {
-        let (mut body, _) = Body::founder(BodyRecipe::Bare);
+        let (mut body, _) = Body::fixture(BodyFixture::Bare);
         let mut request = controls(OrganelleKind::Photoreceptor, 1, 0.02);
         request.target_counts[OrganelleKind::Thermoreceptor as usize] = 1;
         request.target_sizes[OrganelleKind::Thermoreceptor as usize] = 0.02;
@@ -1382,7 +1494,7 @@ mod tests {
     }
     #[test]
     fn newly_grown_room_is_unavailable_until_next_tick_and_surface_can_bind_first() {
-        let (mut body, _) = Body::founder(BodyRecipe::Bare);
+        let (mut body, _) = Body::fixture(BodyFixture::Bare);
         let mass = body.space().free;
         body.organs.push(Organelle {
             id: body.next_organelle_id,
@@ -1415,7 +1527,7 @@ mod tests {
             MAX_AREA,
         );
         assert!(body.functional_mass(OrganelleKind::Flagellum) > 0.0);
-        let (mut surface_full, _) = Body::founder(BodyRecipe::Bare);
+        let (mut surface_full, _) = Body::fixture(BodyFixture::Bare);
         let mass = surface_full.surface().free / OrganelleKind::Cortex.surface_footprint();
         surface_full.organs.push(Organelle {
             id: surface_full.next_organelle_id,
@@ -1444,7 +1556,7 @@ mod tests {
     }
     #[test]
     fn lowered_targets_need_explicit_recycling_and_core_cannot_be_removed() {
-        let (mut body, _) = Body::founder(BodyRecipe::Producer);
+        let (mut body, _) = Body::fixture(BodyFixture::Producer);
         let (mut energy, mut minerals) = (1000.0, 100.0);
         let before = body.clone();
         run(
@@ -1473,7 +1585,7 @@ mod tests {
     }
     #[test]
     fn concurrent_core_recycling_cannot_authorize_unsupported_growth() {
-        let (mut body, _) = Body::founder(BodyRecipe::Bare);
+        let (mut body, _) = Body::fixture(BodyFixture::Bare);
         let mut request = controls(OrganelleKind::Core, 1, 0.04);
         request.recycle[OrganelleKind::Core as usize] = 1.0;
         let (mut energy, mut minerals) = (1000.0, 100.0);
@@ -1494,8 +1606,8 @@ mod tests {
     }
     #[test]
     fn division_preserves_each_individual_record_and_all_ledgers() {
-        for recipe in BodyRecipe::ALL {
-            let (mut body, _) = Body::founder(recipe);
+        for recipe in BodyFixture::ALL {
+            let (mut body, _) = Body::fixture(recipe);
             body.area = 2.0;
             body.scaffold_energy *= 2.0;
             let (a, b) = body
@@ -1517,7 +1629,7 @@ mod tests {
             organs.sort_by_key(|o| o.id);
             assert_eq!(organs, body.organs);
         }
-        let (mut body, _) = Body::founder(BodyRecipe::Bare);
+        let (mut body, _) = Body::fixture(BodyFixture::Bare);
         body.organs
             .retain(|o| o.kind != OrganelleKind::Core || o.id == 1);
         body.organs[0].mass = 0.16;
@@ -1528,7 +1640,7 @@ mod tests {
             !body.can_partition(),
             "one large core is not implicitly cloned"
         );
-        let (mut oversized, _) = Body::founder(BodyRecipe::Bare);
+        let (mut oversized, _) = Body::fixture(BodyFixture::Bare);
         oversized.area = 2.0;
         oversized.scaffold_energy *= 2.0;
         oversized.organs.push(Organelle {
@@ -1547,7 +1659,7 @@ mod tests {
     }
     #[test]
     fn hard_targets_cannot_allocate_requested_counts_or_exceed_packing() {
-        let (mut body, _) = Body::founder(BodyRecipe::Bare);
+        let (mut body, _) = Body::fixture(BodyFixture::Bare);
         let mut request = BodyControls::default();
         request.target_counts = [u32::MAX; FAMILY_COUNT];
         request.target_sizes = [1e200; FAMILY_COUNT];
@@ -1582,7 +1694,7 @@ mod tests {
     }
     #[test]
     fn body_checkpoint_roundtrip_continues_exactly_and_rejects_bad_ledgers() {
-        let (mut body, _) = Body::founder(BodyRecipe::Producer);
+        let (mut body, _) = Body::fixture(BodyFixture::Producer);
         let request = controls(OrganelleKind::Flagellum, 2, 0.06);
         let (mut energy, mut minerals) = (1000.0, 100.0);
         run(
@@ -1661,7 +1773,7 @@ mod tests {
     #[test]
     fn checkpoint_rejects_multiple_negligible_partial_units_in_each_family() {
         for kind in OrganelleKind::ALL {
-            let (mut body, _) = Body::founder(BodyRecipe::Bare);
+            let (mut body, _) = Body::fixture(BodyFixture::Bare);
             for number in 1..=2 {
                 let mass = 1e-9;
                 body.organs.push(Organelle {
@@ -1693,7 +1805,7 @@ mod tests {
     }
     #[test]
     fn changing_targets_and_partitioning_keep_at_most_one_partial_per_family() {
-        let (mut body, _) = Body::founder(BodyRecipe::Bare);
+        let (mut body, _) = Body::fixture(BodyFixture::Bare);
         let (mut energy, mut minerals) = (1e6, 1e6);
         for _ in 0..60 {
             body.work(

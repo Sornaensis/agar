@@ -16,30 +16,36 @@ pub const REGISTER_COUNT: usize = 999;
 pub const REGISTER_ENERGY_COST: f64 = 0.0025;
 const MAX_STRING_BYTES: usize = 128;
 
-pub const DEFAULT_PROGRAM: &str = r#"# A producer builds actual machinery before it can reproduce.
+pub const DEFAULT_PROGRAM: &str = r#"# Every newborn has one core. This program must build its own energy path.
+let light_path = organelle.photosynthetic.capacity >= 1;
+let processing = organelle.metabolic.capacity >= 1;
+let supplied = organelle.transporter.capacity >= 1;
+let powered = light_path && processing && supplied;
+let funded = energy > 18 && nutrient.stored > 0.002;
+let core_ready = organelle.core.count >= 2 && organelle.core.building < 0.000001;
 thrust = 0;
 turn = 0;
 photosynthesize = 1;
 absorb = 1;
 feed = 0;
-repair = 0.2;
-grow = if energy.fraction > 0.6 then 0.8 else 0;
-divide = body.division_ready;
-target.core.count = 2;
-target.core.size = 0.04;
-build.core = 1;
+repair = if integrity < 0.98 && energy > 40 then 0.2 else 0;
+grow = if core_ready && body.maturity < 1 && energy > 90 then 0.8 else 0;
+divide = body.division_ready && energy > 120
+         && organelle.photosynthetic.count >= 2 && organelle.photosynthetic.building < 0.000001
+         && organelle.metabolic.count >= 2 && organelle.metabolic.building < 0.000001
+         && organelle.transporter.count >= 2 && organelle.transporter.building < 0.000001;
 target.photosynthetic.count = 2;
-target.photosynthetic.size = 0.12;
-build.photosynthetic = 1;
+target.photosynthetic.size = 0.10;
+build.photosynthetic = if funded && (!light_path || powered && core_ready) then 1 else 0;
 target.metabolic.count = 2;
-target.metabolic.size = 0.045;
-build.metabolic = 0.5;
-target.reserve.count = 2;
-target.reserve.size = 0.04;
-build.reserve = 0.4;
+target.metabolic.size = 0.03;
+build.metabolic = if funded && light_path && (!processing || powered && core_ready) then 1 else 0;
 target.transporter.count = 2;
 target.transporter.size = 0.02;
-build.transporter = 0.5;
+build.transporter = if funded && light_path && processing && (!supplied || core_ready) then 1 else 0;
+target.core.count = 2;
+target.core.size = max(0.04, body.birth_area * 0.04);
+build.core = if powered && energy > 50 && nutrient.stored > 0.01 then 1 else 0;
 "#;
 
 /// Owned, physically built machinery, sampled before this tick's construction.
@@ -3496,22 +3502,55 @@ mod tests {
     #[test]
     fn default_producer_requests_paid_construction_and_physical_division() {
         let program = Program::compile(DEFAULT_PROGRAM).unwrap();
-        for (energy_fraction, body_division_ready) in
-            [(0.1, false), (0.6, false), (0.61, false), (0.8, true)]
-        {
-            let result = program.evaluate(&Inputs {
-                energy_fraction,
-                body_division_ready,
-                ..Inputs::default()
-            });
-            assert_eq!(result.grow, if energy_fraction > 0.6 { 0.8 } else { 0.0 });
-            assert_eq!(result.divide, body_division_ready);
-            assert_eq!(result.photosynthesize, 1.0);
-            assert_eq!(result.body.target_counts[0], 2);
-            assert_eq!(result.body.target_counts[1], 2);
-            assert_eq!(result.body.build[1], 1.0);
-            assert_eq!(result.body.recycle, [0.0; FAMILY_COUNT]);
+        let mut inputs = Inputs {
+            energy: 68.0,
+            energy_fraction: 0.85,
+            nutrient_stored: 0.6,
+            body_area: 1.0,
+            body_birth_area: 1.0,
+            integrity: 1.0,
+            ..Inputs::default()
+        };
+        inputs.organelle[0] = OrganelleInput {
+            count: 1,
+            mass: 0.04,
+            capacity: 1.0,
+            ..OrganelleInput::default()
+        };
+        let newborn = program.evaluate(&inputs);
+        assert_eq!(newborn.body.build[1], 1.0, "start an energy source");
+        assert_eq!(newborn.body.build[0], 0.0, "do not expand storage first");
+        assert_eq!(newborn.grow, 0.0);
+        assert!(!newborn.divide);
+        assert_eq!(newborn.photosynthesize, 1.0);
+        assert_eq!(newborn.body.target_counts[0], 2);
+        assert_eq!(newborn.body.target_counts[1], 2);
+        assert_eq!(newborn.body.recycle, [0.0; FAMILY_COUNT]);
+
+        inputs.energy = 130.0;
+        inputs.body_division_ready = true;
+        assert!(
+            !program.evaluate(&inputs).divide,
+            "reserves cannot replace missing organs"
+        );
+        for index in [0, 1, 2, 5] {
+            inputs.organelle[index].count = 2;
+            inputs.organelle[index].capacity = 2.0;
         }
+        assert!(program.evaluate(&inputs).divide);
+        inputs.body_division_ready = false;
+        assert!(!program.evaluate(&inputs).divide);
+        assert_eq!(program.evaluate(&inputs).grow, 0.8);
+        inputs.body_division_ready = true;
+        inputs.organelle[1].building = 0.01;
+        assert!(
+            !program.evaluate(&inputs).divide,
+            "unfinished copies are insufficient"
+        );
+        inputs.organelle[1].building = 0.0;
+        inputs.energy = 20.0;
+        assert!(!program.evaluate(&inputs).divide);
+        assert_eq!(program.evaluate(&inputs).grow, 0.0);
     }
 
     #[test]

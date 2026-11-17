@@ -1,4 +1,4 @@
-import type { BodyRecipe, OrganelleKind } from './engine';
+import type { OrganelleKind } from './engine';
 
 /** Display names mirror the engine's physical families; the Rust body is authoritative. */
 export const ORGANELLE_CATALOG: ReadonlyArray<Readonly<{ kind: OrganelleKind; name: string; minimumMass: number; description: string; color: string }>> = Object.freeze([
@@ -19,15 +19,3 @@ export const ORGANELLE_CATALOG: ReadonlyArray<Readonly<{ kind: OrganelleKind; na
   { kind: 'mechanoreceptor', name: 'Mechanoreceptor', minimumMass: 0.01, description: 'Measures local flow and physical contact pressure and resistance.', color: '#9cbde7' },
   { kind: 'optical', name: 'Optical detector', minimumMass: 0.02, description: 'Detects visible objects by appearance, offset and motion. It cannot read hidden energy, genome or diet.', color: '#a9d8df' },
 ].map(item => Object.freeze(item)) as Array<Readonly<{ kind: OrganelleKind; name: string; minimumMass: number; description: string; color: string }>>);
-
-export const STARTER_BODIES: ReadonlyArray<Readonly<{ id: BodyRecipe; name: string; description: string }>> = Object.freeze([
-  { id: 'bare', name: 'Bare cell', description: 'Core and construction reserves. The genome must build a way to obtain energy.' },
-  { id: 'producer', name: 'Producer', description: 'Light harvesting, mineral uptake, processing, storage and light sensing.' },
-  { id: 'scavenger', name: 'Scavenger', description: 'Capture, digestion, movement and generic object/chemical sensing.' },
-  { id: 'hunter', name: 'Hunter', description: 'Contact attack and capture, digestion, movement and physical sensing.' },
-  { id: 'mixed', name: 'Mixed', description: 'Light harvesting and organic feeding share the same finite body.' },
-].map(item => Object.freeze(item)) as Array<Readonly<{ id: BodyRecipe; name: string; description: string }>>);
-
-export function isBodyRecipe(value: string): value is BodyRecipe {
-  return STARTER_BODIES.some(item => item.id === value);
-}

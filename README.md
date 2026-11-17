@@ -11,7 +11,7 @@ npm ci
 npm run dev
 ```
 
-Open the local URL printed by Vite. In **Simulation**, start a preset or choose an environment, genomes, starter bodies and population counts. **Sunlit pond** uses producers; **Still water** supplies organic particles for consumer experiments. **Mixed ecosystem** combines producer, scavenger, mixed and hunter bodies. Their survival depends on resources and behavior; no guild is protected or automatically replenished.
+Open the local URL printed by Vite. In **Simulation**, start a preset or choose an environment, genomes and population counts. Every introduced cell begins with the same minimal structure and finite reserves; its genome grows its capabilities. **Sunlit pond** uses producer programs; **Still water** supplies organic particles for consumer experiments. **Mixed ecosystem** combines producer, scavenger, mixed and hunter programs. Their survival depends on resources and behavior.
 
 ## Workspace
 
@@ -21,7 +21,7 @@ Open the local URL printed by Vite. In **Simulation**, start a preset or choose 
 | Environments | Create, inspect, edit a new copy, rename, import, export or delete a habitat recipe. |
 | Genomes | Create or copy programs, check types, mutate a draft, inspect its graph and explicitly save. |
 
-An open simulation has **Player**, **Metrics**, **Settings** and **Genomes** tabs. The player has Play/Pause, 1×/2×/5×/10× speed and **Add organism**. Adding an organism explicitly selects both its genome and a paid starter body. Click a cell for **Overview**, **Body**, **Memory** and **Program**. Its program and memory are read-only; saving its genome creates a separate catalog document.
+An open simulation has **Player**, **Metrics**, **Settings** and **Genomes** tabs. The player has Play/Pause, 1×/2×/5×/10× speed and **Add organism**. Choose a genome to add one cell. Click a cell for **Overview**, **Body**, **Memory** and **Program**. Its program and memory are read-only; saving its genome creates a separate catalog document.
 
 The Body inspector compares actual organ counts and mass with the last construction requests. Expand a family to inspect stable local unit IDs, built mass, integrity and functional state. Internal space, membrane attachment use and achieved construction/recycling/repair rates remain visible. Metrics includes resource totals, introduced material and energy, harvested light, populations and feeding capabilities.
 
@@ -52,7 +52,9 @@ Growing the envelope creates room and increases upkeep and drag. It does not gra
 | `mechanoreceptor` | Relative flow and physical contact |
 | `optical` | Visible object geometry, appearance and motion |
 
-Starter recipes are **Bare cell**, **Producer**, **Scavenger**, **Hunter** and **Mixed**. Their actual organs, frame and reserves are charged to introduction ledgers. A genome is never evaluated once to create a free specialist. Bare cells have core machinery and finite construction reserves; their programs must build a sustainable energy path.
+The genome is the body plan. An introduced cell has area 1, one core of mass 0.04, 68 usable energy and 0.6 free minerals in the core's bounded compartments. Its frame, core, reserves and fabrication costs are charged to the introduction ledgers. There are no preassembled specialist bodies or genome-name mappings. Photosynthetic units, digestion, motors, sensors, storage and additional cores all have to be grown through ordinary paid ticks.
+
+Programs must establish an energy source before spending their reserves on further development. The built-ins use actual organelle state to sequence construction, then build duplicates for division. This ordering is part of their visible source and can be edited or mutated. Changing a target changes future construction; it never replaces the living cell's existing organs.
 
 Construction requests share assembly time, energy, minerals, internal room and attachment space. Allocation uses a common starting snapshot; new space, recovered resources and newly functional machinery are used on following ticks. Lowering a target does not remove anything without explicit recycling. Recycling costs processing energy and returns only accounted material and a fraction of retained structural energy. Capacity loss spills excess contents into the environment instead of silently discarding them.
 
@@ -65,19 +67,20 @@ There is **no fixed population cap**. Resources, mortality, browser memory and e
 Programs are immutable typed expression graphs. Each 1/30-second tick computes `(current signals, old memory) → (action requests, next memory)`. `let` names an expression recomputed every tick. Arithmetic, comparisons, booleans, bounded strings, 2D vectors, conditionals and pure built-ins are supported; there are no user loops, I/O or immediate writes inside expressions.
 
 ```text
-# The starter body supplies initial machinery; subsequent growth is paid.
-let assemble = if energy.fraction > 0.6 then 1 else 0;
-target.flagellum.count = 2;
+# Build a source of energy before adding a motor.
+let powered = organelle.photosynthetic.capacity > 0;
+target.photosynthetic.count = 1;
+target.photosynthetic.size = 0.08;
+build.photosynthetic = if energy > 12 then 1 else 0;
+target.flagellum.count = 1;
 target.flagellum.size = 0.04;
-build.flagellum = assemble;
+build.flagellum = if powered && energy.fraction > 0.6 then 1 else 0;
 recycle.flagellum = 0;
 
-turn = if light.available && light.valid
-       then clamp(light.bearing, -1, 1) else 0;
-thrust = if energy.fraction > 0.4 then 0.15 else 0;
+turn = 0;
+thrust = if powered && energy.fraction > 0.7 then 0.1 else 0;
 photosynthesize = 1;
-grow = if body.maturity < 1 && energy.fraction > 0.65 then 0.5 else 0;
-divide = body.division_ready;
+divide = false;
 ```
 
 `thrust`, `turn` and `divide` are required. Other action requests are `grow`, `photosynthesize`, `engulf`, `bite`, `defend`, `repair`, `absorb` and `feed`. Optional actions default to zero/false except `absorb` and `feed`, which default to 1. Hardware and resource checks determine what a request achieves.
@@ -136,7 +139,7 @@ In an organism's read-only Program view, hover, place the caret or select an exp
 
 IndexedDB stores documents and complete worlds; localStorage stores preferences and editor drafts. Changing runs checkpoint every two seconds and after key actions, and reopen paused. The save indicator reports failures. Only the open, visible simulation advances; there is no offline catch-up. Web Locks protect a run from competing writers in multiple tabs. Clearing browser site data removes its local saves; export genomes and environments for portable copies.
 
-**Current formats: engine ABI 8, checkpoint 3, genome language 3.** Genome JSON exports use `agar.genome` version 2 with `languageVersion: 3`; environment JSON remains version 1. Plain `.cell` source is checked with the current compiler.
+**Current formats: engine ABI 9, checkpoint 3, genome language 3.** Genome JSON exports use `agar.genome` version 2 with `languageVersion: 3`; environment JSON remains version 1. Plain `.cell` source is checked with the current compiler. Checkpoint-3 simulations from ABI 8 retain their actual organs and continue normally; the common minimal introduction changes newly added cells only.
 
 The organelle model is an intentional compatibility break. Checkpoints 1/2 are rejected before replacing the engine state. Older saved genomes remain viewable, renameable and exportable, but must be manually updated in a new copy before introduction. Their investment fractions and omniscient sensors are not silently converted into free organs. Saved records and old files remain preserved. New and old browser documents keep the same storage namespace.
 

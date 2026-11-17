@@ -1,0 +1,10 @@
+{
+  "abi": 8,
+  "checkpointVersion": 3,
+  "wasmSha256": "3b1a1d8fd21438ecd6c670690be057e28b7d5b6c522f51a13b43e98b679e468d",
+  "source": "ri001=ri001+1;thrust=0;turn=0;divide=false;photosynthesize=1;feed=1;absorb=1;",
+  "seed": 71,
+  "initialTick": 30,
+  "continuationTicks": 120,
+  "description": "Actual ABI8 physical mixed cell with registers and food; ABI9 must preserve its existing organs and exact continuation without running a founder constructor."
+}

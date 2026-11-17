@@ -4,11 +4,10 @@ import ts from 'typescript';
 export const bytes=await readFile(new URL('../engine/pkg/agar_engine.wasm',import.meta.url));
 export const module=await WebAssembly.compile(bytes);
 export const kinds=['core','photosynthetic','metabolic','digestive','reserve','transporter','phagocyte','flagellum','piercer','cortex','repair','photoreceptor','thermoreceptor','chemoreceptor','mechanoreceptor','optical'];
-export const recipes=['bare','producer','scavenger','hunter','mixed'];
 export const STRIDE=135;
 export const error=api=>new TextDecoder().decode(new Uint8Array(api.memory.buffer,api.error_ptr(),api.error_len()));
 export async function fresh(config={}){
-  const api=(await WebAssembly.instantiate(module,{})).exports;assert.equal(api.abi_version(),8);
+  const api=(await WebAssembly.instantiate(module,{})).exports;assert.equal(api.abi_version(),9);
   api.set_environment(config.ambientTemperature??.5,config.ambientLight??0,config.currentStrength??0);
   api.set_initial_nutrients(config.initialNutrients??.3);api.set_food_rate(config.foodRate??0);api.set_mutation_rate(config.mutationRate??0);
   for(const s of config.sources??[])assert.ok(api.add_source(s.kind,s.x,s.y,s.strength,s.radius));
@@ -19,7 +18,7 @@ export function compile(api,source){
   try{new Uint8Array(api.memory.buffer,ptr,data.length).set(data);const id=api.compile_genome(ptr,data.length);assert.ok(id,error(api));return id;}
   finally{api.dealloc(ptr,data.length);}
 }
-export function seed(api,id,count,recipe='producer',x=-1,y=-1){assert.equal(api.seed_cells(id,count,x,y,recipes.indexOf(recipe)),count,error(api));}
+export function seed(api,id,count,x=-1,y=-1){assert.equal(api.seed_cells(id,count,x,y),count,error(api));}
 export function json(api,pointer,length,...args){const p=api[pointer](...args);assert.ok(p,error(api));return JSON.parse(new TextDecoder().decode(new Uint8Array(api.memory.buffer,p,api[length]())));}
 export const graph=(api,id)=>json(api,'genome_graph_ptr','genome_graph_len',id);
 export const body=(api,id)=>json(api,'cell_body_ptr','cell_body_len',id);

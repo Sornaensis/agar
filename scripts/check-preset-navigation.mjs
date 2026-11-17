@@ -9,7 +9,18 @@ const forager = PRESETS.find(item => item.name === 'Forager');
 const api = await fresh({ seed: 42, ambientLight: 0.8, initialNutrients: 1 });
 const genome = compile(api, forager.source);
 const obstacleGenome = compile(api, 'thrust=0;turn=0;divide=false;feed=0;absorb=0;');
-seed(api, genome, 1, 'scavenger', 600, 380);
+seed(api, genome, 1, 600, 380);
+// The program first builds its own movement, vision and contact hardware using
+// the universal newborn's reserves. There is no food or body injection here.
+let developed = snapshot(api);
+for (let tick = 0; tick < 600; tick += 5) {
+  const cell = developed.cells[0];
+  assert.ok(cell, 'The shared newborn survives its initial construction');
+  if (['digestive', 'phagocyte', 'flagellum', 'optical', 'mechanoreceptor'].every(kind => cell.organs[kind].capacity >= 1)) break;
+  developed = advance(api, 5);
+}
+assert.ok(['digestive', 'phagocyte', 'flagellum', 'optical', 'mechanoreceptor'].every(kind => developed.cells[0].organs[kind].capacity >= 1), 'The authored forager constructs all hardware used by the fixture');
+assert.equal(developed.births, 0);
 const initial = snapshot(api).cells[0];
 const wrap = (value, extent) => ((value % extent) + extent) % extent;
 const delta = (value, extent) => value - Math.round(value / extent) * extent;
@@ -18,12 +29,12 @@ const distance = (a, b) => Math.hypot(delta(a.x - b.x,1200),delta(a.y - b.y,760)
 // Measure the deterministic public seeding offset, restore, then choose a
 // center that puts a resistant cell just against the scavenger's front surface.
 const beforeObstacle = save(api);
-seed(api, obstacleGenome, 1, 'bare', initial.x, initial.y);
+seed(api, obstacleGenome, 1, initial.x, initial.y);
 const trialObstacle = snapshot(api).cells.find(cell => cell.genome === obstacleGenome);
 const offset = { x:delta(trialObstacle.x-initial.x,1200), y:delta(trialObstacle.y-initial.y,760) };
 assert.equal(restore(api,beforeObstacle),1);
 const contactDistance = initial.radius + trialObstacle.radius - 0.1;
-seed(api, obstacleGenome, 1, 'bare',
+seed(api, obstacleGenome, 1,
   wrap(initial.x+Math.cos(initial.angle)*contactDistance-offset.x,1200),
   wrap(initial.y+Math.sin(initial.angle)*contactDistance-offset.y,760));
 const first = snapshot(api);

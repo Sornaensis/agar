@@ -1,28 +1,65 @@
-import type { BodyRecipe } from './engine';
-
-export interface Preset { name: string; description: string; starterBody: BodyRecipe; source: string }
+export interface Preset { name: string; description: string; source: string }
 
 type OrganTargets = ReadonlyArray<readonly [string, number]>;
-/** Two physical units of each capability make conservative inheritance possible. */
-function construction(organs: OrganTargets, energyFloor = 0.45): string {
-  return `# Targets do not grant capabilities: each organ must be built and paid for.
-let assemble = if energy.fraction > ${energyFloor} && nutrient.stored > 0.01 then 1 else 0;
+type EnergyPath = 'light' | 'organic' | 'mixed';
+
+/** Expand the complete reactive development program into ordinary editable source. */
+function program(organs: OrganTargets, path: EnergyPath, behavior: string, minimumBuildEnergy = 18,
+  areaTarget = 'body.birth_area * 2'): string {
+  const powered = path === 'light' ? 'light_path' : path === 'organic' ? 'digest_path && capture_path'
+    : 'light_path && digest_path && capture_path';
+  const orientation = path === 'light' ? '' : ' && mobile && seeing && feeling';
+  const first: Record<string, string> = {
+    photosynthetic: '!light_path',
+    digestive: '!digest_path',
+    phagocyte: 'digest_path && !capture_path',
+    metabolic: 'powered && !processing',
+    transporter: 'powered && processing && !supplied',
+    flagellum: path === 'light' ? 'false' : 'powered && processing && supplied && !mobile',
+    optical: 'powered && processing && supplied && mobile && !seeing',
+    mechanoreceptor: 'powered && processing && supplied && mobile && !feeling',
+  };
+  const paired = organs.map(([family]) => `organelle.${family}.count >= 2 && organelle.${family}.building < 0.000001`).join('\n              && ');
+  return `# Every newborn has only one core. Build an energy path before expanding.
+let light_path = organelle.photosynthetic.capacity >= 1;
+let digest_path = organelle.digestive.capacity >= 1;
+let capture_path = organelle.phagocyte.capacity >= 1;
+let powered = ${powered};
+let processing = organelle.metabolic.capacity >= 1;
+let supplied = organelle.transporter.capacity >= 1;
+let mobile = organelle.flagellum.capacity >= 1;
+let seeing = organelle.optical.capacity >= 1;
+let feeling = organelle.mechanoreceptor.capacity >= 1;
+let established = powered && processing && supplied${orientation};
+# Absolute buffers keep storage growth from switching construction off.
+let funded = energy > ${minimumBuildEnergy} && nutrient.stored > 0.002;
+let area_target = ${areaTarget};
+let core_ready = organelle.core.count >= 2 && organelle.core.building < 0.000001
+                 && organelle.core.capacity + 0.000001 >= area_target;
+let expanding = established && core_ready;
+let paired = ${paired};
+
+# Duplicate the core before filling the remaining space; it supports frame growth.
 target.core.count = 2;
-target.core.size = max(0.04, body.area * 0.04);
-build.core = assemble;
+target.core.size = max(0.04, area_target * 0.02);
+build.core = if established && energy > 50 && nutrient.stored > 0.01 then 1 else 0;
 ${organs.map(([family, mass]) => `target.${family}.count = 2;
 target.${family}.size = ${mass};
-build.${family} = assemble;`).join('\n')}`;
+build.${family} = if funded && (${first[family] ?? 'false'} || expanding) then 1 else 0;`).join('\n')}
+
+${behavior.trim()}
+
+absorb = if nutrient.fraction < 0.85 then 1 else 0;
+repair = if integrity < 0.98 && energy > 40 then 0.4 else 0;
+grow = if core_ready && body.area < area_target && energy > 90
+          && nutrient.stored > 0.02 then 0.8 else 0;
+divide = body.division_ready && body.area + 0.000001 >= area_target && paired && energy > 120;`;
 }
-const producer: OrganTargets = [['photosynthetic',0.17],['metabolic',0.04],['reserve',0.06],['transporter',0.03],['flagellum',0.025],['photoreceptor',0.01],['thermoreceptor',0.01],['chemoreceptor',0.015],['cortex',0.02]];
-const scavenger: OrganTargets = [['digestive',0.13],['metabolic',0.04],['reserve',0.06],['transporter',0.02],['phagocyte',0.05],['flagellum',0.05],['optical',0.025],['chemoreceptor',0.015],['mechanoreceptor',0.01],['cortex',0.02]];
-const hunter: OrganTargets = [['digestive',0.13],['metabolic',0.04],['reserve',0.06],['transporter',0.02],['phagocyte',0.04],['flagellum',0.065],['piercer',0.07],['optical',0.035],['mechanoreceptor',0.015],['thermoreceptor',0.01],['cortex',0.035]];
-const mixed: OrganTargets = [['photosynthetic',0.10],['digestive',0.09],['metabolic',0.04],['reserve',0.05],['transporter',0.025],['phagocyte',0.04],['flagellum',0.035],['photoreceptor',0.01],['chemoreceptor',0.015],['optical',0.02],['mechanoreceptor',0.01]];
-const upkeep = `absorb = if nutrient.fraction < 0.85 then 1 else 0;
-repair = if integrity < 0.92 && energy.fraction > 0.55 then 0.4 else 0;
-grow = if body.maturity < 1 && energy.fraction > 0.6
-          && nutrient.stored > 0.06 then 0.65 else 0;
-divide = body.division_ready && energy.fraction > 0.62;`;
+const producer: OrganTargets = [['photosynthetic',0.12],['metabolic',0.04],['reserve',0.04],['transporter',0.025],['flagellum',0.025],['photoreceptor',0.01],['thermoreceptor',0.01],['chemoreceptor',0.015],['cortex',0.02]];
+const scavenger: OrganTargets = [['digestive',0.08],['metabolic',0.04],['reserve',0.04],['transporter',0.02],['phagocyte',0.04],['flagellum',0.04],['optical',0.025],['chemoreceptor',0.015],['mechanoreceptor',0.01],['cortex',0.02]];
+const hunter: OrganTargets = [['digestive',0.10],['metabolic',0.04],['reserve',0.04],['transporter',0.02],['phagocyte',0.035],['flagellum',0.05],['piercer',0.05],['optical',0.03],['mechanoreceptor',0.01],['thermoreceptor',0.01],['cortex',0.025]];
+const mixed: OrganTargets = [['photosynthetic',0.08],['digestive',0.07],['metabolic',0.04],['reserve',0.04],['transporter',0.025],['phagocyte',0.035],['flagellum',0.035],['photoreceptor',0.01],['chemoreceptor',0.015],['optical',0.02],['mechanoreceptor',0.01]];
+
 const surroundings = `# Small appearance and soft contact are useful clues, not guarantees of food.
 let visible = object.available && object.valid;
 let particle = visible && object.area < 0.35;
@@ -50,17 +87,14 @@ photosynthesize = 0;`;
 
 export const PRESETS: Preset[] = [
   {
-    name: 'Forager', starterBody: 'scavenger',
+    name: 'Forager',
     description: 'Approach small visible objects and local organic cues; slide away from resistant surfaces.',
-    source: `${forage}
-${upkeep}
-
-${construction(scavenger)}`,
+    source: program(scavenger, 'organic', `${forage}`),
   },
   {
-    name: 'Drifter', starterBody: 'scavenger',
+    name: 'Drifter',
     description: 'Let currents bring encounters; use a small motor and contact feeding.',
-    source: `${surroundings}
+    source: program(scavenger.map(([kind,mass]) => [kind,kind === 'flagellum' ? 0.025 : mass] as const), 'organic', `${surroundings}
 turn = if blocked || large_near then clamp(slide * 1.5, -1, 1)
        else if chemical.valid && chemical.organic > 0.001 && gut.fraction < 0.3 then clamp(chemical.organic_bearing, -1, 1)
        else sin(age * 0.4 + id) * 0.15;
@@ -68,15 +102,12 @@ thrust = if blocked || large_near then 0.45
          else if soft_contact || gut.fraction > 0.3 then 0 else 0.08;
 feed = 1;
 engulf = gut.fraction < 0.6;
-photosynthesize = 0;
-${upkeep}
-
-${construction(scavenger.map(([kind,mass]) => [kind,kind === 'flagellum' ? 0.025 : mass]))}`,
+photosynthesize = 0;`),
   },
   {
-    name: 'Conserver', starterBody: 'scavenger',
+    name: 'Conserver',
     description: 'Feed opportunistically and preserve reserves before building more machinery.',
-    source: `${surroundings}
+    source: program(scavenger, 'organic', `${surroundings}
 let seeking = energy.fraction < 0.6 && gut.fraction < 0.3;
 turn = if blocked || large_near then clamp(slide * 1.5, -1, 1)
        else if seeking && particle then clamp(angle(object.offset) * 1.5, -1, 1)
@@ -87,28 +118,17 @@ thrust = if blocked || large_near then 0.5
          else if seeking && particle then 0.35 else if seeking then 0.2 else 0.08;
 feed = 1;
 engulf = gut.fraction < 0.7;
-photosynthesize = 0;
-${upkeep}
-
-${construction(scavenger,0.65)}`,
+photosynthesize = 0;`, 28),
   },
   {
-    name: 'Giant', starterBody: 'scavenger',
+    name: 'Giant',
     description: 'Grow a larger envelope, then fill it with digestive machinery and protection.',
-    source: `${forage}
-absorb = if nutrient.fraction < 0.85 then 1 else 0;
-repair = if integrity < 0.92 && energy.fraction > 0.6 then 0.5 else 0;
-let area_target = max(3, body.birth_area * 2);
-grow = if body.area < area_target && energy.fraction > 0.6
-          && nutrient.stored > 0.06 then 0.8 else 0;
-divide = body.area >= area_target && body.division_ready && energy.fraction > 0.65;
-
-${construction(scavenger.map(([kind,mass]) => [kind, kind === 'digestive' ? 0.20 : kind === 'cortex' ? 0.06 : mass]))}`,
+    source: program(scavenger.map(([kind,mass]) => [kind,kind === 'digestive' ? 0.14 : kind === 'cortex' ? 0.04 : mass] as const), 'organic', `${forage}`, 18, 'max(3, body.birth_area * 2)'),
   },
   {
-    name: 'Rememberer', starterBody: 'scavenger',
+    name: 'Rememberer',
     description: 'Remember an observed object token and bearing; reacquisition still needs a physical sensor.',
-    source: `${surroundings}
+    source: program(scavenger, 'organic', `${surroundings}
 # All reads see old memory; remember only promising observations.
 let observed = particle && !blocked;
 ri001 = ri001 + 1 when !observed;
@@ -134,15 +154,12 @@ thrust = if blocked || large_near then 0.65
          else if rb001 then 0.3 else 0.2;
 feed = 1;
 engulf = gut.fraction < 0.6;
-photosynthesize = 0;
-${upkeep}
-
-${construction(scavenger)}`,
+photosynthesize = 0;`),
   },
   {
-    name: 'Phototroph', starterBody: 'producer',
+    name: 'Phototroph',
     description: 'Build photosynthetic units and transporters, using paid light and chemical sensors.',
-    source: `# Harvesting light and measuring light are separate capabilities.
+    source: program(producer, 'light', `# Harvesting light and measuring light are separate capabilities.
 let hot = heat.available && heat.valid && heat.value > 0.8;
 let cool = if heat.bearing > 0 then heat.bearing - 3.141593
            else heat.bearing + 3.141593;
@@ -153,15 +170,12 @@ turn = if hot then clamp(cool, -1, 1)
 thrust = if hot then 0.3 else if needs_minerals then 0.08
          else if light.valid && light.level < 0.3 then 0.07 else 0;
 feed = 0;
-photosynthesize = 1;
-${upkeep}
-
-${construction(producer)}`,
+photosynthesize = 1;`),
   },
   {
-    name: 'Predator', starterBody: 'hunter',
+    name: 'Predator',
     description: 'Approach visible objects when hungry and test contacted surfaces with a built piercer.',
-    source: `# Neither vision nor contact reveals another cell’s genome, diet or energy.
+    source: program(hunter, 'organic', `# Neither vision nor contact reveals another cell’s genome, diet or energy.
 let hungry = energy.fraction < 0.7 && gut.fraction < 0.45;
 let visible = object.available && object.valid;
 let approachable = visible && object.area < body.area * 1.2;
@@ -177,15 +191,12 @@ feed = 1;
 photosynthesize = 0;
 bite = if hungry && touching then 0.8 else 0;
 engulf = hungry && touching;
-defend = if touching then 0.2 else 0;
-${upkeep}
-
-${construction(hunter,0.55)}`,
+defend = if touching then 0.2 else 0;`),
   },
   {
-    name: 'Mixotroph', starterBody: 'mixed',
+    name: 'Mixotroph',
     description: 'Share finite internal space between light harvesting and contact feeding.',
-    source: `${surroundings}
+    source: program(mixed, 'mixed', `${surroundings}
 let seek = particle && gut.fraction < 0.4 && energy.fraction < 0.75;
 turn = if blocked || large_near then clamp(slide * 1.5, -1, 1)
        else if seek then clamp(angle(object.offset) * 1.5, -1, 1)
@@ -195,9 +206,6 @@ thrust = if blocked || large_near then 0.45
          else if seek then 0.3 else if light.valid && light.level < 0.3 then 0.1 else 0;
 feed = 1;
 engulf = gut.fraction < 0.6;
-photosynthesize = 1;
-${upkeep}
-
-${construction(mixed)}`,
+photosynthesize = 1;`),
   },
 ];

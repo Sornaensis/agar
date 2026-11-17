@@ -283,7 +283,9 @@ mod tests {
         e.world.reset_empty(56311, 600);
         e.world.set_food_rate(27.5);
         e.world.set_mutation_rate(1.0);
-        e.world.seed_cells(id, 12, -1.0, -1.0);
+        e.world
+            .try_seed_fixture(id, 12, -1.0, -1.0, crate::body::BodyFixture::Producer)
+            .unwrap();
         for c in &mut e.world.cells {
             for _ in 0..1000 {
                 c.body.work(

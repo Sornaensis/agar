@@ -7,6 +7,7 @@ import {
 } from './storage';
 import { createDialog, escapeHtml, icon, inputNumber, setDialogError } from './ui';
 import { ProgramEditor } from './program-editor';
+import { PRESETS } from './presets';
 
 export interface CatalogCallbacks {
   compiler: () => Promise<Engine>;
@@ -24,28 +25,8 @@ const SOURCE_FIELDS: FieldOverlay[] = ['light', 'heat', 'flow', 'nutrients'];
 const DEFAULT_ENVIRONMENT: EnvironmentConfig = {
   foodRate: 6, ambientTemperature: 0.5, ambientLight: 0, currentStrength: 0, initialNutrients: 0.3, sources: [],
 };
-const DEFAULT_GENOME = `# Start with the Producer body in a lit environment.
-thrust = 0;
-turn = 0;
-photosynthesize = 1;
-feed = 0;
-absorb = if nutrient.fraction < 0.8 then 1 else 0;
-let assemble = if energy.fraction > 0.5 then 1 else 0;
-target.core.count = 2;
-target.core.size = max(0.04, body.area * 0.04);
-build.core = assemble;
-target.photosynthetic.count = 2;
-target.photosynthetic.size = 0.1;
-build.photosynthetic = assemble;
-target.metabolic.count = 2;
-target.metabolic.size = 0.03;
-build.metabolic = assemble;
-target.transporter.count = 2;
-target.transporter.size = 0.015;
-build.transporter = assemble;
-grow = if body.maturity < 1 && energy.fraction > 0.65 then 0.5 else 0;
-divide = body.division_ready;
-`;
+// Use the same authored construction program as the built-in producer.
+const DEFAULT_GENOME = PRESETS.find(preset => preset.name === 'Phototroph')!.source;
 const alive = (dialog: HTMLDialogElement): boolean => dialog.open && dialog.isConnected;
 const message = (error: unknown): string => error instanceof Error ? error.message : String(error);
 const copyName = (name: string): string => `${name.slice(0, 74)} copy`;

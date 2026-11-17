@@ -1,6 +1,5 @@
 import { PRESETS } from './presets';
 import type { EnvironmentDocument, GenomeDocument } from './storage';
-import type { BodyRecipe } from './engine';
 
 function freeze<T>(value: T): T {
   if (value && typeof value === 'object') {
@@ -10,15 +9,11 @@ function freeze<T>(value: T): T {
   return value;
 }
 
-/** Built-ins are recipes. Saving an edit creates an independently named user copy. */
+/** Built-ins stay immutable. Saving an edit creates an independently named user copy. */
 export const BUILTIN_GENOMES: readonly GenomeDocument[] = freeze(PRESETS.map(preset => ({
   id: `builtin:genome:${preset.name.toLowerCase()}`, name: preset.name, source: preset.source,
   description: preset.description, languageVersion: 3, createdAt: 0, updatedAt: 0,
 })));
-
-export function recommendedStarterBody(genomeId: string): BodyRecipe {
-  return PRESETS.find(preset => `builtin:genome:${preset.name.toLowerCase()}` === genomeId)?.starterBody ?? 'bare';
-}
 
 export const BUILTIN_ENVIRONMENTS: readonly EnvironmentDocument[] = freeze([
   {
@@ -54,27 +49,27 @@ export const BUILTIN_ENVIRONMENTS: readonly EnvironmentDocument[] = freeze([
 
 export interface BuiltinSimulation {
   id: string; name: string; description: string; environmentId: string; seed: number;
-  populations: Array<{ genomeId: string; count: number; starterBody: BodyRecipe }>;
+  populations: Array<{ genomeId: string; count: number }>;
 }
 export const BUILTIN_SIMULATIONS: readonly BuiltinSimulation[] = freeze([
   {
     id: 'builtin:simulation:foragers', name: 'Foragers', description: 'Heterotrophs in a deliberately food-supplied habitat.',
     environmentId: 'builtin:environment:still-water', seed: 42,
-    populations: [{ genomeId: 'builtin:genome:forager', starterBody: 'scavenger', count: 22 }],
+    populations: [{ genomeId: 'builtin:genome:forager', count: 22 }],
   },
   {
     id: 'builtin:simulation:sunlit-pond', name: 'Sunlit pond', description: 'Pure autotrophs build a population from light and minerals.',
     environmentId: 'builtin:environment:sunlit-pond', seed: 42,
-    populations: [{ genomeId: 'builtin:genome:phototroph', starterBody: 'producer', count: 22 }],
+    populations: [{ genomeId: 'builtin:genome:phototroph', count: 22 }],
   },
   {
     id: 'builtin:simulation:mixed-ecosystem', name: 'Mixed ecosystem', description: 'Many producers support a few foragers, mixotrophs, and predators. Survival depends on the food chain.',
     environmentId: 'builtin:environment:sunlit-pond', seed: 42,
     populations: [
-      { genomeId: 'builtin:genome:phototroph', starterBody: 'producer', count: 72 },
-      { genomeId: 'builtin:genome:forager', starterBody: 'scavenger', count: 6 },
-      { genomeId: 'builtin:genome:mixotroph', starterBody: 'mixed', count: 4 },
-      { genomeId: 'builtin:genome:predator', starterBody: 'hunter', count: 2 },
+      { genomeId: 'builtin:genome:phototroph', count: 72 },
+      { genomeId: 'builtin:genome:forager', count: 6 },
+      { genomeId: 'builtin:genome:mixotroph', count: 4 },
+      { genomeId: 'builtin:genome:predator', count: 2 },
     ],
   },
 ]);

@@ -3,7 +3,7 @@ use crate::checkpoint::Writer;
 
 const IDLE: &str = "thrust=0;turn=0;divide=false;feed=0;absorb=0;";
 
-fn scene(recipe: BodyRecipe, source: &str, light: f64) -> (World, Vec<Genome>) {
+fn scene(recipe: BodyFixture, source: &str, light: f64) -> (World, Vec<Genome>) {
     let program = Program::compile(source).unwrap();
     let genomes = vec![Genome::new(source.to_owned(), program, 0, 0)];
     let mut world = World::empty(107);
@@ -14,9 +14,9 @@ fn scene(recipe: BodyRecipe, source: &str, light: f64) -> (World, Vec<Genome>) {
     (world, genomes)
 }
 
-fn add_cell(world: &mut World, recipe: BodyRecipe, x: f64, y: f64) -> usize {
+fn add_cell(world: &mut World, recipe: BodyFixture, x: f64, y: f64) -> usize {
     let index = world.cells.len();
-    world.try_seed_body(1, 1, x, y, recipe).unwrap();
+    world.try_seed_fixture(1, 1, x, y, recipe).unwrap();
     let cell = &mut world.cells[index];
     cell.x = x;
     cell.y = y;
@@ -65,20 +65,20 @@ fn grow_for_division(cell: &mut Cell) {
 fn ancestry_exhaustion_rejects_before_any_tick_state_is_committed() {
     for scenario in 0..3 {
         let source = "thrust=0;turn=0;divide=true;feed=0;absorb=0;ri001=ri001+1;";
-        let (mut world, genomes) = scene(BodyRecipe::Bare, source, 1.0);
+        let (mut world, genomes) = scene(BodyFixture::Bare, source, 1.0);
         match scenario {
             0 => {
                 grow_for_division(&mut world.cells[0]);
                 world.next_id = u32::MAX;
             }
             1 => {
-                let second = add_cell(&mut world, BodyRecipe::Bare, 400.0, 200.0);
+                let second = add_cell(&mut world, BodyFixture::Bare, 400.0, 200.0);
                 grow_for_division(&mut world.cells[0]);
                 grow_for_division(&mut world.cells[second]);
                 world.next_id = u32::MAX - 1; // One address, two possible daughters.
             }
             _ => {
-                let second = add_cell(&mut world, BodyRecipe::Bare, 400.0, 200.0);
+                let second = add_cell(&mut world, BodyFixture::Bare, 400.0, 200.0);
                 grow_for_division(&mut world.cells[second]);
                 world.cells[second].parent_id = world.cells[0].id;
                 world.cells[second].generation = u32::MAX;
@@ -112,11 +112,11 @@ fn observe_and_retain_tracks(world: &mut World) -> Inputs {
 
 #[test]
 fn absent_receptors_reveal_no_environment_or_target_properties() {
-    let (mut world, _) = scene(BodyRecipe::Bare, IDLE, 1.0);
+    let (mut world, _) = scene(BodyFixture::Bare, IDLE, 1.0);
     world.environment.configure(0.3, 1.0, 20.0);
     world.environment.emit_organic(110.0, 110.0, 12.0);
     add_particle(&mut world, 118.0, 110.0);
-    add_cell(&mut world, BodyRecipe::Hunter, 123.0, 110.0);
+    add_cell(&mut world, BodyFixture::Hunter, 123.0, 110.0);
     let input = world.sense_cell(1).unwrap();
     for flag in [
         input.light_available,
@@ -167,7 +167,7 @@ fn absent_receptors_reveal_no_environment_or_target_properties() {
 
 #[test]
 fn chemical_receptors_sample_local_fields_not_nearest_food_and_damage_removes_access() {
-    let (mut world, _) = scene(BodyRecipe::Scavenger, IDLE, 1.0);
+    let (mut world, _) = scene(BodyFixture::Scavenger, IDLE, 1.0);
     world.environment.emit_organic(110.0, 110.0, 4.0);
     world.environment.add_nutrients(110.0, 110.0, 2.0);
     add_particle(&mut world, 170.0, 110.0);
@@ -204,7 +204,7 @@ fn chemical_receptors_sample_local_fields_not_nearest_food_and_damage_removes_ac
 
 #[test]
 fn optical_hardware_requires_illuminated_surfaces_and_loses_range_in_dim_light() {
-    let (mut world, _) = scene(BodyRecipe::Hunter, IDLE, 0.0);
+    let (mut world, _) = scene(BodyFixture::Hunter, IDLE, 0.0);
     add_particle(&mut world, 170.0, 110.0);
     let dark = world.sense_cell(1).unwrap();
     assert!(dark.object_available && !dark.object_valid);
@@ -234,14 +234,14 @@ fn optical_hardware_requires_illuminated_surfaces_and_loses_range_in_dim_light()
 
 #[test]
 fn occlusion_and_toroidal_wrapping_apply_even_to_remembered_targets() {
-    let (mut world, _) = scene(BodyRecipe::Hunter, IDLE, 1.0);
+    let (mut world, _) = scene(BodyFixture::Hunter, IDLE, 1.0);
     world.cells[0].x = WIDTH - 20.0;
     add_particle(&mut world, 20.0, 110.0);
     let first = observe_and_retain_tracks(&mut world);
     assert!(first.object_valid);
     let target = first.object_token;
     world.cells[0].scan_target = target.clone();
-    let blocker = add_cell(&mut world, BodyRecipe::Bare, 0.0, 110.0);
+    let blocker = add_cell(&mut world, BodyFixture::Bare, 0.0, 110.0);
     let blocked = world.sense_cell(1).unwrap();
     assert!(
         blocked.object_valid,
@@ -265,7 +265,7 @@ fn occlusion_and_toroidal_wrapping_apply_even_to_remembered_targets() {
 
 #[test]
 fn flow_bearing_cannot_recover_direction_below_vector_resolution() {
-    let (mut world, _) = scene(BodyRecipe::Scavenger, IDLE, 1.0);
+    let (mut world, _) = scene(BodyFixture::Scavenger, IDLE, 1.0);
     world.cells[0].vx = -0.001;
     world.cells[0].vy = -0.003;
     let low = world.sense_cell(1).unwrap();
@@ -284,7 +284,7 @@ fn flow_bearing_cannot_recover_direction_below_vector_resolution() {
 
 #[test]
 fn tracks_expire_without_aliasing_and_remembered_tokens_grant_no_remote_access() {
-    let (mut world, _) = scene(BodyRecipe::Hunter, IDLE, 1.0);
+    let (mut world, _) = scene(BodyFixture::Hunter, IDLE, 1.0);
     add_particle(&mut world, 160.0, 110.0);
     let original = observe_and_retain_tracks(&mut world).object_token;
     world.ticks = TRACK_TTL;
@@ -309,7 +309,7 @@ fn tracks_expire_without_aliasing_and_remembered_tokens_grant_no_remote_access()
 #[test]
 fn scan_requests_change_the_next_sample_without_rewriting_current_memory_reads() {
     let source = "rb001=object.valid;rs001=object.token;scan.bearing=3.141592653589793;scan.width=1;thrust=0;turn=0;divide=false;feed=0;absorb=0;";
-    let (mut world, mut genomes) = scene(BodyRecipe::Hunter, source, 1.0);
+    let (mut world, mut genomes) = scene(BodyFixture::Hunter, source, 1.0);
     add_particle(&mut world, 160.0, 110.0);
     assert!(world.sense_cell(1).unwrap().object_valid);
     world.try_step(&mut genomes).unwrap();
@@ -328,7 +328,7 @@ fn scan_requests_change_the_next_sample_without_rewriting_current_memory_reads()
 #[test]
 fn inspection_repeats_without_committing_tracks_memory_or_random_state() {
     let source = "ri001=ri001+1;rs001=object.token;thrust=0;turn=0;divide=false;feed=0;absorb=0;";
-    let (mut world, mut genomes) = scene(BodyRecipe::Hunter, source, 1.0);
+    let (mut world, mut genomes) = scene(BodyFixture::Hunter, source, 1.0);
     add_particle(&mut world, 160.0, 110.0);
     world.try_step(&mut genomes).unwrap();
     let before = state(&world);
@@ -350,8 +350,8 @@ fn inspection_repeats_without_committing_tracks_memory_or_random_state() {
 
 #[test]
 fn optical_return_does_not_depend_on_hidden_target_energy_genome_or_cell_integrity() {
-    let (mut world, _) = scene(BodyRecipe::Hunter, IDLE, 1.0);
-    let target = add_cell(&mut world, BodyRecipe::Bare, 160.0, 110.0);
+    let (mut world, _) = scene(BodyFixture::Hunter, IDLE, 1.0);
+    let target = add_cell(&mut world, BodyFixture::Bare, 160.0, 110.0);
     let before = observe_and_retain_tracks(&mut world);
     assert!(before.object_valid);
     world.cells[target].energy = 0.001;

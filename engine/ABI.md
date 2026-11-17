@@ -12,7 +12,7 @@ The former area-4 ceiling is removed. The remaining geometric bound is `(760 / 8
 
 Every organelle has a stable local identifier, family, built mass, integrity, and recorded embodied energy. Family targets do not grant capabilities. Positive construction effort approaches a requested count and unit mass using available resources and assembly throughput. Competing requests share finite budgets; source statement order does not confer priority. Lowering targets leaves structures intact until explicit recycling. Recycling and repair are paid operations. Core machinery cannot be dismantled below the viable minimum. Compartment loss releases accounted overflow instead of deleting stored material.
 
-Founders use an explicit recipe: `0` bare, `1` producer, `2` scavenger, `3` hunter, `4` mixed. Their frame, organelles, reserves, and recorded structural energy count against the introduction budget. The engine never evaluates construction targets to grant a free starter body. Mutations change programs, not existing physical organs.
+Every introduced founder has area 1, one core of mass 0.04, 68 usable energy and 0.6 free minerals. Core compartments hold those finite reserves. The introduction ledger records 99.2 energy (68 usable, 7.8 embodied and 23.4 fabrication heat) and 0.99 mineral material (0.39 structure and 0.6 reserve). No optional organelles are present. The same constructor is used for every genome; the program must build its own capabilities through ordinary paid ticks. Mutations change construction requests, not existing physical organs.
 
 Division requires doubled grown frame, sufficient reserves, core machinery for two viable bodies, and a feasible partition. Actual discrete organs are assigned to daughters; they are not copied. Producers must construct sufficient photosynthetic hardware for both descendants if both are to remain producers. The parent retains memory; the daughter starts with empty registers. Death returns the remaining accounted material and recoverable energy once. Damage, dismantling, division, and death cannot create minerals or recover unrecorded construction energy.
 
@@ -169,13 +169,13 @@ Light, heat, flow, dissolved minerals, and organic cues are local fields. Source
 
 Usable reserves, raw gut energy, mineral reserves, frame material, organelle material, and embodied structural energy remain distinct. Digestive assimilation retains the existing 65% efficiency; inorganic minerals do not turn into free usable energy. Loss of storage capacity follows the same explicit overflow path as recycling or damage. Ecological outcomes emerge from resource and physical constraints; there are no guild quotas or guaranteed predator persistence.
 
-## WASM API, version 8
+## WASM API, version 9
 
 The module exports `memory`. Pointers/lengths use bytes, except snapshot lengths, which count elements: float64 for the world and float32 for the environment. Returned buffers are engine-owned: read the matching length and copy immediately before other allocating calls. Refresh JavaScript views after memory growth. Never free engine-owned buffers. Caller-allocated source buffers must be freed once with their exact pointer/length.
 
 | Exports | Behavior |
 | --- | --- |
-| `abi_version() -> u32` | Returns 8 |
+| `abi_version() -> u32` | Returns 9 |
 | `alloc(len) -> ptr`, `dealloc(ptr, len)` | Allocate/free a zeroed source buffer; above 256 KiB returns null |
 | `compile_genome(ptr, len) -> u32` | UTF-8 source → ID ≥ 1; zero plus readable error on failure |
 | `analyze_genome(ptr, len) -> ptr`, `genome_analysis_len()` | Authoritative compiler analysis as engine-owned UTF-8 JSON; no genome registration or simulation mutation |
@@ -190,7 +190,7 @@ The module exports `memory`. Pointers/lengths use bytes, except snapshot lengths
 | `mutation_count()`, `mutation_skipped_count()` | Successful/skipped automatic variants since reset |
 | `error_ptr()`, `error_len()` | Latest UTF-8 error |
 | `reset(seed, genome_id) -> u32` | Recreate world; 1 on success, 0 plus readable error on invalid genome or allocation failure |
-| `seed_cells(genome_id, count: f64, x: f32, y: f32, recipe: u32) -> u32` | Add the requested cells atomically; return count added. Count must be a finite nonnegative integer within the addressable ID range. Invalid counts, ID exhaustion, and allocation failure return zero with a readable error; count zero is a successful no-op. Negative/nonfinite coordinates scatter globally; otherwise within 38 units |
+| `seed_cells(genome_id, count: f64, x: f32, y: f32) -> u32` | Introduce the requested minimal cells atomically; return count added. Count must be a finite nonnegative integer within the addressable ID range. Invalid counts, ID exhaustion, and allocation failure return zero with a readable error; count zero is a successful no-op. Negative/nonfinite coordinates scatter globally; otherwise within 38 units |
 | `add_food(x: f32, y: f32, count) -> u32` | Add food; return count added. Negative/nonfinite coordinates scatter globally; otherwise within 45 units |
 | `set_food_rate(rate: f32)` | Set 0–60 particles/s; nonfinite input becomes zero |
 | `tick(steps) -> u32` | Run at most 120 steps; 1 on success, 0 plus readable error if a step cannot allocate. Earlier completed steps in the batch remain valid |
@@ -215,7 +215,7 @@ The module exports `memory`. Pointers/lengths use bytes, except snapshot lengths
 
 Unannotated integer arguments/counters are `u32`. Mutation probability returns `f32`.
 
-Recipe IDs for `seed_cells` are the founder recipes listed above. Recipe is an explicit introduction choice, separate from genome construction requests. Invalid recipe IDs fail before modifying the world.
+`seed_cells` takes only genome, count and position. It never evaluates the genome during introduction. The program begins expressing construction requests on the next normal tick. Division partitions the parent's actual organs and does not call this founder constructor.
 
 ### Genome analysis
 
@@ -235,7 +235,7 @@ Ranges use zero-based UTF-16 offsets with exclusive ends, suitable for JavaScrip
 
 Valid source has no diagnostics. Invalid source returns the first compiler error; completed earlier declarations and the partial node count remain available after parser/type errors. Lexical errors return no bindings and a zero node count because lexing precedes parsing. `sourceBytes` counts the input's UTF-8 bytes, independently of its UTF-16 length. Oversized input is rejected before parsing, with an empty range at the document start.
 
-Analysis changes only its transient response buffer. It does not consume genome IDs or registry space, change the latest engine error, advance RNGs or cells, or alter checkpoint bytes. It remains available when the genome registry is full. The native ABI accepts a null pointer for empty or oversized input; other nonempty inputs must provide a readable UTF-8 source buffer. Copy the returned JSON before another allocating engine call, and free only the caller's source buffer. The analysis JSON schema is unchanged in ABI 8.
+Analysis changes only its transient response buffer. It does not consume genome IDs or registry space, change the latest engine error, advance RNGs or cells, or alter checkpoint bytes. It remains available when the genome registry is full. The native ABI accepts a null pointer for empty or oversized input; other nonempty inputs must provide a readable UTF-8 source buffer. Copy the returned JSON before another allocating engine call, and free only the caller's source buffer. The analysis JSON schema is unchanged in ABI 9.
 
 ### World snapshot
 
@@ -363,7 +363,7 @@ The evaluation buffer is independent of source, analysis, graph, memory, and fie
 
 ### Genome graph
 
-Graph JSON remains version 1 in ABI 8: `{version: 1, nodes: [...], roots: [...]}`. Inspection does not evaluate programs, advance the world, change memory, or register genomes. Invalid IDs clear the graph buffer and report an error.
+Graph JSON remains version 1 in ABI 9: `{version: 1, nodes: [...], roots: [...]}`. Inspection does not evaluate programs, advance the world, change memory, or register genomes. Invalid IDs clear the graph buffer and report an error.
 
 Nodes contain `id`, `kind`, `type`, `label`, `inputs`, `bindings`, and `reachable`. IDs are compiler-array indexes. Inputs preserve operand order and duplicates and precede their consumer's index. Conditional operands are condition, then branch, else branch. Types are `integer`, `scalar`, `boolean`, `string`, and `vec2`. Kinds are `constant`, `sensor`, `register`, `populated`, `reference`, `unary`, `binary`, `conditional`, and `call`. Unused nodes remain present, marked unreachable, so graph counts match the 8,192-node budget.
 
@@ -383,11 +383,11 @@ Constant writes, constant guards, unconditional clears, and omitted output defau
 
 Current checkpoint format is **3**, using the `CELLAR01` magic, a separate version, exact byte length, FNV-1a corruption checksum, and bounded little-endian values. The checksum is not authentication; every decoded value is independently checked. Checkpoints preserve actual frame and organelles, integrity, resource/embodied-energy ledgers, construction progress, gut contents, memory occupancy and values, sensor tracks and scan controls, sources/fields, deterministic RNG state, counters, and the genome registry with lineage.
 
-Version-1 and version-2 body schemas are explicitly unsupported. They cannot be silently interpreted as paid structures or hardware-gated observations. Existing exports are preserved; create a new simulation with rewritten genomes and an explicit founder recipe. Future unknown versions are also rejected.
+Version-1 and version-2 body schemas are explicitly unsupported. They cannot be silently interpreted as paid structures or hardware-gated observations. Existing exports are preserved; create a new simulation with rewritten genomes. Future unknown versions are also rejected. Version-3 checkpoints from ABI 8 remain supported: they hold actual physical organs, not a recipe to recreate. The ABI 9 introduction change does not reset existing cells or rewrite their programs.
 
 Stored programs retain exact expression trees and source. Restore recompiles source and requires its typed graph to match the stored graph. It validates backward references, scopes, register types/addresses, output types, finite physical state, IDs, resource bounds, and complete input consumption before atomically replacing the world. A failed restore leaves the current world unchanged. Save size remains bounded at 128 MiB; writing stops before exceeding the limit and reports allocation failures. Cell counts are bounded by encoded data and available memory, not a population ceiling.
 
-`resetEmpty(seed, initialFood)` prepares an empty world with the current environment and rates; the UI then introduces the chosen genome and starter recipe. Adding one organism introduces exactly one cell.
+`resetEmpty(seed, initialFood)` prepares an empty world with the current environment and rates; the UI then introduces cells carrying the chosen genomes. Adding one organism introduces exactly one minimal cell, whose program grows its specialized body.
 
 ## Verification
 

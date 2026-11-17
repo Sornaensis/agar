@@ -351,12 +351,36 @@ mod tests {
     use crate::{checkpoint, Engine};
 
     #[test]
+    fn mildly_heat_damaged_universal_core_survives_and_roundtrips_without_free_headroom() {
+        let mut live = Engine::new();
+        let id = live.compile("thrust=0;turn=0;divide=true;grow=1;absorb=0;feed=0;");
+        live.world.food_rate = 0.0;
+        live.world.environment.configure(0.9, 0.0, 0.0);
+        live.world.try_seed_cells(id, 1, 200.0, 200.0).unwrap();
+        live.world.step(&mut live.genomes);
+        assert_eq!(live.world.cells.len(), 1);
+        let cell = &live.world.cells[0];
+        assert_eq!(cell.body.organs.len(), 1);
+        assert_eq!(cell.body.organs[0].mass, Kind::Core.min_mass());
+        assert!(cell.body.organs[0].integrity < 1.0);
+        assert!(
+            !cell.body.viable(),
+            "full support is required for new frame, not survival"
+        );
+        assert!(cell.alive());
+        assert_eq!(cell.body.area, 1.0);
+        let saved = checkpoint::save(&live).unwrap();
+        let restored = checkpoint::restore(&saved).unwrap();
+        assert_eq!(checkpoint::save(&restored).unwrap(), saved);
+    }
+
+    #[test]
     fn aggregate_restore_ledgers_reject_checksum_correct_resource_injection_atomically() {
         let mut live = Engine::new();
         let id = live.compile("thrust=0;turn=0;divide=false;feed=0;absorb=0;");
         live.world.reset_empty(97, 0);
         live.world
-            .try_seed_body(id, 1, 200.0, 200.0, BodyRecipe::Bare)
+            .try_seed_fixture(id, 1, 200.0, 200.0, BodyFixture::Bare)
             .unwrap();
         live.world.add_food(300.0, 200.0, 1);
         let before = checkpoint::save(&live).unwrap();

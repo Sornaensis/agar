@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import { bytes,fresh,compile,seed,snapshot,advance,graph,catalog,recipes,moduleUrl } from './organelle-harness.mjs';
-const args=process.argv.slice(2),measure=args.includes('--measure');let output=null,seeds=[42,7,2026],mutationRate=0,duration=900;
+import { bytes,fresh,compile,seed,snapshot,advance,graph,body,catalog,moduleUrl } from './organelle-harness.mjs';
+const args=process.argv.slice(2),measure=args.includes('--measure');let output=null,seeds=[42,7,2026],mutationRate=0,duration=120;
 for(let i=0;i<args.length;i++){
   if(args[i]==='--measure')continue;const name=args[i],value=args[++i];assert.ok(['--output','--seed','--mutation','--duration'].includes(name)&&value);
   if(name==='--output')output=value;if(name==='--seed'){const n=Number(value);assert.ok(Number.isInteger(n)&&n>=0&&n<=0xffffffff);seeds=[n];}
@@ -22,45 +22,93 @@ assert.equal(hasLegacyReference('let area=size;'),true,'The old overloaded size 
 const preset=name=>{const p=PRESETS.find(p=>p.name===name);assert.ok(p);return p;};
 const sunlit=BUILTIN_ENVIRONMENTS.find(e=>e.id==='builtin:environment:sunlit-pond');
 assert.equal(sunlit.config.foodRate,0,'Primary-production habitat has no implicit organic food input');
+const conserved=state=>{
+  assert.ok(Math.abs(state.material-state.materialIntroduced)<Math.max(1e-7,state.materialIntroduced*1e-10));
+  assert.ok(state.energy<=state.energyIntroduced+state.photosynthesis+1e-7);
+};
+let commonBody;
 for(const p of PRESETS){
-  const api=await fresh();const id=compile(api,p.source);assert.ok(recipes.includes(p.starterBody));
+  const api=await fresh(),id=compile(api,p.source);
+  assert.equal('starterBody' in p,false,'A genome is not paired with an external body recipe');
   const roots=graph(api,id).roots;assert.equal(roots.filter(r=>r.kind==='output').length,78);
   assert.ok(!hasLegacyReference(p.source),'No legacy resource or semantic target oracle in authored programs');
-  seed(api,id,1,p.starterBody);const before=snapshot(api).cells[0];advance(api,1);const after=snapshot(api).cells[0];
-  assert.ok(after,'A supplied founder is viable with its paired program');
-  assert.ok(after.mass<=before.mass+0.01,'First evaluation cannot introduce free specialist tissue');
+  seed(api,id,1);const before=snapshot(api).cells[0],initial=body(api,before.id);
+  assert.equal(before.area,1);assert.equal(before.energy,68);assert.equal(before.capacity,80);
+  assert.equal(before.nutrients,.6);assert.equal(before.mineralCapacity,1);
+  assert.equal(initial.organs.length,1);assert.equal(initial.organs[0].kind,'core');assert.equal(initial.organs[0].mass,.04);
+  const physical={area:initial.area,mass:initial.mass,organs:initial.organs,space:initial.spaceCapacity,surface:initial.surfaceCapacity};
+  commonBody??=physical;assert.deepEqual(physical,commonBody,`${p.name} begins with the same physical body`);
+  const after=advance(api,1).cells[0];assert.ok(after);
+  const constructed=Object.values(after.organs).reduce((sum,organ)=>sum+organ.mass,0)-.04;
+  assert.ok(constructed>0&&constructed<=.022/30+1e-10,'A program starts bounded, paid construction instead of receiving complete organs');
+  assert.ok(after.energy<before.energy&&after.nutrients<before.nutrients,'Initial construction spends the shared resource reserves');
+}
+// Action requests alone do not grant hardware, even with food and light present.
+{
+  const api=await fresh({ambientLight:.8,initialNutrients:2}),id=compile(api,'thrust=1;turn=1;divide=true;grow=1;photosynthesize=1;feed=1;engulf=true;absorb=1;bite=1;');
+  seed(api,id,1,600,380);const initial=snapshot(api).cells[0];assert.equal(api.add_food(initial.x,initial.y,32),32);
+  const state=advance(api,600),cell=state.cells[0];assert.ok(cell);assert.equal(cell.area,1);
+  assert.deepEqual(body(api,cell.id).organs,commonBody.organs);assert.equal(state.photosynthesis,0);assert.equal(state.eaten,0);assert.equal(state.births,0);conserved(state);
 }
 function stationary(text){
   for(const[name,value]of [['thrust','0'],['turn','0'],['grow','0'],['divide','false']])text=text.replace(new RegExp(`^${name}\\s*=\\s*[^;]+;`,'m'),`${name} = ${value};`);
-  text=text.replace(/^build\.[a-z]+\s*=\s*[^;]+;/gm,match=>match.replace(/=[^;]+;/,'= 0;'));
-  return text;
+  return text; // Construction remains the authored genome's responsibility.
 }
 async function acquisition(name,light,food=false){
-  const api=await fresh({ambientLight:light,initialNutrients:2});const p=preset(name),id=compile(api,stationary(p.source));seed(api,id,1,p.starterBody,600,380);
-  const before=snapshot(api);if(food)api.add_food(before.cells[0].x,before.cells[0].y,256);
-  const after=advance(api,600);assert.equal(after.population,1);assert.ok(Math.abs(after.material-after.materialIntroduced)<1e-7);
-  return{before,after};
+  const api=await fresh({ambientLight:light,initialNutrients:2}),id=compile(api,stationary(preset(name).source));seed(api,id,1,600,380);
+  const before=snapshot(api);if(food)assert.equal(api.add_food(before.cells[0].x,before.cells[0].y,256),256);
+  const after=advance(api,600);assert.equal(after.population,1);conserved(after);return{api,before,after};
 }
 const producerLight=await acquisition('Phototroph',.8),producerDark=await acquisition('Phototroph',0);
 const consumerEmpty=await acquisition('Forager',.8),consumerFed=await acquisition('Forager',.8,true);
-const mixerLight=await acquisition('Mixotroph',.8),mixerDark=await acquisition('Mixotroph',0);
-assert.ok(producerLight.after.cells[0].energy>producerLight.before.cells[0].energy,'Physical photosynthetic units harvest light');
-assert.ok(producerDark.after.cells[0].energy<producerDark.before.cells[0].energy);assert.equal(producerLight.after.cells[0].gutEnergy,0);
-assert.ok(producerLight.after.food.length>0&&producerLight.after.food.some(f=>f.energy>0),'Photosynthetic surplus supplies organic particles');
-assert.equal(producerDark.after.food.length,0);assert.equal(consumerEmpty.after.photosynthesis,0);
-assert.ok(consumerFed.after.cells[0].energy>consumerEmpty.after.cells[0].energy,'Phagocytic and digestive organelles process contacting organic particles');
-assert.ok(mixerLight.after.cells[0].energy>mixerDark.after.cells[0].energy,'Mixed bodies support both energy routes');
-console.log(`Organelle food-chain checks passed: ${PRESETS.length} compiled programs with explicit starter bodies; paid specialization; light/organic/mixed acquisition; finite compartments and conserved minerals.`);
+const mixerLight=await acquisition('Mixotroph',.8),mixerDark=await acquisition('Mixotroph',0),mixerFedDark=await acquisition('Mixotroph',0,true);
+assert.ok(producerLight.after.photosynthesis>10&&producerLight.after.cells[0].organs.photosynthetic.capacity>=1,'The genome builds functioning photosynthetic units');
+assert.equal(producerDark.after.photosynthesis,0);assert.equal(producerLight.after.cells[0].gutEnergy,0);
+assert.ok(producerLight.after.cells[0].energy>producerDark.after.cells[0].energy,'Built photosynthetic machinery supplies usable energy in light');
+assert.equal(consumerEmpty.after.photosynthesis,0);assert.equal(consumerEmpty.after.eaten,0);
+assert.ok(consumerFed.after.eaten>0&&consumerFed.after.cells[0].digestionRate>0,'The genome builds capture and digestion machinery that actually processes organic particles');
+assert.ok(consumerFed.after.cells[0].organs.core.capacity>consumerEmpty.after.cells[0].organs.core.capacity,'Organic energy funds further construction beyond the unfed initial reserves');
+assert.ok(mixerLight.after.photosynthesis>0&&mixerLight.after.cells[0].organs.digestive.capacity>=1&&mixerLight.after.cells[0].organs.phagocyte.capacity>=1,'The same initial cell can construct both energy routes');
+assert.equal(mixerDark.after.photosynthesis,0);assert.equal(mixerDark.after.eaten,0);
+assert.equal(mixerFedDark.after.photosynthesis,0);assert.ok(mixerFedDark.after.eaten>0&&mixerFedDark.after.cells[0].digestionRate>0,'A mixotroph can use its constructed organic pathway without light');
+const surplus=advance(producerLight.api,1500);assert.ok(surplus.food.some(f=>f.energy>0),'Constructed producers return photosynthetic surplus as organic particles');conserved(surplus);
+
+// Use each complete authored program unchanged. Food is supplied through the
+// normal accounted public input; neither bodies nor checkpoints are patched.
+async function lifecycle(name,fed){
+  const api=await fresh({ambientLight:.8,initialNutrients:2}),id=compile(api,preset(name).source);seed(api,id,1,600,380);
+  let state=snapshot(api),tick=0,nextFood=0,precedingBody;
+  if(fed)assert.equal(api.add_food(state.cells[0].x,state.cells[0].y,256),256);
+  while(tick<5400&&!state.births){
+    const parent=state.cells.find(c=>c.id===1);assert.ok(parent,`${name} survives its development`);
+    if(fed&&tick>=nextFood){assert.equal(api.add_food(parent.x,parent.y,5),5);nextFood=tick+60;}
+    // Inspect the exact partition tick once the envelope approaches maturity.
+    const steps=parent.area>=1.8?1:30;precedingBody=steps===1?body(api,parent.id):undefined;
+    state=advance(api,steps);tick+=steps;
+  }
+  assert.equal(state.births,1,`${name} constructs a reproducing body from the shared minimal newborn`);
+  assert.equal(state.population,2);assert.ok(precedingBody,'The division was observed at one-tick resolution');
+  const daughter=state.cells.find(c=>c.generation===1);assert.ok(daughter&&daughter.parentId===1);
+  const parentBody=body(api,1),daughterBody=body(api,daughter.id),combined=[...parentBody.organs,...daughterBody.organs];
+  assert.ok(daughterBody.organs.length>1,'A daughter inherits developed machinery instead of resetting to a newborn template');
+  assert.equal(new Set(combined.map(organ=>organ.id)).size,combined.length,'Actual organelle records are partitioned without duplication');
+  assert.deepEqual(combined.map(organ=>organ.id).sort((a,b)=>a-b),precedingBody.organs.map(organ=>organ.id).sort((a,b)=>a-b),'Division neither invents nor discards organelles');
+  for(const organ of precedingBody.organs){const inherited=combined.find(item=>item.id===organ.id);assert.equal(inherited.kind,organ.kind);assert.ok(Math.abs(inherited.mass-organ.mass)<.002,'Inherited mass changes only by ordinary construction in the division tick');}
+  assert.ok(daughter.organs[fed?'digestive':'photosynthetic'].capacity>=1,'The daughter retains its actual energy machinery');
+  conserved(state);return{seconds:state.seconds,eaten:state.eaten};
+}
+const producerCycle=await lifecycle('Phototroph',false),consumerCycle=await lifecycle('Forager',true);
+console.log(`Organelle food-chain checks passed: ${PRESETS.length} genomes share one minimal newborn; paid light/organic/mixed development; unchanged Phototroph/Forager programs divide in ${producerCycle.seconds.toFixed(1)}/${consumerCycle.seconds.toFixed(1)} s; physical organelle inheritance and conserved resources.`);
 if(measure){
   const template=BUILTIN_SIMULATIONS.find(s=>s.id==='builtin:simulation:mixed-ecosystem'),env=BUILTIN_ENVIRONMENTS.find(e=>e.id===template.environmentId);
   const populations=template.populations.map(row=>({...BUILTIN_GENOMES.find(g=>g.id===row.genomeId),...row}));
-  const study={startedAt:new Date().toISOString(),abi:8,checkpointVersion:3,wasmSha256:createHash('sha256').update(bytes).digest('hex'),wasmBytes:bytes.length,
+  const study={startedAt:new Date().toISOString(),abi:9,checkpointVersion:3,wasmSha256:createHash('sha256').update(bytes).digest('hex'),wasmBytes:bytes.length,
     template:template.name,environment:env,populations,mutationRate,seeds,durationSeconds:duration,
-    sampleSeconds:[...new Set([...([0,30,120,299,300,600,900].filter(seconds=>seconds<=duration)),duration])].sort((a,b)=>a-b),results:[]};
+    sampleSeconds:[...new Set([...([0,15,30,60,120,180].filter(seconds=>seconds<=duration)),duration])].sort((a,b)=>a-b),results:[]};
   const round=n=>Math.round(n*1000)/1000;
   for(const n of seeds){
     const started=performance.now(),api=await fresh({...env.config,seed:n,mutationRate,initialFood:env.config.foodRate>0?360:0}),names=new Map();
-    for(const p of populations){const id=compile(api,p.source);names.set(id,p.name);seed(api,id,p.count,p.starterBody);}
+    for(const p of populations){const id=compile(api,p.source);names.set(id,p.name);seed(api,id,p.count);}
     const founding=[...new Set(names.values())],samples=[];
     const lineage=id=>{if(names.has(id))return names.get(id);const parent=api.genome_parent(id);assert.ok(parent&&parent!==id);const name=lineage(parent);names.set(id,name);return name;};
     let tick=0;

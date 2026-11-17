@@ -3,9 +3,10 @@ import { ORGANELLE_CATALOG } from './organelles';
 
 export function showGuide(): void {
   createDialog('Guide', `
-    <p>Start from a simulation preset, or combine an environment, genomes and explicit starter bodies. Only the open simulation advances; hidden browser tabs pause. Runs save automatically and reopen paused.</p>
-    <p>Click a cell to inspect its state, physical body, memory or program. <b>Add organism</b> introduces one chosen genome and starter body. The introduction adds its accounted material and energy to the world.</p>
+    <p>Start from a simulation preset, or combine an environment and genomes. Only the open simulation advances; hidden browser tabs pause. Runs save automatically and reopen paused.</p>
+    <p>Click a cell to inspect its state, physical body, memory or program. <b>Add organism</b> introduces one cell with the chosen genome.</p>
     <details class="guide-section"><summary>Grow a body</summary>
+      <p>Every new cell starts with an envelope, one core and finite energy and mineral reserves. Its genome must build its energy source, storage, movement and sensors through ordinary paid construction. Daughters inherit the organs their parent actually grew.</p>
       <p><code>body.area</code> is the supported envelope, which sets collision geometry and interior room. <code>body.mass</code> is actual mineral material in the frame, organs, reserves and gut. Energy is tracked separately. A larger empty body has upkeep and drag; it does not automatically gain capabilities.</p>
       <pre class="guide-code">target.flagellum.count = 2;
 target.flagellum.size = 0.04;
@@ -61,7 +62,7 @@ clear rs001 when !object.valid &amp;&amp; ri001 &gt; 60;</pre>
       <p>Minerals circulate through water, bodies and particles. Construction transfers them into structures; recycling and death return them. Usable, raw gut and embodied structural energy remain separate, and maintenance, movement and conversion dissipate energy. Metrics includes introduced resources, total held energy and harvested light.</p>
     </details>
     <details class="guide-section"><summary>Saved files and older versions</summary>
-      <p>IndexedDB holds genomes, environments and full simulation checkpoints; local storage keeps preferences and unfinished drafts. Export genomes and environments from their menus. An older investment-language genome remains viewable and exportable; edit a new copy to update it. Older simulation checkpoints cannot be reinterpreted as paid organelle bodies and remain preserved without being opened or overwritten.</p>
+      <p>IndexedDB holds genomes, environments and full simulation checkpoints; local storage keeps preferences and unfinished drafts. Export genomes and environments from their menus. An older investment-language genome remains viewable and exportable; edit a new copy to update it. Checkpoint 1/2 simulations cannot be reinterpreted as paid organelle bodies and remain preserved. Existing checkpoint 3 organelle simulations still open with their actual bodies intact.</p>
     </details>
   `, 'guide-dialog');
 }

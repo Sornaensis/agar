@@ -1,6 +1,6 @@
 # Organelle growth and physical sensing
 
-**Status: implemented in engine ABI 8 / body and language version 3.** This replaces the six `invest.*` targets with structures a cell must build, maintain, and inherit. The genome remains a pure reactive program with synchronous registers. These are simulation rules, not a claim of biological fidelity.
+**Status: implemented in engine ABI 9 / body and language version 3.** This replaces the six `invest.*` targets with structures a cell must build, maintain, and inherit. The genome determines the body's development and remains a pure reactive program with synchronous registers. These are simulation rules, not a claim of biological fidelity.
 
 ## 1. Starting point and intended change
 
@@ -107,7 +107,9 @@ Attacks and capture act on actual contact within the apparatus's reach and facin
 
 ## 7. Survival, inheritance, and ecology
 
-Founders use an explicit starter body recipe and resource budget, selected alongside the genome. Starter organelles are charged against that introduction budget. Record the introduced energy/material in metrics; do not evaluate `build.*` once to create a free specialist. Include viable producer, scavenger, hunter, and mixed starter recipes. A bare-cell recipe needs sufficient reserves and baseline construction to reach its first energy source.
+Every introduced founder has the same minimal physical structure: area 1, one core of mass 0.04, 68 usable energy and 0.6 free minerals in the core's bounded compartments. Its frame, core, reserves and fabrication costs count as resource introductions. The genome is the complete developmental plan: all optional organs and additional cores must be built through normal resource-limited ticks. There is no separate body selection, implicit lookup by genome name, or instantaneous construction at introduction.
+
+Built-in programs prioritize an initial energy-acquisition path, use actual functional organelle signals to regulate subsequent construction, and prepare duplicates for division. A program that fails to build a working energy path can exhaust its initial reserves. Those developmental choices belong to editable, mutable source code; the engine applies the same physical construction rules to every genome.
 
 Division requires sufficient grown frame, energy, core machinery and a feasible partition of actual organelles. Distributed material and reserves split conservatively. Discrete organs are assigned to daughters deterministically; they cannot be cloned. Organelles that support fission must first accumulate enough material for two functional units and pay their splitting cost. A daughter may inherit no flagellum or chloroplast; the genome must anticipate this, or the lineage may fail.
 
@@ -120,7 +122,7 @@ Producers compete for light and minerals, consumers for accessible organic mater
 ## 8. Implementation order and acceptance
 
 1. **Accounting and geometry:** split area/mass/energy ledgers, add module definitions and packing invariants, then construction, recycling and capacity overflow. Keep existing behavior as a temporary adapter only while this step is incomplete.
-2. **Capabilities and lifecycle:** route actions through built structures; add starter bodies, paid organelle duplication, deterministic division and checkpoint state. Remove instant founder specialization and fractional remodeling.
+2. **Capabilities and lifecycle:** route actions through built structures; start introduced cells from one common minimal structure, then use genome-directed growth, paid organelle duplication, deterministic division and checkpoint state. Remove instant founder specialization and fractional remodeling.
 3. **Physical sensing:** implement separate light/heat/chemical/mechanical/optical hardware and generic returns; add cue transport and bounded tracking. Rewrite all built-in programs before removing old sensor names and investment outputs together.
 4. **Inspection and ecosystem tuning:** show space/surface usage, actual organs, progress, damage, requested versus achieved actions, and unavailable measurements. Tune resource costs only after correctness checks pass.
 

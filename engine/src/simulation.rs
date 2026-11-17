@@ -1,7 +1,9 @@
 //! Fixed-step physical cells. Programs read one immutable snapshot; capabilities
 //! come exclusively from paid physical organelles carried into that tick.
+#[cfg(test)]
+use crate::body::BodyFixture;
 use crate::body::{
-    Body, BodyCapacities, BodyControls, BodyRecipe, OrganelleKind as Kind, FAMILY_COUNT,
+    Body, BodyCapacities, BodyControls, FounderBudget, OrganelleKind as Kind, FAMILY_COUNT,
 };
 use crate::environment::{Environment, COLUMNS as FIELD_COLUMNS, PATCHES, ROWS as FIELD_ROWS};
 use crate::genome::{
@@ -469,15 +471,27 @@ impl World {
         x: f64,
         y: f64,
     ) -> Result<usize, String> {
-        self.try_seed_body(id, count, x, y, BodyRecipe::Producer)
+        self.seed_bodies(id, count, x, y, Body::founder)
     }
-    pub fn try_seed_body(
+    /// Preassembled specimens are available only to native regression tests.
+    #[cfg(test)]
+    pub(crate) fn try_seed_fixture(
         &mut self,
         genome_id: u32,
         count: usize,
         x: f64,
         y: f64,
-        recipe: BodyRecipe,
+        fixture: BodyFixture,
+    ) -> Result<usize, String> {
+        self.seed_bodies(genome_id, count, x, y, || Body::fixture(fixture))
+    }
+    fn seed_bodies(
+        &mut self,
+        genome_id: u32,
+        count: usize,
+        x: f64,
+        y: f64,
+        mut create_body: impl FnMut() -> (Body, FounderBudget),
     ) -> Result<usize, String> {
         if count > (u32::MAX - self.next_id) as usize {
             return Err("Cannot add organisms: the cell identifier sequence is exhausted.".into());
@@ -495,7 +509,7 @@ impl World {
                 (wrap(x + a.cos() * r, WIDTH), wrap(y + a.sin() * r, HEIGHT))
             };
             let angle = self.rng.unit() * TAU;
-            let (body, budget) = Body::founder(recipe);
+            let (body, budget) = create_body();
             let birth_area = body.area;
             self.cells.push(Cell {
                 id: self.next_id,

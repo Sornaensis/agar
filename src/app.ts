@@ -1,8 +1,8 @@
 import './style.css';
-import { Engine, type Cell, type WorldSnapshot, type BodyRecipe } from './engine';
+import { Engine, type Cell, type WorldSnapshot } from './engine';
 import { Renderer, genomeColor } from './renderer';
 import { GenomeVisualizer } from './genome-visualizer';
-import { BUILTIN_GENOMES, BUILTIN_ENVIRONMENTS, BUILTIN_SIMULATIONS, isBuiltin, recommendedStarterBody, type BuiltinSimulation } from './catalog';
+import { BUILTIN_GENOMES, BUILTIN_ENVIRONMENTS, BUILTIN_SIMULATIONS, isBuiltin, type BuiltinSimulation } from './catalog';
 import { Storage, loadPreferences, savePreferences, newGenome, validateName, parseGenomeImport, parseEnvironmentImport,
   exportGenome, exportEnvironment, GENOME_LANGUAGE_VERSION, MAX_GENOME_IMPORT_BYTES, MAX_ENVIRONMENT_IMPORT_BYTES,
   type GenomeDocument, type EnvironmentDocument, type EnvironmentConfig, type SimulationMetadata, type UiPreferences } from './storage';
@@ -11,7 +11,7 @@ import { ProgramEditor } from './program-editor';
 import { SimulationSession, claimSimulation, summarize } from './session';
 import { icon, escapeHtml as esc, createDialog, setDialogError, downloadFile, inputNumber, clock, readableError } from './ui';
 import { showGuide } from './guide';
-import { ORGANELLE_CATALOG, STARTER_BODIES, isBodyRecipe } from './organelles';
+import { ORGANELLE_CATALOG } from './organelles';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 let preferenceWarning: unknown;
@@ -217,29 +217,23 @@ async function closeSimulation(): Promise<void> {
 function genomeOptions(selected?: string): string {
   return allGenomes().map(genome => `<option value="${esc(genome.id)}"${selected === genome.id ? ' selected' : ''}${genome.languageVersion !== GENOME_LANGUAGE_VERSION ? ' disabled' : ''}>${esc(genome.name)}${genome.languageVersion !== GENOME_LANGUAGE_VERSION ? ' · older language' : isBuiltin(genome.id) ? '' : ' · saved'}</option>`).join('');
 }
-function bodyOptions(selected: BodyRecipe): string {
-  return STARTER_BODIES.map(body => `<option value="${body.id}"${body.id === selected ? ' selected' : ''}>${body.name}</option>`).join('');
-}
 function newSimulationDialog(template?: BuiltinSimulation, environmentId?: string): void {
   if (!ready || transitioning || document.querySelector('.new-simulation-dialog[open]')) return;
-  const populations = template?.populations.map(item => ({ ...item })) ?? [{ genomeId: BUILTIN_GENOMES[0].id, count: 22, starterBody: recommendedStarterBody(BUILTIN_GENOMES[0].id) }];
+  const populations = template?.populations.map(item => ({ ...item })) ?? [{ genomeId: BUILTIN_GENOMES[0].id, count: 22 }];
   const chosenEnvironment = environmentId || template?.environmentId || BUILTIN_ENVIRONMENTS[0].id;
   const dialog = createDialog('New simulation', `<form>
     <div class="form-field"><label for="simulation-name">Name</label><input id="simulation-name" maxlength="80" required value="${esc(template?.name || 'New simulation')}"></div>
     <div class="form-row"><div class="form-field"><label for="simulation-environment">Environment</label><select id="simulation-environment">${allEnvironments().map(item => `<option value="${esc(item.id)}"${item.id === chosenEnvironment ? ' selected' : ''}>${esc(item.name)}</option>`).join('')}</select></div><div class="form-field"><label for="simulation-seed">Seed</label><input id="simulation-seed" type="number" min="0" max="4294967295" step="1" value="${template?.seed ?? 42}"></div></div>
-    <h3>Starting organisms</h3><p class="form-help">Choose a genome and a physical starter body. Its material and energy are counted as introduced resources.</p><div class="population-labels" aria-hidden="true"><span>Genome</span><span>Starter body</span><span>Count</span></div><div id="starting-populations"></div><button type="button" class="button subtle" id="add-population">${icon('plus')}Add genome</button>
+    <h3>Starting organisms</h3><div class="population-labels" aria-hidden="true"><span>Genome</span><span>Count</span></div><div id="starting-populations"></div><button type="button" class="button subtle" id="add-population">${icon('plus')}Add genome</button>
     <p class="form-error" role="alert" hidden></p><footer class="dialog-actions"><button class="button primary" type="submit">Start simulation ${icon('arrow')}</button></footer></form>`, 'new-simulation-dialog');
   const rows = dialog.querySelector<HTMLElement>('#starting-populations')!;
-  const drawRows = (): void => { rows.innerHTML = populations.map((item, index) => `<div class="population-row"><select data-population="${index}" aria-label="Genome ${index + 1}">${genomeOptions(item.genomeId)}</select><select data-body="${index}" aria-label="Starter body ${index + 1}">${bodyOptions(item.starterBody)}</select><input type="number" min="0" step="1" data-count="${index}" value="${item.count}" aria-label="Organism count ${index + 1}"><button class="icon-button" type="button" data-remove-population="${index}" aria-label="Remove genome ${index + 1}">${icon('close')}</button></div>`).join(''); };
+  const drawRows = (): void => { rows.innerHTML = populations.map((item, index) => `<div class="population-row"><select data-population="${index}" aria-label="Genome ${index + 1}">${genomeOptions(item.genomeId)}</select><input type="number" min="0" step="1" data-count="${index}" value="${item.count}" aria-label="Organism count ${index + 1}"><button class="icon-button" type="button" data-remove-population="${index}" aria-label="Remove genome ${index + 1}">${icon('close')}</button></div>`).join(''); };
   drawRows();
   const syncPopulation = (event: Event): void => {
     const target = event.target as HTMLInputElement;
     if (target.dataset.population !== undefined) {
       const index = Number(target.dataset.population); populations[index].genomeId = target.value;
-      populations[index].starterBody = recommendedStarterBody(target.value);
-      rows.querySelector<HTMLSelectElement>(`[data-body="${index}"]`)!.value = populations[index].starterBody;
     }
-    if (target.dataset.body !== undefined && isBodyRecipe(target.value)) populations[Number(target.dataset.body)].starterBody = target.value;
     if (target.dataset.count !== undefined) populations[Number(target.dataset.count)].count = target.valueAsNumber;
   };
   rows.addEventListener('input', syncPopulation);
@@ -248,7 +242,7 @@ function newSimulationDialog(template?: BuiltinSimulation, environmentId?: strin
     const button = (event.target as Element).closest<HTMLButtonElement>('[data-remove-population]');
     if (button) { populations.splice(Number(button.dataset.removePopulation), 1); drawRows(); }
   });
-  dialog.querySelector('#add-population')!.addEventListener('click', () => { if (populations.length < 16) { populations.push({ genomeId: BUILTIN_GENOMES[0].id, count: 1, starterBody: recommendedStarterBody(BUILTIN_GENOMES[0].id) }); drawRows(); } });
+  dialog.querySelector('#add-population')!.addEventListener('click', () => { if (populations.length < 16) { populations.push({ genomeId: BUILTIN_GENOMES[0].id, count: 1 }); drawRows(); } });
   dialog.querySelector('form')!.addEventListener('submit', event => {
     event.preventDefault();
     if (transitioning) return;
@@ -265,7 +259,6 @@ function newSimulationDialog(template?: BuiltinSimulation, environmentId?: strin
         const founders = populations.map((_, index) => ({
           genomeId: rows.querySelector<HTMLSelectElement>(`[data-population="${index}"]`)!.value,
           count: rows.querySelector<HTMLInputElement>(`[data-count="${index}"]`)!.valueAsNumber,
-          starterBody: rows.querySelector<HTMLSelectElement>(`[data-body="${index}"]`)!.value,
         }));
         if (founders.some(item => !Number.isSafeInteger(item.count) || item.count < 0)) throw new Error('Organism counts must be nonnegative whole numbers.');
         const environment = findEnvironment(dialog.querySelector<HTMLSelectElement>('#simulation-environment')!.value);
@@ -274,14 +267,13 @@ function newSimulationDialog(template?: BuiltinSimulation, environmentId?: strin
         const startingGenomes = founders.map(item => {
           const genome = findGenome(item.genomeId); if (!genome) throw new Error('A starting genome no longer exists.');
           if (genome.languageVersion !== GENOME_LANGUAGE_VERSION) throw new Error('This genome uses the older investment language. Edit a new copy before introducing it.');
-          if (!isBodyRecipe(item.starterBody)) throw new Error('Choose a valid starter body.');
-          return { count: item.count, source: genome.source, name: genome.name, starterBody: item.starterBody };
+          return { count: item.count, source: genome.source, name: genome.name };
         });
         const engine = await Engine.load(); applyEnvironment(engine, environmentConfig); engine.setMutationRate(0.1); engine.resetEmpty(seed, environmentConfig.foodRate > 0 ? 360 : 0);
         const names: Record<string, string> = {};
         for (const item of startingGenomes) {
           const id = engine.compile(item.source); names[String(id)] = item.name;
-          if (engine.seed(id, item.count, -1, -1, item.starterBody) !== item.count) throw new Error('Could not create the starting population.');
+          if (engine.seed(id, item.count) !== item.count) throw new Error('Could not create the starting population.');
         }
         if (active) await active.flush();
         const now = Date.now(), id = 'simulation:' + crypto.randomUUID(); release = await claimSimulation(id);
@@ -425,34 +417,27 @@ function openLiveProgram(id: number, cellId?: number): void {
 function addOrganismDialog(): void {
   if (!active || transitioning) return;
   const session = active;
-  let selectedGenome = allGenomes().find(item => item.languageVersion === GENOME_LANGUAGE_VERSION) ?? BUILTIN_GENOMES[0];
-  const dialog = createDialog('Add organism', `<form><input class="search-input" id="organism-search" type="search" placeholder="Find a genome" aria-label="Find a genome"><div class="picker-list" id="organism-options"></div><div class="starter-body-choice"><div class="form-field"><label for="organism-body">Starter body</label><select id="organism-body">${bodyOptions(recommendedStarterBody(selectedGenome.id))}</select><p class="form-help" id="organism-body-description"></p></div><p class="form-help">The body and reserves are counted as introduced material and energy.</p></div><p class="form-error" role="alert" hidden></p><footer class="dialog-actions"><button class="button primary" type="submit">${icon('plus')}Add organism</button></footer></form>`, 'organism-picker');
+  const dialog = createDialog('Add organism', '<input class="search-input" id="organism-search" type="search" placeholder="Find a genome" aria-label="Find a genome"><div class="picker-list" id="organism-options"></div><p class="form-error" role="alert" hidden></p>', 'organism-picker');
   const options = dialog.querySelector<HTMLElement>('#organism-options')!;
-  const bodyInput = dialog.querySelector<HTMLSelectElement>('#organism-body')!;
-  const explain = (): void => { dialog.querySelector('#organism-body-description')!.textContent = STARTER_BODIES.find(body => body.id === bodyInput.value)?.description ?? ''; };
   const draw = (): void => {
     const query = dialog.querySelector<HTMLInputElement>('#organism-search')!.value.toLowerCase();
     const matches = allGenomes().filter(item => item.languageVersion === GENOME_LANGUAGE_VERSION && (item.name+' '+(item.description||'')).toLowerCase().includes(query));
     options.innerHTML = [false,true].map(builtin => {
       const group=matches.filter(item=>isBuiltin(item.id)===builtin);
-      return group.length ? `<div class="picker-group"><h3>${builtin?'Built-in':'Saved'}</h3>${group.map(item => `<button type="button" class="picker-item${selectedGenome.id === item.id ? ' selected' : ''}" data-select-id="${esc(item.id)}" aria-pressed="${selectedGenome.id === item.id}" title="${esc(item.description||item.name)}">${icon('dna')}<span>${esc(item.name)}</span><span class="picker-check">${selectedGenome.id === item.id ? '✓' : ''}</span></button>`).join('')}</div>` : '';
+      return group.length ? `<div class="picker-group"><h3>${builtin?'Built-in':'Saved'}</h3>${group.map(item => `<button type="button" class="picker-item" data-add-id="${esc(item.id)}" aria-label="Add ${esc(item.name)}" title="${esc(item.description||item.name)}">${icon('dna')}<span>${esc(item.name)}</span>${icon('plus')}</button>`).join('')}</div>` : '';
     }).join('') || '<p class="muted picker-empty">No matching current-language genomes.</p>';
   };
-  draw(); explain(); dialog.querySelector('#organism-search')!.addEventListener('input',draw); bodyInput.addEventListener('change',explain);
+  draw(); dialog.querySelector('#organism-search')!.addEventListener('input',draw);
   options.addEventListener('click', event => {
-    const button = (event.target as Element).closest<HTMLButtonElement>('[data-select-id]'); if (!button) return;
-    const genome = findGenome(button.dataset.selectId!); if (!genome) return;
-    selectedGenome = genome; bodyInput.value = recommendedStarterBody(genome.id); explain(); draw();
-  });
-  dialog.querySelector('form')!.addEventListener('submit', event => {
-    event.preventDefault(); if (active !== session || transitioning) return;
+    const button = (event.target as Element).closest<HTMLButtonElement>('[data-add-id]');
+    if (!button || active !== session || transitioning) return;
+    const genome = findGenome(button.dataset.addId!); if (!genome) return;
     try {
-      const recipe = bodyInput.value; if (!isBodyRecipe(recipe)) throw new Error('Choose a starter body.');
-      const id = session.engine.compile(selectedGenome.source);
-      if (session.engine.seed(id,1,-1,-1,recipe) !== 1) throw new Error('The organism could not be introduced.');
-      session.metadata.genomeNames[String(id)] = selectedGenome.name; session.refresh(); session.touch();
+      const id = session.engine.compile(genome.source);
+      if (session.engine.seed(id,1) !== 1) throw new Error('The organism could not be introduced.');
+      session.metadata.genomeNames[String(id)] = genome.name; session.refresh(); session.touch();
       dialog.close(); void session.checkpoint().catch(() => {}); updateSimulationUi();
-      toast('One '+selectedGenome.name+' organism added.');
+      toast('One '+genome.name+' organism added.');
     } catch (error) { setDialogError(dialog,error); }
   });
   dialog.querySelector<HTMLInputElement>('#organism-search')!.focus();

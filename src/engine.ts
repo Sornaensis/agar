@@ -4,8 +4,6 @@ import engineContract from './engine-contract.json';
 /** Versioned boundary to the Rust engine. All simulation runs in WASM. */
 export const ORGANELLE_KINDS = ['core','photosynthetic','metabolic','digestive','reserve','transporter','phagocyte','flagellum','piercer','cortex','repair','photoreceptor','thermoreceptor','chemoreceptor','mechanoreceptor','optical'] as const;
 export type OrganelleKind = typeof ORGANELLE_KINDS[number];
-export const BODY_RECIPES = ['bare','producer','scavenger','hunter','mixed'] as const;
-export type BodyRecipe = typeof BODY_RECIPES[number];
 export interface OrganelleSummary { kind: OrganelleKind; count:number; mass:number; capacity:number; damaged:number; building:number; functionalMass:number }
 export interface BodyInspection {
   cellId:number; area:number; mass:number; spaceUsed:number; spaceCapacity:number; surfaceUsed:number; surfaceCapacity:number;
@@ -206,7 +204,7 @@ interface WasmExports extends WebAssembly.Exports {
   alloc_state(len: number): number;
   save_state_ptr(): number; save_state_len(): number;
   restore_state(ptr: number, len: number): number;
-  seed_cells(genomeId: number, count: number, x: number, y: number, recipe:number): number;
+  seed_cells(genomeId: number, count: number, x: number, y: number): number;
   language_schema_ptr():number; language_schema_len():number;
   cell_body_ptr(id:number):number; cell_body_len():number;
   energy_total():number; energy_input_total():number;
@@ -344,11 +342,9 @@ export class Engine {
   private readError(): string {
     return new TextDecoder().decode(new Uint8Array(this.wasm.memory.buffer, this.wasm.error_ptr(), this.wasm.error_len()));
   }
-  seed(genomeId: number, count = 8, x = -1, y = -1, recipe:BodyRecipe = 'producer'): number {
+  seed(genomeId: number, count = 8, x = -1, y = -1): number {
     if (!Number.isSafeInteger(count) || count < 0) throw new Error('Organism count must be a nonnegative safe whole number.');
-    const recipeId = BODY_RECIPES.indexOf(recipe);
-    if (recipeId < 0) throw new Error('Choose a valid starter body.');
-    const added = this.wasm.seed_cells(genomeId, count, x, y, recipeId);
+    const added = this.wasm.seed_cells(genomeId, count, x, y);
     const error = this.readError();
     if (error || added !== count) throw new Error(error || 'The engine could not create the requested organisms.');
     return added;

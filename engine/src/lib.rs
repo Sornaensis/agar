@@ -120,7 +120,7 @@ thread_local! { static ENGINE: RefCell<Engine> = RefCell::new(Engine::new()); }
 
 #[no_mangle]
 pub extern "C" fn abi_version() -> u32 {
-    8
+    9
 }
 
 /// Allocate a writable, zero-initialized byte buffer. The caller must deallocate
@@ -658,7 +658,7 @@ pub extern "C" fn reset_empty(seed: u32, initial_food: u32) {
 }
 
 #[no_mangle]
-pub extern "C" fn seed_cells(genome_id: u32, count: f64, x: f32, y: f32, recipe: u32) -> u32 {
+pub extern "C" fn seed_cells(genome_id: u32, count: f64, x: f32, y: f32) -> u32 {
     ENGINE.with(|e| {
         let mut e = e.borrow_mut();
         e.error.clear();
@@ -667,12 +667,7 @@ pub extern "C" fn seed_cells(genome_id: u32, count: f64, x: f32, y: f32, recipe:
             return 0;
         }
         if !e.valid_genome(genome_id) { return 0; }
-        let recipe = match recipe {
-            0 => body::BodyRecipe::Bare, 1 => body::BodyRecipe::Producer, 2 => body::BodyRecipe::Scavenger,
-            3 => body::BodyRecipe::Hunter, 4 => body::BodyRecipe::Mixed,
-            _ => { e.error = "Unknown starter body recipe.".into(); return 0; }
-        };
-        match e.world.try_seed_body(genome_id, count as usize, x as f64, y as f64, recipe) {
+        match e.world.try_seed_cells(genome_id, count as usize, x as f64, y as f64) {
             Ok(added) => added as u32,
             Err(error) => { e.error = error; 0 }
         }
@@ -845,7 +840,7 @@ mod tests {
         engine.world.cells[0].vy = -1.25;
         engine.world.cells[0].integrity = 0.8;
         engine.world.snapshot(&mut engine.snapshot);
-        assert_eq!(abi_version(), 8);
+        assert_eq!(abi_version(), 9);
         assert_eq!(simulation::CELL_STRIDE, 135);
         assert_eq!(engine.snapshot.len(), 12 + 22 * 135 + 360 * 4);
         assert_eq!(engine.snapshot[7], simulation::WIDTH as f64);
@@ -972,7 +967,7 @@ mod tests {
             u32::MAX as f64 + 1.0,
             u32::MAX as f64,
         ] {
-            assert_eq!(seed_cells(id, count, -1.0, -1.0, 1), 0);
+            assert_eq!(seed_cells(id, count, -1.0, -1.0), 0);
             assert!(
                 error_len() > 0,
                 "invalid or ID-exhausting requests must report why they failed"
@@ -982,15 +977,9 @@ mod tests {
                 before
             );
         }
-        assert_eq!(seed_cells(id, 1.0, -1.0, -1.0, 99), 0);
-        assert!(error_len() > 0, "unknown body recipes fail atomically");
-        assert_eq!(
-            ENGINE.with(|e| checkpoint::save(&e.borrow()).unwrap()),
-            before
-        );
-        assert_eq!(seed_cells(id, 0.0, -1.0, -1.0, 1), 0);
+        assert_eq!(seed_cells(id, 0.0, -1.0, -1.0), 0);
         assert_eq!(error_len(), 0, "zero is an intentional no-op");
-        assert_eq!(seed_cells(id, 513.0, -1.0, -1.0, 1), 513);
+        assert_eq!(seed_cells(id, 513.0, -1.0, -1.0), 513);
         assert_eq!(error_len(), 0);
     }
 
@@ -1000,7 +989,7 @@ mod tests {
         let source = "thrust=0;turn=0;divide=false;target.flagellum.count=999;target.flagellum.size=.2;build.flagellum=0;";
         let id = ENGINE.with(|engine| engine.borrow_mut().compile(source));
         reset_empty(91, 0);
-        assert_eq!(seed_cells(id, 1.0, 200.0, 100.0, 0), 1);
+        assert_eq!(seed_cells(id, 1.0, 200.0, 100.0), 1);
         assert_eq!(tick(1), 1);
         let before = ENGINE.with(|engine| checkpoint::save(&engine.borrow()).unwrap());
         let schema_pointer = language_schema_ptr();
@@ -1054,7 +1043,7 @@ mod tests {
         ENGINE.with(|e| *e.borrow_mut() = Engine::new());
         let id = ENGINE.with(|e| e.borrow_mut().compile("ri001 = 7; rb999 = true; rs002 = \"hello\"; rv003 = vec(1, 2); thrust = 0; turn = 0; divide = false;"));
         assert!(id > 0);
-        assert_eq!(seed_cells(id, 1.0, -1.0, -1.0, 1), 1);
+        assert_eq!(seed_cells(id, 1.0, -1.0, -1.0), 1);
         tick(1);
         let pointer = cell_memory_ptr(1);
         let memory = unsafe { std::slice::from_raw_parts(pointer, cell_memory_len() as usize) };
@@ -1208,7 +1197,7 @@ mod tests {
                 .compile("# 🌿\nlet count=ri001+1;ri001=count;thrust=0;turn=0;divide=false;")
         });
         reset_empty(71, 0);
-        assert_eq!(seed_cells(id, 2.0, 100.0, 100.0, 1), 2);
+        assert_eq!(seed_cells(id, 2.0, 100.0, 100.0), 2);
         tick(3);
         let before = ENGINE.with(|engine| checkpoint::save(&engine.borrow()).unwrap());
         let pointer = cell_evaluation_ptr(1);

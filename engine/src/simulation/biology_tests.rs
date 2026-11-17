@@ -29,11 +29,11 @@ fn close(actual: f64, expected: f64) {
         "{actual:.12} != {expected:.12}"
     );
 }
-fn world(recipe: BodyRecipe) -> World {
+fn world(recipe: BodyFixture) -> World {
     let mut world = World::empty(73);
     world.food_rate = 0.0;
     world.mutation_rate = 0.0;
-    world.try_seed_body(1, 1, 300.0, 300.0, recipe).unwrap();
+    world.try_seed_fixture(1, 1, 300.0, 300.0, recipe).unwrap();
     let cell = &mut world.cells[0];
     cell.x = 300.0;
     cell.y = 300.0;
@@ -91,12 +91,12 @@ fn caps(world: &World) -> Vec<BodyCapacities> {
 }
 
 #[test]
-fn founder_recipe_is_independent_of_the_program_and_every_introduction_is_charged() {
+fn preassembled_test_fixture_is_independent_of_the_program_and_every_introduction_is_charged() {
     let demanding = "thrust=0; turn=0; divide=false; target.flagellum.count=1000; target.flagellum.size=10; build.flagellum=1; target.piercer.count=10; build.piercer=1;";
     let mut programs = registry(IDLE);
     add_program(&mut programs, demanding);
-    let mut a = world(BodyRecipe::Bare);
-    let mut b = world(BodyRecipe::Bare);
+    let mut a = world(BodyFixture::Bare);
+    let mut b = world(BodyFixture::Bare);
     b.cells[0].genome_id = 2;
     assert_eq!(a.cells[0].body, b.cells[0].body);
     close(a.nutrient_total(), a.nutrient_input_total());
@@ -118,8 +118,150 @@ fn founder_recipe_is_independent_of_the_program_and_every_introduction_is_charge
 }
 
 #[test]
+fn production_seeding_gives_every_program_the_same_minimal_founder() {
+    let mut programs = registry(IDLE);
+    let producer = add_program(&mut programs, "thrust=0;turn=0;divide=false;photosynthesize=1;target.photosynthetic.count=2;build.photosynthetic=1;");
+    let hunter = add_program(
+        &mut programs,
+        "thrust=1;turn=1;divide=true;bite=1;engulf=true;target.piercer.count=2;build.piercer=1;",
+    );
+    let mut world = World::empty(82);
+    let (expected_body, budget) = Body::founder();
+    for id in [1, producer, hunter] {
+        world.try_seed_cells(id, 2, -1.0, -1.0).unwrap();
+    }
+    assert_eq!(world.cells.len(), 6);
+    for cell in &world.cells {
+        assert_eq!(cell.body, expected_body);
+        close(cell.energy, budget.energy);
+        close(cell.nutrient_stored, budget.minerals);
+        close(cell.gut_energy, 0.0);
+        assert!(!cell.division_ready());
+    }
+    close(world.nutrient_total(), world.nutrient_input_total());
+    close(world.energy_input_total(), 6.0 * budget.introduced_energy);
+    world.reset(82, hunter);
+    assert!(world.cells.iter().all(|cell| cell.body == expected_body));
+}
+
+#[test]
+fn idle_and_action_only_genomes_cannot_gain_specialization_without_construction() {
+    let mut programs = registry(IDLE);
+    let actions = add_program(&mut programs, "thrust=1;turn=1;divide=true;grow=1;photosynthesize=1;absorb=1;feed=1;bite=1;engulf=true;repair=1;");
+    let mut world = World::empty(64);
+    world.food_rate = 0.0;
+    world.mutation_rate = 0.0;
+    world.environment.configure(0.5, 1.0, 0.0);
+    world.try_seed_cells(1, 1, 300.0, 300.0).unwrap();
+    world.try_seed_cells(actions, 1, 300.0, 300.0).unwrap();
+    world.add_food(300.0, 300.0, 64);
+    let (body, budget) = Body::founder();
+    advance(&mut world, &mut programs, 300);
+    assert_eq!(world.cells.len(), 2);
+    assert_eq!(world.births, 0);
+    assert_eq!(world.photosynthesis_total, 0.0);
+    assert_eq!(world.attacks, 0);
+    for cell in &world.cells {
+        assert_eq!(cell.body, body);
+        assert!(cell.energy < budget.energy);
+        close(cell.nutrient_stored, budget.minerals);
+        close(cell.gut_energy, 0.0);
+    }
+}
+
+#[test]
+fn universal_newborn_builds_feeding_organs_and_a_paid_conservative_daughter() {
+    let source = "let feeding = organelle.digestive.capacity>=1 && organelle.phagocyte.capacity>=1; \
+        let processing = organelle.metabolic.capacity>=1; \
+        thrust=0;turn=0;photosynthesize=0;absorb=0;feed=1; \
+        target.digestive.count=if processing then 2 else 1; target.digestive.size=.04; build.digestive=1; \
+        target.phagocyte.count=if processing then 2 else 1; target.phagocyte.size=.025; build.phagocyte=1; \
+        target.metabolic.count=if feeding then 2 else 0; target.metabolic.size=.03; build.metabolic=1; \
+        target.core.count=2; target.core.size=.04; build.core=if processing && energy>50 then 1 else 0; \
+        grow=if body.maturity<1 && energy>90 then .8 else 0; \
+        divide=body.division_ready && energy>120;";
+    let mut fed = World::empty(73);
+    let mut unfed = World::empty(73);
+    for world in [&mut fed, &mut unfed] {
+        world.food_rate = 0.0;
+        world.mutation_rate = 0.0;
+        world.try_seed_cells(1, 1, 300.0, 300.0).unwrap();
+    }
+    let x = fed.cells[0].x;
+    let y = fed.cells[0].y;
+    let parent_id = fed.cells[0].id;
+    let initial_energy = fed.cells[0].energy;
+    let original_core = fed.cells[0].body.organs[0].clone();
+    assert_eq!(fed.cells[0].body.organs.len(), 1);
+    assert_eq!(fed.cells[0].body.capacities().capture, 0.0);
+    assert_eq!(fed.cells[0].gut_capacity(), 0.0);
+    fed.add_food(x, y, 256);
+    let mut programs = registry(source);
+    let mut control_programs = programs.clone();
+    let mut constructed = false;
+    let mut digested = false;
+    let mut received_energy = false;
+    for tick in 0..5400 {
+        if tick > 0 && tick % 60 == 0 {
+            let cell = &fed.cells[0];
+            fed.add_food(cell.x, cell.y, 5);
+        }
+        fed.step(&mut programs);
+        unfed.step(&mut control_programs);
+        constructed |= fed.cells.iter().any(|cell| cell.construction_rate > 0.0);
+        digested |= fed.cells.iter().any(|cell| cell.digestion_rate > 0.0);
+        received_energy |= fed.cells.iter().any(|cell| cell.energy > initial_energy);
+        close(fed.nutrient_total(), fed.nutrient_input_total());
+        close(unfed.nutrient_total(), unfed.nutrient_input_total());
+        assert!(fed.energy_total() <= fed.energy_input_total() + 1e-8);
+        assert_eq!(fed.photosynthesis_total, 0.0);
+        assert_eq!(unfed.births, 0);
+        if fed.births > 0 {
+            break;
+        }
+        assert!(
+            !fed.cells.is_empty(),
+            "bootstrap failed before feeding machinery could sustain the cell"
+        );
+    }
+    assert!(constructed && digested && received_energy);
+    assert_eq!(
+        fed.births, 1,
+        "a minimal cell must physically construct a complete consumer lifecycle"
+    );
+    assert_eq!(fed.cells.len(), 2);
+    assert!(fed
+        .cells
+        .iter()
+        .any(|cell| cell.parent_id == parent_id && cell.generation == 1));
+    let inherited: Vec<_> = fed
+        .cells
+        .iter()
+        .flat_map(|cell| &cell.body.organs)
+        .collect();
+    let mut identifiers: Vec<_> = inherited.iter().map(|organ| organ.id).collect();
+    identifiers.sort_unstable();
+    identifiers.dedup();
+    assert_eq!(
+        identifiers.len(),
+        inherited.len(),
+        "division cloned physical organelle IDs"
+    );
+    assert_eq!(
+        inherited
+            .iter()
+            .filter(|organ| **organ == &original_core)
+            .count(),
+        1
+    );
+    assert!(fed.cells.iter().all(|cell| cell.body.viable()
+        && cell.body.count(Kind::Core) == 1
+        && cell.gut_capacity() > 0.0));
+}
+
+#[test]
 fn completing_a_flagellum_pays_now_and_changes_movement_only_next_tick() {
-    let mut world = world(BodyRecipe::Bare);
+    let mut world = world(BodyFixture::Bare);
     partial_organ(
         &mut world.cells[0],
         Kind::Flagellum,
@@ -151,8 +293,8 @@ fn mixture_keeps_a_closed_mineral_ledger_through_growth_recycling_damage_and_dea
     world.food_rate = 0.0;
     world.mutation_rate = 0.0;
     world.environment.configure(0.5, 0.8, 3.0);
-    for recipe in BodyRecipe::ALL {
-        world.try_seed_body(1, 2, -1.0, -1.0, recipe).unwrap();
+    for recipe in BodyFixture::ALL {
+        world.try_seed_fixture(1, 2, -1.0, -1.0, recipe).unwrap();
     }
     world.add_food(-1.0, -1.0, 40);
     mature(&mut world.cells[0]);
@@ -166,7 +308,7 @@ fn mixture_keeps_a_closed_mineral_ledger_through_growth_recycling_damage_and_dea
         }
         if tick == 180 {
             world
-                .try_seed_body(1, 1, 500.0, 500.0, BodyRecipe::Scavenger)
+                .try_seed_fixture(1, 1, 500.0, 500.0, BodyFixture::Scavenger)
                 .unwrap();
         }
         world.step(&mut programs);
@@ -187,7 +329,7 @@ fn a_closed_dark_world_cannot_gain_energy_from_build_recycle_feed_or_repair() {
     let source = "thrust=0; turn=0; divide=false; target.flagellum.count=if age<2 then 2 else 0; target.flagellum.size=.035; \
         build.flagellum=1; recycle.flagellum=1; feed=1; absorb=1; grow=.2; repair=1; photosynthesize=0;";
     let mut programs = registry(source);
-    let mut world = world(BodyRecipe::Scavenger);
+    let mut world = world(BodyFixture::Scavenger);
     world.cells[0].body.damage(0.1);
     world.add_food(300.0, 300.0, 8);
     let introduced = world.energy_input_total();
@@ -207,7 +349,7 @@ fn a_closed_dark_world_cannot_gain_energy_from_build_recycle_feed_or_repair() {
 
 #[test]
 fn broken_storage_spills_energy_and_minerals_without_erasing_contents() {
-    let mut world = world(BodyRecipe::Scavenger);
+    let mut world = world(BodyFixture::Scavenger);
     let cell = &mut world.cells[0];
     cell.energy = cell.energy_capacity();
     cell.nutrient_stored = cell.nutrient_capacity();
@@ -233,7 +375,7 @@ fn broken_storage_spills_energy_and_minerals_without_erasing_contents() {
 
 #[test]
 fn dismantling_occupied_compartments_returns_all_material_and_accounts_energy_loss() {
-    let mut world = world(BodyRecipe::Scavenger);
+    let mut world = world(BodyFixture::Scavenger);
     let cell = &mut world.cells[0];
     cell.energy = cell.energy_capacity();
     cell.gut_energy = 40.0;
@@ -266,7 +408,7 @@ fn dismantling_occupied_compartments_returns_all_material_and_accounts_energy_lo
 
 #[test]
 fn division_preserves_whole_organ_identities_and_pays_the_fission_cost() {
-    let mut world = world(BodyRecipe::Producer);
+    let mut world = world(BodyFixture::Producer);
     mature(&mut world.cells[0]);
     let mut programs = registry(DIVIDE);
     let original = world.cells[0].body.clone();
@@ -296,7 +438,7 @@ fn division_preserves_whole_organ_identities_and_pays_the_fission_cost() {
 
 #[test]
 fn parent_memory_age_and_ancestry_are_retained_while_daughter_memory_starts_empty() {
-    let mut world = world(BodyRecipe::Bare);
+    let mut world = world(BodyFixture::Bare);
     mature(&mut world.cells[0]);
     world.cells[0].age = 23.0;
     world.cells[0].parent_id = 47;
@@ -320,8 +462,8 @@ fn parent_memory_age_and_ancestry_are_retained_while_daughter_memory_starts_empt
 
 #[test]
 fn register_energy_cost_uses_previous_tick_occupancy_even_when_clearing() {
-    let mut occupied = world(BodyRecipe::Bare);
-    let mut empty = world(BodyRecipe::Bare);
+    let mut occupied = world(BodyFixture::Bare);
+    let mut empty = world(BodyFixture::Bare);
     let mut a = registry(
         "thrust=0; turn=0; divide=false; ri001=0; clear ri001 when age>0; absorb=0; feed=0;",
     );
@@ -347,7 +489,7 @@ fn register_energy_cost_uses_previous_tick_occupancy_even_when_clearing() {
 
 #[test]
 fn one_large_core_cannot_be_cloned_to_satisfy_division() {
-    let mut world = world(BodyRecipe::Bare);
+    let mut world = world(BodyFixture::Bare);
     mature(&mut world.cells[0]);
     let body = &mut world.cells[0].body;
     let second = body
@@ -377,7 +519,7 @@ fn population_can_be_seeded_and_divide_above_the_old_384_ceiling() {
     world.mutation_rate = 0.0;
     assert_eq!(
         world
-            .try_seed_body(1, 400, -1.0, -1.0, BodyRecipe::Bare)
+            .try_seed_fixture(1, 400, -1.0, -1.0, BodyFixture::Bare)
             .unwrap(),
         400
     );
@@ -397,9 +539,9 @@ fn population_can_be_seeded_and_divide_above_the_old_384_ceiling() {
 
 #[test]
 fn paid_frame_can_exceed_area_four_and_large_bodies_collide_across_the_torus_seam() {
-    let mut world = world(BodyRecipe::Bare);
+    let mut world = world(BodyFixture::Bare);
     world
-        .try_seed_body(1, 1, 500.0, 300.0, BodyRecipe::Bare)
+        .try_seed_fixture(1, 1, 500.0, 300.0, BodyFixture::Bare)
         .unwrap();
     let mut request = BodyControls::default();
     request.target_counts[Kind::Core as usize] = 2;
@@ -456,7 +598,7 @@ fn local_photon_supply_is_finite_and_shared_by_overlapping_producers() {
     world.food_rate = 0.0;
     world.environment.configure(0.5, 1.0, 0.0);
     world
-        .try_seed_body(1, 120, 110.0, 110.0, BodyRecipe::Producer)
+        .try_seed_fixture(1, 120, 110.0, 110.0, BodyFixture::Producer)
         .unwrap();
     for cell in &mut world.cells {
         cell.x = 110.0;
@@ -494,7 +636,7 @@ fn a_paid_producer_can_grow_and_reproduce_from_light_and_dissolved_minerals() {
         target.metabolic.count=2; target.metabolic.size=.03; build.metabolic=1; \
         target.transporter.count=2; target.transporter.size=.015; build.transporter=1; \
         grow=if body.maturity<1 && energy.fraction>.6 then .8 else 0; divide=body.division_ready;";
-    let mut world = world(BodyRecipe::Producer);
+    let mut world = world(BodyFixture::Producer);
     world.environment.configure(0.5, 0.8, 0.0);
     world.environment.set_initial_nutrients(3.0);
     world.environment.reset_dynamic();
@@ -519,7 +661,7 @@ fn a_paid_producer_can_grow_and_reproduce_from_light_and_dissolved_minerals() {
 
 #[test]
 fn capturing_and_digesting_are_separate_and_conversion_has_a_real_energy_loss() {
-    let mut world = world(BodyRecipe::Scavenger);
+    let mut world = world(BodyFixture::Scavenger);
     world.cells[0].energy = 50.0;
     world.particle(300.0, 300.0, 20.0, 0.4);
     let capacities = caps(&world);
@@ -552,7 +694,7 @@ fn capturing_and_digesting_are_separate_and_conversion_has_a_real_energy_loss() 
 
 #[test]
 fn mineral_full_gut_blocks_capture_and_no_optical_sensor_is_needed_for_contact_feeding() {
-    let mut world = world(BodyRecipe::Scavenger);
+    let mut world = world(BodyFixture::Scavenger);
     for organ in &mut world.cells[0].body.organs {
         if organ.kind == Kind::Optical {
             organ.integrity = 0.0;
@@ -576,9 +718,9 @@ fn mineral_full_gut_blocks_capture_and_no_optical_sensor_is_needed_for_contact_f
 
 #[test]
 fn reciprocal_bites_transfer_existing_reserves_without_creating_energy_or_material() {
-    let mut world = world(BodyRecipe::Hunter);
+    let mut world = world(BodyFixture::Hunter);
     world
-        .try_seed_body(1, 1, 314.0, 300.0, BodyRecipe::Hunter)
+        .try_seed_fixture(1, 1, 314.0, 300.0, BodyFixture::Hunter)
         .unwrap();
     for (index, cell) in world.cells.iter_mut().enumerate() {
         cell.x = 300.0 + index as f64 * 14.0;
@@ -615,10 +757,10 @@ fn reciprocal_bites_transfer_existing_reserves_without_creating_energy_or_materi
 
 #[test]
 fn engulfing_transfers_one_whole_body_once_and_pays_before_the_meal() {
-    let mut world = world(BodyRecipe::Scavenger);
+    let mut world = world(BodyFixture::Scavenger);
     mature(&mut world.cells[0]);
     world
-        .try_seed_body(2, 1, 320.0, 300.0, BodyRecipe::Bare)
+        .try_seed_fixture(2, 1, 320.0, 300.0, BodyFixture::Bare)
         .unwrap();
     let contact = world.cells[0].radius() + world.cells[1].radius();
     world.cells[0].x = 300.0;
@@ -649,7 +791,7 @@ fn engulfing_transfers_one_whole_body_once_and_pays_before_the_meal() {
 
 #[test]
 fn senescence_returns_all_body_and_gut_material_even_when_particles_are_full() {
-    let mut world = world(BodyRecipe::Scavenger);
+    let mut world = world(BodyFixture::Scavenger);
     world.add_food(-1.0, -1.0, MAX_FOOD);
     world.cells[0].gut_energy = 20.0;
     world.cells[0].gut_nutrients = 0.5;
@@ -668,8 +810,8 @@ fn senescence_returns_all_body_and_gut_material_even_when_particles_are_full() {
 fn resource_imports_count_actual_introductions_and_reset_replaces_old_history() {
     let mut world = World::empty(11);
     close(world.nutrient_total(), world.nutrient_input_total());
-    for recipe in BodyRecipe::ALL {
-        world.try_seed_body(1, 2, -1.0, -1.0, recipe).unwrap();
+    for recipe in BodyFixture::ALL {
+        world.try_seed_fixture(1, 2, -1.0, -1.0, recipe).unwrap();
     }
     world.add_food(-1.0, -1.0, MAX_FOOD);
     let full = world.nutrient_input_total();
@@ -680,7 +822,7 @@ fn resource_imports_count_actual_introductions_and_reset_replaces_old_history() 
     world.environment.set_initial_nutrients(0.1);
     close(world.nutrient_total(), full);
     world.reset(11, 1);
-    let (_, budget) = Body::founder(BodyRecipe::Producer);
+    let (_, budget) = Body::founder();
     close(
         world.nutrient_input_total(),
         0.1 * PATCHES as f64 + 360.0 * FOOD_NUTRIENTS + 22.0 * budget.introduced_minerals,
@@ -692,8 +834,8 @@ fn resource_imports_count_actual_introductions_and_reset_replaces_old_history() 
 fn daughter_mutation_changes_only_the_program_not_birth_machinery_or_physics() {
     let mut original = registry(DIVIDE);
     let mut evolving = original.clone();
-    let mut off = world(BodyRecipe::Producer);
-    let mut on = world(BodyRecipe::Producer);
+    let mut off = world(BodyFixture::Producer);
+    let mut on = world(BodyFixture::Producer);
     mature(&mut off.cells[0]);
     mature(&mut on.cells[0]);
     on.mutation_rate = 1.0;
@@ -754,7 +896,7 @@ fn registry_byte_budget_blocks_new_mutations_but_preserves_replay() {
 fn full_genome_registry_keeps_reproduction_and_counts_skipped_mutations() {
     let template = registry(DIVIDE).remove(0);
     let mut programs = vec![template; MAX_GENOMES];
-    let mut world = world(BodyRecipe::Bare);
+    let mut world = world(BodyFixture::Bare);
     mature(&mut world.cells[0]);
     world.mutation_rate = 1.0;
     let energy = world.energy_total();
@@ -781,7 +923,7 @@ fn deterministic_reset_replays_mutation_ids_bodies_and_resource_state() {
     for attempt in 0..2 {
         world.reset_empty(81, 0);
         world
-            .try_seed_body(1, 3, -1.0, -1.0, BodyRecipe::Producer)
+            .try_seed_fixture(1, 3, -1.0, -1.0, BodyFixture::Producer)
             .unwrap();
         for cell in &mut world.cells {
             mature(cell);
@@ -810,8 +952,8 @@ fn dark_scavenger_completes_a_meal_dependent_lifecycle_with_accounted_food() {
         target.core.count=2; target.core.size=.04; build.core=1; \
         grow=if body.maturity<1 && energy.fraction>.65 then .8 else 0; \
         divide=body.division_ready && energy.fraction>.9;";
-    let mut fed = world(BodyRecipe::Scavenger);
-    let mut unfed = world(BodyRecipe::Scavenger);
+    let mut fed = world(BodyFixture::Scavenger);
+    let mut unfed = world(BodyFixture::Scavenger);
     fed.environment.configure(0.5, 0.0, 0.0);
     unfed.environment.configure(0.5, 0.0, 0.0);
     let mut fed_programs = registry(source);

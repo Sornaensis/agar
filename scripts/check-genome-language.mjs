@@ -10,7 +10,7 @@ async function moduleUrl(relative, imports = {}) {
   return `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`;
 }
 const organellesUrl = await moduleUrl('../src/organelles.ts');
-const { ORGANELLE_CATALOG, STARTER_BODIES } = await import(organellesUrl);
+const { ORGANELLE_CATALOG } = await import(organellesUrl);
 const language = await import(await moduleUrl('../src/genome-language.ts', { './organelles': organellesUrl }));
 const { GENOME_SYMBOLS, BUILTIN_FUNCTIONS, BUILTIN_SIGNALS, BUILTIN_OUTPUTS, LANGUAGE_KEYWORDS,
   REGISTER_FAMILIES, lookupGenomeSymbol, registerSymbol, registerCompletions, searchGenomeSymbols,
@@ -216,7 +216,6 @@ assert.equal(BUILTIN_OUTPUTS.length, 78);
 const schemaPointer = api.language_schema_ptr();
 const schema = JSON.parse(decode(schemaPointer,api.language_schema_len()));
 assert.equal(schema.version,3);
-assert.deepEqual(STARTER_BODIES.map(body=>body.id),['bare','producer','scavenger','hunter','mixed']);
 for (const organ of ORGANELLE_CATALOG) {
   assert.equal(schema.outputs.find(output=>output.name===`target.${organ.kind}.size`).default,organ.minimumMass,`${organ.kind} minimum mass documentation matches Rust`);
 }

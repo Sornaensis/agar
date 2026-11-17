@@ -1,12 +1,20 @@
 # Ecosystem measurements
 
-These are deterministic tests of the simulator, not a biological validation or a guarantee of stable coexistence. Each JSON preserves its engine hash, environment, complete authored genomes, starter-body recipes, mutation rate and sampled results.
+These are deterministic tests of the simulator, not a biological validation or a guarantee of stable coexistence. Each measurement JSON preserves its engine hash, environment, complete authored genomes, initialization, mutation rate and sampled results.
 
-## Current organelle model — ABI 8
+## Current genome-directed development — ABI 9
+
+Every introduced organism now starts with the same one-core cell and finite energy and mineral reserves. Its program constructs its optional organs during normal simulation ticks. There is no external body selection or genome-to-body mapping. Division partitions existing physical organs.
+
+The focused food-chain checks verify identical initial bodies across all eight built-in genomes, paid development of functioning organs, real light/organic/mixed acquisition, and conserved material. With their unmodified programs, the Phototroph produces a daughter after 47.3 simulated seconds with light and no organic food; the Forager does so after 51.9 seconds with supplied nearby organic particles. These controlled lifecycle checks establish that both programs can develop, acquire resources, grow and reproduce. They do not establish persistence in the mixed ecosystem.
+
+The navigation check grows the actual Forager's sensors and feeding organs from the same minimal cell, then verifies escape from a resistant surface and capture and digestion of nearby particles. No new long-running mixed-ecosystem measurement accompanies this initialization change. The ABI 8 records below remain historical results.
+
+## Historical organelle model — ABI 8
 
 `organelle-ecosystem-final-42.json`, `organelle-ecosystem-final-7.json` and `organelle-ecosystem-final-2026.json` record **300 simulated seconds**, with mutation disabled. Samples are at 0, 30, 120, 299 and 300 seconds. This covers one founder lifespan and visible descendant generations; it does not establish long-term persistence.
 
-Each run starts with 72 Phototrophs, 6 Foragers, 4 Mixotrophs and 2 Predators in Sunlit pond. There is no initial or continuing external organic-food input. Starter organs and reserves are explicit resource introductions. Later capabilities require paid construction; sensors expose local physical measurements. The updated scavenger programs distinguish tentative small-object returns from resistant contact and steer away from surfaces they cannot capture.
+Each historical run starts with 72 Phototrophs, 6 Foragers, 4 Mixotrophs and 2 Predators in Sunlit pond. There is no initial or continuing external organic-food input. Those runs used selected starter-body recipes, recorded as explicit resource introductions. Later capabilities required paid construction; sensors exposed local physical measurements. Their scavenger programs distinguished tentative small-object returns from resistant contact and steered away from surfaces they could not capture. The initialization and programs differ from ABI 9, so these counts are not predictions for the current build.
 
 ### Living lineage counts at 300 seconds
 
@@ -36,9 +44,9 @@ The engine checks material and energy budgets throughout its correctness tests, 
 
 `organelle-ecosystem-baseline-42.json` is a separate **900-second** ABI 8 diagnostic using earlier programs and a different engine hash. Its final lineage counts are 246 Phototrophs, 0 Foragers, 4 Mixotrophs and 0 Predators. A Predator daughter was visible at 120 seconds, but that lineage was extinct by 600 seconds. No Forager descendants appeared at its sample points. The old scavenger program stopped for all contacts, including resistant living surfaces.
 
-The baseline and current measurements differ in program behavior and engine build. They are not a controlled estimate of the isolated navigation change. The final 300-second files must not be presented as 900-second reruns or evidence of permanent coexistence.
+The baseline and later ABI 8 measurements differ in program behavior and engine build. They are not a controlled estimate of the isolated navigation change. The final 300-second files must not be presented as 900-second reruns or evidence of permanent coexistence.
 
-## Reproduce
+## Run current checks and measurements
 
 ```sh
 npm run test:food-chain
@@ -47,11 +55,11 @@ npm run test:food-chain -- --measure --duration 300 --output experiments/organel
 npm run test:food-chain -- --measure --seed 42 --duration 300 --mutation 0.1 --output experiments/organelle-mutation-rerun.json
 ```
 
-The short food-chain gate verifies real light, organic and mixed acquisition, physical starter bodies and conserved material. The navigation fixture uses the actual Forager program and public WASM APIs: it starts against a resistant cell, escapes, then captures and digests particles. It does not assert a desired ecosystem equilibrium.
+These commands use the current bundled WASM and programs. They do not reproduce the historical ABI 8 runs unless that exact engine and source are restored. Neither correctness gate asserts a desired ecosystem equilibrium.
 
 A separate native lifecycle test supplies a stationary scavenger with accounted organic particles in darkness. It captures and digests meals, grows a paid body and produces a daughter; the identical unfed control has no births. This verifies the heterotrophic growth pathway independently of the mixed preset's navigation and food availability.
 
-`--duration` accepts positive whole simulated seconds and defaults to 900. Standard sample times are filtered to the requested interval, and the requested endpoint is always included. Measurements report observed outcomes rather than asserting particular lineage counts.
+`--duration` accepts positive whole simulated seconds and defaults to 120. Standard sample times are 0, 15, 30, 60, 120 and 180 seconds, filtered to the requested interval; the requested endpoint is always included. Measurements report observed outcomes rather than asserting particular lineage counts.
 
 ## Historical allocation-model experiments — ABI 4–6
 
