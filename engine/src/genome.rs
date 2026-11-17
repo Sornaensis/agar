@@ -5,7 +5,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
 mod checkpoint;
+mod execution;
 mod source;
+use execution::ExecutionPlan;
 
 pub const MAX_SOURCE_BYTES: usize = 256 * 1024;
 const MAX_TOKENS: usize = 65_536;
@@ -1566,6 +1568,41 @@ impl Op {
         }
     }
 }
+
+/// Shared typed semantics for authored evaluation, constant folding and compact
+/// execution. Constant folding never substitutes algebraic identities that could
+/// change saturation, bounded strings, floating-point order or signed zeros.
+fn evaluate_operation(
+    op: &Op,
+    ty: Type,
+    inputs: &Inputs,
+    memory: &Registers,
+    values: &[Value],
+) -> Value {
+    let value = match op {
+        Op::Constant(value) => value.clone(),
+        Op::Sensor(sensor) => sensor.read(inputs),
+        Op::Register(key) => memory.read(*key),
+        Op::Populated(key) => Value::Boolean(memory.entries.contains_key(key)),
+        Op::Reference(i) => values[*i].clone(),
+        Op::Not(i) => Value::Boolean(!values[*i].boolean()),
+        Op::Negate(i) => match &values[*i] {
+            Value::Integer(v) => Value::Integer(v.saturating_neg()),
+            Value::Vector(v) => Value::Vector([-v[0], -v[1]]),
+            v => Value::Scalar(-v.number()),
+        },
+        Op::Binary(op, a, b) => binary_value(*op, &values[*a], &values[*b], ty),
+        Op::Choose(condition, yes, no) => values[if values[*condition].boolean() {
+            *yes
+        } else {
+            *no
+        }]
+        .clone(),
+        Op::Call(function, args) => function.eval(args, values, ty),
+    };
+    value.convert(ty)
+}
+
 #[derive(Debug, Clone)]
 struct Node {
     op: Op,
@@ -1770,6 +1807,8 @@ pub struct Program {
     bindings: Vec<Binding>,
     output_roots: [Option<usize>; OUTPUT_COUNT],
     writes: Vec<WriteRule>,
+    // Derived from the immutable authored graph, never written to checkpoints.
+    execution: Box<ExecutionPlan>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
@@ -1894,6 +1933,22 @@ impl SourceMap {
 }
 
 impl Program {
+    fn from_parts(
+        nodes: Vec<Node>,
+        bindings: Vec<Binding>,
+        output_roots: [Option<usize>; OUTPUT_COUNT],
+        writes: Vec<WriteRule>,
+    ) -> Self {
+        let execution = ExecutionPlan::compile(&nodes, &output_roots, &writes);
+        Self {
+            nodes,
+            bindings,
+            output_roots,
+            writes,
+            execution,
+        }
+    }
+
     pub fn compile(source: &str) -> Result<Self, String> {
         if source.len() > MAX_SOURCE_BYTES {
             return Err(format!(
@@ -1972,6 +2027,14 @@ impl Program {
                     _ => 0,
                 })
                 .sum::<usize>()
+            + self.execution.allocated_bytes
+    }
+
+    /// Runtime-only storage, including the pointer added to Program itself.
+    /// Checkpoint budgets retain the authored allocation estimate, while the
+    /// live registry charges both that estimate and the derived plan.
+    pub(crate) fn derived_execution_bytes(&self) -> usize {
+        std::mem::size_of::<Box<ExecutionPlan>>() + self.execution.allocated_bytes
     }
 
     /// Describe the compiler's graph without evaluating it or changing memory.
@@ -2071,8 +2134,9 @@ impl Program {
         )
     }
     pub fn evaluate_with_scratch(&self, inputs: &Inputs, values: &mut Vec<Value>) -> Outputs {
-        self.evaluate_nodes(inputs, &Registers::default(), values);
-        self.outputs(values)
+        self.execution
+            .evaluate(inputs, &Registers::default(), values);
+        Self::outputs_for(&self.execution.output_roots, values)
     }
     pub fn evaluate_cell(
         &self,
@@ -2080,69 +2144,63 @@ impl Program {
         memory: &mut Registers,
         scratch: &mut EvalScratch,
     ) -> Outputs {
-        self.evaluate_nodes(inputs, memory, &mut scratch.values);
-        let result = self.outputs(&scratch.values);
+        self.execution.evaluate(inputs, memory, &mut scratch.values);
+        let result = Self::outputs_for(&self.execution.output_roots, &scratch.values);
+        Self::commit_writes(&self.execution.writes, memory, &scratch.values);
+        result
+    }
+
+    fn commit_writes(writes: &[WriteRule], memory: &mut Registers, values: &[Value]) {
         // All RHSs and guards have already evaluated against the same old state.
         // The two passes deliberately make clear win regardless of source order.
-        for rule in &self.writes {
+        for rule in writes {
             if let Some(value) = rule.value {
-                if rule.guard.is_none_or(|g| scratch.values[g].boolean()) {
+                if rule.guard.is_none_or(|g| values[g].boolean()) {
                     memory.entries.insert(
                         rule.register,
-                        scratch.values[value].clone().convert(rule.register.ty),
+                        values[value].clone().convert(rule.register.ty),
                     );
                 }
             }
         }
-        for rule in &self.writes {
-            if rule.value.is_none() && rule.guard.is_none_or(|g| scratch.values[g].boolean()) {
+        for rule in writes {
+            if rule.value.is_none() && rule.guard.is_none_or(|g| values[g].boolean()) {
                 memory.entries.remove(&rule.register);
             }
         }
-        result
     }
+
+    /// The full authored evaluator is retained for source inspection and as the
+    /// semantic reference for execution-plan differential tests.
     fn evaluate_nodes(&self, inputs: &Inputs, memory: &Registers, values: &mut Vec<Value>) {
         values.clear();
         // reserve() is relative to len (now zero), not to the existing capacity.
         values.reserve(self.nodes.len());
         for node in &self.nodes {
-            let value = match &node.op {
-                Op::Constant(value) => value.clone(),
-                Op::Sensor(sensor) => sensor.read(inputs),
-                Op::Register(key) => memory.read(*key),
-                Op::Populated(key) => Value::Boolean(memory.entries.contains_key(key)),
-                Op::Reference(i) => values[*i].clone(),
-                Op::Not(i) => Value::Boolean(!values[*i].boolean()),
-                Op::Negate(i) => match &values[*i] {
-                    Value::Integer(v) => Value::Integer(v.saturating_neg()),
-                    Value::Vector(v) => Value::Vector([-v[0], -v[1]]),
-                    v => Value::Scalar(-v.number()),
-                },
-                Op::Binary(op, a, b) => binary_value(*op, &values[*a], &values[*b], node.ty),
-                Op::Choose(condition, yes, no) => values[if values[*condition].boolean() {
-                    *yes
-                } else {
-                    *no
-                }]
-                .clone(),
-                Op::Call(function, args) => function.eval(args, values, node.ty),
-            };
-            values.push(value.convert(node.ty));
+            values.push(evaluate_operation(&node.op, node.ty, inputs, memory, values));
         }
     }
     fn output_value(&self, index: usize, values: &[Value]) -> Value {
-        self.output_roots[index].map_or_else(
+        Self::output_value_for(&self.output_roots, index, values)
+    }
+    fn output_value_for(
+        roots: &[Option<usize>; OUTPUT_COUNT],
+        index: usize,
+        values: &[Value],
+    ) -> Value {
+        roots[index].map_or_else(
             || output_default(index),
             |root| clamp_output(index, values[root].clone()),
         )
     }
-    fn outputs(&self, values: &[Value]) -> Outputs {
-        let number = |index| self.output_value(index, values).number();
-        let boolean = |index| self.output_value(index, values).boolean();
+    fn outputs_for(roots: &[Option<usize>; OUTPUT_COUNT], values: &[Value]) -> Outputs {
+        let output = |index| Self::output_value_for(roots, index, values);
+        let number = |index| output(index).number();
+        let boolean = |index| output(index).boolean();
         let mut body = BodyControls::default();
         for family in 0..FAMILY_COUNT {
             let start = BODY_OUTPUT_START + family * 4;
-            let Value::Integer(count) = self.output_value(start, values) else {
+            let Value::Integer(count) = output(start) else {
                 unreachable!()
             };
             body.target_counts[family] = count as u32;
@@ -2150,7 +2208,7 @@ impl Program {
             body.build[family] = number(start + 2);
             body.recycle[family] = number(start + 3);
         }
-        let Value::Text(scan_target) = self.output_value(SCAN_OUTPUT_START + 2, values) else {
+        let Value::Text(scan_target) = output(SCAN_OUTPUT_START + 2) else {
             unreachable!()
         };
         Outputs {
@@ -2958,12 +3016,12 @@ impl Parser {
                     .error(format!("missing required output '{name}'.")));
             }
         }
-        Ok(Program {
-            nodes: std::mem::take(&mut self.nodes),
-            bindings: std::mem::take(&mut self.binding_order),
-            output_roots: outputs,
+        Ok(Program::from_parts(
+            std::mem::take(&mut self.nodes),
+            std::mem::take(&mut self.binding_order),
+            outputs,
             writes,
-        })
+        ))
     }
     fn expression(&mut self, minimum: u8, depth: usize) -> Result<usize, CompileError> {
         if depth >= MAX_DEPTH {

@@ -1,159 +1,165 @@
 # Simulation performance
 
-## Changes made
+## What changed
 
-This pass removes repeated work while preserving the fixed 1/30-second timestep,
-phase order, physical rules, mutation behavior, and checkpoint/ABI formats.
+The engine keeps its fixed 1/30-second timestep, numerical operation order,
+resource arbitration, and existing physical rules. This second pass implements
+the four architectural directions identified in the first pass.
 
-- **One organ scan for family signals.** `Body::family_summaries()` replaces the
-  80 separate family scans previously needed for each cell's genome inputs. The
-  render snapshot also uses these summaries and derives capacities from them.
-  Per-family accumulation order and empty-family signed zeros are preserved.
-- **Reuse immutable capabilities and appearance.** A tick's initial capacities
-  serve allocation preflight, sensing and the existing action phases. Neighbor
-  appearance is calculated once per observed cell, rather than for every observer.
-  These values are local to the phase, so damage or construction cannot leave a
-  persistent cache stale.
-- **Avoid unused sensing work.** Light and heat gradients require their matching
-  sensors. Spatial sensing indexes are unnecessary when no relevant observer has
-  optical or mechanical hardware. Particle velocity is sampled only for the
-  returned contact/optical observations, since motion does not affect selection.
-- **Retain temporary allocations.** Field solves and genome evaluation reuse
-  storage across ticks. Construction reuses index/build/recycle vectors across
-  families; collision and secretion queries reuse candidate vectors across their
-  loops. Three organic decay factors are evaluated once per tick.
-- **Cheaper readiness checks.** Division feasibility shares the actual packing
-  algorithm without constructing daughter bodies or cloning organ records. The
-  packing index vector still allocates when packing is needed.
-- **Keep integer operations integer.** The evaluator uses direct conversions and
-  saturating arithmetic instead of redundant float roundtrips; scratch reservation
-  now uses the correct `Vec::reserve` semantics.
+1. **Reusable tick storage and explicit phases.** Inputs, outputs, capabilities,
+   tracking, resource requests, photon footprints, predation events, emissions,
+   spatial buckets and candidate lists retain their allocations. Observation
+   data is immutable while genomes evaluate. Geometry rebuilds after movement,
+   upkeep and digestion; collision pairs update cached and canonical positions
+   together while preserving the original frozen collision grid and pair order.
+   Later interaction passes index the settled positions. Construction, division
+   and compaction end that geometry's validity. Scratch is absent from saves,
+   starts empty on restore/reset, and survives rejected tick preflights.
+   Organic and thermal advection share exact same-time patch-center flow samples;
+   mineral transport retains its distinct face samples.
+2. **Separate presentation from inspection.** Drawing exports 21 doubles per cell
+   instead of the legacy 158. Particles still use five doubles each. Metrics are
+   a separate aggregate projection; a selected cell retains the complete legacy
+   row. Organs, memory and program inspection are requested separately. The UI
+   requests metrics and environmental overlays on their 250 ms cadence when
+   relevant, instead of reconstructing them with every frame.
+3. **One worker owns each simulation.** Engine commands, inspection and checkpoint
+   capture execute in order inside a dedicated module worker. Typed arrays and
+   checkpoints transfer to the UI. The animation loop allows one advancing batch
+   at a time, with batches capped at eight ticks; painting uses the last completed
+   frame. Checkpoint bytes and summary describe the same tick, and save revisions
+   cannot mark newer changes saved. This separates simulation work from UI work;
+   it does not parallelize the numerical engine.
+4. **Derived execution and compact spatial data.** A compiled genome plan keeps
+   dependencies of outputs, register writes and guards, skips unused bindings,
+   aliases references and folds constant-only subgraphs using the same typed
+   operations. The authored graph remains intact for inspection, mutation and
+   checkpoints. All register reads still see old memory; clears still win.
+   Contiguous geometry/capability arrays feed sensing, occlusion, collisions,
+   capture and contact targeting. Bodies and registers remain canonical cell
+   data; there is no wholesale entity-model replacement.
 
-Implementation: [body](engine/src/body.rs), [simulation](engine/src/simulation.rs),
-[fields](engine/src/environment.rs), and [genomes](engine/src/genome.rs).
+The earlier body summaries, cheaper division feasibility checks, gated sensing,
+shared evaluator buffers and construction-buffer reuse remain in place.
 
-## Measurements
+Sources: [simulation](engine/src/simulation.rs), [fields](engine/src/environment.rs),
+[execution plan](engine/src/genome/execution.rs),
+[presentation projections](engine/src/simulation/presentation.rs),
+[worker](src/simulation-worker-runtime.ts), [session](src/session.ts).
 
-| Workload | Before (ms/tick) | After (ms/tick) | Tick time change | Snapshot export before → after (ms) |
-| --- | ---: | ---: | ---: | ---: |
-| Mixed ecosystem (84 founders) | 5.50 | 5.22 | -5.1% | 0.765 → 0.681 |
-| 400 producers | 11.68 | 11.22 | -3.9% | 0.753 → 0.432 |
-| 80 foragers; 10,000 initial particles | 38.47 | 28.31 | -26.4% | 0.437 → 0.347 |
-| Fields only (heat, flow, mineral sources) | 1.99 | 2.01 | +1.2% | 0.600 → 0.616 |
+## Measurements against the first optimized version
 
-Negative changes mean less time per tick. The particle-heavy improvement is the
-largest result. The approximately 1% field-only difference is smaller than the
-run-to-run spread; this pass does not establish a field-solver throughput gain.
-The 4–5% population-workload gains are modest. Dense-world snapshot export
-uses about 43% less time.
+These comparisons are **phase one → this architecture pass**, not the original
+upload → final. The original comparison is preserved in
+[phase1-performance.json](experiments/phase1-performance.json).
 
-The included [comparison harness](scripts/benchmark-simulation.mjs) measures release
-WASM engines compiled with the same Rust toolchain. It uses seed 42, naturally
-grown cells, five repeated 300-tick windows, alternating engine order and a warm-up
-trajectory. Node runs with `--no-liftoff` to use the optimizing WASM compiler from
-the start rather than timing transitions between compilation tiers. Raw samples,
-engine hashes, final populations and runtime details are in
+| Workload | Phase one (ms/tick) | Current (ms/tick) | Observed tick-time change |
+| --- | ---: | ---: | ---: |
+| Mixed ecosystem: 84 founders | 5.124 | 4.430 | 13.5% less |
+| 400 producers | 11.010 | 10.965 | 0.4% less |
+| 80 foragers; 10,000 initial particles | 29.297 | 30.094 | 2.7% more |
+| Fields only | 2.010 | 1.917 | 4.6% less |
+
+The mixed workload improves clearly in these samples. Producer throughput is
+essentially unchanged. The particle-heavy median is slightly slower, with strongly
+overlapping samples: baseline 28.56–32.72 ms and current 28.01–30.33 ms. This run
+establishes no additional particle-throughput improvement. The field-only case has
+no organic material, so its small difference does not isolate the shared-flow
+optimization.
+
+### Presentation cost and size
+
+The following compares **current legacy world export → current compact drawing
+export**. Environmental data has a separate cadence and is excluded from this
+particular comparison.
+
+| Workload | Rust export (ms) | Payload (bytes) |
+| --- | ---: | ---: |
+| Mixed ecosystem | 0.0460 → 0.0150 | 111,776 → 18,616 |
+| 400 producers | 0.1775 → 0.0581 | 517,536 → 79,136 |
+| Particle-heavy | 0.0950 → 0.0674 | 483,176 → 395,496 |
+
+The cell-dense frame is about 85% smaller including particles. Particle-dense
+frames shrink less because particles retain their full representation. Metrics
+use 312–432 bytes in these populated worlds. A selected cell uses 1,264 bytes;
+its measured export is below 0.001 ms when selecting the first living row.
+Selecting another ID additionally incurs the existing linear lookup. Complete
+per-export samples and payloads are in
 [simulation-performance.json](experiments/simulation-performance.json).
 
-The timer covers WASM tick batches, excluding setup, checkpoint serialization,
-JavaScript snapshot-object construction and rendering. Rust world/environment
-snapshot exports have a separate timer. These results describe these workloads
-on this machine, not a browser FPS guarantee or a prediction for arbitrarily
-large ecosystems. Small percentage differences should be treated cautiously.
+An optional synthetic workload gives 80 cells a program with **512 unused dynamic
+bindings**. Its tick time falls from **13.383 to 0.371 ms (36.1×)** over three
+100-tick samples. This demonstrates eliminating dormant graph work, not an
+expected gain for ordinary presets. Its independent results are in
+[simulation-dormant-graph.json](experiments/simulation-dormant-graph.json).
 
-## Correctness checks
+### Method and limits
 
-- All 170 original native tests passed before editing; all 172 native tests pass
-  after the changes, including new summary-bit-equivalence and field-scratch
-  restore/reset regressions.
-- Actual WASM integration and loader/artifact checks pass, including checkpoint
-  replay, mutations, resource accounting, legacy-save handling and 2,049-cell
-  restoration.
-- Live program inspection, food-chain development/division and resistant-contact
-  navigation tests pass against the rebuilt WASM.
-- All four benchmark scenarios match sampled complete checkpoints and render
-  buffers exactly. The mixed run includes nine births, eight deaths and two
-  mutations, rather than only static populations.
-- TypeScript checking and the existing frontend production build pass. The source
-  package includes the updated engine and matching generated site assets.
+The harness uses release WASM, Node 24.22.1/V8 with `--no-liftoff`, seed 42, the same
+initial worlds and five repeated 300-tick windows. Engine order alternates.
+Setup, compilation/restoration and validation are outside tick timers. Export
+medians use 30 calls per sample. Raw samples, binary hashes, final populations,
+checkpoint hashes and payload sizes are recorded in the reports.
 
-The comparison checks complete checkpoint bytes every 120 warm-up ticks and at
-the end of the trial/measured intervals, plus exact world/environment render
-buffers. This tests substantially more state than population totals, but is
-sampled trajectory equivalence rather than a proof for every possible world.
-Scratch storage is omitted from checkpoints and starts empty when restoring.
+These timers cover WASM computation and export calls. They exclude JavaScript
+object construction/copying, worker scheduling/transfers, browser painting and
+input latency. They therefore do not measure the worker's responsiveness benefit
+or establish a browser FPS improvement. Small timing differences need caution.
 
-To reproduce:
+Derived plans consume memory. The live `genomeBytes` diagnostic now includes that
+storage; for the mixed run it changes from 199,058 to 293,010 bytes. The live
+registry budget counts this cost. Reusable buffers retain capacity until reset
+or disposal, exchanging retained storage for fewer allocations.
+The checkpoint format remains version 4, but a previous save or registry already
+near the existing 64 MiB live genome limit can now be rejected or reach the
+mutation limit earlier. Exact checkpoint equivalence in these measurements is
+for worlds below that limit.
+
+## Correctness and validation
+
+- **181 native tests pass**, including execution-plan equivalence, synchronous
+  register semantics, accounting, packing, sensing and checkpoint replay.
+- All four primary workloads and the dormant-graph workload match **complete
+  canonical checkpoint bytes** at sampled warm-up boundaries and after every
+  measured trajectory. The mixed run includes nine births, eight deaths and two
+  mutations.
+- Legacy world/environment buffers match exactly. Compact rendering, selected
+  detail and summary exports match their legacy projections. Metrics compare
+  every field; only header index 13, `genomeBytes`, is normalized for the known
+  runtime-storage accounting change. No checkpoint or physical state is
+  normalized. Export calls are verified to leave checkpoint bytes unchanged.
+- Reused workspace matches fresh checkpoint restores through population changes,
+  death and reset. Buffer-retention and failed-preflight tests pass.
+- Actual worker integration tests and asynchronous session tests pass, including
+  ordered commands, same-tick inspection/capture, partial failures and retries.
+- WASM/loader/artifact, inspection, language, graph, storage, food-chain and
+  navigation checks pass. TypeScript and the final Pages production build pass.
+- Browser smoke execution was blocked by this environment's browser/socket
+  restrictions. The included browser test was not counted as passed.
+
+This is sampled trajectory equivalence plus targeted invariant tests, not proof
+for every possible world or cross-platform floating-point identity.
+
+## Reproduce
+
+Build both versions with the same Rust toolchain, then run:
 
 ```sh
 npm run build:wasm
-npm run bench:simulation -- --baseline /path/to/original/engine/pkg/agar_engine.wasm --output experiments/comparison.json
+npm run bench:simulation -- --baseline /path/to/phase1/engine/pkg/agar_engine.wasm --output experiments/comparison.json --samples 5 --ticks 300
+npm run bench:simulation -- --baseline /path/to/phase1/engine/pkg/agar_engine.wasm --scenario dormant-graph --samples 3 --ticks 100 --output experiments/dormant-comparison.json
 ```
 
-Rebuild the original engine with the same compiler before comparing. Optional
-arguments are `--scenario mixed-ecosystem|dense-producers|particle-heavy|dynamic-fields`,
-`--samples N` and `--ticks N`. Without `--baseline`, the harness measures the current
-engine alone.
+`--scenario` also accepts `mixed-ecosystem`, `dense-producers`, `particle-heavy`
+and `dynamic-fields`. Without it, the four ordinary workloads run. Without
+`--baseline`, the harness measures the current engine and checks its projections.
 
-## Architecture and recommended direction
+## Next performance work
 
-The existing structure is a reasonable foundation. Rust owns a `World` containing
-cell and particle vectors, dense environmental fields, per-cell organelle vectors
-and sparse typed registers. Genomes are immutable, topologically ordered
-expression graphs. A wrapped 20×13 spatial grid narrows interaction queries.
-
-Each tick updates fields and particle decay, freezes observations and capabilities,
-evaluates genomes and commits memory, then performs movement/upkeep, digestion,
-mineral uptake, collisions, feeding, photosynthesis, predation, construction,
-division and death. Several actions intentionally use capabilities from the start
-of the tick. New organs cannot retroactively act earlier in that tick.
-
-### 1. Extend reusable storage and explicit phase summaries
-
-Give the tick a reusable workspace for remaining inputs, outputs, request lists
-and spatial buckets. Define when each summary/index is valid. Rebuild after
-movement, collision displacement or population compaction where necessary; retain
-bucket capacity even when contents must change. Keep stable arbitration and
-floating-point accumulation order. Measure phase times, allocation counts,
-spatial candidate counts and occlusion tests to choose the next target.
-
-For environmental fields, organic and thermal advection evaluate flow at the same
-patch centers and time. Sharing those exact evaluations is a possible next step.
-Mineral fluxes use edge positions, and rendering uses a later simulation time, so
-those flow samples cannot all share one indiscriminate cache.
-
-### 2. Separate presentation data from detailed inspection
-
-`SimulationSession.advance()` currently refreshes the entire world after every
-batch. `Engine.snapshot()` reads 158 doubles per cell, builds 16 organelle objects
-per cell, reconstructs every particle and environmental sample, and recomputes
-resource totals. Most of that is unnecessary for drawing a frame.
-
-Use a compact rendering snapshot for positions and visible appearance; refresh
-metrics on their existing 250 ms UI cadence, and request organs, memory and
-program values only for the selected cell. Keep complete checkpoints for saving.
-The relevant code is [engine.ts](src/engine.ts), [session.ts](src/session.ts) and
-[app.ts](src/app.ts). No frontend behavior was changed in this pass.
-
-### 3. Move engine ownership to a Web Worker
-
-The main animation callback synchronously runs up to 30 ticks before rendering.
-Moving simulation and checkpoint serialization to a dedicated worker would let
-controls and painting respond while the engine works. Keep commands ordered,
-transfer bounded snapshots, and apply backpressure. This improves responsiveness;
-it does not inherently reduce the computation required by a tick. Preserve the
-30 Hz numerical timestep independently of display frequency.
-
-### 4. Optimize execution and layout where measurements justify it
-
-The genome evaluator already walks a flat graph. A later derived execution plan
-could skip unused bindings and precompute constant-only expressions, while keeping
-the original graph intact for mutation, source spans and inspection. Output roots,
-register values and guards must retain their synchronous semantics.
-
-For large populations, separate frequently accessed geometry/capabilities into
-contiguous arrays before considering a wholesale data-model rewrite. Profile
-optical candidates and occlusion searches as density rises. Independent sensing,
-genome evaluation and field preparation are possible parallel stages; resource
-arbitration, collisions and predation require deliberate deterministic resolution.
-These are follow-up directions, not implemented changes or promised speedups.
+Profile phase time and candidate/allocation counts before another broad rewrite.
+The remaining concrete candidates are organ construction's repeated family scans
+and resource-allocation loop, arbitrary-position particle flow sampling, and
+optical candidate/occlusion work as local density rises. Keep their accumulation,
+arbitration and torus semantics explicit. The producer and particle results show
+why these workloads need their own measurements: cheaper presentation, dormant
+graph execution and a worker do not automatically make every physical tick faster.

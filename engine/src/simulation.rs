@@ -13,6 +13,7 @@ use std::f64::consts::{PI, TAU};
 use std::fmt::Write;
 use std::rc::Rc;
 mod checkpoint;
+mod presentation;
 #[cfg(test)]
 mod sensing_tests;
 
@@ -166,6 +167,11 @@ impl Rng {
 struct Grid {
     buckets: [Vec<usize>; GRID_BUCKETS],
 }
+impl Default for Grid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl Grid {
     fn new() -> Self {
         Self {
@@ -179,6 +185,23 @@ impl Grid {
     }
     fn insert(&mut self, x: f64, y: f64, id: usize) {
         self.buckets[Self::index(x, y)].push(id);
+    }
+    fn clear(&mut self) {
+        for bucket in &mut self.buckets {
+            bucket.clear();
+        }
+    }
+    fn index_cells(&mut self, geometry: &CellGeometry) -> f64 {
+        self.clear();
+        let mut max_radius: f64 = 0.0;
+        for i in 0..geometry.ids.len() {
+            if geometry.alive[i] {
+                let [x, y] = geometry.positions[i];
+                self.insert(x, y, i);
+                max_radius = max_radius.max(geometry.radii[i]);
+            }
+        }
+        max_radius
     }
     fn relocate(&mut self, from: (f64, f64), to: (f64, f64), id: usize) {
         let old = Self::index(from.0, from.1);
@@ -433,6 +456,96 @@ pub struct Food {
     pub nutrients: f64,
 }
 
+/// Compact columns used by spatial passes. Canonical cells retain their bodies,
+/// memory and resources; these values are rebuilt at explicit phase boundaries.
+#[derive(Default)]
+struct CellGeometry {
+    ids: Vec<u32>,
+    positions: Vec<[f64; 2]>,
+    velocities: Vec<[f64; 2]>,
+    radii: Vec<f64>,
+    areas: Vec<f64>,
+    angles: Vec<f64>,
+    alive: Vec<bool>,
+    pigments: Vec<f64>,
+    inertia: Vec<f64>,
+}
+impl CellGeometry {
+    fn rebuild(&mut self, cells: &[Cell], appearance: bool, inertia: bool) {
+        self.ids.clear();
+        self.positions.clear();
+        self.velocities.clear();
+        self.radii.clear();
+        self.areas.clear();
+        self.angles.clear();
+        self.alive.clear();
+        self.pigments.clear();
+        self.inertia.clear();
+        for cell in cells {
+            self.ids.push(cell.id);
+            self.positions.push([cell.x, cell.y]);
+            self.velocities.push([cell.vx, cell.vy]);
+            self.radii.push(cell.radius());
+            self.areas.push(cell.body.area);
+            self.angles.push(cell.angle);
+            self.alive.push(cell.alive());
+            self.pigments.push(if appearance {
+                (cell.body.functional_mass(Kind::Photosynthetic) / cell.body.structural_mass()
+                    * 2.0)
+                    .clamp(0.0, 1.0)
+            } else {
+                0.0
+            });
+            self.inertia
+                .push(if inertia { cell.inertia() } else { 0.0 });
+        }
+    }
+}
+
+#[derive(Default)]
+struct ObservationWorkspace {
+    inputs: Vec<Inputs>,
+    tracking: Vec<Tracking>,
+    geometry: CellGeometry,
+    cell_grid: Grid,
+    food_grid: Grid,
+}
+
+#[derive(Default)]
+struct PhaseWorkspace {
+    geometry: CellGeometry,
+    cell_grid: Grid,
+    food_grid: Grid,
+    candidates: Vec<usize>,
+    nearby: Vec<usize>,
+    groups: Vec<Vec<(usize, f64)>>,
+    photo_requests: Vec<(usize, usize, f64)>,
+    footprint: Vec<(usize, f64)>,
+    totals: Vec<f64>,
+    gains: Vec<f64>,
+    exudates: Vec<(usize, f64, f64, f64, f64, f64)>,
+    emissions: Vec<OrganicEmission>,
+    targets: Vec<Option<usize>>,
+    consumed: Vec<bool>,
+    order: Vec<usize>,
+    events: Vec<(usize, usize, f64)>,
+    damage: Vec<f64>,
+    removed: Vec<(f64, f64)>,
+    meals: Vec<(f64, f64)>,
+    requests: Vec<f64>,
+    budgets: Vec<f64>,
+}
+
+/// Reusable derived storage is not part of the checkpoint or simulated state.
+#[derive(Default)]
+struct TickWorkspace {
+    capacities: Vec<BodyCapacities>,
+    observations: ObservationWorkspace,
+    outputs: Vec<Outputs>,
+    processing: Vec<f64>,
+    phases: PhaseWorkspace,
+}
+
 pub struct World {
     pub cells: Vec<Cell>,
     pub food: Vec<Food>,
@@ -457,6 +570,7 @@ pub struct World {
     seed: u32,
     // Derived evaluation storage is reusable, never serialized as world state.
     eval_scratch: EvalScratch,
+    workspace: TickWorkspace,
 }
 impl World {
     pub fn empty(seed: u32) -> Self {
@@ -483,6 +597,7 @@ impl World {
             rng: Rng::new(seed),
             seed,
             eval_scratch: EvalScratch::default(),
+            workspace: TickWorkspace::default(),
         }
     }
     pub fn reset(&mut self, seed: u32, genome_id: u32) {
@@ -703,41 +818,46 @@ impl World {
     }
     fn observations(&self, selected: Option<usize>) -> (Vec<Inputs>, Vec<Tracking>) {
         let caps: Vec<_> = self.cells.iter().map(|c| c.body.capacities()).collect();
-        self.observations_with_capacities(selected, &caps)
+        let mut workspace = ObservationWorkspace::default();
+        self.observations_into(selected, &caps, &mut workspace);
+        (workspace.inputs, workspace.tracking)
     }
-    fn observations_with_capacities(
+    fn observations_into(
         &self,
         selected: Option<usize>,
         capacities: &[BodyCapacities],
-    ) -> (Vec<Inputs>, Vec<Tracking>) {
-        let mut cell_grid = Grid::new();
-        let mut food_grid = Grid::new();
+        workspace: &mut ObservationWorkspace,
+    ) {
+        let ObservationWorkspace {
+            inputs: result,
+            tracking: tracks,
+            geometry,
+            cell_grid,
+            food_grid,
+        } = workspace;
+        cell_grid.clear();
+        food_grid.clear();
         let mut max_radius: f64 = 0.0;
         let spatial_sensing = capacities.iter().enumerate().any(|(i, caps)| {
             selected.is_none_or(|which| which == i)
                 && (caps.optical_sensing > 0.0 || caps.mechanical_sensing > 0.0)
         });
         if spatial_sensing {
-            for (i, c) in self.cells.iter().enumerate() {
-                if c.alive() {
-                    cell_grid.insert(c.x, c.y, i);
-                    max_radius = max_radius.max(c.radius());
-                }
-            }
+            geometry.rebuild(&self.cells, true, false);
+            max_radius = cell_grid.index_cells(geometry);
             for (i, f) in self.food.iter().enumerate() {
                 food_grid.insert(f.x, f.y, i);
             }
         }
-        // Compute a target's appearance at most once in this immutable phase.
-        // Worlds without physical sensors need neither the index nor this cache.
-        let mut appearances = vec![None; if spatial_sensing { self.cells.len() } else { 0 }];
+        // The geometry columns stay immutable throughout observation. Worlds
+        // without physical sensors skip this spatial snapshot entirely.
         let count = if selected.is_some() {
             1
         } else {
             self.cells.len()
         };
-        let mut result = Vec::with_capacity(count);
-        let mut tracks = Vec::with_capacity(count);
+        result.clear();
+        tracks.resize_with(count, Tracking::default);
         for (index, cell) in self.cells.iter().enumerate() {
             if selected.is_some_and(|which| which != index) {
                 continue;
@@ -876,7 +996,9 @@ impl World {
                 };
             }
             input.object_available = caps.optical_sensing > 0.0;
-            let mut tracking = cell.tracking.clone();
+            let tracking = &mut tracks[result.len()];
+            tracking.entries.clone_from(&cell.tracking.entries);
+            tracking.next_serial = cell.tracking.next_serial;
             tracking
                 .entries
                 .retain(|e| self.ticks.saturating_sub(e.seen) <= TRACK_TTL);
@@ -932,7 +1054,7 @@ impl World {
                         };
                         if object.as_ref().is_none_or(|(old, best)| {
                             score > *best || (score == *best && o.entity < old.entity)
-                        }) && self.optical_line_clear(index, &o, &cell_grid, max_radius)
+                        }) && self.optical_line_clear(index, &o, cell_grid, max_radius, geometry)
                         {
                             object = Some((o, score));
                         }
@@ -940,26 +1062,21 @@ impl World {
                 };
                 let reach = (caps.optical_range + max_radius).max(cell.radius() + max_radius + 1.0);
                 for i in cell_grid.nearby_radius(cell.x, cell.y, reach) {
-                    let c = &self.cells[i];
-                    if c.id == cell.id {
+                    if geometry.ids[i] == cell.id {
                         continue;
                     }
-                    let (radius, pigment) = *appearances[i].get_or_insert_with(|| {
-                        let pigment = (c.body.functional_mass(Kind::Photosynthetic)
-                            / c.body.structural_mass()
-                            * 2.0)
-                            .clamp(0.0, 1.0);
-                        (c.radius(), pigment)
-                    });
+                    let [x, y] = geometry.positions[i];
+                    let [vx, vy] = geometry.velocities[i];
+                    let pigment = geometry.pigments[i];
                     consider(Observation {
-                        entity: (c.id as u64) << 1,
-                        dx: delta(c.x - cell.x, WIDTH),
-                        dy: delta(c.y - cell.y, HEIGHT),
-                        radius,
-                        area: c.body.area,
+                        entity: (geometry.ids[i] as u64) << 1,
+                        dx: delta(x - cell.x, WIDTH),
+                        dy: delta(y - cell.y, HEIGHT),
+                        radius: geometry.radii[i],
+                        area: geometry.areas[i],
                         contrast: 0.45 + 0.4 * pigment,
                         pigment,
-                        motion: ObservedMotion::Relative(c.vx - cell.vx, c.vy - cell.vy),
+                        motion: ObservedMotion::Relative(vx - cell.vx, vy - cell.vy),
                         resistance: capacities[i].protection + 0.15,
                     });
                 }
@@ -1018,9 +1135,7 @@ impl World {
                 }
             }
             result.push(input);
-            tracks.push(tracking);
         }
-        (result, tracks)
     }
     /// Center-ray occlusion on the same wrapped geometry as sensing/collision.
     /// Query the ray's local bounding disk, then test each actual cell circle.
@@ -1032,20 +1147,22 @@ impl World {
         target: &Observation,
         grid: &Grid,
         max_radius: f64,
+        geometry: &CellGeometry,
     ) -> bool {
-        let cell = &self.cells[observer];
+        let [x, y] = geometry.positions[observer];
         let length_squared = target.dx * target.dx + target.dy * target.dy;
-        let midpoint_x = wrap(cell.x + target.dx * 0.5, WIDTH);
-        let midpoint_y = wrap(cell.y + target.dy * 0.5, HEIGHT);
+        let midpoint_x = wrap(x + target.dx * 0.5, WIDTH);
+        let midpoint_y = wrap(y + target.dy * 0.5, HEIGHT);
         let reach = length_squared.sqrt() * 0.5 + max_radius;
         for index in grid.nearby_radius(midpoint_x, midpoint_y, reach) {
-            let occluder = &self.cells[index];
-            if index == observer || (occluder.id as u64) << 1 == target.entity || !occluder.alive()
+            if index == observer
+                || (geometry.ids[index] as u64) << 1 == target.entity
+                || !geometry.alive[index]
             {
                 continue;
             }
-            let dx = delta(occluder.x - cell.x, WIDTH);
-            let dy = delta(occluder.y - cell.y, HEIGHT);
+            let dx = delta(geometry.positions[index][0] - x, WIDTH);
+            let dy = delta(geometry.positions[index][1] - y, HEIGHT);
             let t = if length_squared > 1e-12 {
                 ((dx * target.dx + dy * target.dy) / length_squared).clamp(0.0, 1.0)
             } else {
@@ -1053,7 +1170,8 @@ impl World {
             };
             let nearest_x = dx - t * target.dx;
             let nearest_y = dy - t * target.dy;
-            if nearest_x * nearest_x + nearest_y * nearest_y + 1e-9 < occluder.radius().powi(2) {
+            if nearest_x * nearest_x + nearest_y * nearest_y + 1e-9 < geometry.radii[index].powi(2)
+            {
                 return false;
             }
         }
@@ -1064,6 +1182,25 @@ impl World {
             .expect("Unable to advance simulation")
     }
     pub fn try_step(&mut self, genomes: &mut Vec<Genome>) -> Result<(), String> {
+        // Keep the workspace even when a preflight returns an error. All fallible
+        // paths live inside try_step_in; this wrapper always restores the buffers.
+        let mut workspace = std::mem::take(&mut self.workspace);
+        let result = self.try_step_in(genomes, &mut workspace);
+        self.workspace = workspace;
+        result
+    }
+    fn try_step_in(
+        &mut self,
+        genomes: &mut Vec<Genome>,
+        workspace: &mut TickWorkspace,
+    ) -> Result<(), String> {
+        let TickWorkspace {
+            capacities: caps,
+            observations,
+            outputs,
+            processing,
+            phases,
+        } = workspace;
         let remaining = (u32::MAX - self.next_id) as usize;
         // Births require readiness in the frozen starting snapshot. Reserve the
         // maximum eligible set before fields, memory, RNG or resources advance.
@@ -1093,11 +1230,12 @@ impl World {
         }
         // Fields and particle decay do not change bodies. Reuse these frozen
         // capacities for preflight, sensing, and the existing action phases.
-        let caps: Vec<_> = self.cells.iter().map(|c| c.body.capacities()).collect();
+        caps.clear();
+        caps.extend(self.cells.iter().map(|c| c.body.capacities()));
         let packet_energy: f64 = self
             .cells
             .iter()
-            .zip(&caps)
+            .zip(caps.iter())
             .map(|(c, cap)| {
                 c.energy.max(0.0)
                     + c.gut_energy
@@ -1128,22 +1266,26 @@ impl World {
         })?;
         self.environment.step(self.time());
         self.decay_food();
-        let (inputs, tracking) = self.observations_with_capacities(None, &caps);
+        // Phase 1: one immutable observation/capability snapshot. Memory and
+        // tracking commit only after every cell has observed that same world.
+        self.observations_into(None, caps, observations);
+        let inputs = &observations.inputs;
         let scratch = &mut self.eval_scratch;
-        let outputs: Vec<_> = self
-            .cells
-            .iter_mut()
-            .zip(&inputs)
-            .zip(tracking)
-            .map(|((c, input), tracks)| {
-                c.tracking = tracks;
-                genomes[(c.genome_id - 1) as usize].program.evaluate_cell(
-                    input,
-                    &mut c.memory,
-                    scratch,
-                )
-            })
-            .collect();
+        outputs.clear();
+        outputs.extend(
+            self.cells
+                .iter_mut()
+                .zip(inputs)
+                .zip(observations.tracking.iter_mut())
+                .map(|((c, input), tracks)| {
+                    std::mem::swap(&mut c.tracking, tracks);
+                    genomes[(c.genome_id - 1) as usize].program.evaluate_cell(
+                        input,
+                        &mut c.memory,
+                        scratch,
+                    )
+                }),
+        );
         let time = self.time();
         for (i, cell) in self.cells.iter_mut().enumerate() {
             let output = &outputs[i];
@@ -1198,18 +1340,24 @@ impl World {
             cell.integrity = (cell.integrity - stress).max(0.0);
             cell.body.damage(stress);
         }
-        let mut processing: Vec<_> = caps.iter().map(|c| c.metabolism * DT).collect();
-        self.digest(&outputs, &caps, &mut processing);
-        self.absorb_nutrients(&outputs, &caps);
+        processing.clear();
+        processing.extend(caps.iter().map(|c| c.metabolism * DT));
+        self.digest_in(outputs, caps, processing, phases);
+        self.absorb_nutrients_in(outputs, caps, phases);
         for food in &mut self.food {
             let (vx, vy) = self.environment.flow_at(food.x, food.y, time);
             food.x = wrap(food.x + vx * DT, WIDTH);
             food.y = wrap(food.y + vy * DT, HEIGHT);
         }
-        self.resolve_collisions();
-        self.eat(&outputs, &caps);
-        self.photosynthesize(&outputs, &caps, &mut processing);
-        let consumed = self.resolve_predation(&outputs, &caps);
+        // Phase 2: rebuild geometry after movement, maintenance and digestion.
+        // Collisions update these columns in pair order while their grid stays
+        // frozen. Capture and target selection then index the settled positions.
+        self.resolve_collisions_in(phases);
+        self.eat_in(outputs, caps, phases);
+        self.photosynthesize_in(outputs, caps, processing, phases);
+        self.resolve_predation_in(outputs, caps, phases);
+        // Phase 3: damage, construction and births use canonical cells. Geometry
+        // from the interaction phase is invalid beyond this boundary.
         for (i, cell) in self.cells.iter_mut().enumerate() {
             if !cell.alive() {
                 continue;
@@ -1240,7 +1388,7 @@ impl World {
             cell.recycling_rate = report.recycled_mass / DT;
             cell.repair_rate = report.repaired_mass / DT;
         }
-        self.spill_excess_stores();
+        self.spill_excess_stores_in(phases);
         let originals = self.cells.len();
         for i in 0..originals {
             if !outputs[i].divide
@@ -1318,13 +1466,13 @@ impl World {
         }
         // Uneven, discrete compartment inheritance can reduce capacity; transfer
         // overflow to the local environment rather than cloning a compartment.
-        self.spill_excess_stores();
-        let mut remains = Vec::new();
+        self.spill_excess_stores_in(phases);
+        phases.emissions.clear();
         for (i, c) in self.cells.iter().enumerate().take(originals) {
-            if c.alive() || consumed[i] {
+            if c.alive() || phases.consumed[i] {
                 continue;
             }
-            remains.push(OrganicEmission::new(
+            phases.emissions.push(OrganicEmission::new(
                 OrganicKind::Tissue,
                 c.x,
                 c.y,
@@ -1333,7 +1481,7 @@ impl World {
             ));
             for kind in OrganicKind::ALL {
                 let pool = c.gut[kind as usize];
-                remains.push(OrganicEmission::new(
+                phases.emissions.push(OrganicEmission::new(
                     kind,
                     c.x,
                     c.y,
@@ -1342,7 +1490,7 @@ impl World {
                 ));
             }
         }
-        self.emit_organic_batch(remains);
+        self.emit_organic_pending(phases);
         let before = self.cells.len();
         self.cells.retain(Cell::alive);
         self.deaths += (before - self.cells.len()) as u64;
@@ -1374,8 +1522,17 @@ impl World {
             }
         });
     }
-    fn absorb_nutrients(&mut self, outputs: &[Outputs], caps: &[BodyCapacities]) {
-        let mut groups: Vec<Vec<(usize, f64)>> = vec![Vec::new(); PATCHES];
+    fn absorb_nutrients_in(
+        &mut self,
+        outputs: &[Outputs],
+        caps: &[BodyCapacities],
+        workspace: &mut PhaseWorkspace,
+    ) {
+        let groups = &mut workspace.groups;
+        groups.resize_with(PATCHES, Vec::new);
+        for group in groups.iter_mut() {
+            group.clear();
+        }
         for (i, c) in self.cells.iter().enumerate() {
             if !c.alive() {
                 continue;
@@ -1407,8 +1564,15 @@ impl World {
             self.environment.recycle_nutrients(c.x, c.y, remaining);
         }
     }
-    fn digest(&mut self, outputs: &[Outputs], caps: &[BodyCapacities], processing: &mut [f64]) {
-        let mut residues = Vec::new();
+    fn digest_in(
+        &mut self,
+        outputs: &[Outputs],
+        caps: &[BodyCapacities],
+        processing: &mut [f64],
+        workspace: &mut PhaseWorkspace,
+    ) {
+        let residues = &mut workspace.emissions;
+        residues.clear();
         for (i, c) in self.cells.iter_mut().enumerate() {
             if !c.alive() || outputs[i].feed <= 0.0 || c.gut_energy <= 0.0 {
                 continue;
@@ -1487,10 +1651,11 @@ impl World {
             c.digestion_rate = useful_total / DT;
             processing[i] = (processing[i] - work.iter().sum::<f64>()).max(0.0);
         }
-        self.emit_organic_batch(residues);
+        self.emit_organic_pending(workspace);
     }
-    fn spill_excess_stores(&mut self) {
-        let mut spills = Vec::new();
+    fn spill_excess_stores_in(&mut self, workspace: &mut PhaseWorkspace) {
+        let spills = &mut workspace.emissions;
+        spills.clear();
         for c in &mut self.cells {
             if !c.alive() {
                 continue;
@@ -1532,16 +1697,27 @@ impl World {
             }
             c.scale_gut(kept);
         }
-        self.emit_organic_batch(spills);
+        self.emit_organic_pending(workspace);
     }
-    fn photosynthesize(
+    fn photosynthesize_in(
         &mut self,
         outputs: &[Outputs],
         caps: &[BodyCapacities],
         processing: &mut [f64],
+        workspace: &mut PhaseWorkspace,
     ) {
-        let mut requests = Vec::new();
-        let mut totals = vec![0.0; PATCHES];
+        let PhaseWorkspace {
+            photo_requests: requests,
+            footprint,
+            totals,
+            gains,
+            exudates,
+            emissions,
+            ..
+        } = workspace;
+        requests.clear();
+        totals.resize(PATCHES, 0.0);
+        totals.fill(0.0);
         for (i, c) in self.cells.iter().enumerate() {
             if !c.alive() {
                 continue;
@@ -1551,7 +1727,8 @@ impl World {
             if capacity <= 0.0 {
                 continue;
             }
-            for (patch, weight) in photon_footprint(c.x, c.y, c.body.area) {
+            photon_footprint_into(c.x, c.y, c.body.area, footprint);
+            for &(patch, weight) in footprint.iter() {
                 let request = capacity * weight * self.environment.patch_light(patch);
                 if request > 0.0 {
                     requests.push((i, patch, request));
@@ -1559,13 +1736,14 @@ impl World {
                 }
             }
         }
-        let mut gains = vec![0.0; self.cells.len()];
-        for (i, patch, request) in requests {
+        gains.resize(self.cells.len(), 0.0);
+        gains.fill(0.0);
+        for &(i, patch, request) in requests.iter() {
             let supply =
                 PHOTO_HABITAT_POWER / PATCHES as f64 * self.environment.patch_light(patch) * DT;
             gains[i] += request * (supply / totals[patch]).min(1.0);
         }
-        let mut exudates = Vec::new();
+        exudates.clear();
         for (i, c) in self.cells.iter_mut().enumerate() {
             let gain = gains[i];
             if gain <= 0.0 {
@@ -1579,8 +1757,8 @@ impl World {
             self.photosynthesis_total += gain;
             exudates.push((i, c.x, c.y, c.radius(), c.angle, gain - retained));
         }
-        let mut emissions = Vec::with_capacity(exudates.len());
-        for (i, x, y, r, a, energy) in exudates {
+        emissions.clear();
+        for &(i, x, y, r, a, energy) in exudates.iter() {
             let mut emission = OrganicEmission::new(
                 OrganicKind::Exudate,
                 x + (r + 2.5) * a.cos(),
@@ -1592,54 +1770,70 @@ impl World {
             emissions.push(emission);
             self.cells[i].exudation_rate = energy / DT;
         }
-        self.emit_organic_batch(emissions);
+        self.emit_organic_pending(workspace);
     }
-    fn physical_targets(&self, caps: &[BodyCapacities]) -> Vec<Option<usize>> {
-        let mut grid = Grid::new();
-        let mut max_radius: f64 = 0.0;
-        for (i, c) in self.cells.iter().enumerate() {
-            if c.alive() {
-                grid.insert(c.x, c.y, i);
-                max_radius = max_radius.max(c.radius());
+    fn physical_targets(&self, caps: &[BodyCapacities], workspace: &mut PhaseWorkspace) {
+        let PhaseWorkspace {
+            geometry,
+            cell_grid: grid,
+            targets,
+            ..
+        } = workspace;
+        let max_radius = grid.index_cells(geometry);
+        targets.resize(geometry.ids.len(), None);
+        targets.fill(None);
+        for i in 0..geometry.ids.len() {
+            if !geometry.alive[i] || (caps[i].capture == 0.0 && caps[i].piercing == 0.0) {
+                continue;
             }
+            let [x, y] = geometry.positions[i];
+            let reach = 0.75 + 12.0 * caps[i].piercing.sqrt();
+            let mut target = None;
+            let mut best = f64::INFINITY;
+            for j in grid.nearby_radius(x, y, geometry.radii[i] + max_radius + reach) {
+                if i == j || !geometry.alive[j] {
+                    continue;
+                }
+                let dx = delta(geometry.positions[j][0] - x, WIDTH);
+                let dy = delta(geometry.positions[j][1] - y, HEIGHT);
+                let gap = dx.hypot(dy) - geometry.radii[i] - geometry.radii[j];
+                if gap > reach || relative_angle(dy.atan2(dx) - geometry.angles[i]).abs() > PI * 0.6
+                {
+                    continue;
+                }
+                if gap < best
+                    || (gap == best
+                        && target.is_none_or(|old: usize| geometry.ids[j] < geometry.ids[old]))
+                {
+                    best = gap;
+                    target = Some(j);
+                }
+            }
+            targets[i] = target;
         }
-        self.cells
-            .iter()
-            .enumerate()
-            .map(|(i, c)| {
-                if !c.alive() || (caps[i].capture == 0.0 && caps[i].piercing == 0.0) {
-                    return None;
-                }
-                let reach = 0.75 + 12.0 * caps[i].piercing.sqrt();
-                let mut target = None;
-                let mut best = f64::INFINITY;
-                for j in grid.nearby_radius(c.x, c.y, c.radius() + max_radius + reach) {
-                    let b = &self.cells[j];
-                    if i == j || !b.alive() {
-                        continue;
-                    }
-                    let dx = delta(b.x - c.x, WIDTH);
-                    let dy = delta(b.y - c.y, HEIGHT);
-                    let gap = dx.hypot(dy) - c.radius() - b.radius();
-                    if gap > reach || relative_angle(dy.atan2(dx) - c.angle).abs() > PI * 0.6 {
-                        continue;
-                    }
-                    if gap < best
-                        || (gap == best
-                            && target.is_none_or(|old: usize| b.id < self.cells[old].id))
-                    {
-                        best = gap;
-                        target = Some(j);
-                    }
-                }
-                target
-            })
-            .collect()
     }
-    fn resolve_predation(&mut self, outputs: &[Outputs], caps: &[BodyCapacities]) -> Vec<bool> {
-        let targets = self.physical_targets(caps);
-        let mut consumed = vec![false; self.cells.len()];
-        let mut order: Vec<_> = (0..self.cells.len()).collect();
+    fn resolve_predation_in(
+        &mut self,
+        outputs: &[Outputs],
+        caps: &[BodyCapacities],
+        workspace: &mut PhaseWorkspace,
+    ) {
+        self.physical_targets(caps, workspace);
+        let PhaseWorkspace {
+            targets,
+            consumed,
+            order,
+            events,
+            damage,
+            removed,
+            meals,
+            requests,
+            ..
+        } = workspace;
+        consumed.resize(self.cells.len(), false);
+        consumed.fill(false);
+        order.clear();
+        order.extend(0..self.cells.len());
         order.sort_by(|&a, &b| {
             self.cells[b]
                 .body
@@ -1647,7 +1841,7 @@ impl World {
                 .total_cmp(&self.cells[a].body.area)
                 .then_with(|| self.cells[a].id.cmp(&self.cells[b].id))
         });
-        for i in order {
+        for i in order.iter().copied() {
             if !outputs[i].engulf
                 || outputs[i].feed <= 0.0
                 || !self.cells[i].alive()
@@ -1693,7 +1887,7 @@ impl World {
             consumed[j] = true;
             self.predations += 1;
         }
-        let mut events = Vec::new();
+        events.clear();
         for i in 0..self.cells.len() {
             if !self.cells[i].alive() || outputs[i].bite <= 0.0 || caps[i].piercing <= 0.0 {
                 continue;
@@ -1717,9 +1911,12 @@ impl World {
             }
         }
         events.sort_by_key(|&(j, i, _)| (self.cells[j].id, self.cells[i].id));
-        let mut damage = vec![0.0; self.cells.len()];
-        let mut removed = vec![(0.0, 0.0); self.cells.len()];
-        let mut meals = vec![(0.0, 0.0); self.cells.len()];
+        damage.resize(self.cells.len(), 0.0);
+        damage.fill(0.0);
+        removed.resize(self.cells.len(), (0.0, 0.0));
+        removed.fill((0.0, 0.0));
+        meals.resize(self.cells.len(), (0.0, 0.0));
+        meals.fill((0.0, 0.0));
         let mut start = 0;
         while start < events.len() {
             let victim = events[start].0;
@@ -1733,22 +1930,20 @@ impl World {
             damage[victim] = actual;
             let fraction = if total > 0.0 { actual / total } else { 0.0 };
             let victim_cell = &self.cells[victim];
-            let requests: Vec<_> = group
-                .iter()
-                .map(|&(_, attacker, inflicted)| {
-                    let raw = 80.0
-                        * inflicted
-                        * fraction
-                        * victim_cell.body.structural_mass()
-                        * outputs[attacker].feed;
-                    let minerals = if victim_cell.energy > 0.0 {
-                        victim_cell.nutrient_stored * raw / victim_cell.energy
-                    } else {
-                        0.0
-                    };
-                    raw * self.cells[attacker].gut_fraction_for(raw, minerals, &caps[attacker])
-                })
-                .collect();
+            requests.clear();
+            requests.extend(group.iter().map(|&(_, attacker, inflicted)| {
+                let raw = 80.0
+                    * inflicted
+                    * fraction
+                    * victim_cell.body.structural_mass()
+                    * outputs[attacker].feed;
+                let minerals = if victim_cell.energy > 0.0 {
+                    victim_cell.nutrient_stored * raw / victim_cell.energy
+                } else {
+                    0.0
+                };
+                raw * self.cells[attacker].gut_fraction_for(raw, minerals, &caps[attacker])
+            }));
             let demand: f64 = requests.iter().sum();
             let pool = demand.min(victim_cell.energy);
             let scale = if demand > 0.0 { pool / demand } else { 0.0 };
@@ -1757,7 +1952,7 @@ impl World {
             } else {
                 0.0
             };
-            for ((_, attacker, _), request) in group.iter().zip(requests) {
+            for ((_, attacker, _), request) in group.iter().zip(requests.iter()) {
                 let energy = request * scale;
                 let minerals = energy * mineral_ratio;
                 meals[*attacker].0 += energy;
@@ -1783,23 +1978,28 @@ impl World {
                 }
             }
         }
-        consumed
     }
     /// Merge locally within a substrate. Building the index once per batch
     /// avoids one full particle scan for every photosynthesizing cell.
-    fn emit_organic_batch(&mut self, emissions: Vec<OrganicEmission>) {
+    fn emit_organic_pending(&mut self, workspace: &mut PhaseWorkspace) {
+        let PhaseWorkspace {
+            emissions,
+            food_grid: grid,
+            nearby,
+            ..
+        } = workspace;
         if emissions
             .iter()
             .all(|e| e.energy <= 0.0 && e.nutrients <= 0.0)
         {
+            emissions.clear();
             return;
         }
-        let mut grid = Grid::new();
+        grid.clear();
         for (i, food) in self.food.iter().enumerate() {
             grid.insert(food.x, food.y, i);
         }
-        let mut nearby = Vec::new();
-        for emission in emissions {
+        for emission in emissions.drain(..) {
             let OrganicEmission {
                 kind,
                 x,
@@ -1816,7 +2016,7 @@ impl World {
             nearby.clear();
             nearby.extend(grid.nearby_radius(x, y, 24.0));
             nearby.sort_unstable();
-            for &index in &nearby {
+            for &index in nearby.iter() {
                 let food = &mut self.food[index];
                 if food.kind != kind
                     || delta(food.x - x, WIDTH).hypot(delta(food.y - y, HEIGHT)) > 24.0
@@ -1884,59 +2084,61 @@ impl World {
             self.environment.recycle_nutrients(x, y, nutrients);
         }
     }
-    fn resolve_collisions(&mut self) {
-        let mut grid = Grid::new();
-        let mut max_radius: f64 = 0.0;
-        for (i, c) in self.cells.iter().enumerate() {
-            if c.alive() {
-                grid.insert(c.x, c.y, i);
-                max_radius = max_radius.max(c.radius());
-            }
-        }
-        let mut candidates = Vec::new();
+    fn resolve_collisions_in(&mut self, workspace: &mut PhaseWorkspace) {
+        let PhaseWorkspace {
+            geometry,
+            cell_grid: grid,
+            candidates,
+            ..
+        } = workspace;
+        geometry.rebuild(&self.cells, false, true);
+        let max_radius = grid.index_cells(geometry);
+        // The broad-phase buckets deliberately stay frozen for the whole pass.
+        // Pair resolution updates positions/velocities in both representations.
         for i in 0..self.cells.len() {
-            if !self.cells[i].alive() {
+            if !geometry.alive[i] {
                 continue;
             }
             candidates.clear();
             candidates.extend(
                 grid.nearby_radius(
-                    self.cells[i].x,
-                    self.cells[i].y,
-                    self.cells[i].radius() + max_radius,
+                    geometry.positions[i][0],
+                    geometry.positions[i][1],
+                    geometry.radii[i] + max_radius,
                 )
                 .filter(|&j| j > i),
             );
             candidates.sort_unstable();
             candidates.dedup();
-            for &j in &candidates {
+            for &j in candidates.iter() {
                 let (a, b) = self.cells.split_at_mut(j);
                 let a = &mut a[i];
                 let b = &mut b[0];
-                if !b.alive() {
+                if !geometry.alive[j] {
                     continue;
                 }
-                let dx = delta(b.x - a.x, WIDTH);
-                let dy = delta(b.y - a.y, HEIGHT);
+                let dx = delta(geometry.positions[j][0] - geometry.positions[i][0], WIDTH);
+                let dy = delta(geometry.positions[j][1] - geometry.positions[i][1], HEIGHT);
                 let distance = dx.hypot(dy);
-                let contact = a.radius() + b.radius();
+                let contact = geometry.radii[i] + geometry.radii[j];
                 if distance >= contact {
                     continue;
                 }
                 let (nx, ny) = if distance > 1e-5 {
                     (dx / distance, dy / distance)
                 } else {
-                    let a = (a.id.wrapping_mul(13) ^ b.id) as f64;
+                    let a = (geometry.ids[i].wrapping_mul(13) ^ geometry.ids[j]) as f64;
                     (a.cos(), a.sin())
                 };
-                let ma = a.inertia();
-                let mb = b.inertia();
+                let ma = geometry.inertia[i];
+                let mb = geometry.inertia[j];
                 let overlap = contact - distance;
                 a.x = wrap(a.x - nx * overlap * mb / (ma + mb), WIDTH);
                 a.y = wrap(a.y - ny * overlap * mb / (ma + mb), HEIGHT);
                 b.x = wrap(b.x + nx * overlap * ma / (ma + mb), WIDTH);
                 b.y = wrap(b.y + ny * overlap * ma / (ma + mb), HEIGHT);
-                let approaching = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+                let approaching = (geometry.velocities[j][0] - geometry.velocities[i][0]) * nx
+                    + (geometry.velocities[j][1] - geometry.velocities[i][1]) * ny;
                 if approaching < 0.0 {
                     let impulse = -approaching / (1.0 / ma + 1.0 / mb);
                     a.vx -= nx * impulse / ma;
@@ -1944,39 +2146,49 @@ impl World {
                     b.vx += nx * impulse / mb;
                     b.vy += ny * impulse / mb;
                 }
+                geometry.positions[i] = [a.x, a.y];
+                geometry.positions[j] = [b.x, b.y];
+                geometry.velocities[i] = [a.vx, a.vy];
+                geometry.velocities[j] = [b.vx, b.vy];
             }
         }
     }
-    fn eat(&mut self, outputs: &[Outputs], caps: &[BodyCapacities]) {
-        let mut grid = Grid::new();
-        let mut max_radius: f64 = 0.0;
-        for (i, c) in self.cells.iter().enumerate() {
-            if c.alive() {
-                grid.insert(c.x, c.y, i);
-                max_radius = max_radius.max(c.radius());
-            }
-        }
-        let mut budgets: Vec<_> = caps
-            .iter()
-            .zip(outputs)
-            .map(|(c, o)| c.capture * 1200.0 * o.feed * DT)
-            .collect();
+    fn eat_in(
+        &mut self,
+        outputs: &[Outputs],
+        caps: &[BodyCapacities],
+        workspace: &mut PhaseWorkspace,
+    ) {
+        let PhaseWorkspace {
+            geometry,
+            cell_grid: grid,
+            budgets,
+            ..
+        } = workspace;
+        let max_radius = grid.index_cells(geometry);
+        budgets.clear();
+        budgets.extend(
+            caps.iter()
+                .zip(outputs)
+                .map(|(c, o)| c.capture * 1200.0 * o.feed * DT),
+        );
         self.food.retain_mut(|food| {
             let mut winner = None;
             let mut best = f64::INFINITY;
             for i in grid.nearby_radius(food.x, food.y, max_radius + 2.5) {
                 let c = &self.cells[i];
-                if !c.alive()
+                if !geometry.alive[i]
                     || budgets[i] <= 0.0
                     || c.gut_fraction_for(food.energy, food.nutrients, &caps[i]) <= 0.0
                 {
                     continue;
                 }
-                let distance = delta(c.x - food.x, WIDTH).hypot(delta(c.y - food.y, HEIGHT));
-                if distance <= c.radius() + 2.5
+                let distance = delta(geometry.positions[i][0] - food.x, WIDTH)
+                    .hypot(delta(geometry.positions[i][1] - food.y, HEIGHT));
+                if distance <= geometry.radii[i] + 2.5
                     && (distance < best
                         || (distance == best
-                            && winner.is_none_or(|old: usize| c.id < self.cells[old].id)))
+                            && winner.is_none_or(|old: usize| geometry.ids[i] < geometry.ids[old])))
                 {
                     best = distance;
                     winner = Some(i);
@@ -2004,6 +2216,50 @@ impl World {
             true
         });
     }
+    // Isolated phase entry points used by existing physical regression fixtures.
+    // Production ticks pass the persistent workspace through every phase.
+    #[cfg(test)]
+    fn resolve_collisions(&mut self) {
+        self.resolve_collisions_in(&mut PhaseWorkspace::default());
+    }
+    #[cfg(test)]
+    fn eat(&mut self, outputs: &[Outputs], caps: &[BodyCapacities]) {
+        let mut workspace = PhaseWorkspace::default();
+        workspace.geometry.rebuild(&self.cells, false, false);
+        self.eat_in(outputs, caps, &mut workspace);
+    }
+    #[cfg(test)]
+    fn resolve_predation(&mut self, outputs: &[Outputs], caps: &[BodyCapacities]) -> Vec<bool> {
+        let mut workspace = PhaseWorkspace::default();
+        workspace.geometry.rebuild(&self.cells, false, false);
+        self.resolve_predation_in(outputs, caps, &mut workspace);
+        workspace.consumed
+    }
+    #[cfg(test)]
+    fn digest(&mut self, outputs: &[Outputs], caps: &[BodyCapacities], processing: &mut [f64]) {
+        self.digest_in(outputs, caps, processing, &mut PhaseWorkspace::default());
+    }
+    #[cfg(test)]
+    fn photosynthesize(
+        &mut self,
+        outputs: &[Outputs],
+        caps: &[BodyCapacities],
+        processing: &mut [f64],
+    ) {
+        self.photosynthesize_in(outputs, caps, processing, &mut PhaseWorkspace::default());
+    }
+    #[cfg(test)]
+    fn spill_excess_stores(&mut self) {
+        self.spill_excess_stores_in(&mut PhaseWorkspace::default());
+    }
+    #[cfg(test)]
+    fn emit_organic_batch(&mut self, emissions: Vec<OrganicEmission>) {
+        let mut workspace = PhaseWorkspace {
+            emissions,
+            ..PhaseWorkspace::default()
+        };
+        self.emit_organic_pending(&mut workspace);
+    }
     pub fn snapshot(&self, target: &mut Vec<f64>) {
         target.clear();
         target.extend_from_slice(&[
@@ -2021,71 +2277,7 @@ impl World {
             self.food_rate as f64,
         ]);
         for c in &self.cells {
-            let families = c.body.family_summaries();
-            let cap = c.body.capacities_from_summaries(&families);
-            let space = c.body.space();
-            let surface = c.body.surface();
-            let used = c.memory.populated_count() as f64;
-            let values = [
-                c.id as f64,
-                c.genome_id as f64,
-                c.x,
-                c.y,
-                c.vx,
-                c.vy,
-                c.angle,
-                c.energy,
-                c.age,
-                c.generation as f64,
-                c.parent_id as f64,
-                c.radius(),
-                c.body.area,
-                c.mass(),
-                c.birth_area,
-                cap.energy,
-                c.basal_metabolism() * metabolic_factor(self.environment.temperature_at(c.x, c.y)),
-                used,
-                used * MEMORY_REGISTER_COST,
-                c.integrity,
-                c.photosynthesis_rate,
-                c.nutrient_stored,
-                cap.minerals,
-                c.uptake_rate,
-                c.gut_energy,
-                cap.gut_energy,
-                c.gut_nutrients,
-                c.digestion_rate,
-                c.growth_rate,
-                c.maturity(),
-                LIFESPAN,
-                c.exudation_rate,
-                c.body.upkeep(),
-                space.used,
-                space.capacity,
-                surface.used,
-                surface.capacity,
-                if c.division_ready() { 1.0 } else { 0.0 },
-                cap.optical_range,
-            ];
-            debug_assert_eq!(values.len(), 39);
-            target.extend(values);
-            for family in families {
-                target.extend(
-                    [
-                        family.count as f64,
-                        family.mass,
-                        family.capacity,
-                        family.damaged,
-                        family.building,
-                        family.functional_mass,
-                    ]
-                    .map(|v| v as f64),
-                );
-            }
-            target.extend(c.gut.iter().map(|pool| pool.energy));
-            target.extend(c.gut.iter().map(|pool| pool.nutrients));
-            target.extend(c.body.precursor_mass);
-            target.push(c.synthesis_rate);
+            self.snapshot_cell_into(c, target);
         }
         for f in &self.food {
             target.extend([f.x, f.y, f.energy, f.nutrients, f.kind as u8 as f64]);
@@ -2217,7 +2409,13 @@ fn fraction(value: f64, capacity: f64) -> f64 {
 fn metabolic_factor(temperature: f64) -> f64 {
     0.5 + temperature.clamp(0.0, 1.0)
 }
+#[cfg(test)]
 fn photon_footprint(x: f64, y: f64, area: f64) -> Vec<(usize, f64)> {
+    let mut result = Vec::new();
+    photon_footprint_into(x, y, area, &mut result);
+    result
+}
+fn photon_footprint_into(x: f64, y: f64, area: f64, result: &mut Vec<(usize, f64)>) {
     let radius = (60.0 * area.sqrt()).max(20.0);
     let span = (radius / 20.0).ceil() as isize;
     let center = Environment::patch(x, y);
@@ -2225,7 +2423,7 @@ fn photon_footprint(x: f64, y: f64, area: f64) -> Vec<(usize, f64)> {
     let row = (center / FIELD_COLUMNS) as isize;
     let cols = (2 * span + 1).min(FIELD_COLUMNS as isize);
     let rows = (2 * span + 1).min(FIELD_ROWS as isize);
-    let mut result = Vec::new();
+    result.clear();
     let mut total = 0.0;
     for dy in 0..rows {
         for dx in 0..cols {
@@ -2242,10 +2440,9 @@ fn photon_footprint(x: f64, y: f64, area: f64) -> Vec<(usize, f64)> {
             }
         }
     }
-    for (_, weight) in &mut result {
+    for (_, weight) in result.iter_mut() {
         *weight /= total;
     }
-    result
 }
 fn wrap(value: f64, size: f64) -> f64 {
     value.rem_euclid(size)
@@ -2273,3 +2470,113 @@ fn mutation_seed(world_seed: u32, tick: u64, parent_cell: u32, daughter_cell: u3
 
 #[cfg(test)]
 mod biology_tests;
+
+#[cfg(test)]
+mod workspace_tests {
+    use super::*;
+    use crate::checkpoint::{Reader, Writer};
+
+    fn state(world: &World) -> Vec<u8> {
+        let mut writer = Writer::new();
+        world.write_checkpoint(&mut writer);
+        assert!(!writer.failed());
+        writer.0
+    }
+
+    fn genomes() -> Vec<Genome> {
+        let source = "thrust=0.4;turn=0.1;divide=false;photosynthesize=1;feed=1;absorb=1;\
+            bite=0.3;engulf=true;rs001=object.token when object.valid;scan.target=rs001;";
+        vec![Genome::new(
+            source.to_owned(),
+            Program::compile(source).unwrap(),
+            0,
+            0,
+        )]
+    }
+
+    #[test]
+    fn reused_tick_workspace_matches_fresh_restores_across_population_changes_and_reset() {
+        let mut reused = World::empty(117);
+        let mut programs = genomes();
+        reused.environment.configure(0.5, 0.8, 12.0);
+        reused.environment.add_source(1, 10.0, 755.0, 0.3, 80.0);
+        reused.environment.add_source(2, 1195.0, 5.0, -0.7, 90.0);
+        reused.set_food_rate(0.0);
+        reused.set_mutation_rate(0.0);
+        for fixture in [
+            BodyFixture::Producer,
+            BodyFixture::Scavenger,
+            BodyFixture::Hunter,
+        ] {
+            reused
+                .try_seed_fixture(1, 2, 1190.0, 750.0, fixture)
+                .unwrap();
+        }
+        reused.add_food(1190.0, 750.0, 20);
+
+        for tick in 0..32 {
+            if tick == 5 {
+                reused
+                    .try_seed_fixture(1, 3, 8.0, 8.0, BodyFixture::Scavenger)
+                    .unwrap();
+            } else if tick == 10 {
+                // Still valid at checkpoint time; ordinary maintenance kills it.
+                reused.cells[0].energy = 1e-12;
+            } else if tick == 18 {
+                reused.reset_empty(92, 20);
+                reused.try_seed_cells(1, 2, 20.0, 20.0).unwrap();
+            } else if tick == 22 {
+                reused
+                    .try_seed_fixture(1, 2, 20.0, 20.0, BodyFixture::Hunter)
+                    .unwrap();
+            }
+            let bytes = state(&reused);
+            let mut reader = Reader::new(&bytes);
+            let mut fresh = World::read_checkpoint(&mut reader, programs.len(), 4).unwrap();
+            assert!(reader.finished());
+            assert!(fresh.workspace.capacities.is_empty());
+            let mut fresh_programs = programs.clone();
+            reused.try_step(&mut programs).unwrap();
+            fresh.try_step(&mut fresh_programs).unwrap();
+            assert_eq!(state(&reused), state(&fresh), "tick {tick}");
+        }
+    }
+
+    #[test]
+    fn successful_ticks_retain_buffers_and_failed_preflight_preserves_them_and_state() {
+        let mut world = World::empty(43);
+        let mut programs = genomes();
+        world.set_food_rate(0.0);
+        world.set_mutation_rate(0.0);
+        world.try_seed_cells(1, 2, 200.0, 200.0).unwrap();
+        world.try_step(&mut programs).unwrap();
+        let inputs = world.workspace.observations.inputs.as_ptr();
+        let outputs = world.workspace.outputs.as_ptr();
+        let capacities = world.workspace.capacities.as_ptr();
+        let processing = world.workspace.processing.as_ptr();
+        world.try_step(&mut programs).unwrap();
+        assert_eq!(world.workspace.observations.inputs.as_ptr(), inputs);
+        assert_eq!(world.workspace.outputs.as_ptr(), outputs);
+        assert_eq!(world.workspace.capacities.as_ptr(), capacities);
+        assert_eq!(world.workspace.processing.as_ptr(), processing);
+
+        let next_food_id = world.next_food_id;
+        world.next_food_id = u64::MAX / 2;
+        let before = state(&world);
+        assert!(world.try_step(&mut programs).is_err());
+        assert_eq!(state(&world), before);
+        assert_eq!(world.workspace.outputs.as_ptr(), outputs);
+        assert_eq!(world.workspace.capacities.as_ptr(), capacities);
+        world.next_food_id = next_food_id;
+        world.try_step(&mut programs).unwrap();
+
+        let before = state(&world);
+        assert!(world.try_reset_empty(123, usize::MAX).is_err());
+        assert_eq!(state(&world), before);
+        assert_eq!(world.workspace.outputs.as_ptr(), outputs);
+        world.try_reset_empty(123, 0).unwrap();
+        assert!(world.workspace.capacities.is_empty());
+        assert!(world.workspace.observations.inputs.is_empty());
+        world.try_step(&mut programs).unwrap();
+    }
+}

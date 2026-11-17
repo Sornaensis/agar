@@ -62,6 +62,11 @@
     "cell_body_ptr",
     "cell_body_len",
     "energy_total",
-    "energy_input_total"
+    "energy_input_total",
+    "render_snapshot_ptr",
+    "metrics_snapshot_ptr",
+    "cell_snapshot_ptr",
+    "summary_snapshot_ptr",
+    "presentation_len"
   ]
 }

@@ -1,0 +1,10 @@
+{
+  "checkpointVersion": 4,
+  "producer": "Unchanged phase-one engine, native x86_64, before derived execution plans",
+  "seed": 57,
+  "initialTick": 17,
+  "population": 4,
+  "particles": 20,
+  "sha256": "8bc099262fb4edc5c099633d24a3ffcc86089cf5b1f886cc89670e43e181c8e3",
+  "description": "Authoritative pre-plan checkpoint with all five register types, a guarded clear, unused dynamic code and constant vector operations. Current code must restore and re-save exact bytes while charging rebuilt execution-plan memory to the live registry."
+}

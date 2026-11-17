@@ -21,7 +21,8 @@
     "check:engine": "node scripts/check-engine-artifact.mjs",
     "test:food-chain": "node scripts/check-food-chain.mjs",
     "test:navigation": "node scripts/check-preset-navigation.mjs",
-    "bench:simulation": "node --no-liftoff scripts/benchmark-simulation.mjs"
+    "bench:simulation": "node --no-liftoff scripts/benchmark-simulation.mjs",
+    "test:worker": "node scripts/check-worker.mjs"
   },
   "devDependencies": {
     "typescript": "5.9.3",

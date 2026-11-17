@@ -27,6 +27,7 @@ pub struct Source {
 #[derive(Clone, Default)]
 struct FieldScratch {
     advected: Vec<f64>,
+    patch_flow: Vec<(f64, f64)>,
     transfers: Vec<(usize, usize, f64)>,
     outgoing: Vec<f64>,
     limits: Vec<f64>,
@@ -113,14 +114,14 @@ impl Environment {
             self.organic[i] = (self.organic[i] + amount).min(1e6);
         }
     }
-    fn step_organic(&mut self, time: f64) {
+    fn step_organic(&mut self) {
         if self.organic.iter().all(|&v| v == 0.0) {
             return;
         }
         self.scratch.advected.resize(PATCHES, 0.0);
         for i in 0..PATCHES {
             let (x, y) = Self::patch_center(i);
-            let (vx, vy) = self.flow_at(x, y, time);
+            let (vx, vy) = self.scratch.patch_flow[i];
             self.scratch.advected[i] = self.organic_at(x - vx * DT, y - vy * DT);
         }
         let advected = &self.scratch.advected;
@@ -356,20 +357,31 @@ impl Environment {
 
     pub fn step(&mut self, time: f64) {
         self.step_nutrients(time);
-        self.step_organic(time);
-        // A neutral field stays exactly neutral and incurs no grid solve.
-        if self.heating.iter().all(|&v| v == 0.0)
+        let organic_active = self.organic.iter().any(|&v| v != 0.0);
+        let heat_active = !(self.heating.iter().all(|&v| v == 0.0)
             && self
                 .temperature
                 .iter()
-                .all(|&v| v == self.ambient_temperature)
-        {
+                .all(|&v| v == self.ambient_temperature));
+        // Both semi-Lagrangian fields sample flow at the same patch centers and
+        // time. Recompute this derived table each step so source/config changes
+        // cannot leave stale velocities. Mineral fluxes sample different faces.
+        if organic_active || heat_active {
+            self.scratch.patch_flow.resize(PATCHES, (0.0, 0.0));
+            for i in 0..PATCHES {
+                let (x, y) = Self::patch_center(i);
+                self.scratch.patch_flow[i] = self.flow_at(x, y, time);
+            }
+        }
+        self.step_organic();
+        // A neutral field stays exactly neutral and incurs no grid solve.
+        if !heat_active {
             return;
         }
         self.scratch.advected.resize(PATCHES, 0.0);
         for i in 0..PATCHES {
             let (x, y) = Self::patch_center(i);
-            let (vx, vy) = self.flow_at(x, y, time);
+            let (vx, vy) = self.scratch.patch_flow[i];
             self.scratch.advected[i] = self.temperature_at(x - vx * DT, y - vy * DT);
         }
         let advected = &self.scratch.advected;

@@ -1,0 +1,121 @@
+import assert from 'node:assert/strict';
+
+// Run against a production preview. Playwright and a browser are optional local
+// test tools; the app itself has no browser automation dependency.
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const browser = await chromium.launch({ headless: true,
+  ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
+  args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+const context = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
+const page = await context.newPage();
+const failures = [];
+page.on('pageerror', error => failures.push(error.message));
+page.on('console', message => { if (message.type() === 'error') failures.push(message.text()); });
+const base = process.env.UI_TEST_URL || 'http://127.0.0.1:4173/';
+const textIs = (selector, value) => page.waitForFunction(({ selector, value }) => document.querySelector(selector)?.textContent === value, { selector, value });
+const readSaved = () => page.evaluate(() => new Promise((resolve, reject) => {
+  const open = indexedDB.open('cellarium');
+  open.onerror = () => reject(open.error);
+  open.onsuccess = () => {
+    const database = open.result, transaction = database.transaction('simulations'), request = transaction.objectStore('simulations').getAll();
+    request.onsuccess = () => resolve(request.result.map(({ state, ...metadata }) => ({ ...metadata, stateBytes: state.byteLength })));
+    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => database.close();
+  };
+}));
+
+try {
+  await page.goto(base);
+  await textIs('#save-state', 'Saved');
+  await page.locator('[data-action="start-template"][data-id="builtin:simulation:foragers"]').click();
+  await page.locator('#simulation-name').fill('Worker smoke');
+  await page.locator('[data-count="0"]').fill('12');
+  await page.getByRole('button', { name: /Start simulation/ }).click();
+  await page.locator('#world').waitFor();
+  await page.getByRole('button', { name: 'Pause simulation' }).click();
+  await textIs('#save-state', 'Saved');
+  assert.equal(page.workers().length, 1, 'One worker owns the active simulation');
+  let saved = await readSaved();
+  assert.equal(saved.length, 1); assert.equal(saved[0].paused, true); assert.ok(saved[0].stateBytes > 1000);
+  const pausedTime = saved[0].summary.time;
+
+  await page.locator('#world').focus(); await page.keyboard.press('ArrowRight');
+  await page.locator('#inspector-content .inspector-metrics').waitFor();
+  await page.locator('[data-inspector-view="body"]').click();
+  await page.locator('.body-capacity').waitFor();
+  await page.locator('[data-inspector-view="memory"]').click();
+  await page.waitForFunction(() => document.querySelector('#memory-summary')?.textContent?.includes('registers'));
+  await page.locator('[data-inspector-view="program"]').click();
+  await page.locator('#organism-program .cm-editor').waitFor();
+  await page.locator('#organism-program .program-evaluation-time').waitFor({ state: 'visible' });
+  await page.locator('[data-action="cell-program"]').click();
+  await page.locator('.live-program-dialog .program-evaluation-time').waitFor({ state: 'visible' });
+  await page.locator('.live-program-dialog [data-close]').click();
+
+  await page.locator('[data-view="settings"]').click();
+  // Adjacent changes must preserve one another despite crossing the worker boundary.
+  await page.evaluate(() => {
+    for (const [id, value] of [['setting-temperature', '.73'], ['setting-light', '61'], ['setting-current', '7']]) {
+      const input = document.getElementById(id); input.value = value; input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+  await page.locator('#setting-overlay').selectOption('nutrients');
+  await page.locator('[data-view="metrics"]').click();
+  await textIs('#metric-population', '12');
+  await page.locator('[data-view="genomes"]').click();
+  await page.locator('[data-genome-stats]').waitFor();
+  assert.match(await page.locator('[data-genome-stats]').first().textContent(), /12 organisms/);
+  await page.locator('[data-view="player"]').click();
+  await page.getByRole('button', { name: 'Add organism', exact: true }).click();
+  await page.getByRole('button', { name: 'Add Forager', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('#player-caption')?.textContent?.startsWith('13 organisms'));
+  await page.locator('[data-action="close-simulation"]').click();
+  await page.locator('[data-action="open-simulation"]').waitFor();
+  assert.equal(page.workers().length, 0, 'Closing flushes the run and terminates its worker');
+  saved = await readSaved();
+  assert.equal(saved[0].summary.population, 13); assert.equal(saved[0].summary.time, pausedTime);
+  await page.locator('[data-action="open-simulation"]').first().click();
+  await page.locator('#world').waitFor();
+  assert.equal(page.workers().length, 1);
+  await page.locator('[data-view="settings"]').click();
+  assert.equal(await page.locator('#setting-temperature').inputValue(), '0.73');
+  assert.equal(await page.locator('#setting-light').inputValue(), '61');
+  assert.equal(await page.locator('#setting-current').inputValue(), '7');
+  await page.locator('[data-view="player"]').click();
+  await page.getByRole('button', { name: 'Play simulation' }).click();
+  await page.waitForFunction(() => document.querySelector('#play-pause')?.getAttribute('aria-label') === 'Pause simulation');
+  await page.locator('[data-view="metrics"]').click();
+  await page.locator('[data-view="player"]').click();
+  await page.getByRole('button', { name: 'Pause simulation' }).click();
+  await textIs('#save-state', 'Saved');
+  saved = await readSaved(); assert.ok(saved[0].summary.time >= pausedTime);
+
+  // A second tab must not acquire the run held by the first tab.
+  const second = await context.newPage();
+  await second.goto(base); await second.locator('.simulation-list, [data-action="open-simulation"]').first().waitFor();
+  await second.waitForFunction(() => document.body.textContent?.includes('already open in another tab'));
+  assert.equal(second.workers().length, 0); await second.close();
+
+  await page.getByRole('tab', { name: 'Environments', exact: true }).click();
+  await page.locator('[data-action="open-environment"][data-id="builtin:environment:sunlit-pond"]').click();
+  await page.locator('.environment-editor-dialog .preview-status').waitFor({ state: 'hidden' });
+  assert.equal(page.workers().length, 2, 'Environment preview uses its own worker');
+  await page.locator('.environment-editor-dialog [data-copy]').click();
+  await page.locator('.environment-editor-dialog .preview-status').waitFor({ state: 'hidden' });
+  await page.locator('#environment-current').fill('12');
+  await page.locator('#environment-light').fill('.65');
+  await page.locator('#environment-current').fill('4');
+  await page.locator('.environment-editor-dialog [data-close]').click();
+  await page.waitForFunction(() => !document.querySelector('.environment-editor-dialog'));
+  await page.getByRole('tab', { name: 'Simulation', exact: true }).click();
+  await page.locator('#world').waitFor();
+  await page.locator('[data-action="close-simulation"]').click();
+  await page.locator('[data-action="open-simulation"]').waitFor();
+  assert.equal(page.workers().length, 0, 'All closed workers have been disposed');
+  assert.deepEqual(failures, [], 'No browser or worker errors');
+  console.log('Browser checks passed: production worker loading, pause/save/reopen, adjacent setting edits, compact metrics, all inspector modes, live evaluation, insertion, exclusive locks, asynchronous previews and worker disposal.');
+} catch (error) {
+  console.error('Browser errors:', failures);
+  console.error('Visible page:', (await page.locator('body').innerText()).slice(0, 6000));
+  throw error;
+} finally { await browser.close(); }

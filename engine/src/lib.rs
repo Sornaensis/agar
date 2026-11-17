@@ -16,6 +16,7 @@ struct Engine {
     world: World,
     error: String,
     snapshot: Vec<f64>,
+    presentation_buffer: Vec<f64>,
     environment_snapshot: Vec<f32>,
     source_buffer: Vec<u8>,
     memory_buffer: Vec<u8>,
@@ -34,6 +35,7 @@ impl Engine {
             world: World::empty(1),
             error: String::new(),
             snapshot: Vec::new(),
+            presentation_buffer: Vec::new(),
             environment_snapshot: Vec::new(),
             source_buffer: Vec::new(),
             memory_buffer: Vec::new(),
@@ -748,6 +750,73 @@ pub extern "C" fn snapshot_ptr() -> *const f64 {
 #[no_mangle]
 pub extern "C" fn snapshot_len() -> u32 {
     ENGINE.with(|e| e.borrow().snapshot.len() as u32)
+}
+
+/// Additive ABI 10 projections. Copy the buffer before another engine call.
+#[no_mangle]
+pub extern "C" fn render_snapshot_ptr() -> *const f64 {
+    ENGINE.with(|engine| {
+        let mut engine = engine.borrow_mut();
+        let Engine {
+            world,
+            presentation_buffer,
+            ..
+        } = &mut *engine;
+        world.render_snapshot(presentation_buffer);
+        presentation_buffer.as_ptr()
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn metrics_snapshot_ptr() -> *const f64 {
+    ENGINE.with(|engine| {
+        let mut engine = engine.borrow_mut();
+        let Engine {
+            world,
+            genomes,
+            presentation_buffer,
+            ..
+        } = &mut *engine;
+        world.metrics_snapshot(genomes, presentation_buffer);
+        presentation_buffer.as_ptr()
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn cell_snapshot_ptr(id: u32) -> *const f64 {
+    ENGINE.with(|engine| {
+        let mut engine = engine.borrow_mut();
+        let Engine {
+            world,
+            presentation_buffer,
+            ..
+        } = &mut *engine;
+        if world.cell_snapshot(id, presentation_buffer) {
+            presentation_buffer.as_ptr()
+        } else {
+            std::ptr::null()
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn summary_snapshot_ptr() -> *const f64 {
+    ENGINE.with(|engine| {
+        let mut engine = engine.borrow_mut();
+        let Engine {
+            world,
+            presentation_buffer,
+            ..
+        } = &mut *engine;
+        world.summary_snapshot(presentation_buffer);
+        presentation_buffer.as_ptr()
+    })
+}
+
+/// All presentation projections share one reusable buffer and length export.
+#[no_mangle]
+pub extern "C" fn presentation_len() -> u32 {
+    ENGINE.with(|engine| engine.borrow().presentation_buffer.len() as u32)
 }
 
 #[cfg(test)]

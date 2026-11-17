@@ -220,6 +220,11 @@ The module exports `memory`. Pointers/lengths use bytes, except snapshot lengths
 | `set_food_rate(rate: f32)` | Set 0–60 particles/s; nonfinite input becomes zero |
 | `tick(steps) -> u32` | Run at most 120 steps; 1 on success, 0 plus readable error if a step cannot allocate. Earlier completed steps in the batch remain valid |
 | `snapshot_ptr()`, `snapshot_len()` | Build/read float64 world snapshot; length in elements |
+| `render_snapshot_ptr()` | Compact geometry/appearance snapshot; read `presentation_len()` immediately afterwards |
+| `metrics_snapshot_ptr()` | Aggregate metrics and per-genome population groups; read `presentation_len()` |
+| `cell_snapshot_ptr(cell_id)` | Exactly one living cell in the existing 158-value layout; missing cell returns null with zero presentation length |
+| `summary_snapshot_ptr()` | Six values describing the current checkpoint summary; read `presentation_len()` |
+| `presentation_len()` | Element count for the most recent render, metrics, selected-cell or summary projection |
 | `language_schema_ptr()`, `language_schema_len()` | Authoritative language-version-3 read/write signal names, types, defaults, and limits as UTF-8 JSON |
 | `cell_body_ptr(cell_id)`, `cell_body_len()` | Actual organelles, body packing, construction requests, and achieved work as UTF-8 JSON |
 | `cell_memory_ptr(cell_id)`, `cell_memory_len()` | UTF-8 JSON of populated registers; unknown cell returns `[]` and an error |
@@ -321,6 +326,51 @@ Cell offsets 135–137 contain gut energies for exudate/tissue/waste; 138–140 
 
 The reserved header field and `max_food` are zero; neither is a population or particle limit. Float64 world identifiers preserve all u32 cell IDs exactly; counters are exact through 2⁵³, with u64 counters retained internally. The environment rendering buffer remains float32.
 
+### Presentation projections
+
+The presentation exports are additive to ABI 10. The full snapshot above remains available with its original layout. Render, metrics, selected-cell and summary projections share one engine-owned `Float64Array` buffer. Read `presentation_len()` and copy before calling another projection or any allocating engine operation. These exports do not advance time, change observations or memory, or modify checkpoint state.
+
+`render_snapshot_ptr()` returns `12 + cell_count × 21 + food_count × 5` values. It omits organelle inspection arrays, resource totals and environmental grid samples. Particle layout remains unchanged.
+
+| Header offsets | Fields in order |
+| --- | --- |
+| 0–3 | tick, time, cell count, food count |
+| 4–8 | births, deaths, eaten, world width, world height |
+| 9–11 | food rate, mutation rate, maximum living generation |
+
+| Compact cell offsets | Fields in order |
+| --- | --- |
+| 0–6 | id, genome id, x, y, vx, vy, angle |
+| 7–13 | radius, energy, energy capacity, gut energy, gut capacity, integrity, photosynthesis rate |
+| 14–17 | flagellum count, flagellum capacity, cortex mass, cortex capacity |
+| 18–20 | photosynthetic capacity, piercer capacity, generation |
+
+The visual family capacities retain their existing meaning: functional mass divided by the family's minimum mass. They are not action throughput values. `cell_snapshot_ptr(id)` supplies the full 158-value cell record when inspection needs it, without packing the rest of the world. A missing cell clears the presentation buffer; it does not replace the latest simulation error.
+
+`metrics_snapshot_ptr()` returns a 36-value header followed by three values for each living genome group. Groups are sorted by genome ID; each is `[genome_id, population, maximum_generation]`. Registry counts include all registered genomes, whereas groups contain only genomes with living cells.
+
+| Metric offsets | Fields in order |
+| --- | --- |
+| 0–7 | tick, time, population, food count, births, deaths, eaten, maximum generation |
+| 8–14 | mutation rate, mutated births, skipped mutations, genome registry count, genome limit, registry bytes, byte limit |
+| 15–19 | predation deaths, attacks, harvested light energy, current energy, introduced energy |
+| 20–24 | total minerals, introduced minerals, dissolved minerals, particle minerals, cell minerals |
+| 25–28 | autotrophs, heterotrophs, mixotrophs, attack-capable cells |
+| 29–31 | total current photosynthesis, digestion and exudation rates |
+| 32–35 | exudate count, tissue count, waste count, living genome group count |
+
+Feeding categories follow the same functional photosynthetic/digestive organ checks as cell inspection; attack-capable count is independent. Rates and ledgers preserve the full snapshot's meanings. `summary_snapshot_ptr()` returns `[time, population, food_count, births, deaths, maximum_generation]` and performs no particle, organelle or field export.
+
+The TypeScript `Engine` exposes `renderSnapshot()`, `metricsSnapshot()`, `cellSnapshot(id)` and `summary()` alongside its existing API. `renderSnapshotData()` and `metricsSnapshotData()` return owned packed buffers for transfer.
+
+### Simulation worker ownership
+
+`WorkerEngine` owns one `Engine` instance in a dedicated module worker. Its asynchronous methods preserve command order, including edits, ticks, inspection and checkpoint capture. Render and metric buffers cross the worker boundary using transferable `ArrayBuffer`s. The UI obtains full environmental fields only when requested and detailed cell data only for inspection.
+
+`advance(steps, {metrics?, environment?})` executes a bounded batch of 0–120 fixed ticks and returns `{frame, metrics?, environment?, error?}`. If a tick fails after earlier ticks completed, the response contains the resulting frame and original error; the caller can pause while retaining accurate state. `presentation(options)` returns the same projections without advancing time. A rejected ordinary command does not block subsequent commands.
+
+`captureCheckpoint()` synchronously captures checkpoint bytes and summary inside a single queued worker command, so both describe the same state even when later advances are already queued. Restore transfers a copy of the caller's bytes, preserving the original on either success or failure. `dispose()` terminates the worker and rejects outstanding/future requests. These ownership changes do not change tick duration, physical phase order or checkpoint version 4.
+
 ### Body inspection
 
 `cell_body_ptr(cell_id)` returns actual structure and packing, separately from the compact rendering snapshot:
@@ -420,3 +470,5 @@ Stored programs retain exact expression trees and source. Restore recompiles sou
 ## Verification
 
 The native suite covers typing, synchronous memory, source-preserving mutations, physical accounting, capacity limits, hardware-dependent sensing, division, and deterministic restore. WASM checks exercise the real frontend boundary, all five register banks, expression budgets, schema/catalog agreement, and exported buffer layouts. The static Pages build typechecks the frontend and uses relative paths. Unsupported legacy fixtures must be rejected explicitly, not migrated implicitly.
+
+`npm run test:worker` exercises the actual TypeScript facade and dispatcher in Node worker threads against the compiled WASM. It checks ordered commands, compact/full projection parity, selected-cell inspection, transferred buffer ownership, atomic checkpoint summaries, restore ownership, recoverable errors, partial tick results, main-loop responsiveness and disposal. The native presentation tests also compare packed fields and checkpoint bytes directly.

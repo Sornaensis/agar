@@ -1,4 +1,6 @@
-import { Engine, type MutationKind, type SourceKind, type WorldSnapshot } from './engine';
+import { Engine, type MutationKind, type SourceKind } from './engine';
+import { WorkerEngine } from './worker-engine';
+import type { RenderWorldSnapshot } from './session';
 import { Renderer, type FieldOverlay } from './renderer';
 import {
   GENOME_LANGUAGE_VERSION, clearEnvironmentDraft, clearGenomeDraft, loadEnvironmentDraft, loadGenomeDraft,
@@ -246,9 +248,10 @@ export class CatalogUI {
     let selectedSource: number | null = config.sources.length ? 0 : null;
     let placingKind: SourceKind | null = editable && !config.sources.length ? 0 : null;
     const placement = SOURCE_NAMES.map(() => ({ strength: '0.7', radius: '200' }));
-    let previewEngine: Engine | null = null;
+    let previewEngine: WorkerEngine | null = null;
     let renderer: Renderer | null = null;
-    let previewSnapshot: WorldSnapshot | null = null;
+    let previewSnapshot: RenderWorldSnapshot | null = null;
+    let previewBusy = false, previewRevision = 0;
     let resizeObserver: ResizeObserver | null = null;
     let frame = 0;
     let refreshTimer = 0;
@@ -282,16 +285,32 @@ export class CatalogUI {
     };
     const refreshPreview = (): void => {
       if (!alive(dialog) || !previewEngine) return;
-      previewEngine.setEnvironment(config.ambientTemperature, config.ambientLight, config.currentStrength);
-      previewEngine.setInitialNutrients(config.initialNutrients);
-      previewEngine.setFoodRate(config.foodRate);
-      previewEngine.clearSources();
-      for (const source of config.sources) previewEngine.addSource(source.kind, source.x, source.y, source.strength, source.radius);
-      previewEngine.resetEmpty(42, 0);
-      previewEngine.tick(60);
-      previewSnapshot = previewEngine.snapshot();
-      draw();
-      previewStatus.textContent = ''; previewStatus.hidden = true;
+      previewRevision++;
+      if (previewBusy) return;
+      previewBusy = true;
+      const engine = previewEngine;
+      void (async () => {
+        // Coalesce rapid edits while the worker computes a preview. Only the
+        // newest complete configuration becomes visible.
+        while (alive(dialog) && previewEngine === engine) {
+          const revision = previewRevision, next = structuredClone(config);
+          await engine.setEnvironment(next.ambientTemperature, next.ambientLight, next.currentStrength);
+          await engine.setInitialNutrients(next.initialNutrients);
+          await engine.setFoodRate(next.foodRate);
+          await engine.clearSources();
+          for (const source of next.sources) await engine.addSource(source.kind, source.x, source.y, source.strength, source.radius);
+          await engine.resetEmpty(42, 0);
+          const presentation = await engine.advance(60, { environment: true });
+          if (presentation.error) throw new Error(presentation.error);
+          if (!alive(dialog) || previewEngine !== engine) return;
+          if (revision !== previewRevision) continue;
+          previewSnapshot = { ...presentation.frame, environment: presentation.environment! };
+          draw(); previewStatus.textContent = ''; previewStatus.hidden = true;
+          return;
+        }
+      })().catch(error => {
+        if (alive(dialog)) { previewStatus.hidden = false; previewStatus.textContent = 'Preview unavailable'; setDialogError(dialog, error); }
+      }).finally(() => { previewBusy = false; });
     };
     const persistDraft = (): void => {
       if (!editable || saved) return;
@@ -372,6 +391,9 @@ export class CatalogUI {
         const position = renderer.toWorld(event.clientX, event.clientY);
         if (position) placeSource(position.x, position.y);
       } else {
+        // The visible source IDs/indexes belong to the last completed preview.
+        // After removal/reordering they cannot index the pending configuration.
+        if (previewBusy) return;
         const source = renderer.pickSource(previewSnapshot, event.clientX, event.clientY);
         chooseSource(source ? previewSnapshot.environment.sources.findIndex(item => item.id === source.id) : null);
       }
@@ -382,14 +404,14 @@ export class CatalogUI {
     dialog.addEventListener('close', () => {
       window.clearTimeout(refreshTimer);
       window.cancelAnimationFrame(frame);
-      resizeObserver?.disconnect(); renderer?.dispose();
+      resizeObserver?.disconnect(); renderer?.dispose(); previewEngine?.dispose();
       renderer = null; previewEngine = null; previewSnapshot = null;
       if (editable && !saved) {
         try { persistDraft(); } catch (error) { this.callbacks.notify(`Draft could not be saved: ${message(error)}`); }
       }
     }, { once: true });
-    void Engine.load().then(engine => {
-      if (!alive(dialog)) return;
+    void WorkerEngine.load().then(engine => {
+      if (!alive(dialog)) { engine.dispose(); return; }
       previewEngine = engine; renderer = new Renderer(canvas);
       resizeObserver = new ResizeObserver(() => {
         window.cancelAnimationFrame(frame);

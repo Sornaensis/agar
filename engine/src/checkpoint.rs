@@ -183,7 +183,13 @@ pub(crate) fn save(engine: &Engine) -> Result<Vec<u8>> {
         }
         w.u32(genome.parent_id);
         w.u32(genome.mutation_kind);
-        w.count(genome.bytes);
+        // Persist the authored allocation budget. Runtime execution plans are
+        // rebuilt on load and charged separately to the live registry limit.
+        let authored_bytes = genome
+            .bytes
+            .checked_sub(genome.program.derived_execution_bytes())
+            .ok_or("Invalid simulation state: genome allocation budget is incomplete.")?;
+        w.count(authored_bytes);
         w.text(&genome.source);
         genome.program.write_checkpoint(&mut w);
     }
@@ -239,9 +245,17 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
                 "migrated genome exceeds its allocation budget",
             )?;
         } else {
-            // Current-format saves preserve allocation capacities exactly.
-            ensure(saved_bytes >= genome.bytes, "invalid genome budget")?;
-            genome.bytes = saved_bytes;
+            // Preserve retained authored allocation capacities, including saves
+            // produced before derived execution plans existed. Validate that
+            // budget before adding the current runtime-only plan storage.
+            let derived_bytes = genome.program.derived_execution_bytes();
+            ensure(
+                saved_bytes >= genome.bytes - derived_bytes,
+                "invalid genome budget",
+            )?;
+            genome.bytes = saved_bytes
+                .checked_add(derived_bytes)
+                .ok_or("Invalid simulation save: genome budget overflow.")?;
         }
         genomes.push(genome);
         ensure(
@@ -382,6 +396,72 @@ mod tests {
         let copy = restore(&save(&e).unwrap()).unwrap();
         assert_eq!(copy.world.cells[0].memory, e.world.cells[0].memory);
         assert_eq!(copy.world.cells[0].memory.populated_count(), 4995);
+    }
+
+    #[test]
+    fn pre_plan_checkpoints_keep_authored_bytes_and_rebuild_runtime_plans() {
+        // Produced by the unchanged phase-one engine, not reconstructed by the
+        // current serializer. Its stored budget contains no execution plan.
+        let bytes = include_bytes!("../fixtures/execution-plan-v4.bin");
+        let mut restored = restore(bytes).unwrap();
+        assert_eq!(save(&restored).unwrap(), bytes);
+        let saved_budget = u32::from_le_bytes(bytes[32..36].try_into().unwrap()) as usize;
+        let genome = &restored.genomes[0];
+        assert!(genome.program.derived_execution_bytes() > 0);
+        assert_eq!(genome.bytes, saved_budget + genome.program.derived_execution_bytes());
+        assert_eq!(restored.world.ticks, 17);
+        for cell in &restored.world.cells {
+            assert_eq!(cell.memory.value("ri001"), Some(&crate::genome::Value::Integer(17)));
+        }
+        restored.world.step(&mut restored.genomes);
+        for cell in &restored.world.cells {
+            assert_eq!(cell.memory.value("ri001"), Some(&crate::genome::Value::Integer(18)));
+        }
+
+        let version3 = include_bytes!("../fixtures/organelle-v3.bin");
+        let migrated = restore(version3).unwrap();
+        assert!(migrated.genomes.iter().all(|genome| {
+            genome.program.derived_execution_bytes() > 0
+                && genome.bytes > genome.program.derived_execution_bytes()
+        }));
+        let updated = save(&migrated).unwrap();
+        assert_eq!(save(&restore(&updated).unwrap()).unwrap(), updated);
+    }
+
+    #[test]
+    fn checkpoint_budgets_include_runtime_plans_and_reject_forged_authoring_costs() {
+        let mut engine = Engine::new();
+        assert_eq!(engine.compile(PROGRAM), 1);
+        // A decoded Vec/String may have less capacity; preserve the retained
+        // authored budget across saves while still charging rebuilt plan bytes.
+        engine.genomes[0].source.reserve_exact(4096);
+        let genome = &mut engine.genomes[0];
+        genome.bytes = std::mem::size_of::<Genome>()
+            + genome.source.capacity()
+            + genome.program.estimated_bytes();
+        let bytes = save(&engine).unwrap();
+        let restored = restore(&bytes).unwrap();
+        assert_eq!(restored.genomes[0].bytes, engine.genomes[0].bytes);
+        assert_eq!(save(&restored).unwrap(), bytes);
+
+        let genome = &engine.genomes[0];
+        let mut graph = Writer::new();
+        genome.program.write_checkpoint(&mut graph);
+        let decoded = Program::read_checkpoint(&mut Reader::new(&graph.0)).unwrap();
+        let decoded = Genome::new(genome.source.clone(), decoded, 0, 0);
+        let minimum_authored = decoded.bytes - decoded.program.derived_execution_bytes();
+        for (budget, expected_error) in [
+            (minimum_authored - 1, "invalid genome budget"),
+            (MAX_GENOME_BYTES, "registry exceeds 64 MiB"),
+        ] {
+            let mut forged = bytes.clone();
+            forged[32..36].copy_from_slice(&(budget as u32).to_le_bytes());
+            let hash = checksum(&forged[20..]);
+            forged[16..20].copy_from_slice(&hash.to_le_bytes());
+            assert!(!engine.restore_state(&forged));
+            assert!(engine.error.contains(expected_error), "{}", engine.error);
+            assert_eq!(save(&engine).unwrap(), bytes, "budget rejection must be atomic");
+        }
     }
 
     #[test]

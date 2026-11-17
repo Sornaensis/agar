@@ -195,6 +195,7 @@ The relative Vite base (`./`) works at both a user Pages root and a repository s
 | `src/program-editor.ts`, `src/genome-language.ts` | Editor, native diagnostics, assistance and live values |
 | `src/genome-network.ts`, `src/genome-visualizer.ts` | Dependency projection and graph UI |
 | `src/storage.ts`, `src/session.ts` | Validated persistence and ordered checkpoint saves |
+| `src/worker-engine.ts`, `src/simulation-worker-runtime.ts`, `src/simulation-protocol.ts` | Dedicated simulation worker, ordered commands and transferable presentation buffers |
 | `src/renderer.ts`, `src/engine.ts` | Canvas display and the typed WASM boundary |
 | `engine/src/body.rs` | Organs, footprints, construction, recovery and conservative partitioning |
 | `engine/src/genome.rs`, `engine/src/genome/` | Typed language, registers, source-preserving mutation and inspection |
@@ -213,16 +214,36 @@ npm run test:inspection
 npm run test:graph
 npm run test:storage
 npm run test:session
+npm run test:worker
 npm run test:food-chain
 node scripts/check-preset-navigation.mjs
 ```
 
-Tests cover physical accounting and packing, sensor gates, conservative inheritance, safe mutations, checkpoint replay, real WASM interfaces, editor/Rust metadata agreement, graph bounds and persistence failures. The short preset-navigation fixture tests escape from a real resistant contact followed by particle capture and digestion. Ecosystem checks report survival and extinctions across fixed seeds; they do not guarantee permanent coexistence.
+Tests cover physical accounting and packing, sensor gates, conservative inheritance, safe mutations, checkpoint replay, real WASM interfaces, editor/Rust metadata agreement, graph bounds and persistence failures. Worker tests use real worker threads and WASM to check ordered commands, transferred buffers, atomic checkpoint capture, partial failures, disposal and main-thread responsiveness. Session tests cover related inspector reads on one tick and final-save ordering. The short preset-navigation fixture tests escape from a real resistant contact followed by particle capture and digestion. Ecosystem checks report survival and extinctions across fixed seeds; they do not guarantee permanent coexistence.
+
+An optional browser smoke test is available as `node scripts/check-ui.mjs`. Run
+`npm run build:pages` and serve `docs` on `http://127.0.0.1:4173/` first; it requires
+Playwright and Chromium. `UI_TEST_URL`, `PLAYWRIGHT_MODULE` and `CHROMIUM_PATH`
+override those local defaults. It uses an isolated browser context. This test
+could not run in the implementation environment because Chromium socket access
+was denied and the separate browser could not reach the local preview.
 
 ## Simulation performance
 
 See [PERFORMANCE.md](PERFORMANCE.md) for the measured optimization results,
-correctness checks, and recommended architecture changes. The comparison harness
+correctness checks, and implemented architecture. The engine retains tick buffers
+and spatial columns, shares identical field-flow samples, and evaluates a derived
+genome plan with folded constants and unreachable bindings removed. Authored
+programs remain intact for mutation, inspection and checkpoints.
+
+Each simulation and environment preview runs in a dedicated worker. The main
+thread requests at most one advancing batch of eight fixed 1/30-second ticks,
+draws compact snapshots, and requests aggregate metrics or field overlays at
+250 ms intervals when visible. Selected-cell details are fetched on demand;
+unchanged frames are not repainted. Pausing and closing drain outstanding work
+and save checkpoint bytes with their matching summary before releasing the run.
+
+The comparison harness
 runs actual release WASM engines on the same fixed-seed worlds and checks complete
 checkpoint and render-buffer equality at sampled boundaries.
 

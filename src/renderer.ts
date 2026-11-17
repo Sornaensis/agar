@@ -1,5 +1,6 @@
 import { ORGANELLE_CATALOG } from './organelles';
-import type { Cell, EnvironmentSnapshot, EnvironmentSource, WorldSnapshot } from './engine';
+import type { Cell, RenderCell, EnvironmentSnapshot, EnvironmentSource } from './engine';
+import type { RenderWorldSnapshot } from './session';
 
 const PALETTE = ['#5ce1ba', '#aaa2ff', '#efa66b', '#6dcbea', '#ed9db7', '#d7d889'];
 const clamp = (value: number, low: number, high: number): number => Math.max(low, Math.min(high, value));
@@ -36,6 +37,12 @@ export class Renderer {
   private offsetX = 0;
   private offsetY = 0;
   private lastTick = -1;
+  private lastWorld: RenderWorldSnapshot | null = null;
+  private lastSelected: number | null = null;
+  private lastDetails: Cell | null = null;
+  private lastOptions = '';
+  private resizeVersion = 0;
+  private renderedResize = -1;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     const context = canvas.getContext('2d', { alpha: false });
@@ -47,6 +54,7 @@ export class Renderer {
   }
 
   resize(): void {
+    this.resizeVersion++;
     const rect = this.canvas.getBoundingClientRect();
     this.cssWidth = Math.max(1, rect.width);
     this.cssHeight = Math.max(1, rect.height);
@@ -72,10 +80,10 @@ export class Renderer {
     return { x, y };
   }
 
-  pickCell(world: WorldSnapshot, clientX: number, clientY: number): Cell | null {
+  pickCell(world: RenderWorldSnapshot, clientX: number, clientY: number): RenderCell | null {
     const position = this.toWorld(clientX, clientY);
     if (!position) return null;
-    let nearest: Cell | null = null;
+    let nearest: RenderCell | null = null;
     let nearestDistance = Infinity;
     for (const cell of world.cells) {
       const rawX = Math.abs(cell.x - position.x);
@@ -92,7 +100,7 @@ export class Renderer {
     return nearest;
   }
 
-  pickSource(world: WorldSnapshot, clientX: number, clientY: number): EnvironmentSource | null {
+  pickSource(world: RenderWorldSnapshot, clientX: number, clientY: number): EnvironmentSource | null {
     const position = this.toWorld(clientX, clientY);
     if (!position) return null;
     let nearest: EnvironmentSource | null = null;
@@ -108,7 +116,7 @@ export class Renderer {
     return nearest;
   }
 
-  render(world: WorldSnapshot, selectedId: number | null, options: RenderOptions = {}): void {
+  render(world: RenderWorldSnapshot, selectedId: number | null, options: RenderOptions = {}, details: Cell | null = null): void {
     if (world.width !== this.worldWidth || world.height !== this.worldHeight) {
       this.worldWidth = world.width;
       this.worldHeight = world.height;
@@ -116,6 +124,11 @@ export class Renderer {
       this.updateTransform();
     }
     if (this.pixelRatio !== Math.min(window.devicePixelRatio || 1, 2)) this.resize();
+    const optionsKey = `${options.overlay ?? 'none'}:${options.trails ?? false}:${options.sensors ?? true}`;
+    if (this.lastWorld === world && this.lastSelected === selectedId && this.lastDetails === details
+      && this.lastOptions === optionsKey && this.renderedResize === this.resizeVersion) return;
+    this.lastWorld = world; this.lastSelected = selectedId; this.lastDetails = details;
+    this.lastOptions = optionsKey; this.renderedResize = this.resizeVersion;
     const context = this.context;
     context.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0);
     context.globalAlpha = 1;
@@ -141,9 +154,9 @@ export class Renderer {
     this.lastTick = world.tick;
 
     const selected = world.cells.find((cell) => cell.id === selectedId);
-    if (selected && options.sensors !== false) {
+    if (selected && details?.id === selected.id && options.sensors !== false) {
       for (const point of this.wrappedPositions(selected.x, selected.y, selected.radius + 16)) {
-        this.drawBodyDetails(selected, point.x, point.y);
+        this.drawBodyDetails(details, point.x, point.y);
       }
     }
 
@@ -367,7 +380,7 @@ export class Renderer {
     return sprite;
   }
 
-  private drawCell(cell: Cell, x: number, y: number, selected: boolean): void {
+  private drawCell(cell: RenderCell, x: number, y: number, selected: boolean): void {
     const context = this.context;
     const color = genomeColor(cell.genomeId);
     const radius = cell.radius;
@@ -386,9 +399,8 @@ export class Renderer {
       context.stroke();
     }
     context.rotate(cell.angle);
-    const flagellum = cell.organelles.find(organ => organ.kind === 'flagellum');
-    if (flagellum && flagellum.capacity > 0) {
-      const filaments = Math.min(3,flagellum.count), reach = radius * (1.1 + Math.min(0.8,flagellum.capacity));
+    if (cell.flagellumCapacity > 0) {
+      const filaments = Math.min(3,cell.flagellumCount), reach = radius * (1.1 + Math.min(0.8,cell.flagellumCapacity));
       context.strokeStyle = 'rgba(141,203,217,0.65)'; context.lineWidth = 0.8;
       for (let index=0; index<filaments; index++) {
         const spread = (index-(filaments-1)/2)*radius*0.4;
@@ -397,14 +409,13 @@ export class Renderer {
         context.stroke();
       }
     }
-    const cortex = cell.organelles.find(organ => organ.kind === 'cortex');
-    if (cortex && cortex.capacity > 0) {
+    if (cell.cortexCapacity > 0) {
       context.beginPath(); context.arc(0,0,radius*1.02,0,Math.PI*2);
-      context.strokeStyle = 'rgba(164,175,216,0.45)'; context.lineWidth = 0.5+Math.min(2,cortex.mass*10); context.stroke();
+      context.strokeStyle = 'rgba(164,175,216,0.45)'; context.lineWidth = 0.5+Math.min(2,cell.cortexMass*10); context.stroke();
     }
     const size = radius * (96 / 21.5);
     context.drawImage(this.sprite(color), -size / 2, -size / 2, size, size);
-    if (cell.organelles.some(organ => organ.kind === 'photosynthetic' && organ.capacity > 0)) {
+    if (cell.photosyntheticCapacity > 0) {
       context.fillStyle = 'rgba(136,211,137,0.85)';
       context.beginPath();
       context.ellipse(-radius * 0.32, -radius * 0.36, radius * 0.22, radius * 0.13, -0.5, 0, Math.PI * 2);
@@ -418,7 +429,7 @@ export class Renderer {
       context.arc(radius * 0.15, radius * 0.08, radius * (0.12 + 0.22 * Math.sqrt(fullness)), 0, Math.PI * 2);
       context.fill();
     }
-    if (cell.organelles.some(organ => organ.kind === 'piercer' && organ.capacity > 0)) {
+    if (cell.piercerCapacity > 0) {
       context.strokeStyle = 'rgba(235,143,129,0.85)';
       context.lineWidth = 1.1;
       context.beginPath();
@@ -484,7 +495,7 @@ export class Renderer {
     return xs.flatMap((px) => ys.map((py) => ({ x: px, y: py })));
   }
 
-  private recordTrails(world: WorldSnapshot): void {
+  private recordTrails(world: RenderWorldSnapshot): void {
     const living = new Set<number>();
     for (const cell of world.cells) {
       living.add(cell.id);
@@ -497,7 +508,7 @@ export class Renderer {
     for (const id of this.trails.keys()) if (!living.has(id)) this.trails.delete(id);
   }
 
-  private drawTrails(world: WorldSnapshot): void {
+  private drawTrails(world: RenderWorldSnapshot): void {
     const context = this.context;
     context.save();
     context.lineWidth = 1.1 / this.scale;

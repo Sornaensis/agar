@@ -3,10 +3,10 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { resolve } from 'node:path';
-import { catalog, compile, seed, save, restore, error, snapshot } from './organelle-harness.mjs';
+import { catalog, compile, seed, save, restore, error, snapshot, STRIDE } from './organelle-harness.mjs';
 
-// Compare actual release WASM engines on identical worlds. Timings exclude
-// setup, checkpoint comparison, JS snapshot parsing, and rendering.
+// Compare release WASM engines on identical worlds. Timers exclude setup,
+// checkpoint comparison, JS hydration, worker transfers and browser rendering.
 const args = process.argv.slice(2);
 let baselinePath, outputPath, scenarioName, samples = 5, ticks = 300;
 for (let i = 0; i < args.length; i += 2) {
@@ -23,22 +23,28 @@ for (let i = 0; i < args.length; i += 2) {
 }
 assert.ok(Number.isSafeInteger(samples) && samples >= 1 && samples <= 25);
 assert.ok(Number.isSafeInteger(ticks) && ticks >= 1 && ticks <= 18000);
+const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const currentPath = new URL('../engine/pkg/agar_engine.wasm', import.meta.url);
 const engines = [];
 for (const [name, path] of baselinePath ? [['baseline', baselinePath], ['optimized', currentPath]] : [['current', currentPath]]) {
   const bytes = await readFile(path);
-  engines.push({ name, module: await WebAssembly.compile(bytes), sha256: createHash('sha256').update(bytes).digest('hex') });
+  engines.push({ name, module: await WebAssembly.compile(bytes), sha256: sha256(bytes) });
 }
 const { PRESETS, BUILTIN_ENVIRONMENTS } = await catalog();
 const pond = BUILTIN_ENVIRONMENTS.find(item => item.id === 'builtin:environment:sunlit-pond').config;
 const calm = { ambientTemperature: 0.5, ambientLight: 0.8, currentStrength: 0, initialNutrients: 1, foodRate: 0, sources: [] };
+const dormantSource = Array.from({ length: 512 }, (_, i) =>
+  `let dormant${i} = sin(energy + ${i}.0) + cos(age + ${i}.0);`).join('\n')
+  + '\nthrust=0;turn=0;divide=false;feed=0;absorb=0;';
 const scenarios = [
   { name: 'mixed-ecosystem', config: pond, food: 0, warmup: 1800, populations: [['Phototroph', 72], ['Forager', 6], ['Mixotroph', 4], ['Predator', 2]], mutationRate: 0.1 },
   { name: 'dense-producers', config: calm, food: 0, warmup: 900, populations: [['Phototroph', 400]] },
   { name: 'particle-heavy', config: calm, food: 10000, warmup: 600, populations: [['Forager', 80]] },
   { name: 'dynamic-fields', config: pond, food: 0, warmup: 300, populations: [] },
+  // Optional synthetic stress: 512 unused dynamic bindings, not a preset forecast.
+  { name: 'dormant-graph', optional: true, config: calm, food: 0, warmup: 90, populations: [['Dormant graph', 80]], source: dormantSource },
 ];
-const chosen = scenarioName ? scenarios.filter(item => item.name === scenarioName) : scenarios;
+const chosen = scenarioName ? scenarios.filter(item => item.name === scenarioName) : scenarios.filter(item => !item.optional);
 assert.ok(chosen.length, `Unknown scenario ${scenarioName}`);
 function advance(api, count) {
   for (let left = count; left > 0; left -= 120) {
@@ -55,14 +61,17 @@ async function create(engine, scenario) {
   for (const source of c.sources) assert.ok(api.add_source(source.kind, source.x, source.y, source.strength, source.radius));
   assert.equal(api.reset_empty(42, scenario.food), 1, error(api));
   for (const [name, count] of scenario.populations) {
-    const preset = PRESETS.find(item => item.name === name);
-    assert.ok(preset, name);
-    seed(api, compile(api, preset.source), count);
+    const source = scenario.source ?? PRESETS.find(item => item.name === name)?.source;
+    assert.ok(source, name);
+    seed(api, compile(api, source), count);
   }
   return api;
 }
+function bytesOf(value) {
+  return value instanceof ArrayBuffer ? Buffer.from(value) : Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+}
 function sameBytes(a, b, label) {
-  const left = Buffer.from(a), right = Buffer.from(b);
+  const left = bytesOf(a), right = bytesOf(b);
   if (!left.equals(right)) {
     let at = 0;
     while (at < Math.min(left.length, right.length) && left[at] === right[at]) at++;
@@ -76,32 +85,108 @@ function median(values) {
 }
 function rawSnapshot(api) {
   const p = api.snapshot_ptr(), n = api.snapshot_len();
-  const world = new Uint8Array(api.memory.buffer, p, n * 8).slice();
+  const world = new Float64Array(api.memory.buffer, p, n).slice();
   const e = api.environment_snapshot_ptr(), m = api.environment_snapshot_len();
-  return { world, environment: new Uint8Array(api.memory.buffer, e, m * 4).slice() };
+  return { world, environment: new Float32Array(api.memory.buffer, e, m).slice() };
+}
+function projection(api, method, ...args) {
+  const pointer = api[method](...args), length = api.presentation_len();
+  return new Float64Array(api.memory.buffer, pointer, length).slice();
+}
+function expectedRender(api, full) {
+  let generation = 0;
+  const values = [full[0], full[1], full[2], full[3], full[4], full[5], full[6], full[7], full[8], full[11], api.mutation_rate(), 0];
+  const offsets = [0, 1, 2, 3, 4, 5, 6, 11, 7, 15, 24, 25, 19, 20, 81, 83, 94, 95, 47, 89, 9];
+  for (let i = 0; i < full[2]; i++) {
+    const at = 12 + i * STRIDE;
+    for (const offset of offsets) values.push(full[at + offset]);
+    generation = Math.max(generation, full[at + 9]);
+  }
+  values[11] = generation;
+  for (let i = 12 + full[2] * STRIDE; i < full.length; i++) values.push(full[i]);
+  return new Float64Array(values);
+}
+function expectedMetrics(api, full) {
+  let generation = 0;
+  const trophic = [0, 0, 0, 0], flow = [0, 0, 0], organic = [0, 0, 0], groups = new Map();
+  for (let i = 0; i < full[2]; i++) {
+    const at = 12 + i * STRIDE, id = full[at + 1], age = full[at + 9];
+    const photo = full[at + 39 + 1 * 6 + 5] > 0, digestive = full[at + 39 + 3 * 6 + 5] > 0;
+    if (photo || digestive) trophic[photo && digestive ? 2 : photo ? 0 : 1]++;
+    if (full[at + 39 + 8 * 6 + 5] > 0) trophic[3]++;
+    flow[0] += full[at + 20]; flow[1] += full[at + 27]; flow[2] += full[at + 31];
+    generation = Math.max(generation, age);
+    const group = groups.get(id) ?? [0, 0]; group[0]++; group[1] = Math.max(group[1], age); groups.set(id, group);
+  }
+  for (let at = 12 + full[2] * STRIDE; at < full.length; at += 5) organic[full[at + 4]]++;
+  return new Float64Array([
+    full[0], full[1], full[2], full[3], full[4], full[5], full[6], generation,
+    api.mutation_rate(), api.mutation_count(), api.mutation_skipped_count(), api.genome_count(), api.genome_limit(), api.genome_bytes(), api.genome_byte_limit(),
+    api.predation_count(), api.attack_count(), api.photosynthesis_total(), api.energy_total(), api.energy_input_total(),
+    api.nutrient_total(), api.nutrient_input_total(), api.nutrient_dissolved_total(), api.nutrient_food_total(), api.nutrient_cell_total(),
+    ...trophic, ...flow, ...organic, groups.size,
+    ...[...groups].sort((a, b) => a[0] - b[0]).flatMap(([id, group]) => [id, ...group]),
+  ]);
+}
+function validateProjections(api, referenceApi, full, label) {
+  if (!api.render_snapshot_ptr) return null;
+  const render = projection(api, 'render_snapshot_ptr');
+  sameBytes(render, expectedRender(referenceApi, full), `${label} compact render`);
+  const metrics = projection(api, 'metrics_snapshot_ptr'), expected = expectedMetrics(referenceApi, full);
+  const genomeBytes = { reference: expected[13], current: metrics[13] };
+  assert.equal(metrics[13], api.genome_bytes());
+  // This one diagnostic measures resident derived execution plans now. No
+  // checkpoint, physical value, population count or other header is normalized.
+  expected[13] = metrics[13];
+  sameBytes(metrics, expected, `${label} metrics (genomeBytes accounting normalized)`);
+  const selectedId = full[2] ? full[12] : null;
+  if (selectedId !== null) sameBytes(projection(api, 'cell_snapshot_ptr', selectedId), full.slice(12, 12 + STRIDE), `${label} selected cell`);
+  const summary = projection(api, 'summary_snapshot_ptr');
+  sameBytes(summary, new Float64Array([full[1], full[2], full[3], full[4], full[5], expected[7]]), `${label} summary`);
+  return { selectedId, genomeBytes, payloadBytes: { compactRender: render.byteLength, metrics: metrics.byteLength, selectedCell: selectedId === null ? 0 : STRIDE * 8, summary: summary.byteLength } };
+}
+function exportMeasurements(api, selectedId) {
+  const operations = {
+    legacyCombined: () => { api.snapshot_ptr(); api.environment_snapshot_ptr(); },
+    legacyWorld: () => api.snapshot_ptr(),
+    environment: () => api.environment_snapshot_ptr(),
+  };
+  if (api.render_snapshot_ptr) {
+    operations.compactRender = () => api.render_snapshot_ptr();
+    operations.metrics = () => api.metrics_snapshot_ptr();
+    operations.summary = () => api.summary_snapshot_ptr();
+    if (selectedId !== null) operations.selectedCell = () => api.cell_snapshot_ptr(selectedId);
+  }
+  const result = {};
+  for (const [name, operation] of Object.entries(operations)) {
+    operation();
+    const start = performance.now();
+    for (let n = 0; n < 30; n++) operation();
+    result[name] = (performance.now() - start) / 30;
+  }
+  return result;
 }
 const report = {
   runtime: process.version, runtimeFlags: process.execArgv, platform: process.platform, architecture: process.arch,
-  seed: 42, measuredTicks: ticks, samples, warmupCheckInterval: 120,
-  note: 'Release WASM in Node/V8. Tick and Rust snapshot export timings only; not browser rendering or JS object hydration. Medians of repeated identical trajectories, alternating engine order.',
+  seed: 42, measuredTicks: ticks, samples, warmupCheckInterval: 120, exportCallsPerSample: 30,
+  note: 'Release WASM in Node/V8. Tick and Rust export timings exclude JS hydration/copies, worker transfer/scheduling, main-thread rendering and setup. Medians of identical trajectories with alternating engine order.',
+  equivalence: 'Canonical checkpoints and legacy world/environment buffers must match exactly. Compact projections match those legacy values; only metrics header[13] (genomeBytes) is normalized because derived execution-plan storage is now counted.',
   engines: engines.map(({ name, sha256 }) => ({ name, sha256 })), scenarios: [],
 };
 for (const scenario of chosen) {
   console.log(`Preparing ${scenario.name}...`);
   const apis = await Promise.all(engines.map(engine => create(engine, scenario)));
-  // Compare complete checkpoints at sampled boundaries, including development,
-  // rather than relying only on final population counts or resource totals.
   for (let left = scenario.warmup; left > 0; left -= 120) {
     for (const api of apis) advance(api, Math.min(left, 120));
     if (apis.length === 2) sameBytes(save(apis[0]), save(apis[1]), `${scenario.name} warmup ${scenario.warmup - Math.max(0, left - 120)}`);
   }
   const starting = apis.map(save);
-  // Warm every branch used by the measured trajectory before recording times.
-  // For reproducible V8 steady-state measurements, run with --no-liftoff.
+  // Warm branches in the measured trajectory; --no-liftoff avoids tier changes.
   for (const api of apis) advance(api, ticks);
   if (apis.length === 2) sameBytes(save(apis[0]), save(apis[1]), `${scenario.name} trial`);
-  const timings = engines.map(() => []), exports = engines.map(() => []);
-  let finalState;
+  const timings = engines.map(() => []), exportTimings = engines.map(() => []);
+  const payloads = [], accounting = [];
+  let finalState, finalCheckpoint, finalRaw;
   for (let sample = 0; sample < samples; sample++) {
     const order = [...apis.keys()];
     if (sample % 2) order.reverse();
@@ -114,33 +199,41 @@ for (const scenario of chosen) {
       timings[index].push((performance.now() - start) / ticks);
       states[index] = save(api);
       snapshots[index] = rawSnapshot(api);
-      // Read-only export cost is separate from ticks. No JS hydration here.
-      const exportStart = performance.now();
-      for (let n = 0; n < 30; n++) {
-        api.snapshot_ptr();
-        api.environment_snapshot_ptr();
-      }
-      exports[index].push((performance.now() - exportStart) / 30);
+      exportTimings[index].push(exportMeasurements(api, snapshots[index].world[2] ? snapshots[index].world[12] : null));
+      sameBytes(states[index], save(api), `${scenario.name} read-only exports`);
     }
     if (apis.length === 2) {
       sameBytes(states[0], states[1], `${scenario.name} sample ${sample + 1}`);
-      sameBytes(snapshots[0].world, snapshots[1].world, `${scenario.name} world snapshot`);
+      sameBytes(snapshots[0].world, snapshots[1].world, `${scenario.name} legacy world snapshot`);
       sameBytes(snapshots[0].environment, snapshots[1].environment, `${scenario.name} environment snapshot`);
     }
-    if (sample === 0) finalState = snapshot(apis.at(-1));
+    for (const [index, api] of apis.entries()) {
+      const checked = validateProjections(api, apis[0], snapshots[0].world, `${scenario.name} sample ${sample + 1}`);
+      payloads[index] = { legacyWorld: snapshots[index].world.byteLength, environment: snapshots[index].environment.byteLength, ...checked?.payloadBytes };
+      accounting[index] = checked?.genomeBytes ?? { reference: api.genome_bytes(), current: api.genome_bytes() };
+      sameBytes(states[index], save(api), `${scenario.name} projection validation is read-only`);
+    }
+    if (sample === 0) {
+      finalState = snapshot(apis.at(-1)); finalCheckpoint = states.at(-1); finalRaw = snapshots.at(-1);
+    }
   }
   const result = {
-    name: scenario.name, warmupTicks: scenario.warmup, initialPopulations: scenario.populations, initialParticles: scenario.food,
+    name: scenario.name, synthetic: scenario.optional ?? false, warmupTicks: scenario.warmup, initialPopulations: scenario.populations, initialParticles: scenario.food,
     finalPopulation: finalState.population, finalParticles: finalState.food.length,
     births: finalState.births, deaths: finalState.deaths, mutations: finalState.mutations,
-    checkpointIdentical: apis.length === 2, renderBuffersIdentical: apis.length === 2,
-    measurements: engines.map((engine, i) => ({ engine: engine.name, tickMs: median(timings[i]), tickSamplesMs: timings[i], snapshotExportMs: median(exports[i]) })),
+    checkpointIdentical: apis.length === 2, legacyBuffersIdentical: apis.length === 2, compactProjectionsValidated: apis.some(api => api.render_snapshot_ptr),
+    checkpointBytes: finalCheckpoint.byteLength, checkpointSha256: sha256(finalCheckpoint),
+    legacyWorldSha256: sha256(bytesOf(finalRaw.world)), environmentSha256: sha256(bytesOf(finalRaw.environment)),
+    measurements: engines.map((engine, i) => {
+      const exports = Object.fromEntries(Object.keys(exportTimings[i][0]).map(name => [name, median(exportTimings[i].map(sample => sample[name]))]));
+      return { engine: engine.name, tickMs: median(timings[i]), tickSamplesMs: timings[i], snapshotExportMs: exports.legacyCombined, exportMs: exports, exportSamplesMs: exportTimings[i], payloadBytes: payloads[i], genomeBytes: accounting[i].current };
+    }),
   };
   if (engines.length === 2) {
     result.speedup = result.measurements[0].tickMs / result.measurements[1].tickMs;
     result.tickTimeReductionPercent = 100 * (1 - result.measurements[1].tickMs / result.measurements[0].tickMs);
   }
   report.scenarios.push(result);
-  console.log(JSON.stringify(result));
+  console.log(JSON.stringify({ name: result.name, checkpointIdentical: result.checkpointIdentical, measurements: result.measurements.map(({ engine, tickMs, exportMs, payloadBytes }) => ({ engine, tickMs, exportMs, payloadBytes })), speedup: result.speedup }));
 }
 if (outputPath) await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`);

@@ -1,5 +1,6 @@
 import './style.css';
-import { Engine, type Cell, type WorldSnapshot } from './engine';
+import { Engine, type Cell, type BodyInspection, type RegisterEntry, type GenomeRecord, type MetricsSnapshot } from './engine';
+import { WorkerEngine } from './worker-engine';
 import { Renderer, genomeColor } from './renderer';
 import { GenomeVisualizer } from './genome-visualizer';
 import { BUILTIN_GENOMES, BUILTIN_ENVIRONMENTS, BUILTIN_SIMULATIONS, isBuiltin, type BuiltinSimulation } from './catalog';
@@ -8,7 +9,7 @@ import { Storage, loadPreferences, savePreferences, newGenome, validateName, par
   type GenomeDocument, type EnvironmentDocument, type EnvironmentConfig, type SimulationMetadata, type UiPreferences } from './storage';
 import { CatalogUI } from './catalog-ui';
 import { ProgramEditor } from './program-editor';
-import { SimulationSession, claimSimulation, summarize } from './session';
+import { SimulationSession, claimSimulation } from './session';
 import { icon, escapeHtml as esc, createDialog, setDialogError, downloadFile, inputNumber, clock, readableError } from './ui';
 import { showGuide } from './guide';
 import { ORGANELLE_CATALOG } from './organelles';
@@ -33,6 +34,11 @@ let selectedId: number | null = null;
 let inspectorView: 'overview' | 'body' | 'memory' | 'program' = 'overview';
 let memoryFilter = '', memoryPage = 0, catalogQuery = '', simulationOpenError = '';
 let lastFrame = 0, lastUi = 0, accumulator = 0, toastTimer = 0;
+let lastMetrics = 0, lastEnvironment = 0;
+let inspectorEpoch = 0, inspectorPending = false, inspectorStamp = '';
+let cellInspection: { session: SimulationSession; cell: Cell; body?: BodyInspection; memory?: RegisterEntry[] } | null = null;
+const genomeRecords = new WeakMap<SimulationSession, Map<number, Promise<GenomeRecord>>>();
+const evaluatingEditors = new WeakSet<ProgramEditor>();
 const genomeVisualizer = new GenomeVisualizer();
 const compiler = (): Promise<Engine> => Engine.load();
 const saveIssues = new Map<string, unknown>();
@@ -139,6 +145,7 @@ function renderCatalog(): string {
   return `<div class="page library-page"><header class="page-header"><h1>${genome ? 'Genomes' : 'Environments'}</h1><div class="toolbar"><label class="search-field">${icon('search')}<input class="search-input" id="catalog-search" type="search" placeholder="Search" aria-label="Search ${genome ? 'genomes' : 'environments'}" value="${esc(catalogQuery)}"></label><button class="icon-button import-button" aria-label="Import ${kind}" title="Import ${kind}" data-action="import-${kind}">${icon('upload')}</button><button class="button primary" data-action="new-${kind}">${icon('plus')}New ${kind}</button></div></header><div id="catalog-items"></div></div>`;
 }
 function renderView(): void {
+  inspectorEpoch++;
   inspectorProgram?.destroy(); inspectorProgram = null;
   renderer?.dispose(); renderer = null;
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-tab]')) {
@@ -168,40 +175,61 @@ function renderView(): void {
         selectedId = cells.length ? cells[index < 0 ? (direction > 0 ? 0 : cells.length - 1) : (index + direction + cells.length) % cells.length].id : null; renderInspector();
       }
     });
-    renderInspector(); updatePlayback(); renderer.render(active.world, selectedId, prefs);
+    renderInspector(); updatePlayback(); renderer.render(active.world, selectedId, prefs, cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.cell : null);
   }
   updateSimulationUi();
 }
 async function navigate(tab: UiPreferences['tab']): Promise<void> {
   if (!ready || transitioning) return;
   transitioning = true;
-  try { if (active) await active.flush(); await refreshCatalogs(false); prefs.tab = tab; catalogQuery = ''; accumulator = 0; persistPreferences(); renderView(); }
+  try {
+    if (active) {
+      await active.refresh({ metrics: true, environment: prefs.overlay !== 'none' });
+      await active.flush();
+    }
+    await refreshCatalogs(false); prefs.tab = tab; catalogQuery = ''; accumulator = 0; persistPreferences(); renderView();
+  }
   catch (error) { toast(readableError(error)); } finally { transitioning = false; }
 }
-function applyEnvironment(engine: Engine, config: EnvironmentConfig): void {
-  engine.setEnvironment(config.ambientTemperature, config.ambientLight, config.currentStrength);
-  engine.setInitialNutrients(config.initialNutrients); engine.setFoodRate(config.foodRate); engine.clearSources();
-  for (const source of config.sources) if (!engine.addSource(source.kind, source.x, source.y, source.strength, source.radius)) throw new Error('Could not create an environment source.');
+async function applyEnvironment(engine: WorkerEngine, config: EnvironmentConfig): Promise<void> {
+  await engine.setEnvironment(config.ambientTemperature, config.ambientLight, config.currentStrength);
+  await engine.setInitialNutrients(config.initialNutrients); await engine.setFoodRate(config.foodRate); await engine.clearSources();
+  for (const source of config.sources) if (!await engine.addSource(source.kind, source.x, source.y, source.strength, source.radius)) throw new Error('Could not create an environment source.');
 }
-function makeSession(engine: Engine, metadata: SimulationMetadata): SimulationSession {
-  return new SimulationSession(engine, metadata, storage, saveStatus, upsertMetadata);
+async function makeSession(engine: WorkerEngine, metadata: SimulationMetadata): Promise<SimulationSession> {
+  const initial = await engine.presentation({ metrics: true, environment: true });
+  return new SimulationSession(engine, metadata, initial, storage, saveStatus, upsertMetadata);
+}
+function disposeSession(session: SimulationSession): void {
+  for (const inspection of expandedInspections) if (inspection.session === session) {
+    inspection.editor.setEvaluationUnavailable('This simulation has been closed.');
+    expandedInspections.delete(inspection);
+  }
+  if (cellInspection?.session === session) cellInspection = null;
+  genomeRecords.delete(session);
+  session.dispose();
+}
+function runError(session: SimulationSession, error: unknown): void {
+  if (active !== session) return;
+  session.metadata.paused = true; session.touch(); updatePlayback();
+  toast(readableError(error));
 }
 async function openSimulation(id: string): Promise<void> {
   if (transitioning) return;
   if (active?.metadata.id === id) { prefs.tab = 'simulation'; renderView(); return; }
-  transitioning = true; let release: (() => void) | null = null;
+  transitioning = true; let release: (() => void) | null = null; let candidate: WorkerEngine | null = null;
   try {
     release = await claimSimulation(id);
     const record = await storage.getSimulation(id); if (!record) throw new Error('This simulation no longer exists.');
-    const engine = await Engine.load(); engine.restoreState(record.state);
+    const engine = candidate = await WorkerEngine.load(); await engine.restoreState(record.state);
     if (active) await active.flush();
     const { state: _state, ...metadata } = record; metadata.paused = true;
-    const next = makeSession(engine, metadata); next.release = release;
-    active?.release(); active = next; release = null;
+    const next = await makeSession(engine, metadata); next.release = release;
+    if (active) disposeSession(active); active = next; release = null; candidate = null;
     prefs.activeSimulationId = id; prefs.tab = 'simulation'; prefs.simulationView = 'player';
     selectedId = null; accumulator = 0; persistPreferences(); renderView();
   } catch (error) {
-    release?.();
+    candidate?.dispose(); release?.();
     if (!active) { simulationOpenError = readableError(error); prefs.activeSimulationId = null; persistPreferences(); renderView(); }
     else toast(readableError(error));
   } finally { transitioning = false; }
@@ -210,7 +238,7 @@ async function closeSimulation(): Promise<void> {
   if (!active || transitioning) return;
   transitioning = true;
   try {
-    active.metadata.paused = true; active.touch(); await active.flush(); active.release(); active = null;
+    active.metadata.paused = true; active.touch(); await active.flush(); disposeSession(active); active = null;
     selectedId = null; prefs.activeSimulationId = null; simulations = await storage.listSimulationSummaries(); persistPreferences(); renderView();
   } catch (error) { toast(readableError(error)); } finally { transitioning = false; }
 }
@@ -251,7 +279,7 @@ function newSimulationDialog(template?: BuiltinSimulation, environmentId?: strin
         .map(control => ({ control, disabled: control.disabled }));
       for (const item of controls) item.control.disabled = true;
       transitioning = true; dialog.dataset.saving = 'true';
-      let release: (() => void) | null = null;
+      let release: (() => void) | null = null; let candidate: WorkerEngine | null = null;
       try {
         const name = validateName(dialog.querySelector<HTMLInputElement>('#simulation-name')!.value);
         const seed = inputNumber(dialog.querySelector('#simulation-seed')!, 'Seed', 0, 4294967295);
@@ -269,19 +297,19 @@ function newSimulationDialog(template?: BuiltinSimulation, environmentId?: strin
           if (genome.languageVersion !== GENOME_LANGUAGE_VERSION) throw new Error('This genome uses the older investment language. Edit a new copy before introducing it.');
           return { count: item.count, source: genome.source, name: genome.name };
         });
-        const engine = await Engine.load(); applyEnvironment(engine, environmentConfig); engine.setMutationRate(0.1); engine.resetEmpty(seed, environmentConfig.foodRate > 0 ? 360 : 0);
+        const engine = candidate = await WorkerEngine.load(); await applyEnvironment(engine, environmentConfig); await engine.setMutationRate(0.1); await engine.resetEmpty(seed, environmentConfig.foodRate > 0 ? 360 : 0);
         const names: Record<string, string> = {};
         for (const item of startingGenomes) {
-          const id = engine.compile(item.source); names[String(id)] = item.name;
-          if (engine.seed(id, item.count) !== item.count) throw new Error('Could not create the starting population.');
+          const id = await engine.compile(item.source); names[String(id)] = item.name;
+          if (await engine.seed(id, item.count) !== item.count) throw new Error('Could not create the starting population.');
         }
         if (active) await active.flush();
         const now = Date.now(), id = 'simulation:' + crypto.randomUUID(); release = await claimSimulation(id);
-        const next = makeSession(engine, { id, name, environmentName, createdAt: now, updatedAt: now, seed, paused: false, speed: 1, genomeNames: names, history: [], summary: summarize(engine.snapshot()) });
-        next.refresh(); next.touch(); await next.checkpoint(); next.release = release; active?.release(); active = next; release = null;
+        const next = await makeSession(engine, { id, name, environmentName, createdAt: now, updatedAt: now, seed, paused: false, speed: 1, genomeNames: names, history: [], summary: await engine.summary() });
+        next.touch(); await next.checkpoint(); next.release = release; if (active) disposeSession(active); active = next; release = null; candidate = null;
         prefs.activeSimulationId = id; prefs.tab = 'simulation'; prefs.simulationView = 'player'; selectedId = null; accumulator = 0;
         simulationOpenError = ''; persistPreferences(); dialog.close(); renderView();
-      } catch (error) { release?.(); setDialogError(dialog, error); }
+      } catch (error) { candidate?.dispose(); release?.(); setDialogError(dialog, error); }
       finally { for (const item of controls) item.control.disabled = item.disabled; transitioning = false; delete dialog.dataset.saving; }
     })();
   });
@@ -306,36 +334,57 @@ async function togglePlayback(): Promise<void> {
   session.metadata.paused = !session.metadata.paused; accumulator = 0; session.touch(); updatePlayback();
   const pausing = session.metadata.paused;
   if (pausing) transitioning = true;
-  try { if (pausing) await session.flush(); else await session.checkpoint(); }
-  catch { /* Save status keeps the failure visible. */ }
+  try {
+    if (pausing) {
+      // Finish any accepted batch, then refresh the slower projections once so
+      // a paused overlay and metrics describe the final rendered tick.
+      await session.refresh({ metrics: true, environment: prefs.overlay !== 'none' });
+      await session.flush();
+    } else await session.checkpoint();
+  }
+  catch (error) { runError(session, error); }
   finally { if (pausing) transitioning = false; }
+}
+function getGenome(session: SimulationSession, id: number): Promise<GenomeRecord> {
+  let records = genomeRecords.get(session);
+  if (!records) { records = new Map(); genomeRecords.set(session, records); }
+  let pending = records.get(id);
+  if (!pending) {
+    pending = session.inspect(async engine => {
+      const record = await engine.getGenome(id);
+      if (active === session && !session.metadata.genomeNames[String(id)]) {
+        const original = allGenomes().find(item => item.source === record.source);
+        const names = session.metadata.genomeNames;
+        names[String(id)] = (original?.name || (record.parentId ? (names[String(record.parentId)] || 'Variant').split(' · ')[0] + ' · ' + id : 'Genome ' + id)).slice(0,80);
+        session.touch();
+      }
+      return record;
+    });
+    records.set(id, pending);
+    void pending.catch(() => { records!.delete(id); });
+  }
+  return pending;
 }
 function genomeName(id: number): string {
   if (!active) return 'Genome ' + id;
-  const names = active.metadata.genomeNames;
-  if (transitioning || lifecycleFlushes) return names[String(id)] || 'Genome ' + id;
-  if (!names[String(id)]) {
-    const record = active.engine.getGenome(id);
-    const original = allGenomes().find(item => item.source === record.source);
-    names[String(id)] = (original?.name || (record.parentId ? (names[String(record.parentId)] || 'Variant').split(' · ')[0] + ' · ' + id : 'Genome ' + id)).slice(0,80);
-    active.touch();
-  }
-  return names[String(id)];
+  const name = active.metadata.genomeNames[String(id)];
+  if (!name && !transitioning && !lifecycleFlushes) void getGenome(active,id).catch(() => {});
+  return name || 'Genome ' + id;
 }
 function renderInspector(): void {
+  inspectorEpoch++; inspectorStamp = '';
   inspectorProgram?.destroy(); inspectorProgram = null;
   const panel = $('cell-inspector'); if (!panel || !active) return;
   panel.hidden = selectedId === null; if (selectedId === null) return;
   const cell = active.world.cells.find(item => item.id === selectedId);
   panel.innerHTML = `<header class="inspector-header"><div><h2>Organism ${selectedId}</h2><span class="muted">${cell ? esc(genomeName(cell.genomeId)) : 'No longer alive'}</span></div><button class="icon-button" data-action="close-inspector" aria-label="Close organism inspector">${icon('close')}</button></header>
+    <p id="inspector-error" class="compatibility-notice" role="status" hidden></p>
     ${cell ? `<nav class="inspector-tabs" aria-label="Organism details" role="tablist">${(['overview','body','memory','program'] as const).map(view => `<button role="tab" data-inspector-view="${view}" tabindex="${inspectorView === view ? 0 : -1}" aria-selected="${inspectorView === view}" class="${inspectorView === view ? 'active' : ''}">${view[0].toUpperCase()+view.slice(1)}</button>`).join('')}</nav><div id="inspector-content"></div>` : '<p class="muted">This organism has died.</p>'}`;
   if (!cell) return;
   if (inspectorView === 'memory') {
     $('inspector-content').innerHTML = `<div class="memory-summary" id="memory-summary"></div><input id="memory-filter" class="search-input memory-filter" type="search" placeholder="Find a register" aria-label="Find a register" value="${esc(memoryFilter)}"><table class="memory-table"><thead><tr><th>Address</th><th>Value</th></tr></thead><tbody id="memory-values"></tbody></table><div class="memory-footer"><button class="button subtle" data-action="memory-previous">Previous</button><span id="memory-page"></span><button class="button subtle" data-action="memory-next">Next</button></div>`;
   } else if (inspectorView === 'program') {
-    const source = active.engine.getGenome(cell.genomeId).source;
-    $('inspector-content').innerHTML = `<div class="program-toolbar"><button class="button small subtle" data-action="cell-graph">${icon('graph')}Graph</button><button class="icon-button" data-action="cell-program" aria-label="Expand program" title="Expand program">${icon('expand')}</button></div><div id="organism-program" class="organism-program-editor"></div>`;
-    inspectorProgram = new ProgramEditor({ parent: $('organism-program'), source, readOnly: true, compiler });
+    $('inspector-content').innerHTML = `<div class="program-toolbar"><button class="button small subtle" data-action="cell-graph">${icon('graph')}Graph</button><button class="icon-button" data-action="cell-program" aria-label="Expand program" title="Expand program">${icon('expand')}</button></div><div id="organism-program" class="organism-program-editor"><p class="muted">Loading program…</p></div>`;
   }
   updateInspector();
 }
@@ -352,27 +401,70 @@ function memoryValue(value: unknown): string {
 }
 function updateProgramEvaluation(editor: ProgramEditor, session: SimulationSession, cellId: number): void {
   const previous = inspectedRevisions.get(editor);
-  if (previous?.session === session && previous.cellId === cellId
-    && previous.revision === session.revision && previous.tick === session.world.tick) return;
-  inspectedRevisions.set(editor, { session, cellId, revision: session.revision, tick: session.world.tick });
+  if (evaluatingEditors.has(editor) || (previous?.session === session && previous.cellId === cellId
+    && previous.revision === session.revision && previous.tick === session.world.tick)) return;
   if (!session.world.cells.some(cell => cell.id === cellId)) {
     editor.setEvaluationUnavailable(`Organism ${cellId} has died. Its program remains available; live values do not.`);
     return;
   }
-  try { editor.setEvaluation(session.engine.getCellEvaluation(cellId)); }
-  catch (error) { editor.setEvaluationUnavailable(readableError(error)); }
+  const revision = session.revision;
+  evaluatingEditors.add(editor);
+  void session.engine.getCellEvaluation(cellId).then(evaluation => {
+    if (active !== session || (editor !== inspectorProgram && ![...expandedInspections].some(item => item.editor === editor))) return;
+    editor.setEvaluation(evaluation);
+    inspectedRevisions.set(editor, { session, cellId, revision, tick: evaluation.tick });
+  }).catch(error => {
+    if (active === session && (editor === inspectorProgram || [...expandedInspections].some(item => item.editor === editor))) editor.setEvaluationUnavailable(readableError(error));
+  }).finally(() => { evaluatingEditors.delete(editor); });
 }
 function updateInspector(): void {
   if (!active || selectedId === null || !$('inspector-content')) return;
-  const cell = active.world.cells.find(item => item.id === selectedId);
-  if (!cell) { renderInspector(); return; }
+  const session = active, id = selectedId, mode = inspectorView, epoch = inspectorEpoch;
+  if (!session.world.cells.some(item => item.id === id)) { cellInspection = null; renderInspector(); return; }
+  if (cellInspection?.session === session && cellInspection.cell.id === id) paintInspector();
+  const stamp = `${session.revision}:${session.world.tick}:${id}:${mode}`;
+  if (inspectorPending || inspectorStamp === stamp) return;
+  inspectorPending = true;
+  void (async () => {
+    const detail = await session.inspect(async engine => {
+      const cell = await engine.cellSnapshot(id);
+      if (!cell) return null;
+      const body = mode === 'body' ? await engine.cellBody(id) : undefined;
+      const memory = mode === 'memory' ? await engine.getMemory(id) : undefined;
+      return { cell, body, memory };
+    });
+    if (!detail) return;
+    const { cell, body, memory } = detail;
+    const source = mode === 'program' ? (await getGenome(session, cell.genomeId)).source : undefined;
+    if (active !== session || selectedId !== id || inspectorView !== mode || inspectorEpoch !== epoch) return;
+    cellInspection = { session, cell, body, memory }; inspectorStamp = stamp;
+    const errorNotice = $('inspector-error');
+    if (errorNotice) { errorNotice.hidden = true; errorNotice.textContent = ''; }
+    if (source !== undefined && !inspectorProgram && $('organism-program')) {
+      $('organism-program').replaceChildren();
+      inspectorProgram = new ProgramEditor({ parent: $('organism-program'), source, readOnly: true, compiler });
+    }
+    paintInspector();
+  })().catch(error => {
+    const errorNotice = $('inspector-error');
+    if (active === session && selectedId === id && inspectorEpoch === epoch && errorNotice) {
+      errorNotice.textContent = readableError(error); errorNotice.hidden = false;
+    }
+  }).finally(() => { inspectorPending = false; });
+}
+function paintInspector(): void {
+  if (!active || selectedId === null || !$('inspector-content')) return;
+  const cell = cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.cell : null;
+  if (!cell) return;
+  const name = document.querySelector<HTMLElement>('.inspector-header .muted');
+  if (name) name.textContent = genomeName(cell.genomeId);
   if (inspectorView === 'overview') {
     $('inspector-content').innerHTML = `<div class="inspector-metrics">${metricRow('Capabilities',trophicRole(cell))}${metricRow('Energy',cell.energy.toFixed(1)+' / '+cell.energyCapacity.toFixed(1))}${metricRow('Envelope area',cell.bodyArea.toFixed(3))}${metricRow('Material mass',cell.bodyMass.toFixed(3))}${metricRow('Division',cell.divisionReady ? 'Ready' : Math.round(cell.maturity*100)+'% grown')}${metricRow('Growth',cell.growthRate.toFixed(3)+' area / s')}${metricRow('Gut',cell.gutEnergy.toFixed(1)+' / '+cell.gutCapacity.toFixed(1))}${metricRow('Gut exudate',cell.gutExudateEnergy.toFixed(1)+' energy')}${metricRow('Gut tissue',cell.gutTissueEnergy.toFixed(1)+' energy')}${metricRow('Gut waste',cell.gutWasteEnergy.toFixed(1)+' energy')}${metricRow('Digestion',cell.digestionRate.toFixed(2)+' energy / s')}${metricRow('Photosynthesis',cell.photosynthesisRate.toFixed(2)+' energy / s')}${metricRow('Integrity',Math.round(cell.integrity*100)+'%')}${metricRow('Minerals',cell.nutrientStored.toFixed(2)+' / '+cell.nutrientCapacity.toFixed(2))}${metricRow('Age',clock(cell.age))}${metricRow('Generation',String(cell.generation))}${metricRow('Upkeep',(cell.basalMetabolism+cell.memoryCost).toFixed(2)+' energy / s')}</div>`;
   } else if (inspectorView === 'body') {
     const target = $('inspector-content'), expanded = new Set([...target.querySelectorAll<HTMLDetailsElement>('details[open]')].map(item => item.dataset.kind));
     const focusedFamily = target.contains(document.activeElement) ? document.activeElement?.closest<HTMLDetailsElement>('.organelle-detail')?.dataset.kind : undefined;
     try {
-      const body = active.engine.cellBody(cell.id);
+      const body = cellInspection?.body; if (!body) return;
       const meter = (name: string, used: number, capacity: number): string => `<div class="body-meter"><div><span>${name}</span><strong>${used.toFixed(3)} / ${capacity.toFixed(3)}</strong></div><meter min="0" max="${Math.max(capacity,0.000001)}" value="${used}" aria-label="${name}"></meter></div>`;
       target.innerHTML = `<div class="body-capacity">${meter('Internal space',body.spaceUsed,body.spaceCapacity)}${meter('Membrane attachments',body.surfaceUsed,body.surfaceCapacity)}</div><div class="body-work"><span>Expression <strong>${body.synthesisRate.toFixed(3)}</strong></span><span>Assembly <strong>${body.constructionRate.toFixed(3)}</strong></span><span title="Shared work budget: protein synthesis costs 0.6 work per material, and assembly costs 0.4.">Core capacity <strong>${body.assemblyCapacity.toFixed(3)}</strong></span><span>Recycling <strong>${body.recyclingRate.toFixed(3)}</strong></span><span>Repair <strong>${body.repairRate.toFixed(3)}</strong></span><small>material / s · synthesis and assembly share core work</small></div><div class="organelle-list">${ORGANELLE_CATALOG.map(definition => {
         const summary = cell.organelles.find(item => item.kind === definition.kind)!;
@@ -384,7 +476,8 @@ function updateInspector(): void {
       if (focusedFamily) target.querySelector<HTMLElement>(`[data-kind="${focusedFamily}"] > summary`)?.focus({preventScroll:true});
     } catch (error) { target.textContent = readableError(error); }
   } else if (inspectorView === 'memory') {
-    const entries = active.engine.getMemory(cell.id), matching = entries.filter(entry => (entry.name+' '+entry.type).toLowerCase().includes(memoryFilter.toLowerCase()));
+    const entries = cellInspection?.memory; if (!entries) return;
+    const matching = entries.filter(entry => (entry.name+' '+entry.type).toLowerCase().includes(memoryFilter.toLowerCase()));
     const pageCount = Math.max(1,Math.ceil(matching.length/50)); memoryPage = Math.max(0,Math.min(memoryPage,pageCount-1));
     $('memory-summary').textContent = entries.length+' registers · '+cell.memoryCost.toFixed(4)+' energy / s';
     $('memory-values').innerHTML = matching.slice(memoryPage*50,memoryPage*50+50).map(entry => `<tr><td title="${esc(entry.type)}"><code>${esc(entry.name)}</code></td><td title="${esc(JSON.stringify(entry.value) ?? String(entry.value))}"><code>${esc(memoryValue(entry.value))}</code></td></tr>`).join('') || `<tr><td colspan="2">${entries.length ? 'No matching registers.' : 'Memory is empty.'}</td></tr>`;
@@ -396,9 +489,11 @@ function updateInspector(): void {
     updateProgramEvaluation(inspectorProgram, active, cell.id);
   }
 }
-function openLiveProgram(id: number, cellId?: number): void {
+async function openLiveProgram(id: number, cellId?: number): Promise<void> {
   if (!active) return;
-  const session = active, engine = session.engine, name = genomeName(id), source = engine.getGenome(id).source;
+  const session = active, engine = session.engine, source = (await getGenome(session,id)).source;
+  if (active !== session) return;
+  const name = genomeName(id);
   const title = cellId === undefined ? name : `Organism ${cellId} · ${name}`;
   const dialog = createDialog(title, `<div class="live-program-editor"></div><footer class="dialog-actions"><button class="button subtle" id="program-graph">${icon('graph')}Graph</button><button class="button primary" id="program-save">${icon('copy')}Save to Genomes</button></footer>`, 'editor-dialog live-program-dialog');
   const editor = new ProgramEditor({ parent: dialog.querySelector<HTMLElement>('.live-program-editor')!, source, readOnly: true, compiler });
@@ -408,7 +503,7 @@ function openLiveProgram(id: number, cellId?: number): void {
     if (inspection) expandedInspections.delete(inspection);
     editor.destroy();
   }, { once: true });
-  dialog.querySelector('#program-graph')!.addEventListener('click', () => { try { genomeVisualizer.open(engine.getGenomeGraph(id), name); } catch (error) { setDialogError(dialog,error); } });
+  dialog.querySelector('#program-graph')!.addEventListener('click', () => { void engine.getGenomeGraph(id).then(graph => { if(dialog.open) genomeVisualizer.open(graph,name); }).catch(error => { if(dialog.open) setDialogError(dialog,error); }); });
   dialog.querySelector('#program-save')!.addEventListener('click', () => {
     const button = dialog.querySelector<HTMLButtonElement>('#program-save')!; button.disabled = true;
     void persistGenome(newGenome(name,source)).then(() => { button.textContent = 'Saved to Genomes'; toast('Genome saved.'); }).catch(error => { button.disabled=false; setDialogError(dialog,error); });
@@ -428,17 +523,20 @@ function addOrganismDialog(): void {
     }).join('') || '<p class="muted picker-empty">No matching current-language genomes.</p>';
   };
   draw(); dialog.querySelector('#organism-search')!.addEventListener('input',draw);
-  options.addEventListener('click', event => {
+  options.addEventListener('click', async event => {
     const button = (event.target as Element).closest<HTMLButtonElement>('[data-add-id]');
     if (!button || active !== session || transitioning) return;
     const genome = findGenome(button.dataset.addId!); if (!genome) return;
     try {
-      const id = session.engine.compile(genome.source);
-      if (session.engine.seed(id,1) !== 1) throw new Error('The organism could not be introduced.');
-      session.metadata.genomeNames[String(id)] = genome.name; session.refresh(); session.touch();
+      button.disabled = true;
+      await session.mutate(async engine => {
+        const id = await engine.compile(genome.source);
+        if (await engine.seed(id,1) !== 1) throw new Error('The organism could not be introduced.');
+        session.metadata.genomeNames[String(id)] = genome.name;
+      });
       dialog.close(); void session.checkpoint().catch(() => {}); updateSimulationUi();
       toast('One '+genome.name+' organism added.');
-    } catch (error) { setDialogError(dialog,error); }
+    } catch (error) { button.disabled = false; if (dialog.open) setDialogError(dialog,error); }
   });
   dialog.querySelector<HTMLInputElement>('#organism-search')!.focus();
 }
@@ -455,23 +553,12 @@ function metricsMarkup(): string {
     <details class="metrics-secondary"><summary>Resource accounting</summary><div class="inspector-metrics">${metricRow('Material introduced','<span id="introduced-material">—</span>')}${metricRow('Organic energy introduced','<span id="introduced-energy">—</span>')}${metricRow('Energy currently held','<span id="held-energy">—</span>')}${metricRow('Light energy collected','<span id="light-energy">—</span>')}</div></details>
     <details class="metrics-secondary"><summary>Evolution & interactions</summary><div class="metrics-grid">${cards(metricDefinitions.slice(4))}</div></details></div>`;
 }
-function renderMetrics(world: WorldSnapshot): void {
-  const values: Record<string,number> = { population:world.cells.length,food:world.food.length,births:world.births,deaths:world.deaths,generation:world.cells.reduce((max,cell)=>Math.max(max,cell.generation),0),mutations:world.mutatedBirths,predation:world.predationCount,attacks:world.attackCount };
+function renderMetrics(world: MetricsSnapshot): void {
+  const values: Record<string,number> = { population:world.population,food:world.food,births:world.births,deaths:world.deaths,generation:world.generation,mutations:world.mutatedBirths,predation:world.predationCount,attacks:world.attackCount };
   for (const [key] of metricDefinitions) $('metric-'+key).textContent = String(values[key]);
-  const trophic = { autotrophs: 0, heterotrophs: 0, mixotrophs: 0, hunters: 0 };
-  const flow = { production: 0, digestion: 0, exudation: 0 };
-  for (const cell of world.cells) {
-    const role = trophicRole(cell);
-    if (role === 'Autotroph') trophic.autotrophs++;
-    if (role === 'Heterotroph') trophic.heterotrophs++;
-    if (role === 'Mixotroph') trophic.mixotrophs++;
-    if (cell.organelles.some(organ => organ.kind === 'piercer' && organ.capacity > 0)) trophic.hunters++;
-    flow.production += cell.photosynthesisRate; flow.digestion += cell.digestionRate; flow.exudation += cell.exudationRate;
-  }
-  for (const [key,value] of Object.entries(trophic)) $('metric-'+key).textContent = String(value);
-  for (const [key,value] of Object.entries(flow)) $('flow-'+key).textContent = value.toFixed(1)+' energy / s';
-  const organicCounts = [0,0,0];
-  for (const particle of world.food) organicCounts[particle.kind]++;
+  for (const [key,value] of Object.entries(world.trophic)) $('metric-'+key).textContent = String(value);
+  for (const [key,value] of Object.entries(world.flow)) $('flow-'+key).textContent = value.toFixed(1)+' energy / s';
+  const organicCounts = world.organicCounts;
   ['exudate','tissue','waste'].forEach((kind,index) => { $('organic-'+kind).textContent = organicCounts[index]+' particles'; });
   for (const [key,value] of Object.entries({water:world.nutrientDissolvedTotal,food:world.nutrientFoodTotal,cells:world.nutrientCellTotal,total:world.nutrientTotal})) $('nutrient-'+key).textContent=value.toFixed(1);
   $('introduced-material').textContent = world.nutrientInputTotal.toFixed(2);
@@ -479,7 +566,7 @@ function renderMetrics(world: WorldSnapshot): void {
   $('held-energy').textContent = world.energyTotal.toFixed(2);
   $('light-energy').textContent = world.photosynthesisTotal.toFixed(2);
   $('nutrient-total').title = world.nutrientInputTotal.toFixed(1)+' mineral units introduced since this simulation began.';
-  const history = [...active!.metadata.history.filter(point=>point.time<world.time),{time:world.time,population:world.cells.length}];
+  const history = [...active!.metadata.history.filter(point=>point.time<world.time),{time:world.time,population:world.population}];
   const first = history[0]?.time ?? 0, span=Math.max(1,world.time-first);
   const max=Math.ceil(Math.max(10,...history.map(point=>point.population))*1.1/10)*10;
   const points=history.map(point=>`${((point.time-first)/span*930+50).toFixed(2)},${(214-point.population/max*190).toFixed(2)}`);
@@ -506,16 +593,14 @@ function settingsMarkup(): string {
 function renderActiveGenomes(): void {
   if (!active) return;
   const target=$('active-genomes'); if(!target) return;
-  const counts=new Map<number,Cell[]>();
-  for(const cell of active.world.cells) { const cells=counts.get(cell.genomeId)??[];cells.push(cell);counts.set(cell.genomeId,cells); }
-  const entries=[...counts.entries()].sort(([a],[b])=>a-b),signature=entries.map(([id])=>id).join(',');
+  const entries=active.metrics.genomes,signature=entries.map(entry=>entry.id+':'+(active!.metadata.genomeNames[String(entry.id)]||'')).join(',');
   if(target.dataset.signature!==signature || !target.childElementCount) {
     target.dataset.signature=signature;
-    target.innerHTML=entries.map(([id])=>`<article class="genome-row"><button class="genome-open" data-action="live-program" data-genome="${id}" aria-label="Inspect ${esc(genomeName(id))}"><i class="genome-dot" style="background:${genomeColor(id)}"></i><span class="genome-row-title"><span class="card-title">${esc(genomeName(id))}</span><span class="muted" data-genome-stats="${id}"></span></span><span class="card-chevron">${icon('chevron')}</span></button><button class="icon-button" data-action="live-graph" data-genome="${id}" aria-label="Graph of ${esc(genomeName(id))}" title="Graph">${icon('graph')}</button></article>`).join('') || '<div class="empty-state">No living organisms. Add an organism from the player.</div>';
+    target.innerHTML=entries.map(({id})=>`<article class="genome-row"><button class="genome-open" data-action="live-program" data-genome="${id}" aria-label="Inspect ${esc(genomeName(id))}"><i class="genome-dot" style="background:${genomeColor(id)}"></i><span class="genome-row-title"><span class="card-title">${esc(genomeName(id))}</span><span class="muted" data-genome-stats="${id}"></span></span><span class="card-chevron">${icon('chevron')}</span></button><button class="icon-button" data-action="live-graph" data-genome="${id}" aria-label="Graph of ${esc(genomeName(id))}" title="Graph">${icon('graph')}</button></article>`).join('') || '<div class="empty-state">No living organisms. Add an organism from the player.</div>';
   }
-  for(const [id,cells] of entries) {
+  for(const {id,population,maxGeneration} of entries) {
     const target=document.querySelector<HTMLElement>(`[data-genome-stats="${id}"]`)!;
-    target.textContent=cells.length+(cells.length===1?' organism':' organisms')+' · generation '+Math.max(...cells.map(cell=>cell.generation));
+    target.textContent=population+(population===1?' organism':' organisms')+' · generation '+maxGeneration;
   }
 }
 function updateSimulationUi(): void {
@@ -524,7 +609,7 @@ function updateSimulationUi(): void {
   if(prefs.simulationView==='player') {
     $('player-caption').textContent=active.world.cells.length+' organisms · '+clock(active.world.time);
     updateInspector();
-  } else if(prefs.simulationView==='metrics') renderMetrics(active.world);
+  } else if(prefs.simulationView==='metrics') renderMetrics(active.metrics);
   else if(prefs.simulationView==='genomes') renderActiveGenomes();
 }
 
@@ -612,10 +697,10 @@ async function action(name:string,id?:string,genomeId?:number):Promise<void>{
   if(name==='memory-previous'||name==='memory-next'){memoryPage+=name==='memory-next'?1:-1;updateInspector();return;}
   if(name==='cell-program'||name==='cell-graph'){
     const cell=active?.world.cells.find(item=>item.id===selectedId);if(!cell||!active)return;
-    if(name==='cell-program')openLiveProgram(cell.genomeId, cell.id);else genomeVisualizer.open(active.engine.getGenomeGraph(cell.genomeId),genomeName(cell.genomeId));return;
+    if(name==='cell-program')await openLiveProgram(cell.genomeId, cell.id);else { const session=active; const graph=await session.engine.getGenomeGraph(cell.genomeId); if(active===session)genomeVisualizer.open(graph,genomeName(cell.genomeId)); }return;
   }
-  if(name==='live-program'&&genomeId){openLiveProgram(genomeId);return;}
-  if(name==='live-graph'&&genomeId&&active){genomeVisualizer.open(active.engine.getGenomeGraph(genomeId),genomeName(genomeId));return;}
+  if(name==='live-program'&&genomeId){await openLiveProgram(genomeId);return;}
+  if(name==='live-graph'&&genomeId&&active){const session=active;const graph=await session.engine.getGenomeGraph(genomeId);if(active===session)genomeVisualizer.open(graph,genomeName(genomeId));return;}
   if(name==='new-genome'){catalog.openGenome(undefined,true);return;}
   if(name==='new-environment'){catalog.openEnvironment(undefined,true);return;}
   if(name==='open-genome'||name==='copy-genome'){const item=findGenome(id!);if(item)catalog.openGenome(item,name==='copy-genome');return;}
@@ -632,6 +717,10 @@ document.addEventListener('click',event=>{
   if(target.dataset.tab){void navigate(target.dataset.tab as UiPreferences['tab']);return;}
   if(target.dataset.view&&active){
     prefs.simulationView=target.dataset.view as UiPreferences['simulationView'];persistPreferences();renderView();
+    const session=active;
+    void session.refresh({metrics:prefs.simulationView==='metrics'||prefs.simulationView==='genomes',
+      environment:prefs.simulationView==='player'&&prefs.overlay!=='none'})
+      .then(()=>{if(active===session)updateSimulationUi();}).catch(error=>runError(session,error));
     document.querySelector<HTMLButtonElement>('[data-view="'+prefs.simulationView+'"]')?.focus({preventScroll:true});return;
   }
   if(target.dataset.inspectorView){
@@ -661,21 +750,35 @@ document.addEventListener('change',event=>{
     active.metadata.speed=speed as 1|2|5|10;active.touch();updatePlayback();void active.checkpoint().catch(()=>{});return;
   }
   if(!key||!active||transitioning)return;
+  const session=active;
   try{
-    if(key==='overlay'){prefs.overlay=input.value as UiPreferences['overlay'];persistPreferences();return;}
+    if(key==='overlay'){
+      prefs.overlay=input.value as UiPreferences['overlay'];persistPreferences();
+      if(prefs.overlay!=='none')void session.refresh({environment:true}).catch(error=>runError(session,error));
+      return;
+    }
     if(key==='sensors'||key==='trails'){prefs[key]=input.checked;persistPreferences();return;}
     if(key==='name'){
-      active.metadata.name=validateName(input.value);
-      const heading=document.querySelector('.simulation-title h1');if(heading)heading.textContent=active.metadata.name;
-    }else if(key==='food')active.engine.setFoodRate(inputNumber(input,'External organic input',0,60));
-    else if(key==='mutation')active.engine.setMutationRate(inputNumber(input,'Mutation chance',0,100)/100);
-    else{
-      const environment=active.world.environment;
-      active.engine.setEnvironment(key==='temperature'?inputNumber(input,'Temperature',0,1):environment.ambientTemperature,
-        key==='light'?inputNumber(input,'Light',0,100)/100:environment.ambientLight,
-        key==='current'?inputNumber(input,'Current strength',0,30):environment.currentStrength);
+      session.metadata.name=validateName(input.value);
+      const heading=document.querySelector('.simulation-title h1');if(heading)heading.textContent=session.metadata.name;
+      session.touch();void session.checkpoint().catch(()=>{});return;
     }
-    active.refresh();active.touch();void active.checkpoint().catch(()=>{});
+    // Read the edited value now; read the other settings when this command runs,
+    // after earlier queued edits have refreshed the session's environment.
+    const value=key==='food'?inputNumber(input,'External organic input',0,60)
+      :key==='mutation'?inputNumber(input,'Mutation chance',0,100)/100
+      :key==='temperature'?inputNumber(input,'Temperature',0,1)
+      :key==='light'?inputNumber(input,'Light',0,100)/100
+      :inputNumber(input,'Current strength',0,30);
+    void session.mutate(async engine=>{
+      if(key==='food')await engine.setFoodRate(value);
+      else if(key==='mutation')await engine.setMutationRate(value);
+      else{
+        const environment=session.world.environment;
+        await engine.setEnvironment(key==='temperature'?value:environment.ambientTemperature,
+          key==='light'?value:environment.ambientLight,key==='current'?value:environment.currentStrength);
+      }
+    }).then(()=>session.checkpoint()).catch(error=>runError(session,error));
   }catch(error){toast(readableError(error));renderView();}
 });
 document.addEventListener('keydown',event=>{
@@ -695,12 +798,21 @@ function frame(now:number):void{
   const elapsed=Math.max(0,Math.min((now-lastFrame)/1000,.2));lastFrame=now;
   try{
     if(active&&prefs.tab==='simulation'){
-      if(!active.metadata.paused&&!transitioning&&!lifecycleFlushes&&!document.hidden){
-        accumulator=Math.min(accumulator+elapsed*active.metadata.speed,1);
-        const steps=Math.min(30,Math.floor(accumulator*30));
-        if(steps){active.advance(steps);accumulator-=steps/30;}
+      const session=active;
+      if(!session.metadata.paused&&!transitioning&&!lifecycleFlushes&&!document.hidden){
+        accumulator=Math.min(accumulator+elapsed*session.metadata.speed,1);
+        // At most one advancing batch is in flight. Small batches bound the
+        // wait for pause, settings, inspection and checkpoint commands.
+        const steps=session.busy?0:Math.min(8,Math.floor(accumulator*30));
+        if(steps){
+          const metrics=now-lastMetrics>=250&&(prefs.simulationView==='metrics'||prefs.simulationView==='genomes');
+          const environment=now-lastEnvironment>=250&&prefs.simulationView==='player'&&prefs.overlay!=='none';
+          if(metrics)lastMetrics=now;if(environment)lastEnvironment=now;
+          void session.advance(steps,{metrics,environment}).catch(error=>runError(session,error));
+          accumulator-=steps/30;
+        }
       }
-      if(renderer&&prefs.simulationView==='player')renderer.render(active.world,selectedId,prefs);
+      if(renderer&&prefs.simulationView==='player')renderer.render(active.world,selectedId,prefs,cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.cell : null);
       if(!transitioning&&!lifecycleFlushes&&now-lastUi>250){updateSimulationUi();lastUi=now;}
     }
   }catch(error){
@@ -714,8 +826,11 @@ window.setInterval(()=>{
 },2000);
 async function flushLifecycle(session: SimulationSession): Promise<void> {
   lifecycleFlushes++;
-  try { await session.flush(); }
-  catch { /* Session save status exposes failures. */ }
+  try {
+    await session.refresh({ metrics: true, environment: prefs.overlay !== 'none' });
+    await session.flush();
+  }
+  catch (error) { runError(session, error); }
   finally { lifecycleFlushes--; accumulator = 0; lastFrame = performance.now(); }
 }
 document.addEventListener('visibilitychange',()=>{
@@ -725,7 +840,7 @@ document.addEventListener('visibilitychange',()=>{
 });
 window.addEventListener('pagehide',event=>{
   accumulator=0;
-  if(active){const session=active;void flushLifecycle(session).finally(()=>{if(!event.persisted)session.release();});}
+  if(active){const session=active;void flushLifecycle(session).finally(()=>{if(!event.persisted)disposeSession(session);});}
 });
 window.addEventListener('pageshow',()=>{lastFrame=performance.now();accumulator=0;renderer?.resize();});
 libraryChannel?.addEventListener('message',()=>{if(ready&&!transitioning)void refreshCatalogs().catch(error=>toast(readableError(error)));});

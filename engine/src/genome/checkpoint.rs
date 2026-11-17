@@ -342,12 +342,12 @@ impl Program {
                 guard,
             });
         }
-        Ok(Self {
+        Ok(Self::from_parts(
             nodes,
             bindings,
-            output_roots: roots,
+            roots,
             writes,
-        })
+        ))
     }
 }
 

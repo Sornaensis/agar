@@ -196,6 +196,80 @@ export interface WorldSnapshot {
   nutrientTotal: number; nutrientInputTotal: number; nutrientDissolvedTotal: number; nutrientFoodTotal: number; nutrientCellTotal: number;
   environment: EnvironmentSnapshot;
 }
+export interface RenderCell {
+  id:number; genomeId:number; x:number; y:number; vx:number; vy:number; angle:number; radius:number;
+  energy:number; energyCapacity:number; gutEnergy:number; gutCapacity:number; integrity:number; photosynthesisRate:number;
+  flagellumCount:number; flagellumCapacity:number; cortexMass:number; cortexCapacity:number;
+  photosyntheticCapacity:number; piercerCapacity:number; generation:number;
+}
+export interface RenderSnapshot {
+  tick:number; time:number; width:number; height:number; births:number; deaths:number; eaten:number;
+  foodRate:number; mutationRate:number; generation:number; cells:RenderCell[]; food:Food[];
+}
+export type RenderWorldSnapshot = RenderSnapshot & { environment: EnvironmentSnapshot };
+export interface SimulationSummary {
+  time:number; population:number; food:number; births:number; deaths:number; generation:number;
+}
+export interface MetricsSnapshot extends SimulationSummary {
+  tick:number; eaten:number; mutationRate:number; mutatedBirths:number; mutationSkipped:number;
+  genomeCount:number; genomeLimit:number; genomeBytes:number; genomeByteLimit:number;
+  predationCount:number; attackCount:number; photosynthesisTotal:number; energyTotal:number; energyInputTotal:number;
+  nutrientTotal:number; nutrientInputTotal:number; nutrientDissolvedTotal:number; nutrientFoodTotal:number; nutrientCellTotal:number;
+  trophic:{autotrophs:number;heterotrophs:number;mixotrophs:number;hunters:number};
+  flow:{production:number;digestion:number;exudation:number};
+  organicCounts:[number,number,number];
+  genomes:{id:number;population:number;maxGeneration:number}[];
+}
+
+const RENDER_HEADER = 12;
+const RENDER_CELL_STRIDE = 21;
+const METRICS_HEADER = 36;
+
+/** Decode a worker-transferred compact buffer without any WASM calls. */
+export function decodeRenderSnapshot(data: Float64Array): RenderSnapshot {
+  if (data.length < RENDER_HEADER || !Number.isSafeInteger(data[2]) || data[2] < 0
+    || !Number.isSafeInteger(data[3]) || data[3] < 0
+    || data.length !== RENDER_HEADER + data[2] * RENDER_CELL_STRIDE + data[3] * FOOD_STRIDE) {
+    throw new Error('The render snapshot has an invalid layout.');
+  }
+  const cells: RenderCell[] = [];
+  const food: Food[] = [];
+  for (let i = 0; i < data[2]; i++) {
+    const n = RENDER_HEADER + i * RENDER_CELL_STRIDE;
+    cells.push({id:data[n],genomeId:data[n+1],x:data[n+2],y:data[n+3],vx:data[n+4],vy:data[n+5],
+      angle:data[n+6],radius:data[n+7],energy:data[n+8],energyCapacity:data[n+9],gutEnergy:data[n+10],
+      gutCapacity:data[n+11],integrity:data[n+12],photosynthesisRate:data[n+13],flagellumCount:data[n+14],
+      flagellumCapacity:data[n+15],cortexMass:data[n+16],cortexCapacity:data[n+17],
+      photosyntheticCapacity:data[n+18],piercerCapacity:data[n+19],generation:data[n+20]});
+  }
+  const start = RENDER_HEADER + cells.length * RENDER_CELL_STRIDE;
+  for (let i = 0; i < data[3]; i++) {
+    const n = start + i * FOOD_STRIDE;
+    const kind = data[n+4];
+    if (kind !== 0 && kind !== 1 && kind !== 2) throw new Error('The render snapshot has an invalid organic material kind.');
+    food.push({x:data[n],y:data[n+1],energy:data[n+2],nutrients:data[n+3],kind});
+  }
+  return {tick:data[0],time:data[1],cells,food,births:data[4],deaths:data[5],eaten:data[6],
+    width:data[7],height:data[8],foodRate:data[9],mutationRate:data[10],generation:data[11]};
+}
+
+export function decodeMetricsSnapshot(data: Float64Array): MetricsSnapshot {
+  if (data.length < METRICS_HEADER || !Number.isSafeInteger(data[35]) || data[35] < 0
+    || data.length !== METRICS_HEADER + data[35] * 3) throw new Error('The metrics snapshot has an invalid layout.');
+  const genomes: MetricsSnapshot['genomes'] = [];
+  for (let i = 0; i < data[35]; i++) {
+    const n = METRICS_HEADER + i * 3;
+    genomes.push({id:data[n],population:data[n+1],maxGeneration:data[n+2]});
+  }
+  return {tick:data[0],time:data[1],population:data[2],food:data[3],births:data[4],deaths:data[5],eaten:data[6],
+    generation:data[7],mutationRate:data[8],mutatedBirths:data[9],mutationSkipped:data[10],genomeCount:data[11],
+    genomeLimit:data[12],genomeBytes:data[13],genomeByteLimit:data[14],predationCount:data[15],attackCount:data[16],
+    photosynthesisTotal:data[17],energyTotal:data[18],energyInputTotal:data[19],nutrientTotal:data[20],
+    nutrientInputTotal:data[21],nutrientDissolvedTotal:data[22],nutrientFoodTotal:data[23],nutrientCellTotal:data[24],
+    trophic:{autotrophs:data[25],heterotrophs:data[26],mixotrophs:data[27],hunters:data[28]},
+    flow:{production:data[29],digestion:data[30],exudation:data[31]},organicCounts:[data[32],data[33],data[34]],genomes};
+}
+
 interface WasmExports extends WebAssembly.Exports {
   memory: WebAssembly.Memory;
   abi_version(): number;
@@ -225,6 +299,8 @@ interface WasmExports extends WebAssembly.Exports {
   genome_count(): number; genome_limit(): number;
   tick(steps: number): number;
   snapshot_ptr(): number; snapshot_len(): number;
+  render_snapshot_ptr(): number; metrics_snapshot_ptr(): number; cell_snapshot_ptr(id: number): number;
+  summary_snapshot_ptr(): number; presentation_len(): number;
   set_environment(temperature: number, light: number, current: number): void;
   set_initial_nutrients(level: number): void; add_nutrients(x: number, y: number, amount: number): number;
   nutrient_total(): number; nutrient_input_total(): number; nutrient_dissolved_total(): number;
@@ -459,6 +535,35 @@ export class Engine {
     return { columns, rows, ambientTemperature: data[2], ambientLight: data[3], currentStrength: data[4], initialNutrients: data[6], samples, sources };
   }
 
+  /** Owned compact bytes can be transferred to the UI without cloning cell objects. */
+  renderSnapshotData(): Float64Array {
+    const pointer = this.wasm.render_snapshot_ptr();
+    return new Float64Array(this.wasm.memory.buffer, pointer, this.wasm.presentation_len()).slice();
+  }
+  renderSnapshot(): RenderSnapshot { return decodeRenderSnapshot(this.renderSnapshotData()); }
+  metricsSnapshotData(): Float64Array {
+    const pointer = this.wasm.metrics_snapshot_ptr();
+    return new Float64Array(this.wasm.memory.buffer, pointer, this.wasm.presentation_len()).slice();
+  }
+  metricsSnapshot(): MetricsSnapshot { return decodeMetricsSnapshot(this.metricsSnapshotData()); }
+  cellSnapshot(id: number): Cell | null {
+    if (!Number.isInteger(id) || id < 1 || id > 0xffff_ffff) return null;
+    const pointer = this.wasm.cell_snapshot_ptr(id);
+    const length = this.wasm.presentation_len();
+    if (!pointer && length === 0) return null;
+    if (!pointer || length !== CELL_STRIDE) throw new Error('The selected cell snapshot has an invalid layout.');
+    const cell = decodeCell(new Float64Array(this.wasm.memory.buffer, pointer, length), 0);
+    if (cell.id !== id) throw new Error('The selected cell snapshot has the wrong organism.');
+    return cell;
+  }
+  summary(): SimulationSummary {
+    const pointer = this.wasm.summary_snapshot_ptr();
+    const length = this.wasm.presentation_len();
+    if (length !== 6) throw new Error('The simulation summary has an invalid layout.');
+    const data = new Float64Array(this.wasm.memory.buffer, pointer, length);
+    return {time:data[0],population:data[1],food:data[2],births:data[3],deaths:data[4],generation:data[5]};
+  }
+
   snapshot(): WorldSnapshot {
     const ptr = this.wasm.snapshot_ptr();
     const data = new Float64Array(this.wasm.memory.buffer, ptr, this.wasm.snapshot_len());
@@ -467,14 +572,7 @@ export class Engine {
     const cells: Cell[] = [];
     const food: Food[] = [];
     for (let i = 0; i < data[2]; i++) {
-      const n = 12 + i * CELL_STRIDE;
-      const organelles:OrganelleSummary[] = ORGANELLE_KINDS.map((kind,index)=>{
-        const k=n+39+index*6;return {kind,count:data[k],mass:data[k+1],capacity:data[k+2],damaged:data[k+3],building:data[k+4],functionalMass:data[k+5],protein:data[n+141+index]};
-      });
-      cells.push({id:data[n],genomeId:data[n+1],x:data[n+2],y:data[n+3],vx:data[n+4],vy:data[n+5],angle:data[n+6],energy:data[n+7],age:data[n+8],generation:data[n+9],parentId:data[n+10],radius:data[n+11],
-        bodyArea:data[n+12],bodyMass:data[n+13],birthArea:data[n+14],energyCapacity:data[n+15],basalMetabolism:data[n+16],memoryUsed:data[n+17],memoryCost:data[n+18],integrity:data[n+19],photosynthesisRate:data[n+20],
-        nutrientStored:data[n+21],nutrientCapacity:data[n+22],nutrientUptakeRate:data[n+23],gutEnergy:data[n+24],gutCapacity:data[n+25],gutNutrients:data[n+26],digestionRate:data[n+27],growthRate:data[n+28],maturity:data[n+29],exudationRate:data[n+31],bodyUpkeep:data[n+32],spaceUsed:data[n+33],spaceCapacity:data[n+34],surfaceUsed:data[n+35],surfaceCapacity:data[n+36],divisionReady:data[n+37]!==0,opticalRange:data[n+38],
-        gutExudateEnergy:data[n+135],gutTissueEnergy:data[n+136],gutWasteEnergy:data[n+137],gutExudateNutrients:data[n+138],gutTissueNutrients:data[n+139],gutWasteNutrients:data[n+140],expressionRate:data[n+157],organelles});
+      cells.push(decodeCell(data, 12 + i * CELL_STRIDE));
     }
     for (let i = 0; i < data[3]; i++) {
       const n = 12 + cells.length * CELL_STRIDE + i * FOOD_STRIDE;
@@ -493,4 +591,14 @@ export class Engine {
       nutrientDissolvedTotal: this.wasm.nutrient_dissolved_total(), nutrientFoodTotal: this.wasm.nutrient_food_total(), nutrientCellTotal: this.wasm.nutrient_cell_total(),
       environment: this.environment() };
   }
+}
+
+function decodeCell(data: Float64Array, n: number): Cell {
+  const organelles:OrganelleSummary[] = ORGANELLE_KINDS.map((kind,index)=>{
+    const k=n+39+index*6;return {kind,count:data[k],mass:data[k+1],capacity:data[k+2],damaged:data[k+3],building:data[k+4],functionalMass:data[k+5],protein:data[n+141+index]};
+  });
+  return {id:data[n],genomeId:data[n+1],x:data[n+2],y:data[n+3],vx:data[n+4],vy:data[n+5],angle:data[n+6],energy:data[n+7],age:data[n+8],generation:data[n+9],parentId:data[n+10],radius:data[n+11],
+    bodyArea:data[n+12],bodyMass:data[n+13],birthArea:data[n+14],energyCapacity:data[n+15],basalMetabolism:data[n+16],memoryUsed:data[n+17],memoryCost:data[n+18],integrity:data[n+19],photosynthesisRate:data[n+20],
+    nutrientStored:data[n+21],nutrientCapacity:data[n+22],nutrientUptakeRate:data[n+23],gutEnergy:data[n+24],gutCapacity:data[n+25],gutNutrients:data[n+26],digestionRate:data[n+27],growthRate:data[n+28],maturity:data[n+29],exudationRate:data[n+31],bodyUpkeep:data[n+32],spaceUsed:data[n+33],spaceCapacity:data[n+34],surfaceUsed:data[n+35],surfaceCapacity:data[n+36],divisionReady:data[n+37]!==0,opticalRange:data[n+38],
+    gutExudateEnergy:data[n+135],gutTissueEnergy:data[n+136],gutWasteEnergy:data[n+137],gutExudateNutrients:data[n+138],gutTissueNutrients:data[n+139],gutWasteNutrients:data[n+140],expressionRate:data[n+157],organelles};
 }
