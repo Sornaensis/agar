@@ -691,3 +691,44 @@ kbd { padding: 2px 5px; border: 1px solid #505455; border-radius: 4px; font-size
   .genome-graph-dialog .graph-details p { font-size: 10px; }
   .graph-details-empty { max-height: 55px; }
 }
+
+/* Physical bodies: compact, inspectable, and clearly separate from genome targets. */
+.compatibility-notice { padding: 12px 15px; border: 1px solid #6d5740; border-radius: 8px; color: #dfc39e; background: #302b24; font-size: 12px; line-height: 1.6; }
+.form-help { margin: 7px 0 14px; color: #969f9f; font-size: 11px; line-height: 1.55; }
+.population-row, .population-labels { grid-template-columns: minmax(0, 1fr) minmax(125px, .8fr) 74px 30px; gap: 8px; }
+.population-labels { display: grid; color: #9da7a6; font-size: 10px; padding: 0 2px 7px; }
+.new-simulation-dialog { width: 640px; }
+.starter-body-choice { padding-top: 16px; margin-top: 12px; border-top: 1px solid #343b3d; }
+.starter-body-choice .form-help:last-child { margin-bottom: 0; }
+.organism-picker .picker-list { max-height: 34dvh; overflow-y: auto; }
+.picker-item.selected { background: #294039; }
+.picker-item > .picker-check { flex: 0 0 16px; color: #9be4c7; }
+.body-capacity { display: grid; gap: 16px; margin-bottom: 18px; }
+.body-meter > div { display: flex; justify-content: space-between; gap: 10px; color: #abb6b3; font-size: 11px; }
+.body-meter strong { font-weight: 500; color: #e0e9e5; font-variant-numeric: tabular-nums; }
+.body-meter meter { width: 100%; height: 6px; display: block; margin-top: 8px; border: 0; background: #303b3a; border-radius: 6px; }
+.body-meter meter::-webkit-meter-bar { height: 6px; border: 0; background: #303b3a; border-radius: 6px; }
+.body-meter meter::-webkit-meter-optimum-value { background: #8bcaaf; border-radius: 6px; }
+.body-meter meter::-moz-meter-bar { background: #8bcaaf; border-radius: 6px; }
+.body-work { display: grid; grid-template-columns: repeat(3,1fr); gap: 4px 8px; margin-bottom: 18px; color: #99a6a2; font-size: 10px; }
+.body-work strong { display: block; margin-top: 5px; color: #d8e1dd; font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.body-work small { grid-column: 1 / -1; margin-top: 5px; color: #788982; }
+.organelle-detail { border-top: 1px solid #343c3c; }
+.organelle-detail > summary { display: flex; align-items: center; gap: 9px; padding: 12px 0; list-style: none; cursor: pointer; color: #d7e0dc; font-size: 11px; }
+.organelle-detail > summary::-webkit-details-marker { display: none; }
+.organelle-detail > summary > i { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.organelle-detail > summary > span { flex: 1; }
+.organelle-detail > summary small { display: block; margin-top: 4px; color: #91a09a; font-size: 10px; font-weight: 400; }
+.organelle-detail > summary > strong { font-weight: 500; font-size: 13px; }
+.organelle-detail > summary > strong small { display: inline; }
+.organelle-content { padding: 0 0 13px; }
+.organelle-content p { color: #9faca6; font-size: 10px; line-height: 1.6; }
+.organelle-request .metric-row { padding: 4px 0; font-size: 10px; }
+.organelle-table { width: 100%; margin-top: 10px; border-collapse: collapse; font-size: 10px; text-align: left; }
+.organelle-table th { font-weight: 400; color: #899b92; padding: 5px 0; }
+.organelle-table td { padding: 5px 0; border-top: 1px solid #303a36; color: #c0cfc7; font-variant-numeric: tabular-nums; }
+.body-explanation { color: #87968e; font-size: 10px; line-height: 1.6; margin-top: 14px; }
+@media (max-width: 540px) {
+  .population-row, .population-labels { grid-template-columns: minmax(90px, 1fr) minmax(95px, .8fr) 51px 24px; gap: 6px; }
+  .population-row select, .population-row input { padding-left: 7px; padding-right: 7px; font-size: 11px; }
+}

@@ -19,7 +19,8 @@
     "test:storage": "node scripts/check-storage.mjs",
     "test:session": "node scripts/check-session.mjs",
     "check:engine": "node scripts/check-engine-artifact.mjs",
-    "test:food-chain": "node scripts/check-food-chain.mjs"
+    "test:food-chain": "node scripts/check-food-chain.mjs",
+    "test:navigation": "node scripts/check-preset-navigation.mjs"
   },
   "devDependencies": {
     "typescript": "5.9.3",

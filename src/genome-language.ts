@@ -1,3 +1,5 @@
+import { ORGANELLE_CATALOG } from './organelles';
+
 /** Editor assistance for the language in engine/src/genome.rs; the Rust compiler remains authoritative. */
 export type PrimitiveType = 'integer' | 'scalar' | 'boolean' | 'string' | 'vec2';
 export type GenomeSymbolCategory = 'function' | 'signal' | 'output' | 'keyword' | 'register' | 'binding';
@@ -52,88 +54,104 @@ export const BUILTIN_FUNCTIONS: readonly GenomeSymbol[] = Object.freeze([
 ]);
 
 const sensorRows: ReadonlyArray<readonly [string, PrimitiveType, string]> = [
-  ['energy', 'scalar', 'Current energy reserve. Capacity is 200 × size.'],
-  ['age', 'scalar', 'This organism’s age in seconds. Cells die at the age reported by lifespan.'],
-  ['speed', 'scalar', 'Current velocity magnitude in world units per second.'],
+  ['energy', 'scalar', 'Current usable energy reserve. It is separate from undigested and embodied structural energy.'],
+  ['energy.fraction', 'scalar', 'Usable energy divided by current built storage capacity, clamped to 0–1.'],
+  ['energy.capacity', 'scalar', 'Usable-energy storage provided by the core and built reserve vacuoles.'],
+  ['age', 'scalar', 'This organism’s age in seconds.'],
   ['time', 'scalar', 'Elapsed simulation time in seconds.'],
-  ['id', 'scalar', 'This organism’s stable numeric ID, exposed as a scalar.'],
-  ['size', 'scalar', 'Current biomass relative to a founder. Founders start at 1; living cells range from 0.5 to 4.'],
-  ['food.angle', 'scalar', 'Signed angle in radians to the selected food target, relative to heading. Accessible particles are ranked by raw energy / (distance + 20). Check food.visible first.'],
-  ['food.distance', 'scalar', 'Distance to the selected food target’s center. Equals sense.range when no food is visible.'],
-  ['food.visible', 'boolean', 'Whether a selectable food target is within sensing range. Particles buried inside another cell are excluded.'],
-  ['neighbor.angle', 'scalar', 'Signed angle in radians to the nearest sensed other cell, relative to heading. Check neighbor.visible first.'],
-  ['neighbor.distance', 'scalar', 'Distance to the nearest sensed other cell’s center. Equals sense.range when no neighbor is visible.'],
-  ['neighbor.visible', 'boolean', 'Whether another living cell is within sensing range.'],
-  ['energy.fraction', 'scalar', 'Energy divided by capacity, clamped to 0–1.'],
-  ['memory.used', 'scalar', 'Number of populated registers at the start of this tick, exposed as a scalar.'],
+  ['speed', 'scalar', 'Current velocity magnitude in world units per second.'],
+  ['id', 'scalar', 'This organism’s stable numeric identifier. This is self-knowledge, not an object tracking token.'],
+  ['integrity', 'scalar', 'Overall structural health from 0 to 1.'],
+  ['memory.used', 'scalar', 'Number of populated registers at the start of this tick.'],
   ['memory.cost', 'scalar', 'Register maintenance in energy per second: 0.0025 × memory.used.'],
-  ['light.level', 'scalar', 'Local light level, from 0 to 1.'],
-  ['light.angle', 'scalar', 'Direction of brighter light relative to heading, in radians. Zero when the local gradient is flat.'],
-  ['temperature.value', 'scalar', 'Local temperature from 0 to 1. A value around 0.5 is mild.'],
-  ['temperature.angle', 'scalar', 'Direction of warmer water relative to heading, in radians. Zero when the local gradient is flat.'],
-  ['flow.x', 'scalar', 'Local water-current velocity along the world x axis.'],
-  ['flow.y', 'scalar', 'Local water-current velocity along the world y axis.'],
-  ['flow.speed', 'scalar', 'Magnitude of the local water-current velocity.'],
-  ['flow.angle', 'scalar', 'Direction of the local current relative to heading, in radians. Zero for a stationary current.'],
-  ['prey.id', 'scalar', 'Stable ID of a sensed potential prey cell of any size. Prefers a different genome, then the nearest target within that group. Zero when none is visible.'],
-  ['prey.angle', 'scalar', 'Signed angle in radians to the sensed prey, relative to heading. Check prey.visible first.'],
-  ['prey.distance', 'scalar', 'Distance to the sensed prey’s center. Equals sense.range when none is visible.'],
-  ['prey.size', 'scalar', 'Biomass of the sensed prey. Zero when none is visible.'],
-  ['prey.visible', 'boolean', 'Whether a potential prey cell of any size is within sensing range. Sensing a target does not guarantee it can be engulfed.'],
-  ['prey.same_genome', 'boolean', 'Whether the sensed prey has the same genome as this cell. False when no prey is visible.'],
-  ['threat.angle', 'scalar', 'Signed angle in radians to the nearest sensed cell with attack tissue, including smaller hunters. Check threat.visible first.'],
-  ['threat.distance', 'scalar', 'Distance to the sensed threat’s center. Equals sense.range when none is visible.'],
-  ['threat.size', 'scalar', 'Biomass of the sensed threat. Zero when none is visible.'],
-  ['threat.visible', 'boolean', 'Whether a cell with positive attack allocation is within sensing range. Smaller hunters can also bite. This describes capability and proximity, not intent.'],
-  ['integrity', 'scalar', 'Structural health from 0 to 1. The organism dies at zero integrity.'],
-  ['nutrient.stored', 'scalar', 'Free mineral reserves. Minerals bound into biomass are counted separately.'],
-  ['nutrient.capacity', 'scalar', 'Free mineral capacity: 2 × size.'],
-  ['nutrient.fraction', 'scalar', 'Stored minerals divided by free reserve capacity, from 0 to 1.'],
-  ['nutrient.level', 'scalar', 'Local dissolved mineral mass per 20 × 20 world-unit water patch.'],
-  ['nutrient.angle', 'scalar', 'Direction of increasing dissolved minerals relative to heading, in radians. Zero for a flat gradient.'],
-  ['body.propulsion', 'scalar', 'Current biomass fraction invested in propulsion, from 0 to 1. Controls movement and turning capacity.'],
-  ['body.photosynthesis', 'scalar', 'Current biomass fraction invested in photosynthesis, from 0 to 1. Controls light-harvesting capacity.'],
-  ['body.digestion', 'scalar', 'Current biomass fraction invested in digestion, from 0 to 1. Controls gut capacity, ingestion, and digestion. Dissolved mineral uptake and attacks use separate mechanisms.'],
-  ['body.armor', 'scalar', 'Current biomass fraction invested in armor, from 0 to 1. Reduces attack and temperature damage.'],
-  ['body.sensing', 'scalar', 'Current biomass fraction invested in sensing, from 0 to 1. Extends target sensing range.'],
-  ['body.unassigned', 'scalar', 'Biomass fraction not currently assigned to a capability, from 0 to 1.'],
-  ['sense.range', 'scalar', 'Current target-sensing radius in world units: 40 + 400 × body.sensing.'],
-  ['body.attack', 'scalar', 'Current biomass fraction invested in attack, from 0 to 1. Controls biting and the ability to engulf weakened prey.'],
-  ['gut.energy', 'scalar', 'Raw organic energy waiting in the gut. Digestion gradually converts it to usable energy at 65% efficiency.'],
-  ['gut.capacity', 'scalar', 'Current raw-energy gut capacity: 100 × size × (body.digestion / 0.2).'],
-  ['gut.fraction', 'scalar', 'Raw gut energy divided by gut capacity, from 0 to 1. Zero when there is no digestive capacity.'],
-  ['digestion.rate', 'scalar', 'Usable energy gained from digestion per second during the last completed tick, after 65% assimilation efficiency.'],
-  ['growth.rate', 'scalar', 'Biomass added per second during the last completed tick. Growth requires energy and stored minerals.'],
-  ['birth.size', 'scalar', 'Biomass at this organism’s most recent birth or division. It must double this size before dividing again.'],
-  ['maturity', 'scalar', 'Growth toward division, clamped to 0–1: size / birth.size − 1. Full maturity means birth biomass has doubled; energy and cooldown requirements still apply.'],
-  ['lifespan', 'scalar', 'Maximum organism age in seconds. The current model uses a 300-second lifespan.'],
-  ['exudation.rate', 'scalar', 'Raw organic energy actually released as food per second during the last completed tick. Photosynthesis releases at least 12% of gross production, plus energy-reserve overflow, outside the membrane when particle space is available.'],
-  ['prey.integrity', 'scalar', 'Structural health of the sensed prey, from 0 to 1. Zero when no prey is visible.'],
-  ['prey.attack', 'scalar', 'Actual attack allocation of the sensed prey, from 0 to 1. Zero when no prey is visible.'],
-  ['prey.photosynthesis', 'scalar', 'Actual photosynthetic allocation of the sensed prey, from 0 to 1. Zero when no prey is visible.'],
-  ['food.energy', 'scalar', 'Raw organic energy in the selected food particle, before digestion and assimilation loss. Zero when no food target is visible.'],
-  ['food.nutrients', 'scalar', 'Mineral content of the selected food particle. Exudates can contain energy without minerals. Zero when no food target is visible.'],
+  ['body.area', 'scalar', 'Supported envelope area. Its frame and membrane must be grown using energy and minerals; collision radius is 7 × sqrt(body.area).'],
+  ['body.mass', 'scalar', 'Actual mineral material: frame, organelles, free reserves and gut minerals, each counted once. Energy does not add material mass.'],
+  ['body.birth_area', 'scalar', 'Envelope area at this organism’s most recent birth or division.'],
+  ['body.maturity', 'scalar', 'Envelope growth toward division, clamped to 0–1. Area must double from body.birth_area. Other physical requirements still apply.'],
+  ['body.division_ready', 'boolean', 'Whether the current body can divide: sufficient area, energy, cooldown, viable cores and a conservative organelle partition.'],
+  ['body.space.free', 'scalar', 'Unused internal space. Organelles and storage compartments occupy room even while damaged or incomplete.'],
+  ['body.space.used', 'scalar', 'Internal space occupied by organs and their compartments. Contents are not counted a second time.'],
+  ['body.space.capacity', 'scalar', 'Internal capacity supported by the paid envelope.'],
+  ['body.surface.free', 'scalar', 'Unused membrane attachment capacity. External organs need both anchors and internal support.'],
+  ['body.surface.used', 'scalar', 'Membrane attachment capacity occupied by built and incomplete organs.'],
+  ['body.surface.capacity', 'scalar', 'Attachment capacity, which grows with the envelope perimeter rather than its area.'],
+  ['nutrient.stored', 'scalar', 'Free mineral reserves available for frame growth, construction and repair.'],
+  ['nutrient.capacity', 'scalar', 'Mineral storage capacity of the core and built reserve vacuoles.'],
+  ['nutrient.fraction', 'scalar', 'Stored minerals divided by current free-reserve capacity, clamped to 0–1.'],
+  ['gut.energy', 'scalar', 'Raw organic energy waiting in digestive compartments. It is not yet usable.'],
+  ['gut.capacity', 'scalar', 'Raw-energy storage provided by functional digestive vacuoles.'],
+  ['gut.fraction', 'scalar', 'Gut energy divided by digestive capacity, clamped to 0–1. Zero when capacity is absent.'],
+  ['digestion.rate', 'scalar', 'Usable energy gained from digestion per second during the last completed tick, after assimilation losses.'],
+  ['growth.rate', 'scalar', 'Envelope area added per second during the last completed tick.'],
+  ['lifespan', 'scalar', 'Maximum organism age in seconds.'],
+  ['exudation.rate', 'scalar', 'Raw organic energy released as particles per second during the last completed tick.'],
+  ...ORGANELLE_CATALOG.flatMap(({kind, name}) => [
+    [`organelle.${kind}.count`, 'integer', `Actual ${name.toLowerCase()} instance count, including unfinished or damaged instances.`],
+    [`organelle.${kind}.mass`, 'scalar', `Material held in this cell’s ${name.toLowerCase()} instances. Damage does not make this material disappear.`],
+    [`organelle.${kind}.capacity`, 'scalar', `Equivalent minimum-sized functional units of ${name.toLowerCase()} machinery, after damage. Unbuilt or subthreshold modules provide none.`],
+    [`organelle.${kind}.damaged`, 'scalar', `Damaged material in ${name.toLowerCase()} instances. Repair or explicit recycling is needed to recover function or space.`],
+    [`organelle.${kind}.building`, 'scalar', `Material still missing before unfinished ${name.toLowerCase()} instances reach their minimum functional size. Their already-built material still occupies space.`],
+  ] as Array<[string, PrimitiveType, string]>),
+  ['light.available', 'boolean', 'A functional photoreceptor is present. Photosynthetic machinery alone does not reveal light measurements.'],
+  ['light.valid', 'boolean', 'This tick has a usable photoreceptor measurement. Guard light values with this flag.'],
+  ['light.level', 'scalar', 'Measured local brightness, from 0 to 1; resolution depends on built photoreceptors. Zero when invalid.'],
+  ['light.bearing', 'scalar', 'Measured direction of increasing brightness relative to heading, in radians. A flat gradient gives zero.'],
+  ['heat.available', 'boolean', 'A functional thermoreceptor is present. Heat still affects cells without one.'],
+  ['heat.valid', 'boolean', 'This tick has a usable thermoreceptor measurement.'],
+  ['heat.value', 'scalar', 'Measured temperature from 0 to 1. Around 0.5 is mild; zero without a valid reading does not mean cold water.'],
+  ['heat.bearing', 'scalar', 'Measured direction of increasing temperature relative to heading, in radians.'],
+  ['chemical.available', 'boolean', 'A functional chemoreceptor is present.'],
+  ['chemical.valid', 'boolean', 'This tick has usable local chemical measurements.'],
+  ['chemical.mineral', 'scalar', 'Measured local dissolved mineral concentration. This is a local field reading, not the contents of a nearby object.'],
+  ['chemical.organic', 'scalar', 'Measured local organic cue concentration from release, leakage and decay. A cue does not guarantee edible material.'],
+  ['chemical.mineral_bearing', 'scalar', 'Measured direction of increasing dissolved mineral concentration relative to heading, in radians.'],
+  ['chemical.organic_bearing', 'scalar', 'Measured direction of increasing organic cue concentration relative to heading, in radians.'],
+  ['flow.available', 'boolean', 'A functional mechanoreceptor is present. Currents still carry unsensing cells.'],
+  ['flow.valid', 'boolean', 'This tick has a usable local flow measurement.'],
+  ['flow.vector', 'vec2', 'Measured local relative water flow in the cell’s body frame. Zero vector when invalid.'],
+  ['flow.speed', 'scalar', 'Magnitude of the measured relative water flow.'],
+  ['flow.bearing', 'scalar', 'Measured relative-flow direction in radians from the cell’s heading.'],
+  ['contact.available', 'boolean', 'A functional mechanoreceptor is present. Physical capture and collisions do not require awareness.'],
+  ['contact.valid', 'boolean', 'One physical contact was detected this tick.'],
+  ['contact.token', 'string', 'Opaque token for the observed contacting object. Tokens identify observations, not hidden properties or remote targets. Empty when invalid.'],
+  ['contact.offset', 'vec2', 'Measured body-relative displacement toward the contacting surface. Zero vector when invalid.'],
+  ['contact.pressure', 'scalar', 'Measured pressure of the selected physical contact.'],
+  ['contact.resistance', 'scalar', 'Measured mechanical resistance of the contacted surface. It does not expose genotype, diet or energy.'],
+  ['object.available', 'boolean', 'A functional optical detector is present.'],
+  ['object.valid', 'boolean', 'A contrasting object was detected within the current scan and visibility limits. Cells and particles use the same return format.'],
+  ['object.token', 'string', 'Opaque token stable during a continuous observed track. Store it in rs001 to request reacquisition; it cannot reveal an unseen location. Empty when invalid.'],
+  ['object.offset', 'vec2', 'Estimated body-relative displacement to the selected visible object. angle(object.offset) gives a steering bearing.'],
+  ['object.area', 'scalar', 'Estimated apparent area of the visible object, not its exact material mass.'],
+  ['object.contrast', 'scalar', 'Measured optical contrast. Selection depends on visibility, angle and distance, never hidden energy.'],
+  ['object.pigment', 'scalar', 'Measured visible surface appearance. This is not a species, feeding-strategy or edible flag.'],
+  ['object.motion', 'vec2', 'Estimated relative motion of the visible object in the cell’s body frame. Zero when invalid.'],
 ];
 export const BUILTIN_SIGNALS: readonly GenomeSymbol[] = Object.freeze(sensorRows.map(([name, type, description]) =>
-  symbol(name, 'signal', type, `${name}: ${type}`, `${description} Sampled before any organism moves this tick.`)));
+  symbol(name, 'signal', type, `${name}: ${type}`, `${description} Sampled before actions this tick.`)));
 
-const output = (name: string, type: 'scalar' | 'boolean', description: string): GenomeSymbol =>
+const output = (name: string, type: PrimitiveType, description: string): GenomeSymbol =>
   symbol(name, 'output', type, `${name} = ${type};`, description);
-const investment = 'Target body fraction, clamped to 0–1; defaults to 0.2. Targets above a total of 1 are normalized. Remodeling takes time and energy; read body.* for the actual allocation.';
 export const BUILTIN_OUTPUTS: readonly GenomeSymbol[] = Object.freeze([
-  output('thrust', 'scalar', 'Required. Forward movement effort, clamped to 0–1. Acceleration and its energy cost depend on propulsion investment.'),
-  output('turn', 'scalar', 'Required. Signed turning effort, clamped to -1–1. Turning speed depends on propulsion investment.'),
-  output('divide', 'boolean', 'Required. Requests division after doubling birth.size, meeting energy requirements, and a 12-second cooldown. Both cells receive half the biomass, gut contents, and remaining reserves; the daughter starts with empty registers.'),
-  output('grow', 'scalar', 'Growth effort, clamped to 0–1; defaults to 0. Building biomass costs 80 energy and one stored mineral per biomass, preserves a 20% energy reserve, and stops at size 4.'),
-  output('photosynthesize', 'scalar', 'Light-harvesting effort, clamped to 0–1; defaults to 0. Collects shared light over a footprint with radius 60 × sqrt(size); overlapping organisms compete for a finite areal supply. At least 12% of production, plus reserve overflow, is released as organic food when particle space is available.'),
-  output('engulf', 'boolean', 'Requests engulfing weakened sensed prey on contact; defaults to false. Requires a size advantage, attack and gut capacity, energy, and an available engulfing cooldown. The meal enters the gut for later digestion.'),
-  output('bite', 'scalar', 'Biting effort, clamped to 0–1; defaults to 0. Damages touching prey using attack tissue. With feeding and gut space, damage after defense can transfer some prey reserves into the gut for later digestion; it never immediately replenishes usable energy.'),
-  output('defend', 'scalar', 'Active defense effort, clamped to 0–1; defaults to 0. Reduces bite damage at an energy cost, alongside passive armor.'),
-  output('repair', 'scalar', 'Repair effort, clamped to 0–1; defaults to 0. Spends energy to restore integrity.'),
-  output('absorb', 'scalar', 'Dissolved mineral uptake effort, clamped to 0–1; defaults to 1. Limited by local supply, energy, size, and free reserve space; independent of digestion allocation.'),
-  ...['propulsion', 'photosynthesis', 'digestion', 'armor', 'sensing'].map(name => output(`invest.${name}`, 'scalar', investment)),
-  output('feed', 'scalar', 'Feeding and digestion effort, clamped to 0–1; defaults to 1. Particles and extracted prey reserves enter the gut for later assimilation at 65% efficiency. Zero stops intake, bite extraction, engulfing, and digestion, but does not prevent bite damage.'),
-  output('invest.attack', 'scalar', 'Target attack fraction, clamped to 0–1; defaults to 0. Shares the body budget with the five other capabilities and changes gradually through paid remodeling.'),
+  output('thrust', 'scalar', 'Required. Forward effort, clamped to 0–1. Built flagella provide movement; force, drag and energy cost depend on the physical body.'),
+  output('turn', 'scalar', 'Required. Signed steering effort, clamped to -1–1. Without functional flagella, this request cannot turn the cell.'),
+  output('divide', 'boolean', 'Required. Requests conservative division when body.division_ready is true. Actual organs are partitioned, never cloned; the daughter starts with empty registers and tracking memory.'),
+  output('grow', 'scalar', 'Paid frame and envelope growth effort, clamped to 0–1; defaults to 0. Adds space without granting capabilities. Construction shares finite energy, minerals and assembly throughput.'),
+  output('photosynthesize', 'scalar', 'Light-harvesting effort, clamped to 0–1; defaults to 0. Requires built photosynthetic machinery, processing capacity and shared local light. Organic release supports consumers.'),
+  output('engulf', 'boolean', 'Requests contact capture; defaults to false. Aperture, force, object geometry, energy and available digestive space determine whether capture succeeds.'),
+  output('bite', 'scalar', 'Contact attack effort, clamped to 0–1; defaults to 0. Requires a built piercing apparatus. It can damage a nearby surface and transfer accessible material into available digestive space.'),
+  output('defend', 'scalar', 'Active defense effort, clamped to 0–1; defaults to 0. Built cortex adds passive resistance; active defense also costs energy.'),
+  output('repair', 'scalar', 'Paid repair effort, clamped to 0–1; defaults to 0. The core provides slow repair; repair complexes raise throughput. Damaged organs retain their material and space until repaired or recycled.'),
+  output('absorb', 'scalar', 'Mineral uptake effort, clamped to 0–1; defaults to 1. Requires built mineral transporters, energy, local supply and reserve room.'),
+  output('feed', 'scalar', 'Organic intake and digestion effort, clamped to 0–1; defaults to 1. Capture and digestion require the corresponding built machinery; ingested energy is processed with assimilation losses.'),
+  ...ORGANELLE_CATALOG.flatMap(({kind, name, minimumMass}) => [
+    output(`target.${kind}.count`, 'integer', `Requested number of ${name.toLowerCase()} instances; nonnegative integer, default 0. This does not create or remove organs by itself. Use build.${kind} or recycle.${kind}.`),
+    output(`target.${kind}.size`, 'scalar', `Requested material per ${name.toLowerCase()} instance; default and minimum ${minimumMass}. Actual instances can differ through partial construction or damage.`),
+    output(`build.${kind}`, 'scalar', `Construction effort toward the ${name.toLowerCase()} count and size targets, clamped to 0–1; default 0. Shares finite assembly, energy, minerals, internal room and membrane space with all other requests. Capabilities update on the next tick.`),
+    output(`recycle.${kind}`, 'scalar', `Explicit dismantling effort for ${name.toLowerCase()} material above its targets, clamped to 0–1; default 0. Costs time and energy, recovers only accounted material and retained energy, and spills excess contents safely. Essential core remains protected.`),
+  ]),
+  output('scan.bearing', 'scalar', 'Body-relative scan center in radians, wrapped to −π…π; defaults to 0. Takes effect on the following tick.'),
+  output('scan.width', 'scalar', 'Requested scan width in radians, clamped to 0…2π; defaults to a full circle. Built detector coverage, visibility and occlusion still limit observations. Takes effect on the following tick.'),
+  output('scan.target', 'string', 'Optional opaque token to reacquire within the next physical scan; defaults to an empty string. It grants no access outside the detector’s observable region.'),
 ]);
 
 export const LANGUAGE_KEYWORDS: readonly GenomeSymbol[] = Object.freeze([
@@ -419,12 +437,13 @@ export function genomeCompletions(source: string, position: number, prefix = '',
 }
 
 const outputExamples: Readonly<Record<string, string>> = Object.freeze({
-  thrust: 'thrust = if food.visible then 0.7 else 0.2;', turn: 'turn = clamp(food.angle, -1, 1);',
-  divide: 'divide = maturity >= 1 && energy.fraction > 0.65;', grow: 'grow = if energy.fraction > 0.6 then 1 else 0;',
-  photosynthesize: 'photosynthesize = 1;', engulf: 'engulf = prey.visible && prey.size * 1.6 <= size && prey.integrity <= 0.35;',
-  bite: 'bite = if prey.visible && !prey.same_genome then 1 else 0;', defend: 'defend = if threat.visible then 1 else 0;',
-  repair: 'repair = if integrity < 0.9 && energy.fraction > 0.4 then 1 else 0;', absorb: 'absorb = if nutrient.fraction < 0.8 then 1 else 0;',
-  feed: 'feed = 1;',
+  thrust: 'thrust = if energy.fraction > 0.3 then 0.3 else 0;', turn: 'turn = if object.valid then clamp(angle(object.offset), -1, 1) else 0;',
+  divide: 'divide = body.division_ready;', grow: 'grow = if energy.fraction > 0.6 && body.maturity < 1 then 0.7 else 0;',
+  photosynthesize: 'photosynthesize = 1;', engulf: 'engulf = contact.valid && gut.fraction < 0.5;',
+  bite: 'bite = if contact.valid && gut.fraction < 0.5 then 0.8 else 0;', defend: 'defend = if contact.valid then 0.5 else 0;',
+  repair: 'repair = if integrity < 0.9 && energy.fraction > 0.5 then 0.5 else 0;', absorb: 'absorb = if nutrient.fraction < 0.8 then 1 else 0;',
+  feed: 'feed = 1;', 'scan.bearing': 'scan.bearing = sin(age * 0.2) * 1.5;', 'scan.width': 'scan.width = 3.141593;',
+  'scan.target': 'scan.target = if populated(rs001) then rs001 else "";',
 });
 
 export interface GenomeSymbolDocumentation { example: string; notes: readonly string[] }
@@ -433,16 +452,23 @@ export function genomeSymbolDocumentation(item: GenomeSymbol): GenomeSymbolDocum
     return { example: `${item.name} = ${REGISTER_FAMILIES.find(family => family.type === item.type)?.empty ?? '0'};\nclear ${item.name} when age > 10;`,
       notes: ['Addresses run from 001 to 999 for each of the five primitive types.', 'Reads use memory from the start of the evaluation. Writes commit together after a real tick; clear wins when both rules fire.'] };
   }
-  if (item.category === 'output') return {
-    example: outputExamples[item.name] ?? `${item.name} = 0.2;`,
-    notes: [item.type === 'scalar' ? 'Accepts integers or scalars. The engine clamps the command to its supported range.' : 'Requires a boolean expression; numbers are not booleans.',
-      'This is a write-only action request. Read the relevant body or state signal to inspect what the organism can actually do.'],
-  };
-  if (item.category === 'signal') return { example: `let observed = ${item.name};`,
-    notes: ['Read-only input, sampled consistently for this evaluation.',
-      item.name.startsWith('prey.') || item.name.startsWith('food.') || item.name.startsWith('neighbor.') || item.name.startsWith('threat.')
-        ? `Check ${item.name.split('.')[0]}.visible before relying on the target’s other values.`
-        : 'Local bindings can combine this signal with arithmetic, comparisons, functions, or if expressions.'] };
+  if (item.category === 'output') {
+    const family = ORGANELLE_CATALOG.find(entry => item.name.includes(`.${entry.kind}`));
+    const fallback = item.name.endsWith('.count') ? '2' : item.name.endsWith('.size') ? String(family?.minimumMass ?? 0.04) : '0.3';
+    const typeNote = item.type === 'integer' ? 'Requires an integer expression such as 2 or int(value); 2.0 is a scalar.'
+      : item.type === 'string' ? 'Requires a bounded string expression. Object tokens can be kept in string registers.'
+      : item.type === 'boolean' ? 'Requires a boolean expression; numbers are not booleans.'
+      : 'Accepts integers or scalars. The engine bounds the command to its supported range.';
+    return { example: outputExamples[item.name] ?? `${item.name} = ${fallback};`,
+      notes: [typeNote, 'This is a write-only request. Inspect actual body and organelle signals to see what has been built or achieved.'] };
+  }
+  if (item.category === 'signal') {
+    const group = item.name.split('.')[0];
+    const sensed = ['light', 'heat', 'chemical', 'flow', 'contact', 'object'].includes(group);
+    return { example: `let observed = ${item.name};`, notes: ['Read-only input, sampled consistently for this evaluation.',
+      sensed ? `Check ${group}.available and ${group}.valid before using a measurement. Missing/invalid numbers and vectors are zero; tokens are empty.`
+        : 'Core self-signals remain available without external sensing hardware. Local bindings can combine them with pure expressions.'] };
+  }
   return { example: item.example ?? item.signature, notes: [] };
 }
 

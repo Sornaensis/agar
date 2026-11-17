@@ -1,7 +1,7 @@
 import { Engine, type MutationKind, type SourceKind, type WorldSnapshot } from './engine';
 import { Renderer, type FieldOverlay } from './renderer';
 import {
-  clearEnvironmentDraft, clearGenomeDraft, loadEnvironmentDraft, loadGenomeDraft,
+  GENOME_LANGUAGE_VERSION, clearEnvironmentDraft, clearGenomeDraft, loadEnvironmentDraft, loadGenomeDraft,
   newEnvironment, newGenome, saveEnvironmentDraft, saveGenomeDraft, validateEnvironmentConfig,
   type EnvironmentConfig, type EnvironmentDocument, type GenomeDocument,
 } from './storage';
@@ -24,10 +24,27 @@ const SOURCE_FIELDS: FieldOverlay[] = ['light', 'heat', 'flow', 'nutrients'];
 const DEFAULT_ENVIRONMENT: EnvironmentConfig = {
   foodRate: 6, ambientTemperature: 0.5, ambientLight: 0, currentStrength: 0, initialNutrients: 0.3, sources: [],
 };
-const DEFAULT_GENOME = `thrust = 0.3;
-turn = sin(age) * 0.2;
-grow = if size < 2 && energy.fraction > 0.6 then 1 else 0;
-divide = size >= 2 && energy.fraction > 0.75;
+const DEFAULT_GENOME = `# Start with the Producer body in a lit environment.
+thrust = 0;
+turn = 0;
+photosynthesize = 1;
+feed = 0;
+absorb = if nutrient.fraction < 0.8 then 1 else 0;
+let assemble = if energy.fraction > 0.5 then 1 else 0;
+target.core.count = 2;
+target.core.size = max(0.04, body.area * 0.04);
+build.core = assemble;
+target.photosynthetic.count = 2;
+target.photosynthetic.size = 0.1;
+build.photosynthetic = assemble;
+target.metabolic.count = 2;
+target.metabolic.size = 0.03;
+build.metabolic = assemble;
+target.transporter.count = 2;
+target.transporter.size = 0.015;
+build.transporter = assemble;
+grow = if body.maturity < 1 && energy.fraction > 0.65 then 0.5 else 0;
+divide = body.division_ready;
 `;
 const alive = (dialog: HTMLDialogElement): boolean => dialog.open && dialog.isConnected;
 const message = (error: unknown): string => error instanceof Error ? error.message : String(error);
@@ -80,6 +97,7 @@ export class CatalogUI {
     const dialog = createDialog(title, `
       ${editable ? `<div class="editor-name-row"><label for="genome-name">Name</label><input id="genome-name" name="name" maxlength="80" value="${escapeHtml(name)}" autocomplete="off"></div>` : ''}
       ${!editable && document?.description ? `<p class="editor-description">${escapeHtml(document.description)}</p>` : ''}
+      ${document && document.languageVersion !== GENOME_LANGUAGE_VERSION ? '<p class="compatibility-notice">This source uses the older investment language. The original stays preserved; update a copy to organelle targets and physical sensing before running it.</p>' : ''}
       <div class="editor-toolbar">
         <div class="toolbar">
           ${editable ? `<div class="editor-history" role="group" aria-label="Edit history"><button type="button" class="icon-button" data-undo aria-label="Undo" title="Undo (Ctrl/Cmd+Z)" disabled>${icon('undo')}</button><button type="button" class="icon-button" data-redo aria-label="Redo" title="Redo (Ctrl/Cmd+Shift+Z)" disabled>${icon('redo')}</button></div>` : ''}

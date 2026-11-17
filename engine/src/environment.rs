@@ -36,6 +36,7 @@ pub struct Environment {
     heating: Vec<f64>,
     nutrients: Vec<f64>,
     nutrient_injection: Vec<f64>,
+    organic: Vec<f64>,
     nutrient_inputs: f64,
     next_source_id: u32,
 }
@@ -53,6 +54,7 @@ impl Default for Environment {
             heating: vec![0.0; PATCHES],
             nutrients: vec![DEFAULT_INITIAL_NUTRIENTS; PATCHES],
             nutrient_injection: vec![0.0; PATCHES],
+            organic: vec![0.0; PATCHES],
             nutrient_inputs: DEFAULT_INITIAL_NUTRIENTS * PATCHES as f64,
             next_source_id: 1,
         }
@@ -63,6 +65,7 @@ impl Environment {
     pub fn reset_dynamic(&mut self) {
         self.temperature.fill(self.ambient_temperature);
         self.nutrients.fill(self.initial_nutrients);
+        self.organic.fill(0.0);
         self.nutrient_inputs = self.initial_nutrients * PATCHES as f64;
     }
 
@@ -79,6 +82,51 @@ impl Environment {
             self.nutrient_at(x + 10.0, y) - self.nutrient_at(x - 10.0, y),
             self.nutrient_at(x, y + 10.0) - self.nutrient_at(x, y - 10.0),
         )
+    }
+    /// A dimensionless local chemical cue, not an energy or mineral store.
+    /// It is emitted by decay/leakage and transported with the water.
+    pub fn organic_at(&self, x: f64, y: f64) -> f64 {
+        sample(&self.organic, x, y)
+    }
+    pub fn organic_gradient(&self, x: f64, y: f64) -> (f64, f64) {
+        (
+            self.organic_at(x + 10.0, y) - self.organic_at(x - 10.0, y),
+            self.organic_at(x, y + 10.0) - self.organic_at(x, y - 10.0),
+        )
+    }
+    pub fn emit_organic(&mut self, x: f64, y: f64, amount: f64) {
+        if amount.is_finite() && amount > 0.0 {
+            let i = Self::patch(x, y);
+            self.organic[i] = (self.organic[i] + amount).min(1e6);
+        }
+    }
+    fn step_organic(&mut self, time: f64) {
+        if self.organic.iter().all(|&v| v == 0.0) {
+            return;
+        }
+        let mut advected = vec![0.0; PATCHES];
+        for (i, value) in advected.iter_mut().enumerate() {
+            let (x, y) = Self::patch_center(i);
+            let (vx, vy) = self.flow_at(x, y, time);
+            *value = self.organic_at(x - vx * DT, y - vy * DT);
+        }
+        let diffusion = 90.0 * DT / PATCH_AREA;
+        let retained = (-0.18 * DT).exp();
+        for i in 0..PATCHES {
+            let col = i % COLUMNS;
+            let row = i / COLUMNS;
+            let neighbors = [
+                row * COLUMNS + (col + COLUMNS - 1) % COLUMNS,
+                row * COLUMNS + (col + 1) % COLUMNS,
+                ((row + ROWS - 1) % ROWS) * COLUMNS + col,
+                ((row + 1) % ROWS) * COLUMNS + col,
+            ];
+            self.organic[i] = ((advected[i]
+                + diffusion
+                    * (neighbors.iter().map(|&j| advected[j]).sum::<f64>() - 4.0 * advected[i]))
+                * retained)
+                .max(0.0);
+        }
     }
     pub fn nutrient_patch(&self, index: usize) -> f64 {
         self.nutrients.get(index).copied().unwrap_or(0.0)
@@ -287,6 +335,7 @@ impl Environment {
 
     pub fn step(&mut self, time: f64) {
         self.step_nutrients(time);
+        self.step_organic(time);
         // A neutral field stays exactly neutral and incurs no grid solve.
         if self.heating.iter().all(|&v| v == 0.0)
             && self

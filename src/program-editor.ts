@@ -419,10 +419,10 @@ export class ProgramEditor {
     const groups = new Map<string, HTMLOptGroupElement>();
     for (const item of genomeSignalCatalog(direction)) {
       const groupName = item.category === 'register' ? 'Memory registers'
-        : direction === 'write' ? item.name.startsWith('invest.') ? 'Body allocation' : 'Actions'
-          : /^(food|prey|neighbor|threat)\./.test(item.name) ? 'Sensed targets'
-            : /^(light|temperature|flow)\./.test(item.name) || ['nutrient.level', 'nutrient.angle'].includes(item.name) ? 'Environment'
-              : /^(body|sense)\./.test(item.name) ? 'Body capabilities' : 'Cell state';
+        : direction === 'write' ? /^(target|build|recycle)\./.test(item.name) ? 'Organelle construction' : item.name.startsWith('scan.') ? 'Physical scan' : 'Actions'
+          : /^(object|contact)\./.test(item.name) ? 'Physical observations'
+            : /^(light|heat|chemical|flow)\./.test(item.name) ? 'Environment sensors'
+              : item.name.startsWith('organelle.') ? 'Actual organelles' : item.name.startsWith('body.') ? 'Body structure' : 'Cell state';
       let group = groups.get(groupName);
       if (!group) { group = document.createElement('optgroup'); group.label = groupName; groups.set(groupName, group); select.append(group); }
       const option = document.createElement('option'); option.value = item.name;

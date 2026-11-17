@@ -1,12 +1,12 @@
 # Organelle growth and physical sensing
 
-**Status: proposed design; not implemented.** This replaces the six `invest.*` targets with structures a cell must build, maintain, and inherit. The genome remains a pure reactive program with synchronous registers. These are simulation rules, not a claim of biological fidelity.
+**Status: implemented in engine ABI 8 / body and language version 3.** This replaces the six `invest.*` targets with structures a cell must build, maintain, and inherit. The genome remains a pure reactive program with synchronous registers. These are simulation rules, not a claim of biological fidelity.
 
 ## 1. Starting point and intended change
 
-[The current simulation](../engine/src/simulation.rs) uses one `size` for biomass, collision area, reserve capacity, and growth. Six body fractions determine capabilities. Founders receive them immediately; descendants remodel them. One sensing allocation unlocks exact environmental and target properties. [Built-in programs](../src/presets.ts) rely on `food.*`, `prey.*`, and `threat.*`.
+The previous model used one `size` for biomass, collision area, reserve capacity, and growth, with six fractional investments and exact target sensors. The implementation in [body.rs](../engine/src/body.rs), [simulation.rs](../engine/src/simulation.rs), and [the built-in programs](../src/presets.ts) replaces that model with physical structures and generic observations.
 
-Replace this with construction constrained by space, materials, energy, and assembly throughput. Growing the enclosing body creates room without automatically creating capabilities. Capabilities require functional structures. A changed genome changes construction requests; it never swaps the body instantly.
+Construction is constrained by space, materials, energy, and assembly throughput. Growing the enclosing body creates room without automatically creating capabilities. Capabilities require functional structures. A changed genome changes construction requests; it never swaps the body instantly.
 
 ## 2. Separate space, material, and energy
 
@@ -26,7 +26,7 @@ Required invariants are:
 4. Area, mass, and capabilities are independent derived quantities. Adding an organelle inside an existing envelope must not create more room for itself.
 5. Structural damage cannot erase material or compartment contents. Material is retained as damaged structure, released as debris, or returned to water according to explicit rules.
 
-Movement uses actual material mass plus a water-displacement term for inertia, with drag derived from envelope and external structures. Basal maintenance depends on supported body and machinery, so empty space is not free. Replace the current overloaded `size` with explicit `body.area` and `body.mass` in the new language version. Remove the current fixed size-4 growth ceiling only alongside verified collision and wrapping bounds; those geometric limits must be documented separately from biological constraints.
+Movement uses actual material mass plus a water-displacement term for inertia, with drag derived from envelope and external structures. Basal maintenance depends on supported body and machinery, so empty space is not free. Language version 3 replaces the overloaded `size` with explicit `body.area` and `body.mass`. The former size-4 growth ceiling is removed; the separate collision and wrapping safety bound is documented in section 9.
 
 ## 3. A practical organelle catalogue
 
@@ -65,9 +65,9 @@ Dismantling is an explicit, rate-limited request. It costs processing energy and
 
 Lower targets do not instantly remove organs. Build/recycle requests for one family resolve to one net request before resources move. Essential core cannot be recycled below its viable minimum. Optional construction cannot spend energy committed to maintenance.
 
-## 5. Proposed language interface
+## 5. Language interface
 
-Keep outputs declarative and statically typed. Names below are proposals for a new language version, not currently valid code:
+Outputs remain declarative and statically typed. The following is valid language-version-3 code:
 
 ```text
 # Targets describe a body; build controls the effort spent approaching it.
@@ -126,4 +126,19 @@ Producers compete for light and minerals, consumers for accessible organic mater
 
 Acceptance must demonstrate: no net energy/material gain over build/recycle/divide/death cycles; bounded space at every intermediate step; no capabilities from unbuilt modules; fair simultaneous resource allocation independent of source order; safe storage loss; no organelle duplication at division; absent sensors reveal no hidden state; generic observations do not encode organism class; stale tokens cannot target replacements; deterministic checkpoint continuation; and viable complete producer–consumer growth/reproduction cycles from paid founder budgets. Multi-seed ecosystem runs should report extinctions as well as persistence, without claiming guaranteed equilibrium.
 
-This is a body/language schema change. Give older saves and genomes an explicit unsupported-version explanation unless a separately designed, tested conversion is added; do not reinterpret old body fractions or omniscient readings as paid organelles silently. Preserve old exported files. Implementation, compatibility conversion, and numerical balancing remain future work.
+This is a body/language schema change. Give older saves and genomes an explicit unsupported-version explanation unless a separately designed, tested conversion is added; do not reinterpret old body fractions or omniscient readings as paid organelles silently. Preserve old exported files. This implementation deliberately rejects older body/language versions and preserves their saved records. Compatibility conversion remains a separate future task. Numerical coefficients are exposed in the source and remain tunable; ecological persistence is measured rather than guaranteed.
+
+
+## 9. Implemented limits and inspection
+
+- There are 16 organelle families. Each record has a local identity, material mass, integrity, and embodied energy. `.count` includes incomplete units; `.building` is the material still missing before unfinished units become functional. `.capacity` is effective mass divided by that family’s minimum functional mass.
+- Supported area is 0.25 to `(760 / (8 * 7))²` (about 184.18). The upper bound keeps a cell’s diameter within one quarter of the shorter torus dimension. Local collision and photon queries account for actual body radius. It is independent of population; there is no fixed organism count ceiling.
+- The scaffold costs 0.35 material per unit of area. Internal capacity is `0.9 * area`; membrane attachment capacity is `0.9 * sqrt(area)`. Contents use the capacity of their physical compartments and do not occupy the same internal space twice.
+- Growth uses a finite shared assembly budget. New space, machinery, and recovered material cannot fund another construction request in the same tick. Continuous actions use the machinery present at the beginning of the tick. Energy and mineral overflow after compartment damage, recycling, or division follows one explicit spill path.
+- Optical sensing requires illumination, checks line of sight against local cell silhouettes, and quantizes appearance and motion according to hardware. Additional optical units broaden angular coverage; more effective sensor mass improves reach and resolution. Direction and width requests apply to the next tick.
+- Each cell retains at most eight observation tracks. A track expires after 30 unobserved ticks (one second). Opaque strings are stable for continuous observations and are never reused for a different object. Remembered tokens cannot bypass range, light, occlusion, or field of view. The daughter starts with no tracks; the parent must reacquire from its new position.
+- Organic chemical cues are dimensionless, transported, diffused, and decaying local fields. They are emitted by organic decay, exudation, and damage. They are neither food energy nor mineral material and cannot be consumed.
+- The Body inspector exposes actual space, membrane usage, individual organelles, functional thresholds, damage, the latest construction requests, and achieved construction/recycling/repair rates. The program viewer retains native typed expression values and all 144 read signals / 78 write signals.
+- Checkpoint version 3 stores individual organs, resource ledgers, scan settings, observation identity sequences, and the organic cue field. The world snapshot uses 64-bit values to preserve exact 32-bit organism IDs. Source packages include the current WASM artifact and static GitHub Pages build.
+
+The acceptance checks live in the Rust body/simulation/sensing suites and the WASM, language, inspection, storage, and food-chain scripts. Measurements in `experiments/` identify their engine ABI and binary hash; older studies describe the earlier model.

@@ -1,3 +1,4 @@
+import { ORGANELLE_CATALOG } from './organelles';
 import type { Cell, EnvironmentSnapshot, EnvironmentSource, WorldSnapshot } from './engine';
 
 const PALETTE = ['#5ce1ba', '#aaa2ff', '#efa66b', '#6dcbea', '#ed9db7', '#d7d889'];
@@ -141,8 +142,8 @@ export class Renderer {
 
     const selected = world.cells.find((cell) => cell.id === selectedId);
     if (selected && options.sensors !== false) {
-      for (const point of this.wrappedPositions(selected.x, selected.y, selected.senseRange)) {
-        this.drawSensors(selected, point.x, point.y);
+      for (const point of this.wrappedPositions(selected.x, selected.y, selected.radius + 16)) {
+        this.drawBodyDetails(selected, point.x, point.y);
       }
     }
 
@@ -381,9 +382,25 @@ export class Renderer {
       context.stroke();
     }
     context.rotate(cell.angle);
+    const flagellum = cell.organelles.find(organ => organ.kind === 'flagellum');
+    if (flagellum && flagellum.capacity > 0) {
+      const filaments = Math.min(3,flagellum.count), reach = radius * (1.1 + Math.min(0.8,flagellum.capacity));
+      context.strokeStyle = 'rgba(141,203,217,0.65)'; context.lineWidth = 0.8;
+      for (let index=0; index<filaments; index++) {
+        const spread = (index-(filaments-1)/2)*radius*0.4;
+        context.beginPath(); context.moveTo(-radius*0.7,spread);
+        context.bezierCurveTo(-radius-reach*0.3,spread+radius*0.25,-radius-reach*0.7,spread-radius*0.25,-radius-reach,spread);
+        context.stroke();
+      }
+    }
+    const cortex = cell.organelles.find(organ => organ.kind === 'cortex');
+    if (cortex && cortex.capacity > 0) {
+      context.beginPath(); context.arc(0,0,radius*1.02,0,Math.PI*2);
+      context.strokeStyle = 'rgba(164,175,216,0.45)'; context.lineWidth = 0.5+Math.min(2,cortex.mass*10); context.stroke();
+    }
     const size = radius * (96 / 21.5);
     context.drawImage(this.sprite(color), -size / 2, -size / 2, size, size);
-    if (cell.bodyPhotosynthesis >= 0.05) {
+    if (cell.organelles.some(organ => organ.kind === 'photosynthetic' && organ.capacity > 0)) {
       context.fillStyle = 'rgba(136,211,137,0.85)';
       context.beginPath();
       context.ellipse(-radius * 0.32, -radius * 0.36, radius * 0.22, radius * 0.13, -0.5, 0, Math.PI * 2);
@@ -397,7 +414,7 @@ export class Renderer {
       context.arc(radius * 0.15, radius * 0.08, radius * (0.12 + 0.22 * Math.sqrt(fullness)), 0, Math.PI * 2);
       context.fill();
     }
-    if (cell.bodyAttack >= 0.05) {
+    if (cell.organelles.some(organ => organ.kind === 'piercer' && organ.capacity > 0)) {
       context.strokeStyle = 'rgba(235,143,129,0.85)';
       context.lineWidth = 1.1;
       context.beginPath();
@@ -437,43 +454,19 @@ export class Renderer {
     }
   }
 
-  private drawSensors(cell: Cell, x: number, y: number): void {
-    const context = this.context;
-    const color = genomeColor(cell.genomeId);
+  /** A selected cell shows which built families it owns; these marks are not sensing ranges. */
+  private drawBodyDetails(cell: Cell, x: number, y: number): void {
+    const context = this.context, present = cell.organelles.filter(organ => organ.count > 0);
+    if (!present.length) return;
+    const radius = cell.radius + 12 / this.scale;
     context.save();
-    context.fillStyle = rgba(color, 0.025);
-    context.strokeStyle = rgba(color, 0.23);
-    context.lineWidth = 1 / this.scale;
-    context.setLineDash([4 / this.scale, 7 / this.scale]);
-    context.beginPath();
-    context.arc(x, y, cell.senseRange, 0, Math.PI * 2);
-    context.fill();
-    context.stroke();
-    context.setLineDash([]);
-    context.beginPath();
-    context.moveTo(x + Math.cos(cell.angle) * (cell.radius + 10), y + Math.sin(cell.angle) * (cell.radius + 10));
-    context.lineTo(x + Math.cos(cell.angle) * (cell.radius + 24), y + Math.sin(cell.angle) * (cell.radius + 24));
-    context.strokeStyle = rgba(color, 0.5);
-    context.stroke();
-    const sensor = (angle: number, distance: number, stroke: string, dashed: boolean): void => {
-      const tx = x + Math.cos(cell.angle + angle) * distance;
-      const ty = y + Math.sin(cell.angle + angle) * distance;
-      context.strokeStyle = stroke;
-      context.lineWidth = 1 / this.scale;
-      context.setLineDash(dashed ? [3 / this.scale, 5 / this.scale] : []);
-      context.beginPath();
-      context.moveTo(x, y);
-      context.lineTo(tx, ty);
-      context.stroke();
-      context.setLineDash([]);
-      context.beginPath();
-      context.arc(tx, ty, 5 / this.scale, 0, Math.PI * 2);
-      context.stroke();
-    };
-    if (cell.foodVisible) sensor(cell.foodAngle, cell.foodDistance, 'rgba(241,180,103,0.68)', false);
-    if (cell.neighborVisible) sensor(cell.neighborAngle, cell.neighborDistance, 'rgba(172,161,238,0.4)', true);
-    if (cell.preyVisible) sensor(cell.preyAngle, cell.preyDistance, 'rgba(238,165,114,0.5)', true);
-    if (cell.threatVisible) sensor(cell.threatAngle, cell.threatDistance, 'rgba(242,126,114,0.65)', true);
+    for (let index=0; index<present.length; index++) {
+      const organ = present[index], definition = ORGANELLE_CATALOG.find(item => item.kind === organ.kind)!;
+      const angle = -Math.PI/2 + index/present.length*Math.PI*2;
+      context.globalAlpha = organ.capacity > 0 ? 0.9 : 0.35;
+      context.fillStyle = definition.color;
+      context.beginPath(); context.arc(x+Math.cos(angle)*radius,y+Math.sin(angle)*radius,2/this.scale,0,Math.PI*2); context.fill();
+    }
     context.restore();
   }
 

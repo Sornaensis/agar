@@ -1,7 +1,8 @@
 import { MAX_PROGRAM_BYTES, MAX_STATE_BYTES } from './engine';
 
 export interface DocumentBase { id: string; name: string; createdAt: number; updatedAt: number }
-export interface GenomeDocument extends DocumentBase { source: string; description?: string }
+export const GENOME_LANGUAGE_VERSION = 3;
+export interface GenomeDocument extends DocumentBase { source: string; description?: string; languageVersion: number }
 export interface EnvironmentConfig {
   foodRate: number; ambientTemperature: number; ambientLight: number; currentStrength: number; initialNutrients: number;
   sources: Array<{ kind: 0 | 1 | 2 | 3; x: number; y: number; strength: number; radius: number }>;
@@ -104,7 +105,8 @@ export function validateEnvironmentConfig(value: unknown): EnvironmentConfig {
 }
 export function validateGenomeDocument(value: unknown, allowBuiltin = false): GenomeDocument {
   const item = object(value, 'Genome');
-  return { ...base(item, allowBuiltin), source: source(item.source), description: description(item.description) };
+  return { ...base(item, allowBuiltin), source: source(item.source), description: description(item.description),
+    languageVersion: item.languageVersion === undefined ? 1 : number(item.languageVersion, 'Genome language version', 1, GENOME_LANGUAGE_VERSION, true) };
 }
 export function validateEnvironmentDocument(value: unknown, allowBuiltin = false): EnvironmentDocument {
   const item = object(value, 'Environment');
@@ -151,7 +153,7 @@ export function validateSimulationRecord(value: unknown): SimulationRecord {
 }
 export function newGenome(name: string, code: string, detail?: string): GenomeDocument {
   const now = Date.now();
-  return validateGenomeDocument({ id: `genome:${crypto.randomUUID()}`, name, source: code, description: detail, createdAt: now, updatedAt: now });
+  return validateGenomeDocument({ id: `genome:${crypto.randomUUID()}`, name, source: code, description: detail, languageVersion: GENOME_LANGUAGE_VERSION, createdAt: now, updatedAt: now });
 }
 export function newEnvironment(name: string, config: EnvironmentConfig, detail?: string): EnvironmentDocument {
   const now = Date.now();
@@ -162,8 +164,13 @@ function parseImport(text: string, format: string, limit: number): Record<string
   let parsed: unknown;
   try { parsed = JSON.parse(text); } catch { throw new Error('Choose a valid agar JSON export.'); }
   const item = object(parsed, 'Import');
-  if ((item.format !== format && item.format !== format.replace('agar.', 'cellarium.')) || item.version !== 1) throw new Error(`Expected a version 1 ${format} file.`);
-  const allowed = format === 'agar.genome' ? ['format', 'version', 'name', 'source', 'description'] : ['format', 'version', 'name', 'config', 'description'];
+  const genome = format === 'agar.genome';
+  if ((item.format !== format && item.format !== format.replace('agar.', 'cellarium.')) || item.version !== (genome ? 2 : 1)) {
+    if (genome && item.version === 1) throw new Error('This genome uses the older investment language. Its file is preserved; create a new organelle genome or manually update a copy.');
+    throw new Error(`Expected a version ${genome ? 2 : 1} ${format} file.`);
+  }
+  if (genome && item.languageVersion !== GENOME_LANGUAGE_VERSION) throw new Error('Unsupported genome language version. This build uses organelle language 3.');
+  const allowed = format === 'agar.genome' ? ['format', 'version', 'languageVersion', 'name', 'source', 'description'] : ['format', 'version', 'name', 'config', 'description'];
   if (Object.keys(item).some(key => !allowed.includes(key))) throw new Error('This import contains unsupported fields.');
   return item;
 }
@@ -177,7 +184,9 @@ export function parseEnvironmentImport(text: string): EnvironmentDocument {
 }
 export function exportGenome(value: GenomeDocument): string {
   const item = validateGenomeDocument(value, true);
-  return JSON.stringify({ format: 'agar.genome', version: 1, name: item.name, source: item.source, description: item.description }, null, 2);
+  return JSON.stringify({ format: 'agar.genome', version: item.languageVersion === GENOME_LANGUAGE_VERSION ? 2 : 1,
+    ...(item.languageVersion === GENOME_LANGUAGE_VERSION ? { languageVersion: item.languageVersion } : {}),
+    name: item.name, source: item.source, description: item.description }, null, 2);
 }
 export function exportEnvironment(value: EnvironmentDocument): string {
   const item = validateEnvironmentDocument(value, true);

@@ -1,16 +1,17 @@
 import './style.css';
-import { Engine, type Cell, type WorldSnapshot } from './engine';
+import { Engine, type Cell, type WorldSnapshot, type BodyRecipe } from './engine';
 import { Renderer, genomeColor } from './renderer';
 import { GenomeVisualizer } from './genome-visualizer';
-import { BUILTIN_GENOMES, BUILTIN_ENVIRONMENTS, BUILTIN_SIMULATIONS, isBuiltin, type BuiltinSimulation } from './catalog';
+import { BUILTIN_GENOMES, BUILTIN_ENVIRONMENTS, BUILTIN_SIMULATIONS, isBuiltin, recommendedStarterBody, type BuiltinSimulation } from './catalog';
 import { Storage, loadPreferences, savePreferences, newGenome, validateName, parseGenomeImport, parseEnvironmentImport,
-  exportGenome, exportEnvironment, MAX_GENOME_IMPORT_BYTES, MAX_ENVIRONMENT_IMPORT_BYTES,
+  exportGenome, exportEnvironment, GENOME_LANGUAGE_VERSION, MAX_GENOME_IMPORT_BYTES, MAX_ENVIRONMENT_IMPORT_BYTES,
   type GenomeDocument, type EnvironmentDocument, type EnvironmentConfig, type SimulationMetadata, type UiPreferences } from './storage';
 import { CatalogUI } from './catalog-ui';
 import { ProgramEditor } from './program-editor';
 import { SimulationSession, claimSimulation, summarize } from './session';
 import { icon, escapeHtml as esc, createDialog, setDialogError, downloadFile, inputNumber, clock, readableError } from './ui';
 import { showGuide } from './guide';
+import { ORGANELLE_CATALOG, STARTER_BODIES, isBodyRecipe } from './organelles';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 let preferenceWarning: unknown;
@@ -29,8 +30,8 @@ const inspectedRevisions = new WeakMap<ProgramEditor, { session: SimulationSessi
 let ready = false, transitioning = false, saveFailed = false;
 let lifecycleFlushes = 0;
 let selectedId: number | null = null;
-let inspectorView: 'overview' | 'memory' | 'program' = 'overview';
-let memoryFilter = '', memoryPage = 0, catalogQuery = '';
+let inspectorView: 'overview' | 'body' | 'memory' | 'program' = 'overview';
+let memoryFilter = '', memoryPage = 0, catalogQuery = '', simulationOpenError = '';
 let lastFrame = 0, lastUi = 0, accumulator = 0, toastTimer = 0;
 const genomeVisualizer = new GenomeVisualizer();
 const compiler = (): Promise<Engine> => Engine.load();
@@ -116,6 +117,7 @@ function environmentThumb(environment: EnvironmentDocument): string {
 }
 function renderSimulationList(): string {
   return `<div class="page library-page"><header class="page-header"><h1>Simulations</h1><button class="button primary" data-action="new-simulation">${icon('plus')}New simulation</button></header>
+    ${simulationOpenError ? `<p class="compatibility-notice" role="alert">${esc(simulationOpenError)}${simulationOpenError.includes('preserved') ? '' : ' Your saved simulation remains unchanged.'}</p>` : ''}
     ${simulations.length ? `<section class="catalog-section"><h2 class="catalog-section-heading">Saved</h2><div class="catalog-grid simulation-grid">${simulations.map(item => `<article class="catalog-card simulation-card"><button class="card-open" data-action="open-simulation" data-id="${esc(item.id)}" aria-label="Open simulation ${esc(item.name)}"><span class="card-identity">${icon('cell')}</span><span class="card-copy"><span class="card-title">${esc(item.name)}</span><span class="card-description">${esc(item.environmentName)}</span><span class="simulation-card-stats"><span>${item.summary.population} ${item.summary.population===1?'organism':'organisms'}</span><span>${clock(item.summary.time)}</span></span></span><span class="card-chevron">${icon('chevron')}</span></button>${menu('simulation',item.id,item.name)}</article>`).join('')}</div></section>` : ''}
     <section class="catalog-section"><h2 class="catalog-section-heading">Start from a preset</h2><div class="catalog-grid preset-grid">${BUILTIN_SIMULATIONS.map(item => `<article class="catalog-card preset-card"><button class="card-open" data-action="start-template" data-id="${item.id}" aria-label="Start ${esc(item.name)}"><span class="card-identity">${icon('play')}</span><span class="card-copy"><span class="card-title">${esc(item.name)}</span><span class="card-description">${esc(item.description)}</span></span><span class="card-chevron">${icon('chevron')}</span></button></article>`).join('')}</div></section></div>`;
 }
@@ -125,7 +127,7 @@ function renderCatalogCards(): void {
   const items = (isGenome ? allGenomes() : allEnvironments()).filter(item => (item.name + ' ' + (item.description || '')).toLowerCase().includes(catalogQuery.toLowerCase()));
   const card = (item: GenomeDocument | EnvironmentDocument): string => {
     const kind = isGenome ? 'genome' : 'environment';
-    return `<article class="catalog-card ${kind}-card"><button class="card-open" data-action="open-${kind}" data-id="${esc(item.id)}" aria-label="Open ${kind} ${esc(item.name)}">${isGenome ? `<span class="card-identity">${icon('dna')}</span>` : environmentThumb(item as EnvironmentDocument)}<span class="card-copy"><span class="card-title">${esc(item.name)}</span><span class="card-description">${esc(item.description || (isGenome ? '' : `${(item as EnvironmentDocument).config.sources.length} sources · ${(item as EnvironmentDocument).config.foodRate} organic particles / s`))}</span></span><span class="card-chevron">${icon('chevron')}</span></button>${menu(kind,item.id,item.name,isBuiltin(item.id))}</article>`;
+    return `<article class="catalog-card ${kind}-card"><button class="card-open" data-action="open-${kind}" data-id="${esc(item.id)}" aria-label="Open ${kind} ${esc(item.name)}">${isGenome ? `<span class="card-identity">${icon('dna')}</span>` : environmentThumb(item as EnvironmentDocument)}<span class="card-copy"><span class="card-title">${esc(item.name)}</span><span class="card-description">${esc(isGenome && (item as GenomeDocument).languageVersion !== GENOME_LANGUAGE_VERSION ? 'Older language · view or export the preserved source' : item.description || (isGenome ? '' : `${(item as EnvironmentDocument).config.sources.length} sources · ${(item as EnvironmentDocument).config.foodRate} organic particles / s`))}</span></span><span class="card-chevron">${icon('chevron')}</span></button>${menu(kind,item.id,item.name,isBuiltin(item.id))}</article>`;
   };
   target.innerHTML = [false,true].map(builtin => {
     const group = items.filter(item => isBuiltin(item.id) === builtin);
@@ -198,7 +200,11 @@ async function openSimulation(id: string): Promise<void> {
     active?.release(); active = next; release = null;
     prefs.activeSimulationId = id; prefs.tab = 'simulation'; prefs.simulationView = 'player';
     selectedId = null; accumulator = 0; persistPreferences(); renderView();
-  } catch (error) { release?.(); toast(readableError(error)); } finally { transitioning = false; }
+  } catch (error) {
+    release?.();
+    if (!active) { simulationOpenError = readableError(error); prefs.activeSimulationId = null; persistPreferences(); renderView(); }
+    else toast(readableError(error));
+  } finally { transitioning = false; }
 }
 async function closeSimulation(): Promise<void> {
   if (!active || transitioning) return;
@@ -209,23 +215,31 @@ async function closeSimulation(): Promise<void> {
   } catch (error) { toast(readableError(error)); } finally { transitioning = false; }
 }
 function genomeOptions(selected?: string): string {
-  return allGenomes().map(genome => `<option value="${esc(genome.id)}"${selected === genome.id ? ' selected' : ''}>${esc(genome.name)}${isBuiltin(genome.id) ? '' : ' · saved'}</option>`).join('');
+  return allGenomes().map(genome => `<option value="${esc(genome.id)}"${selected === genome.id ? ' selected' : ''}${genome.languageVersion !== GENOME_LANGUAGE_VERSION ? ' disabled' : ''}>${esc(genome.name)}${genome.languageVersion !== GENOME_LANGUAGE_VERSION ? ' · older language' : isBuiltin(genome.id) ? '' : ' · saved'}</option>`).join('');
+}
+function bodyOptions(selected: BodyRecipe): string {
+  return STARTER_BODIES.map(body => `<option value="${body.id}"${body.id === selected ? ' selected' : ''}>${body.name}</option>`).join('');
 }
 function newSimulationDialog(template?: BuiltinSimulation, environmentId?: string): void {
   if (!ready || transitioning || document.querySelector('.new-simulation-dialog[open]')) return;
-  const populations = template?.populations.map(item => ({ ...item })) ?? [{ genomeId: BUILTIN_GENOMES[0].id, count: 22 }];
+  const populations = template?.populations.map(item => ({ ...item })) ?? [{ genomeId: BUILTIN_GENOMES[0].id, count: 22, starterBody: recommendedStarterBody(BUILTIN_GENOMES[0].id) }];
   const chosenEnvironment = environmentId || template?.environmentId || BUILTIN_ENVIRONMENTS[0].id;
   const dialog = createDialog('New simulation', `<form>
     <div class="form-field"><label for="simulation-name">Name</label><input id="simulation-name" maxlength="80" required value="${esc(template?.name || 'New simulation')}"></div>
     <div class="form-row"><div class="form-field"><label for="simulation-environment">Environment</label><select id="simulation-environment">${allEnvironments().map(item => `<option value="${esc(item.id)}"${item.id === chosenEnvironment ? ' selected' : ''}>${esc(item.name)}</option>`).join('')}</select></div><div class="form-field"><label for="simulation-seed">Seed</label><input id="simulation-seed" type="number" min="0" max="4294967295" step="1" value="${template?.seed ?? 42}"></div></div>
-    <h3>Starting organisms</h3><div id="starting-populations"></div><button type="button" class="button subtle" id="add-population">${icon('plus')}Add genome</button>
+    <h3>Starting organisms</h3><p class="form-help">Choose a genome and a physical starter body. Its material and energy are counted as introduced resources.</p><div class="population-labels" aria-hidden="true"><span>Genome</span><span>Starter body</span><span>Count</span></div><div id="starting-populations"></div><button type="button" class="button subtle" id="add-population">${icon('plus')}Add genome</button>
     <p class="form-error" role="alert" hidden></p><footer class="dialog-actions"><button class="button primary" type="submit">Start simulation ${icon('arrow')}</button></footer></form>`, 'new-simulation-dialog');
   const rows = dialog.querySelector<HTMLElement>('#starting-populations')!;
-  const drawRows = (): void => { rows.innerHTML = populations.map((item, index) => `<div class="population-row"><select data-population="${index}" aria-label="Genome ${index + 1}">${genomeOptions(item.genomeId)}</select><input type="number" min="0" step="1" data-count="${index}" value="${item.count}" aria-label="Organism count ${index + 1}"><button class="icon-button" type="button" data-remove-population="${index}" aria-label="Remove genome ${index + 1}">${icon('close')}</button></div>`).join(''); };
+  const drawRows = (): void => { rows.innerHTML = populations.map((item, index) => `<div class="population-row"><select data-population="${index}" aria-label="Genome ${index + 1}">${genomeOptions(item.genomeId)}</select><select data-body="${index}" aria-label="Starter body ${index + 1}">${bodyOptions(item.starterBody)}</select><input type="number" min="0" step="1" data-count="${index}" value="${item.count}" aria-label="Organism count ${index + 1}"><button class="icon-button" type="button" data-remove-population="${index}" aria-label="Remove genome ${index + 1}">${icon('close')}</button></div>`).join(''); };
   drawRows();
   const syncPopulation = (event: Event): void => {
     const target = event.target as HTMLInputElement;
-    if (target.dataset.population !== undefined) populations[Number(target.dataset.population)].genomeId = target.value;
+    if (target.dataset.population !== undefined) {
+      const index = Number(target.dataset.population); populations[index].genomeId = target.value;
+      populations[index].starterBody = recommendedStarterBody(target.value);
+      rows.querySelector<HTMLSelectElement>(`[data-body="${index}"]`)!.value = populations[index].starterBody;
+    }
+    if (target.dataset.body !== undefined && isBodyRecipe(target.value)) populations[Number(target.dataset.body)].starterBody = target.value;
     if (target.dataset.count !== undefined) populations[Number(target.dataset.count)].count = target.valueAsNumber;
   };
   rows.addEventListener('input', syncPopulation);
@@ -234,7 +248,7 @@ function newSimulationDialog(template?: BuiltinSimulation, environmentId?: strin
     const button = (event.target as Element).closest<HTMLButtonElement>('[data-remove-population]');
     if (button) { populations.splice(Number(button.dataset.removePopulation), 1); drawRows(); }
   });
-  dialog.querySelector('#add-population')!.addEventListener('click', () => { if (populations.length < 16) { populations.push({ genomeId: BUILTIN_GENOMES[0].id, count: 1 }); drawRows(); } });
+  dialog.querySelector('#add-population')!.addEventListener('click', () => { if (populations.length < 16) { populations.push({ genomeId: BUILTIN_GENOMES[0].id, count: 1, starterBody: recommendedStarterBody(BUILTIN_GENOMES[0].id) }); drawRows(); } });
   dialog.querySelector('form')!.addEventListener('submit', event => {
     event.preventDefault();
     if (transitioning) return;
@@ -251,6 +265,7 @@ function newSimulationDialog(template?: BuiltinSimulation, environmentId?: strin
         const founders = populations.map((_, index) => ({
           genomeId: rows.querySelector<HTMLSelectElement>(`[data-population="${index}"]`)!.value,
           count: rows.querySelector<HTMLInputElement>(`[data-count="${index}"]`)!.valueAsNumber,
+          starterBody: rows.querySelector<HTMLSelectElement>(`[data-body="${index}"]`)!.value,
         }));
         if (founders.some(item => !Number.isSafeInteger(item.count) || item.count < 0)) throw new Error('Organism counts must be nonnegative whole numbers.');
         const environment = findEnvironment(dialog.querySelector<HTMLSelectElement>('#simulation-environment')!.value);
@@ -258,20 +273,22 @@ function newSimulationDialog(template?: BuiltinSimulation, environmentId?: strin
         const environmentConfig = structuredClone(environment.config), environmentName = environment.name;
         const startingGenomes = founders.map(item => {
           const genome = findGenome(item.genomeId); if (!genome) throw new Error('A starting genome no longer exists.');
-          return { count: item.count, source: genome.source, name: genome.name };
+          if (genome.languageVersion !== GENOME_LANGUAGE_VERSION) throw new Error('This genome uses the older investment language. Edit a new copy before introducing it.');
+          if (!isBodyRecipe(item.starterBody)) throw new Error('Choose a valid starter body.');
+          return { count: item.count, source: genome.source, name: genome.name, starterBody: item.starterBody };
         });
         const engine = await Engine.load(); applyEnvironment(engine, environmentConfig); engine.setMutationRate(0.1); engine.resetEmpty(seed, environmentConfig.foodRate > 0 ? 360 : 0);
         const names: Record<string, string> = {};
         for (const item of startingGenomes) {
           const id = engine.compile(item.source); names[String(id)] = item.name;
-          if (engine.seed(id, item.count) !== item.count) throw new Error('Could not create the starting population.');
+          if (engine.seed(id, item.count, -1, -1, item.starterBody) !== item.count) throw new Error('Could not create the starting population.');
         }
         if (active) await active.flush();
         const now = Date.now(), id = 'simulation:' + crypto.randomUUID(); release = await claimSimulation(id);
         const next = makeSession(engine, { id, name, environmentName, createdAt: now, updatedAt: now, seed, paused: false, speed: 1, genomeNames: names, history: [], summary: summarize(engine.snapshot()) });
         next.refresh(); next.touch(); await next.checkpoint(); next.release = release; active?.release(); active = next; release = null;
         prefs.activeSimulationId = id; prefs.tab = 'simulation'; prefs.simulationView = 'player'; selectedId = null; accumulator = 0;
-        persistPreferences(); dialog.close(); renderView();
+        simulationOpenError = ''; persistPreferences(); dialog.close(); renderView();
       } catch (error) { release?.(); setDialogError(dialog, error); }
       finally { for (const item of controls) item.control.disabled = item.disabled; transitioning = false; delete dialog.dataset.saving; }
     })();
@@ -319,7 +336,7 @@ function renderInspector(): void {
   panel.hidden = selectedId === null; if (selectedId === null) return;
   const cell = active.world.cells.find(item => item.id === selectedId);
   panel.innerHTML = `<header class="inspector-header"><div><h2>Organism ${selectedId}</h2><span class="muted">${cell ? esc(genomeName(cell.genomeId)) : 'No longer alive'}</span></div><button class="icon-button" data-action="close-inspector" aria-label="Close organism inspector">${icon('close')}</button></header>
-    ${cell ? `<nav class="inspector-tabs" aria-label="Organism details" role="tablist">${(['overview','memory','program'] as const).map(view => `<button role="tab" data-inspector-view="${view}" tabindex="${inspectorView === view ? 0 : -1}" aria-selected="${inspectorView === view}" class="${inspectorView === view ? 'active' : ''}">${view[0].toUpperCase()+view.slice(1)}</button>`).join('')}</nav><div id="inspector-content"></div>` : '<p class="muted">This organism has died.</p>'}`;
+    ${cell ? `<nav class="inspector-tabs" aria-label="Organism details" role="tablist">${(['overview','body','memory','program'] as const).map(view => `<button role="tab" data-inspector-view="${view}" tabindex="${inspectorView === view ? 0 : -1}" aria-selected="${inspectorView === view}" class="${inspectorView === view ? 'active' : ''}">${view[0].toUpperCase()+view.slice(1)}</button>`).join('')}</nav><div id="inspector-content"></div>` : '<p class="muted">This organism has died.</p>'}`;
   if (!cell) return;
   if (inspectorView === 'memory') {
     $('inspector-content').innerHTML = `<div class="memory-summary" id="memory-summary"></div><input id="memory-filter" class="search-input memory-filter" type="search" placeholder="Find a register" aria-label="Find a register" value="${esc(memoryFilter)}"><table class="memory-table"><thead><tr><th>Address</th><th>Value</th></tr></thead><tbody id="memory-values"></tbody></table><div class="memory-footer"><button class="button subtle" data-action="memory-previous">Previous</button><span id="memory-page"></span><button class="button subtle" data-action="memory-next">Next</button></div>`;
@@ -332,7 +349,8 @@ function renderInspector(): void {
 }
 function metricRow(label: string, value: string): string { return `<div class="metric-row"><span>${label}</span><strong>${value}</strong></div>`; }
 function trophicRole(cell: Cell): 'Autotroph' | 'Heterotroph' | 'Mixotroph' | 'Non-feeding' {
-  const photosynthesis = cell.bodyPhotosynthesis >= 0.05, digestion = cell.bodyDigestion >= 0.05;
+  const photosynthesis = cell.organelles.some(organ => organ.kind === 'photosynthetic' && organ.capacity > 0),
+    digestion = cell.organelles.some(organ => organ.kind === 'digestive' && organ.capacity > 0);
   return photosynthesis && digestion ? 'Mixotroph' : photosynthesis ? 'Autotroph' : digestion ? 'Heterotroph' : 'Non-feeding';
 }
 function memoryValue(value: unknown): string {
@@ -357,10 +375,22 @@ function updateInspector(): void {
   const cell = active.world.cells.find(item => item.id === selectedId);
   if (!cell) { renderInspector(); return; }
   if (inspectorView === 'overview') {
-    $('inspector-content').innerHTML = `<div class="inspector-metrics">${metricRow('Feeding strategy',trophicRole(cell))}${metricRow('Energy', Math.round(cell.energy) + ' / ' + Math.round(cell.energyCapacity))}${metricRow('Biomass / division',cell.size.toFixed(2)+' / '+(2*cell.birthSize).toFixed(2))}${metricRow('Growth',cell.growthRate.toFixed(3)+' / s')}${metricRow('Gut',cell.gutEnergy.toFixed(1)+' / '+cell.gutCapacity.toFixed(1))}${metricRow('Digestion',cell.digestionRate.toFixed(2)+' energy / s')}${metricRow('Photosynthesis',cell.photosynthesisRate.toFixed(2)+' energy / s')}${metricRow('Integrity',Math.round(cell.integrity*100)+'%')}${metricRow('Minerals',cell.nutrientStored.toFixed(2)+' / '+cell.nutrientCapacity.toFixed(2))}${metricRow('Age',clock(cell.age)+' / '+clock(cell.lifespan))}${metricRow('Generation',String(cell.generation))}${metricRow('Upkeep',(cell.basalMetabolism+cell.memoryCost).toFixed(2)+' / s')}</div><h3>Body allocation</h3><div class="body-allocation">${(['Propulsion','Photosynthesis','Digestion','Armor','Sensing','Attack'] as const).map((name,index) => {
-      const value = [cell.bodyPropulsion,cell.bodyPhotosynthesis,cell.bodyDigestion,cell.bodyArmor,cell.bodySensing,cell.bodyAttack][index];
-      return `<div class="allocation-row"><span>${name}</span><div class="allocation-track"><i style="width:${Math.max(0,Math.min(100,value*100))}%"></i></div><span>${Math.round(value*100)}%</span></div>`;
-    }).join('')}</div>`;
+    $('inspector-content').innerHTML = `<div class="inspector-metrics">${metricRow('Capabilities',trophicRole(cell))}${metricRow('Energy',cell.energy.toFixed(1)+' / '+cell.energyCapacity.toFixed(1))}${metricRow('Envelope area',cell.bodyArea.toFixed(3))}${metricRow('Material mass',cell.bodyMass.toFixed(3))}${metricRow('Division',cell.divisionReady ? 'Ready' : Math.round(cell.maturity*100)+'% grown')}${metricRow('Growth',cell.growthRate.toFixed(3)+' area / s')}${metricRow('Gut',cell.gutEnergy.toFixed(1)+' / '+cell.gutCapacity.toFixed(1))}${metricRow('Digestion',cell.digestionRate.toFixed(2)+' energy / s')}${metricRow('Photosynthesis',cell.photosynthesisRate.toFixed(2)+' energy / s')}${metricRow('Integrity',Math.round(cell.integrity*100)+'%')}${metricRow('Minerals',cell.nutrientStored.toFixed(2)+' / '+cell.nutrientCapacity.toFixed(2))}${metricRow('Age',clock(cell.age)+' / '+clock(cell.lifespan))}${metricRow('Generation',String(cell.generation))}${metricRow('Upkeep',(cell.basalMetabolism+cell.memoryCost).toFixed(2)+' energy / s')}</div>`;
+  } else if (inspectorView === 'body') {
+    const target = $('inspector-content'), expanded = new Set([...target.querySelectorAll<HTMLDetailsElement>('details[open]')].map(item => item.dataset.kind));
+    const focusedFamily = target.contains(document.activeElement) ? document.activeElement?.closest<HTMLDetailsElement>('.organelle-detail')?.dataset.kind : undefined;
+    try {
+      const body = active.engine.cellBody(cell.id);
+      const meter = (name: string, used: number, capacity: number): string => `<div class="body-meter"><div><span>${name}</span><strong>${used.toFixed(3)} / ${capacity.toFixed(3)}</strong></div><meter min="0" max="${Math.max(capacity,0.000001)}" value="${used}" aria-label="${name}"></meter></div>`;
+      target.innerHTML = `<div class="body-capacity">${meter('Internal space',body.spaceUsed,body.spaceCapacity)}${meter('Membrane attachments',body.surfaceUsed,body.surfaceCapacity)}</div><div class="body-work"><span>Building <strong>${body.constructionRate.toFixed(3)}</strong></span><span>Recycling <strong>${body.recyclingRate.toFixed(3)}</strong></span><span>Repair <strong>${body.repairRate.toFixed(3)}</strong></span><small>material / s</small></div><div class="organelle-list">${ORGANELLE_CATALOG.map(definition => {
+        const summary = cell.organelles.find(item => item.kind === definition.kind)!;
+        const request = body.requested.find(item => item.kind === definition.kind)!;
+        const organs = body.organs.filter(item => item.kind === definition.kind);
+        if (!organs.length && !request.count && !request.build && !request.recycle) return '';
+        return `<details class="organelle-detail" data-kind="${definition.kind}"${expanded.has(definition.kind) ? ' open' : ''}><summary><i style="background:${definition.color}"></i><span>${esc(definition.name)}<small>${summary.mass.toFixed(3)} material${summary.building > 0 ? ' · building' : ''}${summary.damaged > 0 ? ' · damaged' : ''}</small></span><strong title="Actual instances / last requested count">${summary.count}<small> / ${request.count}</small></strong></summary><div class="organelle-content"><p>${esc(definition.description)}</p><div class="organelle-request">${metricRow('Last size target',request.size.toFixed(3))}${metricRow('Build / recycle effort',Math.round(request.build*100)+'% / '+Math.round(request.recycle*100)+'%')}${metricRow('Functional capacity',summary.capacity.toFixed(3))}${metricRow('Damaged material',summary.damaged.toFixed(3))}</div>${organs.length ? `<table class="organelle-table"><thead><tr><th>Unit</th><th>Built</th><th>Integrity</th><th>State</th></tr></thead><tbody>${organs.map(organ => `<tr><td>#${organ.id}</td><td>${organ.mass.toFixed(3)}</td><td>${Math.round(organ.integrity*100)}%</td><td>${organ.functional ? organ.mass + 1e-9 < request.size ? 'Growing' : 'Functional' : organ.mass < organ.minimumMass ? 'Building' : 'Damaged'}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">No physical units yet.</p>'}</div></details>`;
+      }).join('')}</div><p class="body-explanation">Targets request a body. Only built, functional organs provide capabilities; incomplete and damaged organs still occupy space.</p>`;
+      if (focusedFamily) target.querySelector<HTMLElement>(`[data-kind="${focusedFamily}"] > summary`)?.focus({preventScroll:true});
+    } catch (error) { target.textContent = readableError(error); }
   } else if (inspectorView === 'memory') {
     const entries = active.engine.getMemory(cell.id), matching = entries.filter(entry => (entry.name+' '+entry.type).toLowerCase().includes(memoryFilter.toLowerCase()));
     const pageCount = Math.max(1,Math.ceil(matching.length/50)); memoryPage = Math.max(0,Math.min(memoryPage,pageCount-1));
@@ -395,26 +425,34 @@ function openLiveProgram(id: number, cellId?: number): void {
 function addOrganismDialog(): void {
   if (!active || transitioning) return;
   const session = active;
-  const dialog = createDialog('Add organism', '<input class="search-input" id="organism-search" type="search" placeholder="Find a genome" aria-label="Find a genome"><div class="picker-list" id="organism-options"></div><p class="form-error" role="alert" hidden></p>', 'organism-picker');
+  let selectedGenome = allGenomes().find(item => item.languageVersion === GENOME_LANGUAGE_VERSION) ?? BUILTIN_GENOMES[0];
+  const dialog = createDialog('Add organism', `<form><input class="search-input" id="organism-search" type="search" placeholder="Find a genome" aria-label="Find a genome"><div class="picker-list" id="organism-options"></div><div class="starter-body-choice"><div class="form-field"><label for="organism-body">Starter body</label><select id="organism-body">${bodyOptions(recommendedStarterBody(selectedGenome.id))}</select><p class="form-help" id="organism-body-description"></p></div><p class="form-help">The body and reserves are counted as introduced material and energy.</p></div><p class="form-error" role="alert" hidden></p><footer class="dialog-actions"><button class="button primary" type="submit">${icon('plus')}Add organism</button></footer></form>`, 'organism-picker');
   const options = dialog.querySelector<HTMLElement>('#organism-options')!;
+  const bodyInput = dialog.querySelector<HTMLSelectElement>('#organism-body')!;
+  const explain = (): void => { dialog.querySelector('#organism-body-description')!.textContent = STARTER_BODIES.find(body => body.id === bodyInput.value)?.description ?? ''; };
   const draw = (): void => {
     const query = dialog.querySelector<HTMLInputElement>('#organism-search')!.value.toLowerCase();
-    const matches = allGenomes().filter(item => (item.name+' '+(item.description||'')).toLowerCase().includes(query));
+    const matches = allGenomes().filter(item => item.languageVersion === GENOME_LANGUAGE_VERSION && (item.name+' '+(item.description||'')).toLowerCase().includes(query));
     options.innerHTML = [false,true].map(builtin => {
       const group=matches.filter(item=>isBuiltin(item.id)===builtin);
-      return group.length ? `<div class="picker-group"><h3>${builtin?'Built-in':'Saved'}</h3>${group.map(item => `<button class="picker-item" data-add-id="${esc(item.id)}" title="${esc(item.description||item.name)}" aria-label="Add ${esc(item.name)}">${icon('dna')}<span>${esc(item.name)}</span>${icon('plus')}</button>`).join('')}</div>` : '';
-    }).join('') || '<p class="muted picker-empty">No matching genomes.</p>';
+      return group.length ? `<div class="picker-group"><h3>${builtin?'Built-in':'Saved'}</h3>${group.map(item => `<button type="button" class="picker-item${selectedGenome.id === item.id ? ' selected' : ''}" data-select-id="${esc(item.id)}" aria-pressed="${selectedGenome.id === item.id}" title="${esc(item.description||item.name)}">${icon('dna')}<span>${esc(item.name)}</span><span class="picker-check">${selectedGenome.id === item.id ? '✓' : ''}</span></button>`).join('')}</div>` : '';
+    }).join('') || '<p class="muted picker-empty">No matching current-language genomes.</p>';
   };
-  draw(); dialog.querySelector('#organism-search')!.addEventListener('input',draw);
+  draw(); explain(); dialog.querySelector('#organism-search')!.addEventListener('input',draw); bodyInput.addEventListener('change',explain);
   options.addEventListener('click', event => {
-    const button = (event.target as Element).closest<HTMLButtonElement>('[data-add-id]'); if (!button || active !== session || transitioning) return;
-    const genome = findGenome(button.dataset.addId!); if (!genome) return;
+    const button = (event.target as Element).closest<HTMLButtonElement>('[data-select-id]'); if (!button) return;
+    const genome = findGenome(button.dataset.selectId!); if (!genome) return;
+    selectedGenome = genome; bodyInput.value = recommendedStarterBody(genome.id); explain(); draw();
+  });
+  dialog.querySelector('form')!.addEventListener('submit', event => {
+    event.preventDefault(); if (active !== session || transitioning) return;
     try {
-      const id = session.engine.compile(genome.source);
-      session.engine.seed(id,1);
-      session.metadata.genomeNames[String(id)] = genome.name; session.refresh(); session.touch();
+      const recipe = bodyInput.value; if (!isBodyRecipe(recipe)) throw new Error('Choose a starter body.');
+      const id = session.engine.compile(selectedGenome.source);
+      if (session.engine.seed(id,1,-1,-1,recipe) !== 1) throw new Error('The organism could not be introduced.');
+      session.metadata.genomeNames[String(id)] = selectedGenome.name; session.refresh(); session.touch();
       dialog.close(); void session.checkpoint().catch(() => {}); updateSimulationUi();
-      toast('One '+genome.name+' organism added.');
+      toast('One '+selectedGenome.name+' organism added.');
     } catch (error) { setDialogError(dialog,error); }
   });
   dialog.querySelector<HTMLInputElement>('#organism-search')!.focus();
@@ -427,8 +465,9 @@ function metricsMarkup(): string {
   const cards = (definitions: ReadonlyArray<readonly [string,string]>): string => definitions.map(([key,label]) => `<article class="metric-card"><span>${label}</span><strong id="metric-${key}">—</strong></article>`).join('');
   return `<div class="page metrics-page"><div class="metrics-grid">${cards(metricDefinitions.slice(0,4))}</div>
     <section class="chart-panel"><div class="section-heading"><h2>Population</h2><span id="history-duration"></span></div><svg class="metrics-chart" id="history-chart" viewBox="0 0 1000 240" preserveAspectRatio="none" role="img" aria-label="Population history"></svg></section>
-    <section class="trophic-panel"><div class="section-heading"><h2>Food chain</h2><span title="Based on current tissue allocations; a cell can change strategy by remodeling.">Current capabilities</span></div><div class="metrics-grid">${cards([['autotrophs','Autotrophs'],['heterotrophs','Heterotrophs'],['mixotrophs','Mixotrophs'],['hunters','Attack-capable']])}</div><div class="energy-flow">${[['production','Photosynthesis'],['digestion','Digestion'],['exudation','Organic release']].map(([key,label])=>`<div><span>${label}</span><strong id="flow-${key}">—</strong></div>`).join('')}</div><p class="muted">Light → producers → organic particles and prey → consumers. Minerals return to the water through decay.</p></section>
+    <section class="trophic-panel"><div class="section-heading"><h2>Food chain</h2><span title="Based on functional organs that have actually been built.">Current capabilities</span></div><div class="metrics-grid">${cards([['autotrophs','Autotrophs'],['heterotrophs','Heterotrophs'],['mixotrophs','Mixotrophs'],['hunters','Attack-capable']])}</div><div class="energy-flow">${[['production','Photosynthesis'],['digestion','Digestion'],['exudation','Organic release']].map(([key,label])=>`<div><span>${label}</span><strong id="flow-${key}">—</strong></div>`).join('')}</div><p class="muted">Light → producers → organic material → consumers. Minerals return to the water through decay.</p></section>
     <section class="nutrient-panel"><h2>Minerals</h2><div class="metrics-grid nutrient-metrics">${[['water','Water'],['food','Organic particles'],['cells','Organisms & guts'],['total','Total']].map(([key,label])=>`<div class="metric-card"><span>${label}</span><strong id="nutrient-${key}">—</strong></div>`).join('')}</div></section>
+    <details class="metrics-secondary"><summary>Resource accounting</summary><div class="inspector-metrics">${metricRow('Material introduced','<span id="introduced-material">—</span>')}${metricRow('Organic energy introduced','<span id="introduced-energy">—</span>')}${metricRow('Energy currently held','<span id="held-energy">—</span>')}${metricRow('Light energy collected','<span id="light-energy">—</span>')}</div></details>
     <details class="metrics-secondary"><summary>Evolution & interactions</summary><div class="metrics-grid">${cards(metricDefinitions.slice(4))}</div></details></div>`;
 }
 function renderMetrics(world: WorldSnapshot): void {
@@ -441,12 +480,16 @@ function renderMetrics(world: WorldSnapshot): void {
     if (role === 'Autotroph') trophic.autotrophs++;
     if (role === 'Heterotroph') trophic.heterotrophs++;
     if (role === 'Mixotroph') trophic.mixotrophs++;
-    if (cell.bodyAttack >= 0.05) trophic.hunters++;
+    if (cell.organelles.some(organ => organ.kind === 'piercer' && organ.capacity > 0)) trophic.hunters++;
     flow.production += cell.photosynthesisRate; flow.digestion += cell.digestionRate; flow.exudation += cell.exudationRate;
   }
   for (const [key,value] of Object.entries(trophic)) $('metric-'+key).textContent = String(value);
   for (const [key,value] of Object.entries(flow)) $('flow-'+key).textContent = value.toFixed(1)+' energy / s';
   for (const [key,value] of Object.entries({water:world.nutrientDissolvedTotal,food:world.nutrientFoodTotal,cells:world.nutrientCellTotal,total:world.nutrientTotal})) $('nutrient-'+key).textContent=value.toFixed(1);
+  $('introduced-material').textContent = world.nutrientInputTotal.toFixed(2);
+  $('introduced-energy').textContent = world.energyInputTotal.toFixed(2);
+  $('held-energy').textContent = world.energyTotal.toFixed(2);
+  $('light-energy').textContent = world.photosynthesisTotal.toFixed(2);
   $('nutrient-total').title = world.nutrientInputTotal.toFixed(1)+' mineral units introduced since this simulation began.';
   const history = [...active!.metadata.history.filter(point=>point.time<world.time),{time:world.time,population:world.cells.length}];
   const first = history[0]?.time ?? 0, span=Math.max(1,world.time-first);
@@ -467,7 +510,7 @@ function settingsMarkup(): string {
     ${rangeField('food','External organic input / s',world.foodRate,0,60,1)}${rangeField('mutation','Mutation chance',Math.round(world.mutationRate*100),0,100,1,'%')}
     <p class="muted">Seed ${active!.metadata.seed} · ${esc(active!.metadata.environmentName)}</p></section>
     <section class="settings-panel"><h2>Display</h2><div class="form-field"><label for="setting-overlay">Field</label><select id="setting-overlay" data-setting="overlay">${[['none','None'],['light','Light'],['heat','Temperature'],['flow','Water flow'],['nutrients','Dissolved nutrients']].map(([value,label])=>`<option value="${value}"${prefs.overlay===value?' selected':''}>${label}</option>`).join('')}</select></div>
-    <label class="toggle-field"><span>Sensing range</span><input type="checkbox" role="switch" data-setting="sensors"${prefs.sensors?' checked':''}></label><label class="toggle-field"><span>Movement trails</span><input type="checkbox" role="switch" data-setting="trails"${prefs.trails?' checked':''}></label></section>
+    <label class="toggle-field"><span>Organelle highlights</span><input type="checkbox" role="switch" data-setting="sensors"${prefs.sensors?' checked':''}></label><label class="toggle-field"><span>Movement trails</span><input type="checkbox" role="switch" data-setting="trails"${prefs.trails?' checked':''}></label></section>
     <section class="settings-panel"><h2>Environment</h2>${rangeField('light','Ambient light',Math.round(environment.ambientLight*100),0,100,1,'%')}${rangeField('temperature','Temperature',Math.round(environment.ambientTemperature*100)/100,0,1,.01)}${rangeField('current','Current strength',Math.round(environment.currentStrength),0,30,1)}
     </section>
   </div></div>`;

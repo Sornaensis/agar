@@ -1,5 +1,6 @@
 //! A bounded typed signal graph with explicit synchronous, per-cell registers.
 //! Expressions are pure: every read sees old memory; all writes commit together.
+use crate::body::{BodyControls, FAMILY_COUNT, MIN_ORGANELLE_MASS};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
@@ -15,79 +16,114 @@ pub const REGISTER_COUNT: usize = 999;
 pub const REGISTER_ENERGY_COST: f64 = 0.0025;
 const MAX_STRING_BYTES: usize = 128;
 
-pub const DEFAULT_PROGRAM: &str = "# Every expression samples the current tick.\n\
-let wander = sin(age * 0.7 + id) * 0.6;\n\
-turn = if food.visible then clamp(food.angle * 1.8, -1, 1) else wander;\n\
-thrust = if food.visible then 0.8 else 0.45;\n\
-grow = if size < 2 && energy > 70 * size then 1 else 0;\n\
-divide = energy > 125 * size && size >= 2 && age > 5;\n";
+pub const DEFAULT_PROGRAM: &str = r#"# A producer builds actual machinery before it can reproduce.
+thrust = 0;
+turn = 0;
+photosynthesize = 1;
+absorb = 1;
+feed = 0;
+repair = 0.2;
+grow = if energy.fraction > 0.6 then 0.8 else 0;
+divide = body.division_ready;
+target.core.count = 2;
+target.core.size = 0.04;
+build.core = 1;
+target.photosynthetic.count = 2;
+target.photosynthetic.size = 0.12;
+build.photosynthetic = 1;
+target.metabolic.count = 2;
+target.metabolic.size = 0.045;
+build.metabolic = 0.5;
+target.reserve.count = 2;
+target.reserve.size = 0.04;
+build.reserve = 0.4;
+target.transporter.count = 2;
+target.transporter.size = 0.02;
+build.transporter = 0.5;
+"#;
 
+/// Owned, physically built machinery, sampled before this tick's construction.
 #[derive(Debug, Clone, Copy, Default)]
+pub struct OrganelleInput {
+    pub count: i32,
+    pub mass: f64,
+    pub capacity: f64,
+    pub damaged: f64,
+    pub building: f64,
+}
+
+/// External measurements are populated by the hardware-gated sensor pipeline.
+/// Absent or invalid measurements carry zero values and empty opaque tokens.
+#[derive(Debug, Clone, Default)]
 pub struct Inputs {
     pub energy: f64,
-    pub age: f64,
-    pub speed: f64,
-    pub time: f64,
-    pub id: f64,
-    pub size: f64,
-    pub food_angle: f64,
-    pub food_distance: f64,
-    pub food_visible: bool,
-    pub neighbor_angle: f64,
-    pub neighbor_distance: f64,
-    pub neighbor_visible: bool,
     pub energy_fraction: f64,
+    pub energy_capacity: f64,
+    pub age: f64,
+    pub time: f64,
+    pub speed: f64,
+    pub id: f64,
+    pub integrity: f64,
     pub memory_used: f64,
     pub memory_cost: f64,
-    pub light_level: f64,
-    pub light_angle: f64,
-    pub temperature: f64,
-    pub temperature_angle: f64,
-    pub flow_x: f64,
-    pub flow_y: f64,
-    pub flow_speed: f64,
-    pub flow_angle: f64,
-    pub prey_id: f64,
-    pub prey_angle: f64,
-    pub prey_distance: f64,
-    pub prey_size: f64,
-    pub prey_visible: bool,
-    pub prey_same_genome: bool,
-    pub threat_angle: f64,
-    pub threat_distance: f64,
-    pub threat_size: f64,
-    pub threat_visible: bool,
-    pub integrity: f64,
+    pub body_area: f64,
+    pub body_mass: f64,
+    pub body_birth_area: f64,
+    pub body_maturity: f64,
+    pub body_division_ready: bool,
+    pub body_space_free: f64,
+    pub body_space_used: f64,
+    pub body_space_capacity: f64,
+    pub body_surface_free: f64,
+    pub body_surface_used: f64,
+    pub body_surface_capacity: f64,
     pub nutrient_stored: f64,
     pub nutrient_capacity: f64,
     pub nutrient_fraction: f64,
-    pub nutrient_level: f64,
-    pub nutrient_angle: f64,
-    pub body_propulsion: f64,
-    pub body_photosynthesis: f64,
-    pub body_digestion: f64,
-    pub body_armor: f64,
-    pub body_sensing: f64,
-    pub body_unassigned: f64,
-    pub sense_range: f64,
-    pub body_attack: f64,
     pub gut_energy: f64,
     pub gut_capacity: f64,
     pub gut_fraction: f64,
     pub digestion_rate: f64,
     pub growth_rate: f64,
-    pub birth_size: f64,
-    pub maturity: f64,
     pub lifespan: f64,
     pub exudation_rate: f64,
-    pub prey_integrity: f64,
-    pub prey_attack: f64,
-    pub prey_photosynthesis: f64,
-    pub food_energy: f64,
-    pub food_nutrients: f64,
+    pub light_available: bool,
+    pub light_valid: bool,
+    pub light_level: f64,
+    pub light_bearing: f64,
+    pub heat_available: bool,
+    pub heat_valid: bool,
+    pub heat_value: f64,
+    pub heat_bearing: f64,
+    pub chemical_available: bool,
+    pub chemical_valid: bool,
+    pub chemical_mineral: f64,
+    pub chemical_organic: f64,
+    pub chemical_mineral_bearing: f64,
+    pub chemical_organic_bearing: f64,
+    pub flow_available: bool,
+    pub flow_valid: bool,
+    pub flow_vector: [f64; 2],
+    pub flow_speed: f64,
+    pub flow_bearing: f64,
+    pub contact_available: bool,
+    pub contact_valid: bool,
+    pub contact_token: Rc<str>,
+    pub contact_offset: [f64; 2],
+    pub contact_pressure: f64,
+    pub contact_resistance: f64,
+    pub object_available: bool,
+    pub object_valid: bool,
+    pub object_token: Rc<str>,
+    pub object_offset: [f64; 2],
+    pub object_area: f64,
+    pub object_contrast: f64,
+    pub object_pigment: f64,
+    pub object_motion: [f64; 2],
+    pub organelle: [OrganelleInput; FAMILY_COUNT],
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Outputs {
     pub thrust: f64,
     pub turn: f64,
@@ -99,13 +135,14 @@ pub struct Outputs {
     pub defend: f64,
     pub repair: f64,
     pub absorb: f64,
-    pub invest_propulsion: f64,
-    pub invest_photosynthesis: f64,
-    pub invest_digestion: f64,
-    pub invest_armor: f64,
-    pub invest_sensing: f64,
     pub feed: f64,
-    pub invest_attack: f64,
+    pub body: BodyControls,
+    /// Body-relative radians. Applied to the next tick's optical sampling.
+    pub scan_bearing: f64,
+    /// Full angular width, clamped to 0..TAU. Default is an unrestricted scan.
+    pub scan_width: f64,
+    /// Opaque observation token; it never grants remote visibility or action.
+    pub scan_target: Rc<str>,
 }
 
 impl Default for Outputs {
@@ -120,14 +157,12 @@ impl Default for Outputs {
             bite: 0.0,
             defend: 0.0,
             repair: 0.0,
-            absorb: output_number_default(9),
-            invest_propulsion: output_number_default(10),
-            invest_photosynthesis: output_number_default(11),
-            invest_digestion: output_number_default(12),
-            invest_armor: output_number_default(13),
-            invest_sensing: output_number_default(14),
-            feed: output_number_default(15),
-            invest_attack: output_number_default(16),
+            absorb: 1.0,
+            feed: 1.0,
+            body: BodyControls::default(),
+            scan_bearing: 0.0,
+            scan_width: std::f64::consts::TAU,
+            scan_target: Rc::from(""),
         }
     }
 }
@@ -372,204 +407,480 @@ pub struct EvalScratch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Sensor {
     Energy,
-    Age,
-    Speed,
-    Time,
-    Id,
-    Size,
-    FoodAngle,
-    FoodDistance,
-    FoodVisible,
-    NeighborAngle,
-    NeighborDistance,
-    NeighborVisible,
     EnergyFraction,
+    EnergyCapacity,
+    Age,
+    Time,
+    Speed,
+    Id,
+    Integrity,
     MemoryUsed,
     MemoryCost,
-    LightLevel,
-    LightAngle,
-    Temperature,
-    TemperatureAngle,
-    FlowX,
-    FlowY,
-    FlowSpeed,
-    FlowAngle,
-    PreyId,
-    PreyAngle,
-    PreyDistance,
-    PreySize,
-    PreyVisible,
-    PreySameGenome,
-    ThreatAngle,
-    ThreatDistance,
-    ThreatSize,
-    ThreatVisible,
-    Integrity,
+    BodyArea,
+    BodyMass,
+    BodyBirthArea,
+    BodyMaturity,
+    BodyDivisionReady,
+    BodySpaceFree,
+    BodySpaceUsed,
+    BodySpaceCapacity,
+    BodySurfaceFree,
+    BodySurfaceUsed,
+    BodySurfaceCapacity,
     NutrientStored,
     NutrientCapacity,
     NutrientFraction,
-    NutrientLevel,
-    NutrientAngle,
-    BodyPropulsion,
-    BodyPhotosynthesis,
-    BodyDigestion,
-    BodyArmor,
-    BodySensing,
-    BodyUnassigned,
-    SenseRange,
-    BodyAttack,
     GutEnergy,
     GutCapacity,
     GutFraction,
     DigestionRate,
     GrowthRate,
-    BirthSize,
-    Maturity,
     Lifespan,
     ExudationRate,
-    PreyIntegrity,
-    PreyAttack,
-    PreyPhotosynthesis,
-    FoodEnergy,
-    FoodNutrients,
+    OrganelleCoreCount,
+    OrganelleCoreMass,
+    OrganelleCoreCapacity,
+    OrganelleCoreDamaged,
+    OrganelleCoreBuilding,
+    OrganellePhotosyntheticCount,
+    OrganellePhotosyntheticMass,
+    OrganellePhotosyntheticCapacity,
+    OrganellePhotosyntheticDamaged,
+    OrganellePhotosyntheticBuilding,
+    OrganelleMetabolicCount,
+    OrganelleMetabolicMass,
+    OrganelleMetabolicCapacity,
+    OrganelleMetabolicDamaged,
+    OrganelleMetabolicBuilding,
+    OrganelleDigestiveCount,
+    OrganelleDigestiveMass,
+    OrganelleDigestiveCapacity,
+    OrganelleDigestiveDamaged,
+    OrganelleDigestiveBuilding,
+    OrganelleReserveCount,
+    OrganelleReserveMass,
+    OrganelleReserveCapacity,
+    OrganelleReserveDamaged,
+    OrganelleReserveBuilding,
+    OrganelleTransporterCount,
+    OrganelleTransporterMass,
+    OrganelleTransporterCapacity,
+    OrganelleTransporterDamaged,
+    OrganelleTransporterBuilding,
+    OrganellePhagocyteCount,
+    OrganellePhagocyteMass,
+    OrganellePhagocyteCapacity,
+    OrganellePhagocyteDamaged,
+    OrganellePhagocyteBuilding,
+    OrganelleFlagellumCount,
+    OrganelleFlagellumMass,
+    OrganelleFlagellumCapacity,
+    OrganelleFlagellumDamaged,
+    OrganelleFlagellumBuilding,
+    OrganellePiercerCount,
+    OrganellePiercerMass,
+    OrganellePiercerCapacity,
+    OrganellePiercerDamaged,
+    OrganellePiercerBuilding,
+    OrganelleCortexCount,
+    OrganelleCortexMass,
+    OrganelleCortexCapacity,
+    OrganelleCortexDamaged,
+    OrganelleCortexBuilding,
+    OrganelleRepairCount,
+    OrganelleRepairMass,
+    OrganelleRepairCapacity,
+    OrganelleRepairDamaged,
+    OrganelleRepairBuilding,
+    OrganellePhotoreceptorCount,
+    OrganellePhotoreceptorMass,
+    OrganellePhotoreceptorCapacity,
+    OrganellePhotoreceptorDamaged,
+    OrganellePhotoreceptorBuilding,
+    OrganelleThermoreceptorCount,
+    OrganelleThermoreceptorMass,
+    OrganelleThermoreceptorCapacity,
+    OrganelleThermoreceptorDamaged,
+    OrganelleThermoreceptorBuilding,
+    OrganelleChemoreceptorCount,
+    OrganelleChemoreceptorMass,
+    OrganelleChemoreceptorCapacity,
+    OrganelleChemoreceptorDamaged,
+    OrganelleChemoreceptorBuilding,
+    OrganelleMechanoreceptorCount,
+    OrganelleMechanoreceptorMass,
+    OrganelleMechanoreceptorCapacity,
+    OrganelleMechanoreceptorDamaged,
+    OrganelleMechanoreceptorBuilding,
+    OrganelleOpticalCount,
+    OrganelleOpticalMass,
+    OrganelleOpticalCapacity,
+    OrganelleOpticalDamaged,
+    OrganelleOpticalBuilding,
+    LightAvailable,
+    LightValid,
+    LightLevel,
+    LightBearing,
+    HeatAvailable,
+    HeatValid,
+    HeatValue,
+    HeatBearing,
+    ChemicalAvailable,
+    ChemicalValid,
+    ChemicalMineral,
+    ChemicalOrganic,
+    ChemicalMineralBearing,
+    ChemicalOrganicBearing,
+    FlowAvailable,
+    FlowValid,
+    FlowVector,
+    FlowSpeed,
+    FlowBearing,
+    ContactAvailable,
+    ContactValid,
+    ContactToken,
+    ContactOffset,
+    ContactPressure,
+    ContactResistance,
+    ObjectAvailable,
+    ObjectValid,
+    ObjectToken,
+    ObjectOffset,
+    ObjectArea,
+    ObjectContrast,
+    ObjectPigment,
+    ObjectMotion,
 }
 impl Sensor {
-    // Checkpoint version 1 stores the first 46 indices; never reorder them.
-    const ALL: [Self; 61] = [
+    const ALL: [Self; 144] = [
         Self::Energy,
-        Self::Age,
-        Self::Speed,
-        Self::Time,
-        Self::Id,
-        Self::Size,
-        Self::FoodAngle,
-        Self::FoodDistance,
-        Self::FoodVisible,
-        Self::NeighborAngle,
-        Self::NeighborDistance,
-        Self::NeighborVisible,
         Self::EnergyFraction,
+        Self::EnergyCapacity,
+        Self::Age,
+        Self::Time,
+        Self::Speed,
+        Self::Id,
+        Self::Integrity,
         Self::MemoryUsed,
         Self::MemoryCost,
-        Self::LightLevel,
-        Self::LightAngle,
-        Self::Temperature,
-        Self::TemperatureAngle,
-        Self::FlowX,
-        Self::FlowY,
-        Self::FlowSpeed,
-        Self::FlowAngle,
-        Self::PreyId,
-        Self::PreyAngle,
-        Self::PreyDistance,
-        Self::PreySize,
-        Self::PreyVisible,
-        Self::PreySameGenome,
-        Self::ThreatAngle,
-        Self::ThreatDistance,
-        Self::ThreatSize,
-        Self::ThreatVisible,
-        Self::Integrity,
+        Self::BodyArea,
+        Self::BodyMass,
+        Self::BodyBirthArea,
+        Self::BodyMaturity,
+        Self::BodyDivisionReady,
+        Self::BodySpaceFree,
+        Self::BodySpaceUsed,
+        Self::BodySpaceCapacity,
+        Self::BodySurfaceFree,
+        Self::BodySurfaceUsed,
+        Self::BodySurfaceCapacity,
         Self::NutrientStored,
         Self::NutrientCapacity,
         Self::NutrientFraction,
-        Self::NutrientLevel,
-        Self::NutrientAngle,
-        Self::BodyPropulsion,
-        Self::BodyPhotosynthesis,
-        Self::BodyDigestion,
-        Self::BodyArmor,
-        Self::BodySensing,
-        Self::BodyUnassigned,
-        Self::SenseRange,
-        Self::BodyAttack,
         Self::GutEnergy,
         Self::GutCapacity,
         Self::GutFraction,
         Self::DigestionRate,
         Self::GrowthRate,
-        Self::BirthSize,
-        Self::Maturity,
         Self::Lifespan,
         Self::ExudationRate,
-        Self::PreyIntegrity,
-        Self::PreyAttack,
-        Self::PreyPhotosynthesis,
-        Self::FoodEnergy,
-        Self::FoodNutrients,
+        Self::OrganelleCoreCount,
+        Self::OrganelleCoreMass,
+        Self::OrganelleCoreCapacity,
+        Self::OrganelleCoreDamaged,
+        Self::OrganelleCoreBuilding,
+        Self::OrganellePhotosyntheticCount,
+        Self::OrganellePhotosyntheticMass,
+        Self::OrganellePhotosyntheticCapacity,
+        Self::OrganellePhotosyntheticDamaged,
+        Self::OrganellePhotosyntheticBuilding,
+        Self::OrganelleMetabolicCount,
+        Self::OrganelleMetabolicMass,
+        Self::OrganelleMetabolicCapacity,
+        Self::OrganelleMetabolicDamaged,
+        Self::OrganelleMetabolicBuilding,
+        Self::OrganelleDigestiveCount,
+        Self::OrganelleDigestiveMass,
+        Self::OrganelleDigestiveCapacity,
+        Self::OrganelleDigestiveDamaged,
+        Self::OrganelleDigestiveBuilding,
+        Self::OrganelleReserveCount,
+        Self::OrganelleReserveMass,
+        Self::OrganelleReserveCapacity,
+        Self::OrganelleReserveDamaged,
+        Self::OrganelleReserveBuilding,
+        Self::OrganelleTransporterCount,
+        Self::OrganelleTransporterMass,
+        Self::OrganelleTransporterCapacity,
+        Self::OrganelleTransporterDamaged,
+        Self::OrganelleTransporterBuilding,
+        Self::OrganellePhagocyteCount,
+        Self::OrganellePhagocyteMass,
+        Self::OrganellePhagocyteCapacity,
+        Self::OrganellePhagocyteDamaged,
+        Self::OrganellePhagocyteBuilding,
+        Self::OrganelleFlagellumCount,
+        Self::OrganelleFlagellumMass,
+        Self::OrganelleFlagellumCapacity,
+        Self::OrganelleFlagellumDamaged,
+        Self::OrganelleFlagellumBuilding,
+        Self::OrganellePiercerCount,
+        Self::OrganellePiercerMass,
+        Self::OrganellePiercerCapacity,
+        Self::OrganellePiercerDamaged,
+        Self::OrganellePiercerBuilding,
+        Self::OrganelleCortexCount,
+        Self::OrganelleCortexMass,
+        Self::OrganelleCortexCapacity,
+        Self::OrganelleCortexDamaged,
+        Self::OrganelleCortexBuilding,
+        Self::OrganelleRepairCount,
+        Self::OrganelleRepairMass,
+        Self::OrganelleRepairCapacity,
+        Self::OrganelleRepairDamaged,
+        Self::OrganelleRepairBuilding,
+        Self::OrganellePhotoreceptorCount,
+        Self::OrganellePhotoreceptorMass,
+        Self::OrganellePhotoreceptorCapacity,
+        Self::OrganellePhotoreceptorDamaged,
+        Self::OrganellePhotoreceptorBuilding,
+        Self::OrganelleThermoreceptorCount,
+        Self::OrganelleThermoreceptorMass,
+        Self::OrganelleThermoreceptorCapacity,
+        Self::OrganelleThermoreceptorDamaged,
+        Self::OrganelleThermoreceptorBuilding,
+        Self::OrganelleChemoreceptorCount,
+        Self::OrganelleChemoreceptorMass,
+        Self::OrganelleChemoreceptorCapacity,
+        Self::OrganelleChemoreceptorDamaged,
+        Self::OrganelleChemoreceptorBuilding,
+        Self::OrganelleMechanoreceptorCount,
+        Self::OrganelleMechanoreceptorMass,
+        Self::OrganelleMechanoreceptorCapacity,
+        Self::OrganelleMechanoreceptorDamaged,
+        Self::OrganelleMechanoreceptorBuilding,
+        Self::OrganelleOpticalCount,
+        Self::OrganelleOpticalMass,
+        Self::OrganelleOpticalCapacity,
+        Self::OrganelleOpticalDamaged,
+        Self::OrganelleOpticalBuilding,
+        Self::LightAvailable,
+        Self::LightValid,
+        Self::LightLevel,
+        Self::LightBearing,
+        Self::HeatAvailable,
+        Self::HeatValid,
+        Self::HeatValue,
+        Self::HeatBearing,
+        Self::ChemicalAvailable,
+        Self::ChemicalValid,
+        Self::ChemicalMineral,
+        Self::ChemicalOrganic,
+        Self::ChemicalMineralBearing,
+        Self::ChemicalOrganicBearing,
+        Self::FlowAvailable,
+        Self::FlowValid,
+        Self::FlowVector,
+        Self::FlowSpeed,
+        Self::FlowBearing,
+        Self::ContactAvailable,
+        Self::ContactValid,
+        Self::ContactToken,
+        Self::ContactOffset,
+        Self::ContactPressure,
+        Self::ContactResistance,
+        Self::ObjectAvailable,
+        Self::ObjectValid,
+        Self::ObjectToken,
+        Self::ObjectOffset,
+        Self::ObjectArea,
+        Self::ObjectContrast,
+        Self::ObjectPigment,
+        Self::ObjectMotion,
     ];
     fn name(self) -> &'static str {
         match self {
             Self::Energy => "energy",
-            Self::Age => "age",
-            Self::Speed => "speed",
-            Self::Time => "time",
-            Self::Id => "id",
-            Self::Size => "size",
-            Self::FoodAngle => "food.angle",
-            Self::FoodDistance => "food.distance",
-            Self::FoodVisible => "food.visible",
-            Self::NeighborAngle => "neighbor.angle",
-            Self::NeighborDistance => "neighbor.distance",
-            Self::NeighborVisible => "neighbor.visible",
             Self::EnergyFraction => "energy.fraction",
+            Self::EnergyCapacity => "energy.capacity",
+            Self::Age => "age",
+            Self::Time => "time",
+            Self::Speed => "speed",
+            Self::Id => "id",
+            Self::Integrity => "integrity",
             Self::MemoryUsed => "memory.used",
             Self::MemoryCost => "memory.cost",
-            Self::LightLevel => "light.level",
-            Self::LightAngle => "light.angle",
-            Self::Temperature => "temperature.value",
-            Self::TemperatureAngle => "temperature.angle",
-            Self::FlowX => "flow.x",
-            Self::FlowY => "flow.y",
-            Self::FlowSpeed => "flow.speed",
-            Self::FlowAngle => "flow.angle",
-            Self::PreyId => "prey.id",
-            Self::PreyAngle => "prey.angle",
-            Self::PreyDistance => "prey.distance",
-            Self::PreySize => "prey.size",
-            Self::PreyVisible => "prey.visible",
-            Self::PreySameGenome => "prey.same_genome",
-            Self::ThreatAngle => "threat.angle",
-            Self::ThreatDistance => "threat.distance",
-            Self::ThreatSize => "threat.size",
-            Self::ThreatVisible => "threat.visible",
-            Self::Integrity => "integrity",
+            Self::BodyArea => "body.area",
+            Self::BodyMass => "body.mass",
+            Self::BodyBirthArea => "body.birth_area",
+            Self::BodyMaturity => "body.maturity",
+            Self::BodyDivisionReady => "body.division_ready",
+            Self::BodySpaceFree => "body.space.free",
+            Self::BodySpaceUsed => "body.space.used",
+            Self::BodySpaceCapacity => "body.space.capacity",
+            Self::BodySurfaceFree => "body.surface.free",
+            Self::BodySurfaceUsed => "body.surface.used",
+            Self::BodySurfaceCapacity => "body.surface.capacity",
             Self::NutrientStored => "nutrient.stored",
             Self::NutrientCapacity => "nutrient.capacity",
             Self::NutrientFraction => "nutrient.fraction",
-            Self::NutrientLevel => "nutrient.level",
-            Self::NutrientAngle => "nutrient.angle",
-            Self::BodyPropulsion => "body.propulsion",
-            Self::BodyPhotosynthesis => "body.photosynthesis",
-            Self::BodyDigestion => "body.digestion",
-            Self::BodyArmor => "body.armor",
-            Self::BodySensing => "body.sensing",
-            Self::BodyUnassigned => "body.unassigned",
-            Self::SenseRange => "sense.range",
-            Self::BodyAttack => "body.attack",
             Self::GutEnergy => "gut.energy",
             Self::GutCapacity => "gut.capacity",
             Self::GutFraction => "gut.fraction",
             Self::DigestionRate => "digestion.rate",
             Self::GrowthRate => "growth.rate",
-            Self::BirthSize => "birth.size",
-            Self::Maturity => "maturity",
             Self::Lifespan => "lifespan",
             Self::ExudationRate => "exudation.rate",
-            Self::PreyIntegrity => "prey.integrity",
-            Self::PreyAttack => "prey.attack",
-            Self::PreyPhotosynthesis => "prey.photosynthesis",
-            Self::FoodEnergy => "food.energy",
-            Self::FoodNutrients => "food.nutrients",
+            Self::OrganelleCoreCount => "organelle.core.count",
+            Self::OrganelleCoreMass => "organelle.core.mass",
+            Self::OrganelleCoreCapacity => "organelle.core.capacity",
+            Self::OrganelleCoreDamaged => "organelle.core.damaged",
+            Self::OrganelleCoreBuilding => "organelle.core.building",
+            Self::OrganellePhotosyntheticCount => "organelle.photosynthetic.count",
+            Self::OrganellePhotosyntheticMass => "organelle.photosynthetic.mass",
+            Self::OrganellePhotosyntheticCapacity => "organelle.photosynthetic.capacity",
+            Self::OrganellePhotosyntheticDamaged => "organelle.photosynthetic.damaged",
+            Self::OrganellePhotosyntheticBuilding => "organelle.photosynthetic.building",
+            Self::OrganelleMetabolicCount => "organelle.metabolic.count",
+            Self::OrganelleMetabolicMass => "organelle.metabolic.mass",
+            Self::OrganelleMetabolicCapacity => "organelle.metabolic.capacity",
+            Self::OrganelleMetabolicDamaged => "organelle.metabolic.damaged",
+            Self::OrganelleMetabolicBuilding => "organelle.metabolic.building",
+            Self::OrganelleDigestiveCount => "organelle.digestive.count",
+            Self::OrganelleDigestiveMass => "organelle.digestive.mass",
+            Self::OrganelleDigestiveCapacity => "organelle.digestive.capacity",
+            Self::OrganelleDigestiveDamaged => "organelle.digestive.damaged",
+            Self::OrganelleDigestiveBuilding => "organelle.digestive.building",
+            Self::OrganelleReserveCount => "organelle.reserve.count",
+            Self::OrganelleReserveMass => "organelle.reserve.mass",
+            Self::OrganelleReserveCapacity => "organelle.reserve.capacity",
+            Self::OrganelleReserveDamaged => "organelle.reserve.damaged",
+            Self::OrganelleReserveBuilding => "organelle.reserve.building",
+            Self::OrganelleTransporterCount => "organelle.transporter.count",
+            Self::OrganelleTransporterMass => "organelle.transporter.mass",
+            Self::OrganelleTransporterCapacity => "organelle.transporter.capacity",
+            Self::OrganelleTransporterDamaged => "organelle.transporter.damaged",
+            Self::OrganelleTransporterBuilding => "organelle.transporter.building",
+            Self::OrganellePhagocyteCount => "organelle.phagocyte.count",
+            Self::OrganellePhagocyteMass => "organelle.phagocyte.mass",
+            Self::OrganellePhagocyteCapacity => "organelle.phagocyte.capacity",
+            Self::OrganellePhagocyteDamaged => "organelle.phagocyte.damaged",
+            Self::OrganellePhagocyteBuilding => "organelle.phagocyte.building",
+            Self::OrganelleFlagellumCount => "organelle.flagellum.count",
+            Self::OrganelleFlagellumMass => "organelle.flagellum.mass",
+            Self::OrganelleFlagellumCapacity => "organelle.flagellum.capacity",
+            Self::OrganelleFlagellumDamaged => "organelle.flagellum.damaged",
+            Self::OrganelleFlagellumBuilding => "organelle.flagellum.building",
+            Self::OrganellePiercerCount => "organelle.piercer.count",
+            Self::OrganellePiercerMass => "organelle.piercer.mass",
+            Self::OrganellePiercerCapacity => "organelle.piercer.capacity",
+            Self::OrganellePiercerDamaged => "organelle.piercer.damaged",
+            Self::OrganellePiercerBuilding => "organelle.piercer.building",
+            Self::OrganelleCortexCount => "organelle.cortex.count",
+            Self::OrganelleCortexMass => "organelle.cortex.mass",
+            Self::OrganelleCortexCapacity => "organelle.cortex.capacity",
+            Self::OrganelleCortexDamaged => "organelle.cortex.damaged",
+            Self::OrganelleCortexBuilding => "organelle.cortex.building",
+            Self::OrganelleRepairCount => "organelle.repair.count",
+            Self::OrganelleRepairMass => "organelle.repair.mass",
+            Self::OrganelleRepairCapacity => "organelle.repair.capacity",
+            Self::OrganelleRepairDamaged => "organelle.repair.damaged",
+            Self::OrganelleRepairBuilding => "organelle.repair.building",
+            Self::OrganellePhotoreceptorCount => "organelle.photoreceptor.count",
+            Self::OrganellePhotoreceptorMass => "organelle.photoreceptor.mass",
+            Self::OrganellePhotoreceptorCapacity => "organelle.photoreceptor.capacity",
+            Self::OrganellePhotoreceptorDamaged => "organelle.photoreceptor.damaged",
+            Self::OrganellePhotoreceptorBuilding => "organelle.photoreceptor.building",
+            Self::OrganelleThermoreceptorCount => "organelle.thermoreceptor.count",
+            Self::OrganelleThermoreceptorMass => "organelle.thermoreceptor.mass",
+            Self::OrganelleThermoreceptorCapacity => "organelle.thermoreceptor.capacity",
+            Self::OrganelleThermoreceptorDamaged => "organelle.thermoreceptor.damaged",
+            Self::OrganelleThermoreceptorBuilding => "organelle.thermoreceptor.building",
+            Self::OrganelleChemoreceptorCount => "organelle.chemoreceptor.count",
+            Self::OrganelleChemoreceptorMass => "organelle.chemoreceptor.mass",
+            Self::OrganelleChemoreceptorCapacity => "organelle.chemoreceptor.capacity",
+            Self::OrganelleChemoreceptorDamaged => "organelle.chemoreceptor.damaged",
+            Self::OrganelleChemoreceptorBuilding => "organelle.chemoreceptor.building",
+            Self::OrganelleMechanoreceptorCount => "organelle.mechanoreceptor.count",
+            Self::OrganelleMechanoreceptorMass => "organelle.mechanoreceptor.mass",
+            Self::OrganelleMechanoreceptorCapacity => "organelle.mechanoreceptor.capacity",
+            Self::OrganelleMechanoreceptorDamaged => "organelle.mechanoreceptor.damaged",
+            Self::OrganelleMechanoreceptorBuilding => "organelle.mechanoreceptor.building",
+            Self::OrganelleOpticalCount => "organelle.optical.count",
+            Self::OrganelleOpticalMass => "organelle.optical.mass",
+            Self::OrganelleOpticalCapacity => "organelle.optical.capacity",
+            Self::OrganelleOpticalDamaged => "organelle.optical.damaged",
+            Self::OrganelleOpticalBuilding => "organelle.optical.building",
+            Self::LightAvailable => "light.available",
+            Self::LightValid => "light.valid",
+            Self::LightLevel => "light.level",
+            Self::LightBearing => "light.bearing",
+            Self::HeatAvailable => "heat.available",
+            Self::HeatValid => "heat.valid",
+            Self::HeatValue => "heat.value",
+            Self::HeatBearing => "heat.bearing",
+            Self::ChemicalAvailable => "chemical.available",
+            Self::ChemicalValid => "chemical.valid",
+            Self::ChemicalMineral => "chemical.mineral",
+            Self::ChemicalOrganic => "chemical.organic",
+            Self::ChemicalMineralBearing => "chemical.mineral_bearing",
+            Self::ChemicalOrganicBearing => "chemical.organic_bearing",
+            Self::FlowAvailable => "flow.available",
+            Self::FlowValid => "flow.valid",
+            Self::FlowVector => "flow.vector",
+            Self::FlowSpeed => "flow.speed",
+            Self::FlowBearing => "flow.bearing",
+            Self::ContactAvailable => "contact.available",
+            Self::ContactValid => "contact.valid",
+            Self::ContactToken => "contact.token",
+            Self::ContactOffset => "contact.offset",
+            Self::ContactPressure => "contact.pressure",
+            Self::ContactResistance => "contact.resistance",
+            Self::ObjectAvailable => "object.available",
+            Self::ObjectValid => "object.valid",
+            Self::ObjectToken => "object.token",
+            Self::ObjectOffset => "object.offset",
+            Self::ObjectArea => "object.area",
+            Self::ObjectContrast => "object.contrast",
+            Self::ObjectPigment => "object.pigment",
+            Self::ObjectMotion => "object.motion",
         }
     }
     fn ty(self) -> Type {
         match self {
-            Self::FoodVisible
-            | Self::NeighborVisible
-            | Self::PreyVisible
-            | Self::PreySameGenome
-            | Self::ThreatVisible => Type::Bool,
+            Self::OrganelleCoreCount
+            | Self::OrganellePhotosyntheticCount
+            | Self::OrganelleMetabolicCount
+            | Self::OrganelleDigestiveCount
+            | Self::OrganelleReserveCount
+            | Self::OrganelleTransporterCount
+            | Self::OrganellePhagocyteCount
+            | Self::OrganelleFlagellumCount
+            | Self::OrganellePiercerCount
+            | Self::OrganelleCortexCount
+            | Self::OrganelleRepairCount
+            | Self::OrganellePhotoreceptorCount
+            | Self::OrganelleThermoreceptorCount
+            | Self::OrganelleChemoreceptorCount
+            | Self::OrganelleMechanoreceptorCount
+            | Self::OrganelleOpticalCount => Type::Integer,
+            Self::BodyDivisionReady
+            | Self::LightAvailable
+            | Self::LightValid
+            | Self::HeatAvailable
+            | Self::HeatValid
+            | Self::ChemicalAvailable
+            | Self::ChemicalValid
+            | Self::FlowAvailable
+            | Self::FlowValid
+            | Self::ContactAvailable
+            | Self::ContactValid
+            | Self::ObjectAvailable
+            | Self::ObjectValid => Type::Bool,
+            Self::ContactToken | Self::ObjectToken => Type::String,
+            Self::FlowVector | Self::ContactOffset | Self::ObjectOffset | Self::ObjectMotion => {
+                Type::Vector
+            }
             _ => Type::Number,
         }
     }
@@ -582,66 +893,163 @@ impl Sensor {
     fn read(self, i: &Inputs) -> Value {
         match self {
             Self::Energy => Value::Scalar(finite(i.energy)),
-            Self::Age => Value::Scalar(finite(i.age)),
-            Self::Speed => Value::Scalar(finite(i.speed)),
-            Self::Time => Value::Scalar(finite(i.time)),
-            Self::Id => Value::Scalar(finite(i.id)),
-            Self::Size => Value::Scalar(finite(i.size)),
-            Self::FoodAngle => Value::Scalar(finite(i.food_angle)),
-            Self::FoodDistance => Value::Scalar(finite(i.food_distance)),
-            Self::FoodVisible => Value::Boolean(i.food_visible),
-            Self::NeighborAngle => Value::Scalar(finite(i.neighbor_angle)),
-            Self::NeighborDistance => Value::Scalar(finite(i.neighbor_distance)),
-            Self::NeighborVisible => Value::Boolean(i.neighbor_visible),
             Self::EnergyFraction => Value::Scalar(finite(i.energy_fraction)),
+            Self::EnergyCapacity => Value::Scalar(finite(i.energy_capacity)),
+            Self::Age => Value::Scalar(finite(i.age)),
+            Self::Time => Value::Scalar(finite(i.time)),
+            Self::Speed => Value::Scalar(finite(i.speed)),
+            Self::Id => Value::Scalar(finite(i.id)),
+            Self::Integrity => Value::Scalar(finite(i.integrity)),
             Self::MemoryUsed => Value::Scalar(finite(i.memory_used)),
             Self::MemoryCost => Value::Scalar(finite(i.memory_cost)),
-            Self::LightLevel => Value::Scalar(finite(i.light_level)),
-            Self::LightAngle => Value::Scalar(finite(i.light_angle)),
-            Self::Temperature => Value::Scalar(finite(i.temperature)),
-            Self::TemperatureAngle => Value::Scalar(finite(i.temperature_angle)),
-            Self::FlowX => Value::Scalar(finite(i.flow_x)),
-            Self::FlowY => Value::Scalar(finite(i.flow_y)),
-            Self::FlowSpeed => Value::Scalar(finite(i.flow_speed)),
-            Self::FlowAngle => Value::Scalar(finite(i.flow_angle)),
-            Self::PreyId => Value::Scalar(finite(i.prey_id)),
-            Self::PreyAngle => Value::Scalar(finite(i.prey_angle)),
-            Self::PreyDistance => Value::Scalar(finite(i.prey_distance)),
-            Self::PreySize => Value::Scalar(finite(i.prey_size)),
-            Self::PreyVisible => Value::Boolean(i.prey_visible),
-            Self::PreySameGenome => Value::Boolean(i.prey_same_genome),
-            Self::ThreatAngle => Value::Scalar(finite(i.threat_angle)),
-            Self::ThreatDistance => Value::Scalar(finite(i.threat_distance)),
-            Self::ThreatSize => Value::Scalar(finite(i.threat_size)),
-            Self::ThreatVisible => Value::Boolean(i.threat_visible),
-            Self::Integrity => Value::Scalar(finite(i.integrity)),
+            Self::BodyArea => Value::Scalar(finite(i.body_area)),
+            Self::BodyMass => Value::Scalar(finite(i.body_mass)),
+            Self::BodyBirthArea => Value::Scalar(finite(i.body_birth_area)),
+            Self::BodyMaturity => Value::Scalar(finite(i.body_maturity)),
+            Self::BodyDivisionReady => Value::Boolean(i.body_division_ready),
+            Self::BodySpaceFree => Value::Scalar(finite(i.body_space_free)),
+            Self::BodySpaceUsed => Value::Scalar(finite(i.body_space_used)),
+            Self::BodySpaceCapacity => Value::Scalar(finite(i.body_space_capacity)),
+            Self::BodySurfaceFree => Value::Scalar(finite(i.body_surface_free)),
+            Self::BodySurfaceUsed => Value::Scalar(finite(i.body_surface_used)),
+            Self::BodySurfaceCapacity => Value::Scalar(finite(i.body_surface_capacity)),
             Self::NutrientStored => Value::Scalar(finite(i.nutrient_stored)),
             Self::NutrientCapacity => Value::Scalar(finite(i.nutrient_capacity)),
             Self::NutrientFraction => Value::Scalar(finite(i.nutrient_fraction)),
-            Self::NutrientLevel => Value::Scalar(finite(i.nutrient_level)),
-            Self::NutrientAngle => Value::Scalar(finite(i.nutrient_angle)),
-            Self::BodyPropulsion => Value::Scalar(finite(i.body_propulsion)),
-            Self::BodyPhotosynthesis => Value::Scalar(finite(i.body_photosynthesis)),
-            Self::BodyDigestion => Value::Scalar(finite(i.body_digestion)),
-            Self::BodyArmor => Value::Scalar(finite(i.body_armor)),
-            Self::BodySensing => Value::Scalar(finite(i.body_sensing)),
-            Self::BodyUnassigned => Value::Scalar(finite(i.body_unassigned)),
-            Self::SenseRange => Value::Scalar(finite(i.sense_range)),
-            Self::BodyAttack => Value::Scalar(finite(i.body_attack)),
             Self::GutEnergy => Value::Scalar(finite(i.gut_energy)),
             Self::GutCapacity => Value::Scalar(finite(i.gut_capacity)),
             Self::GutFraction => Value::Scalar(finite(i.gut_fraction)),
             Self::DigestionRate => Value::Scalar(finite(i.digestion_rate)),
             Self::GrowthRate => Value::Scalar(finite(i.growth_rate)),
-            Self::BirthSize => Value::Scalar(finite(i.birth_size)),
-            Self::Maturity => Value::Scalar(finite(i.maturity)),
             Self::Lifespan => Value::Scalar(finite(i.lifespan)),
             Self::ExudationRate => Value::Scalar(finite(i.exudation_rate)),
-            Self::PreyIntegrity => Value::Scalar(finite(i.prey_integrity)),
-            Self::PreyAttack => Value::Scalar(finite(i.prey_attack)),
-            Self::PreyPhotosynthesis => Value::Scalar(finite(i.prey_photosynthesis)),
-            Self::FoodEnergy => Value::Scalar(finite(i.food_energy)),
-            Self::FoodNutrients => Value::Scalar(finite(i.food_nutrients)),
+            Self::OrganelleCoreCount => Value::Integer(i.organelle[0].count.max(0)),
+            Self::OrganelleCoreMass => Value::Scalar(finite(i.organelle[0].mass)),
+            Self::OrganelleCoreCapacity => Value::Scalar(finite(i.organelle[0].capacity)),
+            Self::OrganelleCoreDamaged => Value::Scalar(finite(i.organelle[0].damaged)),
+            Self::OrganelleCoreBuilding => Value::Scalar(finite(i.organelle[0].building)),
+            Self::OrganellePhotosyntheticCount => Value::Integer(i.organelle[1].count.max(0)),
+            Self::OrganellePhotosyntheticMass => Value::Scalar(finite(i.organelle[1].mass)),
+            Self::OrganellePhotosyntheticCapacity => Value::Scalar(finite(i.organelle[1].capacity)),
+            Self::OrganellePhotosyntheticDamaged => Value::Scalar(finite(i.organelle[1].damaged)),
+            Self::OrganellePhotosyntheticBuilding => Value::Scalar(finite(i.organelle[1].building)),
+            Self::OrganelleMetabolicCount => Value::Integer(i.organelle[2].count.max(0)),
+            Self::OrganelleMetabolicMass => Value::Scalar(finite(i.organelle[2].mass)),
+            Self::OrganelleMetabolicCapacity => Value::Scalar(finite(i.organelle[2].capacity)),
+            Self::OrganelleMetabolicDamaged => Value::Scalar(finite(i.organelle[2].damaged)),
+            Self::OrganelleMetabolicBuilding => Value::Scalar(finite(i.organelle[2].building)),
+            Self::OrganelleDigestiveCount => Value::Integer(i.organelle[3].count.max(0)),
+            Self::OrganelleDigestiveMass => Value::Scalar(finite(i.organelle[3].mass)),
+            Self::OrganelleDigestiveCapacity => Value::Scalar(finite(i.organelle[3].capacity)),
+            Self::OrganelleDigestiveDamaged => Value::Scalar(finite(i.organelle[3].damaged)),
+            Self::OrganelleDigestiveBuilding => Value::Scalar(finite(i.organelle[3].building)),
+            Self::OrganelleReserveCount => Value::Integer(i.organelle[4].count.max(0)),
+            Self::OrganelleReserveMass => Value::Scalar(finite(i.organelle[4].mass)),
+            Self::OrganelleReserveCapacity => Value::Scalar(finite(i.organelle[4].capacity)),
+            Self::OrganelleReserveDamaged => Value::Scalar(finite(i.organelle[4].damaged)),
+            Self::OrganelleReserveBuilding => Value::Scalar(finite(i.organelle[4].building)),
+            Self::OrganelleTransporterCount => Value::Integer(i.organelle[5].count.max(0)),
+            Self::OrganelleTransporterMass => Value::Scalar(finite(i.organelle[5].mass)),
+            Self::OrganelleTransporterCapacity => Value::Scalar(finite(i.organelle[5].capacity)),
+            Self::OrganelleTransporterDamaged => Value::Scalar(finite(i.organelle[5].damaged)),
+            Self::OrganelleTransporterBuilding => Value::Scalar(finite(i.organelle[5].building)),
+            Self::OrganellePhagocyteCount => Value::Integer(i.organelle[6].count.max(0)),
+            Self::OrganellePhagocyteMass => Value::Scalar(finite(i.organelle[6].mass)),
+            Self::OrganellePhagocyteCapacity => Value::Scalar(finite(i.organelle[6].capacity)),
+            Self::OrganellePhagocyteDamaged => Value::Scalar(finite(i.organelle[6].damaged)),
+            Self::OrganellePhagocyteBuilding => Value::Scalar(finite(i.organelle[6].building)),
+            Self::OrganelleFlagellumCount => Value::Integer(i.organelle[7].count.max(0)),
+            Self::OrganelleFlagellumMass => Value::Scalar(finite(i.organelle[7].mass)),
+            Self::OrganelleFlagellumCapacity => Value::Scalar(finite(i.organelle[7].capacity)),
+            Self::OrganelleFlagellumDamaged => Value::Scalar(finite(i.organelle[7].damaged)),
+            Self::OrganelleFlagellumBuilding => Value::Scalar(finite(i.organelle[7].building)),
+            Self::OrganellePiercerCount => Value::Integer(i.organelle[8].count.max(0)),
+            Self::OrganellePiercerMass => Value::Scalar(finite(i.organelle[8].mass)),
+            Self::OrganellePiercerCapacity => Value::Scalar(finite(i.organelle[8].capacity)),
+            Self::OrganellePiercerDamaged => Value::Scalar(finite(i.organelle[8].damaged)),
+            Self::OrganellePiercerBuilding => Value::Scalar(finite(i.organelle[8].building)),
+            Self::OrganelleCortexCount => Value::Integer(i.organelle[9].count.max(0)),
+            Self::OrganelleCortexMass => Value::Scalar(finite(i.organelle[9].mass)),
+            Self::OrganelleCortexCapacity => Value::Scalar(finite(i.organelle[9].capacity)),
+            Self::OrganelleCortexDamaged => Value::Scalar(finite(i.organelle[9].damaged)),
+            Self::OrganelleCortexBuilding => Value::Scalar(finite(i.organelle[9].building)),
+            Self::OrganelleRepairCount => Value::Integer(i.organelle[10].count.max(0)),
+            Self::OrganelleRepairMass => Value::Scalar(finite(i.organelle[10].mass)),
+            Self::OrganelleRepairCapacity => Value::Scalar(finite(i.organelle[10].capacity)),
+            Self::OrganelleRepairDamaged => Value::Scalar(finite(i.organelle[10].damaged)),
+            Self::OrganelleRepairBuilding => Value::Scalar(finite(i.organelle[10].building)),
+            Self::OrganellePhotoreceptorCount => Value::Integer(i.organelle[11].count.max(0)),
+            Self::OrganellePhotoreceptorMass => Value::Scalar(finite(i.organelle[11].mass)),
+            Self::OrganellePhotoreceptorCapacity => Value::Scalar(finite(i.organelle[11].capacity)),
+            Self::OrganellePhotoreceptorDamaged => Value::Scalar(finite(i.organelle[11].damaged)),
+            Self::OrganellePhotoreceptorBuilding => Value::Scalar(finite(i.organelle[11].building)),
+            Self::OrganelleThermoreceptorCount => Value::Integer(i.organelle[12].count.max(0)),
+            Self::OrganelleThermoreceptorMass => Value::Scalar(finite(i.organelle[12].mass)),
+            Self::OrganelleThermoreceptorCapacity => {
+                Value::Scalar(finite(i.organelle[12].capacity))
+            }
+            Self::OrganelleThermoreceptorDamaged => Value::Scalar(finite(i.organelle[12].damaged)),
+            Self::OrganelleThermoreceptorBuilding => {
+                Value::Scalar(finite(i.organelle[12].building))
+            }
+            Self::OrganelleChemoreceptorCount => Value::Integer(i.organelle[13].count.max(0)),
+            Self::OrganelleChemoreceptorMass => Value::Scalar(finite(i.organelle[13].mass)),
+            Self::OrganelleChemoreceptorCapacity => Value::Scalar(finite(i.organelle[13].capacity)),
+            Self::OrganelleChemoreceptorDamaged => Value::Scalar(finite(i.organelle[13].damaged)),
+            Self::OrganelleChemoreceptorBuilding => Value::Scalar(finite(i.organelle[13].building)),
+            Self::OrganelleMechanoreceptorCount => Value::Integer(i.organelle[14].count.max(0)),
+            Self::OrganelleMechanoreceptorMass => Value::Scalar(finite(i.organelle[14].mass)),
+            Self::OrganelleMechanoreceptorCapacity => {
+                Value::Scalar(finite(i.organelle[14].capacity))
+            }
+            Self::OrganelleMechanoreceptorDamaged => Value::Scalar(finite(i.organelle[14].damaged)),
+            Self::OrganelleMechanoreceptorBuilding => {
+                Value::Scalar(finite(i.organelle[14].building))
+            }
+            Self::OrganelleOpticalCount => Value::Integer(i.organelle[15].count.max(0)),
+            Self::OrganelleOpticalMass => Value::Scalar(finite(i.organelle[15].mass)),
+            Self::OrganelleOpticalCapacity => Value::Scalar(finite(i.organelle[15].capacity)),
+            Self::OrganelleOpticalDamaged => Value::Scalar(finite(i.organelle[15].damaged)),
+            Self::OrganelleOpticalBuilding => Value::Scalar(finite(i.organelle[15].building)),
+            Self::LightAvailable => Value::Boolean(i.light_available),
+            Self::LightValid => Value::Boolean(i.light_valid),
+            Self::LightLevel => Value::Scalar(finite(i.light_level)),
+            Self::LightBearing => Value::Scalar(finite(i.light_bearing)),
+            Self::HeatAvailable => Value::Boolean(i.heat_available),
+            Self::HeatValid => Value::Boolean(i.heat_valid),
+            Self::HeatValue => Value::Scalar(finite(i.heat_value)),
+            Self::HeatBearing => Value::Scalar(finite(i.heat_bearing)),
+            Self::ChemicalAvailable => Value::Boolean(i.chemical_available),
+            Self::ChemicalValid => Value::Boolean(i.chemical_valid),
+            Self::ChemicalMineral => Value::Scalar(finite(i.chemical_mineral)),
+            Self::ChemicalOrganic => Value::Scalar(finite(i.chemical_organic)),
+            Self::ChemicalMineralBearing => Value::Scalar(finite(i.chemical_mineral_bearing)),
+            Self::ChemicalOrganicBearing => Value::Scalar(finite(i.chemical_organic_bearing)),
+            Self::FlowAvailable => Value::Boolean(i.flow_available),
+            Self::FlowValid => Value::Boolean(i.flow_valid),
+            Self::FlowVector => Value::Vector([finite(i.flow_vector[0]), finite(i.flow_vector[1])]),
+            Self::FlowSpeed => Value::Scalar(finite(i.flow_speed)),
+            Self::FlowBearing => Value::Scalar(finite(i.flow_bearing)),
+            Self::ContactAvailable => Value::Boolean(i.contact_available),
+            Self::ContactValid => Value::Boolean(i.contact_valid),
+            Self::ContactToken => Value::Text(i.contact_token.clone()),
+            Self::ContactOffset => {
+                Value::Vector([finite(i.contact_offset[0]), finite(i.contact_offset[1])])
+            }
+            Self::ContactPressure => Value::Scalar(finite(i.contact_pressure)),
+            Self::ContactResistance => Value::Scalar(finite(i.contact_resistance)),
+            Self::ObjectAvailable => Value::Boolean(i.object_available),
+            Self::ObjectValid => Value::Boolean(i.object_valid),
+            Self::ObjectToken => Value::Text(i.object_token.clone()),
+            Self::ObjectOffset => {
+                Value::Vector([finite(i.object_offset[0]), finite(i.object_offset[1])])
+            }
+            Self::ObjectArea => Value::Scalar(finite(i.object_area)),
+            Self::ObjectContrast => Value::Scalar(finite(i.object_contrast)),
+            Self::ObjectPigment => Value::Scalar(finite(i.object_pigment)),
+            Self::ObjectMotion => {
+                Value::Vector([finite(i.object_motion[0]), finite(i.object_motion[1])])
+            }
         }
     }
 }
@@ -1028,7 +1436,6 @@ impl Op {
             Self::Call(f, args) => (args, f.arity()),
         }
     }
-
 }
 #[derive(Debug, Clone)]
 struct Node {
@@ -1047,7 +1454,10 @@ struct WriteRule {
     value: Option<usize>,
     guard: Option<usize>,
 }
-const OUTPUT_NAMES: [&str; 17] = [
+pub const OUTPUT_COUNT: usize = 11 + FAMILY_COUNT * 4 + 3;
+const BODY_OUTPUT_START: usize = 11;
+const SCAN_OUTPUT_START: usize = BODY_OUTPUT_START + FAMILY_COUNT * 4;
+const OUTPUT_NAMES: [&str; OUTPUT_COUNT] = [
     "thrust",
     "turn",
     "divide",
@@ -1058,37 +1468,163 @@ const OUTPUT_NAMES: [&str; 17] = [
     "defend",
     "repair",
     "absorb",
-    "invest.propulsion",
-    "invest.photosynthesis",
-    "invest.digestion",
-    "invest.armor",
-    "invest.sensing",
     "feed",
-    "invest.attack",
+    "target.core.count",
+    "target.core.size",
+    "build.core",
+    "recycle.core",
+    "target.photosynthetic.count",
+    "target.photosynthetic.size",
+    "build.photosynthetic",
+    "recycle.photosynthetic",
+    "target.metabolic.count",
+    "target.metabolic.size",
+    "build.metabolic",
+    "recycle.metabolic",
+    "target.digestive.count",
+    "target.digestive.size",
+    "build.digestive",
+    "recycle.digestive",
+    "target.reserve.count",
+    "target.reserve.size",
+    "build.reserve",
+    "recycle.reserve",
+    "target.transporter.count",
+    "target.transporter.size",
+    "build.transporter",
+    "recycle.transporter",
+    "target.phagocyte.count",
+    "target.phagocyte.size",
+    "build.phagocyte",
+    "recycle.phagocyte",
+    "target.flagellum.count",
+    "target.flagellum.size",
+    "build.flagellum",
+    "recycle.flagellum",
+    "target.piercer.count",
+    "target.piercer.size",
+    "build.piercer",
+    "recycle.piercer",
+    "target.cortex.count",
+    "target.cortex.size",
+    "build.cortex",
+    "recycle.cortex",
+    "target.repair.count",
+    "target.repair.size",
+    "build.repair",
+    "recycle.repair",
+    "target.photoreceptor.count",
+    "target.photoreceptor.size",
+    "build.photoreceptor",
+    "recycle.photoreceptor",
+    "target.thermoreceptor.count",
+    "target.thermoreceptor.size",
+    "build.thermoreceptor",
+    "recycle.thermoreceptor",
+    "target.chemoreceptor.count",
+    "target.chemoreceptor.size",
+    "build.chemoreceptor",
+    "recycle.chemoreceptor",
+    "target.mechanoreceptor.count",
+    "target.mechanoreceptor.size",
+    "build.mechanoreceptor",
+    "recycle.mechanoreceptor",
+    "target.optical.count",
+    "target.optical.size",
+    "build.optical",
+    "recycle.optical",
+    "scan.bearing",
+    "scan.width",
+    "scan.target",
 ];
-fn output_number_default(index: usize) -> f64 {
+fn output_type(index: usize) -> Type {
     match index {
-        9 | 15 => 1.0,
-        10..=14 => 0.2,
-        _ => 0.0,
+        2 | 5 => Type::Bool,
+        i if (BODY_OUTPUT_START..SCAN_OUTPUT_START).contains(&i)
+            && (i - BODY_OUTPUT_START) % 4 == 0 =>
+        {
+            Type::Integer
+        }
+        i if i == SCAN_OUTPUT_START + 2 => Type::String,
+        _ => Type::Number,
     }
 }
-fn output_type(index: usize) -> Type {
-    if index == 2 || index == 5 {
-        Type::Bool
-    } else {
-        Type::Number
+fn output_default(index: usize) -> Value {
+    match index {
+        9 | 10 => Value::Scalar(1.0),
+        i if (BODY_OUTPUT_START..SCAN_OUTPUT_START).contains(&i)
+            && (i - BODY_OUTPUT_START) % 4 == 1 =>
+        {
+            Value::Scalar(MIN_ORGANELLE_MASS[(i - BODY_OUTPUT_START) / 4])
+        }
+        i if i == SCAN_OUTPUT_START + 1 => Value::Scalar(std::f64::consts::TAU),
+        _ => Value::zero(output_type(index)),
     }
+}
+/// Applied action values use the same conversion in simulation and inspection.
+fn clamp_output(index: usize, value: Value) -> Value {
+    match (output_type(index), value) {
+        (Type::Bool, Value::Boolean(v)) => Value::Boolean(v),
+        (Type::String, Value::Text(v)) => Value::Text(v),
+        (Type::Integer, Value::Integer(v)) => Value::Integer(v.max(0)),
+        (Type::Number, v) => {
+            let n = finite(v.number());
+            let n = if index == 1 {
+                n.clamp(-1.0, 1.0)
+            } else if index == SCAN_OUTPUT_START {
+                (n + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
+            } else if index == SCAN_OUTPUT_START + 1 {
+                n.clamp(0.0, std::f64::consts::TAU)
+            } else if (BODY_OUTPUT_START..SCAN_OUTPUT_START).contains(&index)
+                && (index - BODY_OUTPUT_START) % 4 == 1
+            {
+                n.clamp(
+                    MIN_ORGANELLE_MASS[(index - BODY_OUTPUT_START) / 4],
+                    MAX_SIGNAL,
+                )
+            } else {
+                n.clamp(0.0, 1.0)
+            };
+            Value::Scalar(n)
+        }
+        _ => unreachable!("compiled output type must match its declaration"),
+    }
+}
+
+/// Versioned authoritative metadata for editor catalogs and ABI validation.
+pub fn language_schema_json() -> String {
+    let signals = Sensor::ALL
+        .iter()
+        .map(|sensor| {
+            format!(
+                "{{\"name\":{},\"type\":{}}}",
+                quote(sensor.name()),
+                quote(sensor.ty().label())
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let outputs = OUTPUT_NAMES
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            format!(
+                "{{\"name\":{},\"type\":{},\"required\":{},\"default\":{}}}",
+                quote(name),
+                quote(output_type(index).label()),
+                index < 3,
+                output_default(index).json()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{{\"version\":3,\"signals\":[{signals}],\"outputs\":[{outputs}],\"maxNodes\":{MAX_NODES},\"maxSourceBytes\":{MAX_SOURCE_BYTES},\"registersPerType\":{REGISTER_COUNT}}}")
 }
 #[derive(Debug, Clone)]
 pub struct Program {
     nodes: Vec<Node>,
     bindings: Vec<Binding>,
-    thrust: usize,
-    turn: usize,
-    divide: usize,
-    grow: Option<usize>,
-    extras: [Option<usize>; 13],
+    output_roots: [Option<usize>; OUTPUT_COUNT],
     writes: Vec<WriteRule>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1138,8 +1674,16 @@ impl GenomeAnalysis {
     pub(crate) fn invalid_input(source_bytes: usize, message: impl Into<String>) -> Self {
         Self {
             valid: false,
-            diagnostics: vec![GenomeDiagnostic { message: message.into(), line: 1, column: 1, from: 0, to: 0 }],
-            bindings: Vec::new(), node_count: 0, source_bytes,
+            diagnostics: vec![GenomeDiagnostic {
+                message: message.into(),
+                line: 1,
+                column: 1,
+                from: 0,
+                to: 0,
+            }],
+            bindings: Vec::new(),
+            node_count: 0,
+            source_bytes,
         }
     }
 
@@ -1148,10 +1692,20 @@ impl GenomeAnalysis {
             "{{\"severity\":\"error\",\"message\":{},\"line\":{},\"column\":{},\"from\":{},\"to\":{}}}",
             quote(&item.message), item.line, item.column, item.from, item.to,
         )).collect::<Vec<_>>().join(",");
-        let bindings = self.bindings.iter().map(|item| format!(
-            "{{\"name\":{},\"type\":{},\"from\":{},\"to\":{}}}",
-            quote(&item.name), quote(item.value_type), item.from, item.to,
-        )).collect::<Vec<_>>().join(",");
+        let bindings = self
+            .bindings
+            .iter()
+            .map(|item| {
+                format!(
+                    "{{\"name\":{},\"type\":{},\"from\":{},\"to\":{}}}",
+                    quote(&item.name),
+                    quote(item.value_type),
+                    item.from,
+                    item.to,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
         format!("{{\"valid\":{},\"diagnostics\":[{diagnostics}],\"bindings\":[{bindings}],\"nodeCount\":{},\"sourceBytes\":{}}}",
             self.valid, self.node_count, self.source_bytes)
     }
@@ -1171,17 +1725,26 @@ impl SourceMap {
         for (byte, character) in source.char_indices() {
             offsets[byte..byte + character.len_utf8()].fill(position);
             position += character.len_utf16();
-            if character == '\n' { line_starts.push(position); }
+            if character == '\n' {
+                line_starts.push(position);
+            }
         }
         offsets[source.len()] = position;
-        Self { offsets, line_starts }
+        Self {
+            offsets,
+            line_starts,
+        }
     }
     fn diagnostic(&self, error: CompileError) -> GenomeDiagnostic {
         let from = self.offsets[error.location.from];
         let to = self.offsets[error.location.to];
         let line = self.line_starts.partition_point(|start| *start <= from);
         GenomeDiagnostic {
-            message: error.message, line, column: from - self.line_starts[line - 1] + 1, from, to,
+            message: error.message,
+            line,
+            column: from - self.line_starts[line - 1] + 1,
+            from,
+            to,
         }
     }
 }
@@ -1193,21 +1756,32 @@ impl Program {
                 "Line 1, column 1: program exceeds {MAX_SOURCE_BYTES} bytes."
             ));
         }
-        lex(source).and_then(|tokens| Parser::new(tokens).program()).map_err(|error| error.to_string())
+        lex(source)
+            .and_then(|tokens| Parser::new(tokens).program())
+            .map_err(|error| error.to_string())
     }
 
     /// Uses exactly the same lexer, parser, and type checker as compile().
     /// Successfully completed let declarations remain available after a later parse error.
     pub fn analyze(source: &str) -> GenomeAnalysis {
         if source.len() > MAX_SOURCE_BYTES {
-            return GenomeAnalysis::invalid_input(source.len(), format!("program exceeds {MAX_SOURCE_BYTES} bytes."));
+            return GenomeAnalysis::invalid_input(
+                source.len(),
+                format!("program exceeds {MAX_SOURCE_BYTES} bytes."),
+            );
         }
         let map = SourceMap::new(source);
         let tokens = match lex(source) {
             Ok(tokens) => tokens,
-            Err(error) => return GenomeAnalysis {
-                valid: false, diagnostics: vec![map.diagnostic(error)], bindings: Vec::new(), node_count: 0, source_bytes: source.len(),
-            },
+            Err(error) => {
+                return GenomeAnalysis {
+                    valid: false,
+                    diagnostics: vec![map.diagnostic(error)],
+                    bindings: Vec::new(),
+                    node_count: 0,
+                    source_bytes: source.len(),
+                }
+            }
         };
         let mut parser = Parser::new(tokens);
         let parsed = parser.program();
@@ -1215,13 +1789,26 @@ impl Program {
             Ok(program) => (&program.nodes, &program.bindings),
             Err(_) => (&parser.nodes, &parser.binding_order),
         };
-        let bindings = declarations.iter().zip(&parser.binding_locations).map(|(binding, location)| GenomeBinding {
-            name: binding.name.clone(), value_type: nodes[binding.node].ty.label(),
-            from: map.offsets[location.from], to: map.offsets[location.to],
-        }).collect();
+        let bindings = declarations
+            .iter()
+            .zip(&parser.binding_locations)
+            .map(|(binding, location)| GenomeBinding {
+                name: binding.name.clone(),
+                value_type: nodes[binding.node].ty.label(),
+                from: map.offsets[location.from],
+                to: map.offsets[location.to],
+            })
+            .collect();
         GenomeAnalysis {
-            valid: parsed.is_ok(), node_count: nodes.len(), bindings, source_bytes: source.len(),
-            diagnostics: parsed.err().map(|error| map.diagnostic(error)).into_iter().collect(),
+            valid: parsed.is_ok(),
+            node_count: nodes.len(),
+            bindings,
+            source_bytes: source.len(),
+            diagnostics: parsed
+                .err()
+                .map(|error| map.diagnostic(error))
+                .into_iter()
+                .collect(),
         }
     }
     pub fn estimated_bytes(&self) -> usize {
@@ -1302,10 +1889,8 @@ impl Program {
             let value_json = value.map_or_else(|| "null".into(), |value| value.to_string());
             let default_json = if value.is_some() {
                 "null".into()
-            } else if ty == Type::Bool {
-                quote("false")
             } else {
-                quote(&output_number_default(index).to_string())
+                quote(&output_default(index).json())
             };
             json.push_str(&format!(
                 "{{\"id\":{},\"kind\":\"output\",\"name\":{},\"type\":{},\"value\":{value_json},\"guard\":null,\"default\":{default_json}}}",
@@ -1400,50 +1985,49 @@ impl Program {
             values.push(value.convert(node.ty));
         }
     }
+    fn output_value(&self, index: usize, values: &[Value]) -> Value {
+        self.output_roots[index].map_or_else(
+            || output_default(index),
+            |root| clamp_output(index, values[root].clone()),
+        )
+    }
     fn outputs(&self, values: &[Value]) -> Outputs {
-        let number = |index: Option<usize>, default: f64| {
-            index.map_or(default, |i| values[i].number().clamp(0.0, 1.0))
+        let number = |index| self.output_value(index, values).number();
+        let boolean = |index| self.output_value(index, values).boolean();
+        let mut body = BodyControls::default();
+        for family in 0..FAMILY_COUNT {
+            let start = BODY_OUTPUT_START + family * 4;
+            let Value::Integer(count) = self.output_value(start, values) else {
+                unreachable!()
+            };
+            body.target_counts[family] = count as u32;
+            body.target_sizes[family] = number(start + 1);
+            body.build[family] = number(start + 2);
+            body.recycle[family] = number(start + 3);
+        }
+        let Value::Text(scan_target) = self.output_value(SCAN_OUTPUT_START + 2, values) else {
+            unreachable!()
         };
         Outputs {
-            thrust: number(Some(self.thrust), 0.0),
-            turn: values[self.turn].number().clamp(-1.0, 1.0),
-            divide: values[self.divide].boolean(),
-            grow: number(self.grow, 0.0),
-            photosynthesize: number(self.extras[0], 0.0),
-            engulf: self.extras[1].is_some_and(|i| values[i].boolean()),
-            bite: number(self.extras[2], 0.0),
-            defend: number(self.extras[3], 0.0),
-            repair: number(self.extras[4], 0.0),
-            absorb: number(self.extras[5], output_number_default(9)),
-            invest_propulsion: number(self.extras[6], output_number_default(10)),
-            invest_photosynthesis: number(self.extras[7], output_number_default(11)),
-            invest_digestion: number(self.extras[8], output_number_default(12)),
-            invest_armor: number(self.extras[9], output_number_default(13)),
-            invest_sensing: number(self.extras[10], output_number_default(14)),
-            feed: number(self.extras[11], output_number_default(15)),
-            invest_attack: number(self.extras[12], output_number_default(16)),
+            thrust: number(0),
+            turn: number(1),
+            divide: boolean(2),
+            grow: number(3),
+            photosynthesize: number(4),
+            engulf: boolean(5),
+            bite: number(6),
+            defend: number(7),
+            repair: number(8),
+            absorb: number(9),
+            feed: number(10),
+            body,
+            scan_bearing: number(SCAN_OUTPUT_START),
+            scan_width: number(SCAN_OUTPUT_START + 1),
+            scan_target,
         }
     }
-    fn output_indices(&self) -> [Option<usize>; 17] {
-        [
-            Some(self.thrust),
-            Some(self.turn),
-            Some(self.divide),
-            self.grow,
-            self.extras[0],
-            self.extras[1],
-            self.extras[2],
-            self.extras[3],
-            self.extras[4],
-            self.extras[5],
-            self.extras[6],
-            self.extras[7],
-            self.extras[8],
-            self.extras[9],
-            self.extras[10],
-            self.extras[11],
-            self.extras[12],
-        ]
+    fn output_indices(&self) -> [Option<usize>; OUTPUT_COUNT] {
+        self.output_roots
     }
     fn reachable(&self) -> Vec<bool> {
         let mut reached = vec![false; self.nodes.len()];
@@ -1525,10 +2109,11 @@ impl Program {
         }
         options
     }
+    #[cfg(test)]
     fn to_source(&self) -> Option<String> {
-        if self.grow.is_none() {
+        if self.output_roots[3].is_none() {
             let mut p = self.clone();
-            p.grow = Some(p.nodes.len());
+            p.output_roots[3] = Some(p.nodes.len());
             p.nodes.push(Node {
                 op: Op::Constant(Value::Scalar(0.0)),
                 ty: Type::Number,
@@ -1730,10 +2315,16 @@ struct Location {
 }
 impl Location {
     fn error(self, message: impl AsRef<str>) -> CompileError {
-        CompileError { location: self, message: message.as_ref().to_owned() }
+        CompileError {
+            location: self,
+            message: message.as_ref().to_owned(),
+        }
     }
     fn through(self, to: usize) -> Self {
-        Self { to: to.max(self.to), ..self }
+        Self {
+            to: to.max(self.to),
+            ..self
+        }
     }
 }
 #[derive(Debug)]
@@ -1743,7 +2334,11 @@ struct CompileError {
 }
 impl std::fmt::Display for CompileError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "Line {}, column {}: {}", self.location.line, self.location.column, self.message)
+        write!(
+            formatter,
+            "Line {}, column {}: {}",
+            self.location.line, self.location.column, self.message
+        )
     }
 }
 #[derive(Debug, Clone)]
@@ -1776,7 +2371,12 @@ fn lex(source: &str) -> Result<Vec<Token>, CompileError> {
             }
             continue;
         }
-        let location = Location { line, column, from: position, to: position + source[position..].chars().next().unwrap().len_utf8() };
+        let location = Location {
+            line,
+            column,
+            from: position,
+            to: position + source[position..].chars().next().unwrap().len_utf8(),
+        };
         if tokens.len() >= MAX_TOKENS {
             return Err(location.error(format!("program exceeds {MAX_TOKENS} tokens.")));
         }
@@ -1806,7 +2406,9 @@ fn lex(source: &str) -> Result<Vec<Token>, CompileError> {
                     position += 1;
                 }
                 if exponent == position {
-                    return Err(location.through(position).error("expected digits in the exponent."));
+                    return Err(location
+                        .through(position)
+                        .error("expected digits in the exponent."));
                 }
             }
             let spelling = &source[start..position];
@@ -1835,9 +2437,11 @@ fn lex(source: &str) -> Result<Vec<Token>, CompileError> {
                 }
                 if bytes[position] == b'\\' {
                     position += 1;
-                    let escaped = *bytes
-                        .get(position)
-                        .ok_or_else(|| location.through(position).error("unterminated string escape."))?;
+                    let escaped = *bytes.get(position).ok_or_else(|| {
+                        location
+                            .through(position)
+                            .error("unterminated string escape.")
+                    })?;
                     position += 1;
                     match escaped {
                         b'"' => value.push('"'),
@@ -1850,17 +2454,27 @@ fn lex(source: &str) -> Result<Vec<Token>, CompileError> {
                             if end > bytes.len()
                                 || !bytes[position..end].iter().all(u8::is_ascii_hexdigit)
                             {
-                                return Err(location.through(position)
+                                return Err(location
+                                    .through(position)
                                     .error("a Unicode escape needs four hexadecimal digits."));
                             }
                             let scalar = u32::from_str_radix(&source[position..end], 16).unwrap();
                             let character = char::from_u32(scalar).ok_or_else(|| {
-                                location.through(end).error("Unicode escape is not a valid character.")
+                                location
+                                    .through(end)
+                                    .error("Unicode escape is not a valid character.")
                             })?;
                             value.push(character);
                             position = end;
                         }
-                        _ => return Err(location.through(position - 1 + source[position - 1..].chars().next().unwrap().len_utf8()).error("unsupported string escape.")),
+                        _ => {
+                            return Err(location
+                                .through(
+                                    position - 1
+                                        + source[position - 1..].chars().next().unwrap().len_utf8(),
+                                )
+                                .error("unsupported string escape."))
+                        }
                     }
                 } else {
                     let c = source[position..].chars().next().unwrap();
@@ -1879,7 +2493,9 @@ fn lex(source: &str) -> Result<Vec<Token>, CompileError> {
                 }
             }
             if !closed {
-                return Err(location.through(position).error("unterminated string literal."));
+                return Err(location
+                    .through(position)
+                    .error("unterminated string literal."));
             }
             Kind::Text(Rc::from(value))
         } else if byte.is_ascii_alphabetic() || byte == b'_' {
@@ -1939,11 +2555,19 @@ fn lex(source: &str) -> Result<Vec<Token>, CompileError> {
             }
         };
         column += source[start..position].chars().count();
-        tokens.push(Token { kind, location: location.through(position) });
+        tokens.push(Token {
+            kind,
+            location: location.through(position),
+        });
     }
     tokens.push(Token {
         kind: Kind::End,
-        location: Location { line, column, from: position, to: position },
+        location: Location {
+            line,
+            column,
+            from: position,
+            to: position,
+        },
     });
     Ok(tokens)
 }
@@ -2002,11 +2626,23 @@ impl Parser {
             ty,
             scope: self.binding_order.len(),
         });
-        let end = self.tokens[self.position.saturating_sub(1)].location.to.max(location.to);
-        self.node_locations.push(source::NodeLocation { from: location.from, to: end, head: location });
+        let end = self.tokens[self.position.saturating_sub(1)]
+            .location
+            .to
+            .max(location.to);
+        self.node_locations.push(source::NodeLocation {
+            from: location.from,
+            to: end,
+            head: location,
+        });
         Ok(index)
     }
-    fn require(&self, index: usize, expected: Type, location: Location) -> Result<(), CompileError> {
+    fn require(
+        &self,
+        index: usize,
+        expected: Type,
+        location: Location,
+    ) -> Result<(), CompileError> {
         let actual = self.nodes[index].ty;
         if actual == expected {
             Ok(())
@@ -2018,7 +2654,12 @@ impl Parser {
             )))
         }
     }
-    fn assignable(&self, index: usize, expected: Type, location: Location) -> Result<(), CompileError> {
+    fn assignable(
+        &self,
+        index: usize,
+        expected: Type,
+        location: Location,
+    ) -> Result<(), CompileError> {
         if expected == Type::Number && self.nodes[index].ty == Type::Integer {
             Ok(())
         } else {
@@ -2174,11 +2815,7 @@ impl Parser {
         Ok(Program {
             nodes: std::mem::take(&mut self.nodes),
             bindings: std::mem::take(&mut self.binding_order),
-            thrust: outputs[0].unwrap(),
-            turn: outputs[1].unwrap(),
-            divide: outputs[2].unwrap(),
-            grow: outputs[3],
-            extras: std::array::from_fn(|index| outputs[index + 4]),
+            output_roots: outputs,
             writes,
         })
     }
@@ -2328,7 +2965,12 @@ impl Parser {
         }
         Ok(left)
     }
-    fn call(&mut self, name: &str, location: Location, depth: usize) -> Result<usize, CompileError> {
+    fn call(
+        &mut self,
+        name: &str,
+        location: Location,
+        depth: usize,
+    ) -> Result<usize, CompileError> {
         if name == "populated" {
             self.expect(Kind::LeftParen, "'('")?;
             let token = self.take();
@@ -2378,18 +3020,36 @@ mod tests {
 
     #[test]
     fn analysis_infers_all_primitive_bindings_and_utf16_declaration_ranges() {
-        let source = "# café 🌱\r\nlet flag = food.visible;\nlet counter = ri001 + 1;\nlet fuel = energy * 0.5;\nlet label = \"é🌱\"; let drift = vec(flow.x, flow.y);\nlet alias = counter;\nthrust=fuel;turn=x(drift);divide=flag;";
+        let source = "# café 🌱\r\nlet flag = chemical.valid;\nlet counter = ri001 + 1;\nlet fuel = energy * 0.5;\nlet label = \"é🌱\"; let drift = vec(x(flow.vector), y(flow.vector));\nlet alias = counter;\nthrust=fuel;turn=x(drift);divide=flag;";
         let analysis = Program::analyze(source);
         assert!(analysis.valid);
         assert!(analysis.diagnostics.is_empty());
-        assert_eq!(analysis.node_count, Program::compile(source).unwrap().nodes.len());
+        assert_eq!(
+            analysis.node_count,
+            Program::compile(source).unwrap().nodes.len()
+        );
         assert_eq!(analysis.source_bytes, source.len());
-        let expected = [("flag", "boolean"), ("counter", "integer"), ("fuel", "scalar"), ("label", "string"), ("drift", "vec2"), ("alias", "integer")];
+        let expected = [
+            ("flag", "boolean"),
+            ("counter", "integer"),
+            ("fuel", "scalar"),
+            ("label", "string"),
+            ("drift", "vec2"),
+            ("alias", "integer"),
+        ];
         assert_eq!(analysis.bindings.len(), expected.len());
         for (binding, (name, value_type)) in analysis.bindings.iter().zip(expected) {
             let byte = source.find(&format!("let {name} =")).unwrap() + 4;
             let from = source[..byte].encode_utf16().count();
-            assert_eq!(binding, &GenomeBinding { name: name.into(), value_type, from, to: from + name.len() });
+            assert_eq!(
+                binding,
+                &GenomeBinding {
+                    name: name.into(),
+                    value_type,
+                    from,
+                    to: from + name.len()
+                }
+            );
         }
     }
 
@@ -2398,25 +3058,49 @@ mod tests {
         let source = "# café 🌱\r\nlet label = \"é🌱\"; let count = 1; let broken = count + false;\nthrust=0;turn=0;divide=false;";
         let analysis = Program::analyze(source);
         assert!(!analysis.valid);
-        assert_eq!(analysis.bindings.iter().map(|item| item.name.as_str()).collect::<Vec<_>>(), ["label", "count"]);
+        assert_eq!(
+            analysis
+                .bindings
+                .iter()
+                .map(|item| item.name.as_str())
+                .collect::<Vec<_>>(),
+            ["label", "count"]
+        );
         assert!(analysis.node_count > 0);
         let diagnostic = &analysis.diagnostics[0];
         let byte = source.find('+').unwrap();
         let line_start = source[..byte].rfind('\n').unwrap() + 1;
         assert_eq!(diagnostic.line, 2);
-        assert_eq!(diagnostic.column, source[line_start..byte].encode_utf16().count() + 1);
+        assert_eq!(
+            diagnostic.column,
+            source[line_start..byte].encode_utf16().count() + 1
+        );
         assert_eq!(diagnostic.from, source[..byte].encode_utf16().count());
         assert_eq!(diagnostic.to, diagnostic.from + 1);
-        assert!(Program::compile(source).unwrap_err().ends_with(&diagnostic.message));
+        assert!(Program::compile(source)
+            .unwrap_err()
+            .ends_with(&diagnostic.message));
         let unknown = "let label=\"🌱\";thrust=missing_signal;turn=0;divide=false;";
         let diagnostic = Program::analyze(unknown).diagnostics.remove(0);
-        let from = unknown[..unknown.find("missing_signal").unwrap()].encode_utf16().count();
-        assert_eq!((diagnostic.from, diagnostic.to), (from, from + "missing_signal".len()));
+        let from = unknown[..unknown.find("missing_signal").unwrap()]
+            .encode_utf16()
+            .count();
+        assert_eq!(
+            (diagnostic.from, diagnostic.to),
+            (from, from + "missing_signal".len())
+        );
     }
 
     #[test]
     fn analysis_handles_empty_incomplete_and_unicode_lexical_input() {
-        for source in ["", "# café 🌱", "let", "let signal = ", "let note = \"é🌱\"; thrust =", "thrust=0;turn=0;\r\n"] {
+        for source in [
+            "",
+            "# café 🌱",
+            "let",
+            "let signal = ",
+            "let note = \"é🌱\"; thrust =",
+            "thrust=0;turn=0;\r\n",
+        ] {
             let analysis = Program::analyze(source);
             assert!(!analysis.valid, "{source}");
             assert_eq!(analysis.diagnostics.len(), 1);
@@ -2424,27 +3108,49 @@ mod tests {
             let end = source.encode_utf16().count();
             let line_start = source.rfind('\n').map_or(0, |index| index + 1);
             assert_eq!((error.from, error.to), (end, end), "{source}");
-            assert_eq!(error.line, source.bytes().filter(|byte| *byte == b'\n').count() + 1);
-            assert_eq!(error.column, source[line_start..].encode_utf16().count() + 1);
-            assert!(Program::compile(source).unwrap_err().ends_with(&error.message));
+            assert_eq!(
+                error.line,
+                source.bytes().filter(|byte| *byte == b'\n').count() + 1
+            );
+            assert_eq!(
+                error.column,
+                source[line_start..].encode_utf16().count() + 1
+            );
+            assert!(Program::compile(source)
+                .unwrap_err()
+                .ends_with(&error.message));
         }
-        for (source, token) in [("# 🌱\nλ", "λ"), ("let text=\"é🌱", "\"é🌱"), ("let text=\"\\🌱", "\"\\🌱")] {
+        for (source, token) in [
+            ("# 🌱\nλ", "λ"),
+            ("let text=\"é🌱", "\"é🌱"),
+            ("let text=\"\\🌱", "\"\\🌱"),
+        ] {
             let analysis = Program::analyze(source);
             let byte = source.find(token).unwrap();
             let from = source[..byte].encode_utf16().count();
-            assert_eq!((analysis.diagnostics[0].from, analysis.diagnostics[0].to), (from, from + token.encode_utf16().count()));
-            assert!(Program::compile(source).unwrap_err().ends_with(&analysis.diagnostics[0].message));
+            assert_eq!(
+                (analysis.diagnostics[0].from, analysis.diagnostics[0].to),
+                (from, from + token.encode_utf16().count())
+            );
+            assert!(Program::compile(source)
+                .unwrap_err()
+                .ends_with(&analysis.diagnostics[0].message));
         }
         let oversized = " ".repeat(MAX_SOURCE_BYTES + 1);
         let analysis = Program::analyze(&oversized);
         assert!(!analysis.valid);
         assert_eq!(analysis.source_bytes, MAX_SOURCE_BYTES + 1);
-        assert_eq!((analysis.diagnostics[0].from, analysis.diagnostics[0].to), (0, 0));
+        assert_eq!(
+            (analysis.diagnostics[0].from, analysis.diagnostics[0].to),
+            (0, 0)
+        );
     }
 
     #[test]
     fn analysis_obeys_expression_budget_without_changing_program_storage() {
-        let mut source = (0..MAX_NODES - 3).map(|index| format!("let a{index}={index};")).collect::<String>();
+        let mut source = (0..MAX_NODES - 3)
+            .map(|index| format!("let a{index}={index};"))
+            .collect::<String>();
         source.push_str("thrust=0;turn=0;divide=false;");
         let program = Program::compile(&source).unwrap();
         let mut before = crate::checkpoint::Writer::new();
@@ -2462,14 +3168,16 @@ mod tests {
         let invalid = Program::analyze(&source);
         assert!(!invalid.valid);
         assert_eq!(invalid.node_count, MAX_NODES);
-        assert!(invalid.diagnostics[0].message.contains("8192 expression nodes"));
+        assert!(invalid.diagnostics[0]
+            .message
+            .contains("8192 expression nodes"));
     }
 
     #[test]
     fn graph_preserves_operands_aliases_defaults_and_state_boundaries() {
         let program = Program::compile(
             "let sensor = energy; let alias = sensor; let unused = 42;\n\
-             ri001 = ri001 + 1 when food.visible;\n\
+             ri001 = ri001 + 1 when chemical.valid;\n\
              clear ri001 when populated(ri001);\n\
              thrust = if rb001 then alias else 0.2; turn = 0; divide = false;",
         )
@@ -2477,7 +3185,7 @@ mod tests {
         let graph = program.graph_json();
         assert!(graph.starts_with("{\"version\":1,\"nodes\":["));
         assert_eq!(graph.matches("\"reachable\":").count(), 14);
-        assert_eq!(graph.matches("\"kind\":\"output\"").count(), 17);
+        assert_eq!(graph.matches("\"kind\":\"output\"").count(), OUTPUT_COUNT);
         assert!(graph.contains(r#"{"id":0,"kind":"sensor","type":"scalar","label":"energy","inputs":[],"bindings":["sensor"],"reachable":true}"#));
         assert!(graph.contains(r#"{"id":1,"kind":"reference","type":"scalar","label":"sensor","inputs":[0],"bindings":["alias"],"reachable":true}"#));
         assert!(graph.contains(r#"{"id":2,"kind":"constant","type":"integer","label":"42","inputs":[],"bindings":["unused"],"reachable":false}"#));
@@ -2495,13 +3203,13 @@ mod tests {
         assert!(graph.contains(r#"{"id":"output:engulf","kind":"output","name":"engulf","type":"boolean","value":null,"guard":null,"default":"false"}"#));
         for (name, default) in [
             ("absorb", "1"),
-            ("invest.propulsion", "0.2"),
-            ("invest.photosynthesis", "0.2"),
-            ("invest.digestion", "0.2"),
-            ("invest.armor", "0.2"),
-            ("invest.sensing", "0.2"),
+            ("build.flagellum", "0"),
+            ("build.photosynthetic", "0"),
+            ("build.digestive", "0"),
+            ("build.cortex", "0"),
+            ("build.optical", "0"),
             ("feed", "1"),
-            ("invest.attack", "0"),
+            ("build.piercer", "0"),
         ] {
             assert!(graph.contains(&format!(
                 "{{\"id\":\"output:{name}\",\"kind\":\"output\",\"name\":\"{name}\",\"type\":\"scalar\",\"value\":null,\"guard\":null,\"default\":\"{default}\"}}"
@@ -2517,51 +3225,96 @@ mod tests {
         let legacy = Program::compile("thrust=0;turn=0;divide=false;").unwrap();
         let defaults = legacy.evaluate(&Inputs::default());
         assert_eq!(defaults.feed, 1.0);
-        assert_eq!(defaults.invest_attack, 0.0);
+        assert_eq!(defaults.body.build[8], 0.0);
         assert!(!legacy.to_source().unwrap().contains("feed ="));
-        assert!(!legacy.to_source().unwrap().contains("invest.attack ="));
-        let source = "thrust=0;turn=0;divide=false;feed=2;invest.attack=-1;";
-        let output = Program::compile(source).unwrap().evaluate(&Inputs::default());
+        assert!(!legacy.to_source().unwrap().contains("build.piercer ="));
+        let source = "thrust=0;turn=0;divide=false;feed=2;build.piercer=-1;";
+        let output = Program::compile(source)
+            .unwrap()
+            .evaluate(&Inputs::default());
         assert_eq!(output.feed, 1.0);
-        assert_eq!(output.invest_attack, 0.0);
+        assert_eq!(output.body.build[8], 0.0);
         for invalid in [
-            "feed=true;", "invest.attack=false;", "feed=0;feed=1;",
-            "invest.attack=0;invest.attack=1;", "let feed=1;", "let maturity=1;",
+            "feed=true;",
+            "build.piercer=false;",
+            "feed=0;feed=1;",
+            "build.piercer=0;build.piercer=1;",
+            "let feed=1;",
+            "let body.maturity=1;",
         ] {
             assert!(Program::compile(&format!("thrust=0;turn=0;divide=false;{invalid}")).is_err());
         }
-        let source = "thrust=.2;turn=food.angle;divide=maturity>=1;feed=1-gut.fraction;invest.attack=prey.attack*.5;rf001=digestion.rate+growth.rate+exudation.rate;";
-        for kind in [MutationKind::Any, MutationKind::Constant, MutationKind::Expression, MutationKind::Reference] {
+        let source = "thrust=.2;turn=chemical.organic_bearing;divide=body.maturity>=1;feed=1-gut.fraction;build.piercer=contact.resistance*.5;rf001=digestion.rate+growth.rate+exudation.rate;";
+        for kind in [
+            MutationKind::Any,
+            MutationKind::Constant,
+            MutationKind::Expression,
+            MutationKind::Reference,
+        ] {
             for seed in 1..50 {
-                if let Some(mutation) = Program::mutate_source(source, seed, kind) { assert_roundtrip(&mutation); }
+                if let Some(mutation) = Program::mutate_source(source, seed, kind) {
+                    assert_roundtrip(&mutation);
+                }
             }
         }
     }
 
     #[test]
-    fn trophic_sensors_append_stable_scalar_ids_and_read_current_inputs() {
-        assert_eq!(Sensor::ALL[45], Sensor::SenseRange);
-        assert_eq!(Sensor::ALL[46], Sensor::BodyAttack);
-        assert_eq!(Sensor::ALL[58], Sensor::PreyPhotosynthesis);
-        assert_eq!(Sensor::ALL[59], Sensor::FoodEnergy);
-        assert_eq!(Sensor::ALL[60], Sensor::FoodNutrients);
+    fn organelle_and_physical_sensors_are_typed_and_read_current_inputs() {
         let inputs = Inputs {
-            body_attack: 0.2, gut_energy: 32.0, gut_capacity: 80.0, gut_fraction: 0.4,
-            digestion_rate: 4.1, growth_rate: 0.03, birth_size: 0.8, maturity: 0.5,
-            lifespan: 300.0, exudation_rate: 0.8, prey_integrity: 0.3,
-            prey_attack: 0.1, prey_photosynthesis: 0.6, food_energy: 12.5, food_nutrients: 0.125, ..Inputs::default()
+            body_area: 1.25,
+            body_mass: 0.7,
+            body_division_ready: true,
+            gut_energy: 32.0,
+            gut_capacity: 80.0,
+            gut_fraction: 0.4,
+            digestion_rate: 4.1,
+            growth_rate: 0.03,
+            body_birth_area: 0.8,
+            body_maturity: 0.5,
+            lifespan: 300.0,
+            exudation_rate: 0.8,
+            contact_pressure: 0.3,
+            contact_token: Rc::from("contact:17"),
+            object_token: Rc::from("track:23"),
+            object_offset: [1.0, -3.0],
+            flow_vector: [-2.0, 0.4],
+            object_motion: [0.2, 0.1],
+            organelle: std::array::from_fn(|i| OrganelleInput {
+                count: i as i32,
+                mass: i as f64 * 0.1,
+                capacity: i as f64 * 0.2,
+                damaged: 0.01,
+                building: 0.02,
+            }),
+            ..Inputs::default()
         };
-        let expected = [0.2, 32.0, 80.0, 0.4, 4.1, 0.03, 0.8, 0.5, 300.0, 0.8, 0.3, 0.1, 0.6, 12.5, 0.125];
-        for (sensor, value) in Sensor::ALL[46..].iter().zip(expected) {
-            assert_eq!(sensor.ty(), Type::Number);
-            assert_eq!(sensor.read(&inputs), Value::Scalar(value));
-            let source = format!("rf001={};thrust=0;turn=0;divide=false;", sensor.name());
+        let mut names = HashSet::new();
+        for sensor in Sensor::ALL {
+            assert!(names.insert(sensor.name()));
+            let value = sensor.read(&inputs);
+            assert_eq!(value.ty(), sensor.ty());
+            let register = format!("{}001", sensor.ty().prefix());
+            let source = format!("{register}={};thrust=0;turn=0;divide=false;", sensor.name());
             let program = Program::compile(&source).unwrap();
             let mut memory = Registers::default();
             program.evaluate_cell(&inputs, &mut memory, &mut EvalScratch::default());
-            assert_eq!(memory.value("rf001"), Some(&Value::Scalar(value)));
-            assert!(Program::compile(&format!("{}=0;thrust=0;turn=0;divide=false;", sensor.name())).is_err());
+            assert_eq!(memory.value(&register), Some(&value));
+            assert!(Program::compile(&format!(
+                "{}=0;thrust=0;turn=0;divide=false;",
+                sensor.name()
+            ))
+            .is_err());
         }
+        assert_eq!(Sensor::ALL.len(), 144);
+        assert_eq!(
+            Sensor::OrganelleFlagellumCount.read(&inputs),
+            Value::Integer(7)
+        );
+        assert_eq!(
+            Sensor::ObjectToken.read(&inputs),
+            Value::Text(Rc::from("track:23"))
+        );
     }
 
     #[test]
@@ -2608,19 +3361,17 @@ mod tests {
         assert!(graph.contains(r#"{"id":8191,"kind":"constant","type":"boolean""#));
         assert!(
             graph.len() < 2 * 1024 * 1024,
-            "bounded metadata for a maximum-size graph"
+            "bounded metadata for a maximum-body.area graph"
         );
     }
 
     #[test]
-    fn default_reacts_to_new_sensor_samples_without_mutable_program_state() {
-        let program = Program::compile(DEFAULT_PROGRAM).unwrap();
+    fn program_reacts_to_new_sensor_samples_without_mutable_program_state() {
+        let program = Program::compile("thrust=if chemical.valid then .8 else .45; turn=chemical.organic_bearing*1.8;divide=energy>250;").unwrap();
         let original = Inputs {
             energy: 300.0,
-            age: 8.0,
-            size: 2.0,
-            food_visible: true,
-            food_angle: 0.2,
+            chemical_valid: true,
+            chemical_organic_bearing: 0.2,
             ..Inputs::default()
         };
         let first = program.evaluate(&original);
@@ -2628,9 +3379,9 @@ mod tests {
         assert!((first.turn - 0.36).abs() < 1e-10);
         assert!(first.divide);
         let second = program.evaluate(&Inputs {
-            food_visible: false,
+            chemical_valid: false,
             energy: 30.0,
-            ..original
+            ..original.clone()
         });
         assert_eq!(second.thrust, 0.45);
         assert!(!second.divide);
@@ -2639,13 +3390,15 @@ mod tests {
 
     #[test]
     fn existing_three_output_programs_default_to_no_growth() {
-        let program =
-            Program::compile("thrust = 0.8; turn = food.angle; divide = energy > 120;").unwrap();
+        let program = Program::compile(
+            "thrust = 0.8; turn = chemical.organic_bearing; divide = energy > 120;",
+        )
+        .unwrap();
         for size in [0.5, 1.0, 2.0, 4.0] {
             let result = program.evaluate(&Inputs {
-                size,
+                body_area: size,
                 energy: 150.0,
-                food_angle: 0.2,
+                chemical_organic_bearing: 0.2,
                 ..Inputs::default()
             });
             assert_eq!(result.grow, 0.0);
@@ -2675,11 +3428,12 @@ mod tests {
     #[test]
     fn grow_is_optional_numeric_and_unique_and_size_is_a_readonly_sensor() {
         let program =
-            Program::compile("grow = size / 2; divide = false; turn = 0; thrust = 0;").unwrap();
+            Program::compile("grow = body.area / 2; divide = false; turn = 0; thrust = 0;")
+                .unwrap();
         assert_eq!(
             program
                 .evaluate(&Inputs {
-                    size: 1.0,
+                    body_area: 1.0,
                     ..Inputs::default()
                 })
                 .grow,
@@ -2689,9 +3443,9 @@ mod tests {
             "thrust = 0; turn = 0; divide = false; grow = true;",
             "thrust = 0; turn = 0; divide = false; grow = 0; grow = 1;",
             "let grow = 1; thrust = 0; turn = 0; divide = false;",
-            "let size = 1; thrust = 0; turn = 0; divide = false;",
+            "let body.area = 1; thrust = 0; turn = 0; divide = false;",
             "thrust = grow; turn = 0; grow = 1; divide = false;",
-            "thrust = 0; turn = 0; divide = size;",
+            "thrust = 0; turn = 0; divide = body.area;",
             "thrust = 0; turn = 0; divide = false; grow = energy > 50;",
         ] {
             assert!(Program::compile(source).is_err(), "accepted {source}");
@@ -2701,7 +3455,7 @@ mod tests {
     #[test]
     fn growth_reacts_to_size_and_energy_and_clamps_to_zero_one() {
         let program = Program::compile(
-            "thrust = 0; turn = 0; divide = false; grow = (2 - size) * energy / 100;",
+            "thrust = 0; turn = 0; divide = false; grow = (2 - body.area) * energy / 100;",
         )
         .unwrap();
         for (size, energy, expected) in [
@@ -2713,7 +3467,7 @@ mod tests {
             assert_eq!(
                 program
                     .evaluate(&Inputs {
-                        size,
+                        body_area: size,
                         energy,
                         ..Inputs::default()
                     })
@@ -2724,7 +3478,7 @@ mod tests {
         assert_eq!(
             program
                 .evaluate(&Inputs {
-                    size: 1.0,
+                    body_area: 1.0,
                     energy: f64::NAN,
                     ..Inputs::default()
                 })
@@ -2740,35 +3494,29 @@ mod tests {
     }
 
     #[test]
-    fn default_program_grows_then_requests_division_at_size_dependent_thresholds() {
+    fn default_producer_requests_paid_construction_and_physical_division() {
         let program = Program::compile(DEFAULT_PROGRAM).unwrap();
-        for (size, energy, age, grow, divide) in [
-            (1.0, 100.0, 6.0, 1.0, false),
-            (1.5, 100.0, 6.0, 0.0, false),
-            (1.5, 106.0, 6.0, 1.0, false),
-            (1.0, 200.0, 6.0, 1.0, false),
-            (2.0, 250.0, 6.0, 0.0, false),
-            (2.0, 251.0, 6.0, 0.0, true),
-            (2.0, 300.0, 5.0, 0.0, false),
-            (3.0, 376.0, 6.0, 0.0, true),
-        ] {
+        for (energy_fraction, body_division_ready) in
+            [(0.1, false), (0.6, false), (0.61, false), (0.8, true)]
+        {
             let result = program.evaluate(&Inputs {
-                size,
-                energy,
-                age,
+                energy_fraction,
+                body_division_ready,
                 ..Inputs::default()
             });
-            assert_eq!(result.grow, grow, "size={size}, energy={energy}, age={age}");
-            assert_eq!(
-                result.divide, divide,
-                "size={size}, energy={energy}, age={age}"
-            );
+            assert_eq!(result.grow, if energy_fraction > 0.6 { 0.8 } else { 0.0 });
+            assert_eq!(result.divide, body_division_ready);
+            assert_eq!(result.photosynthesize, 1.0);
+            assert_eq!(result.body.target_counts[0], 2);
+            assert_eq!(result.body.target_counts[1], 2);
+            assert_eq!(result.body.build[1], 1.0);
+            assert_eq!(result.body.recycle, [0.0; FAMILY_COUNT]);
         }
     }
 
     #[test]
     fn precedence_and_boolean_composition_are_typed() {
-        let result = eval("let ready = energy > 5 && !food.visible; thrust = (2 + 3 * 4) / 20; turn = 0.9 - 0.3 - 0.2; divide = ready || false;", Inputs { energy: 6.0, ..Inputs::default() });
+        let result = eval("let ready = energy > 5 && !chemical.valid; thrust = (2 + 3 * 4) / 20; turn = 0.9 - 0.3 - 0.2; divide = ready || false;", Inputs { energy: 6.0, ..Inputs::default() });
         assert!((result.thrust - 0.7).abs() < 1e-10);
         assert!((result.turn - 0.4).abs() < 1e-10);
         assert!(result.divide);
@@ -2791,40 +3539,133 @@ mod tests {
     }
 
     #[test]
-    fn nutrient_actions_default_consistently_and_explicit_targets_remain_independent() {
+    fn construction_targets_are_integers_and_scan_commands_keep_string_and_angle_types() {
+        let source = "thrust=0;turn=0;divide=false;target.flagellum.count=ri001-3;target.flagellum.size=-1;build.flagellum=9;recycle.flagellum=-2;scan.bearing=10;scan.width=20;scan.target=if object.valid then object.token else rs001;";
+        let program = Program::compile(source).unwrap();
+        let inputs = Inputs {
+            object_valid: true,
+            object_token: Rc::from("track:17"),
+            ..Inputs::default()
+        };
+        let output = program.evaluate(&inputs);
+        assert_eq!(output.body.target_counts[7], 0);
+        assert_eq!(output.body.target_sizes[7], MIN_ORGANELLE_MASS[7]);
+        assert_eq!(output.body.build[7], 1.0);
+        assert_eq!(output.body.recycle[7], 0.0);
+        assert_eq!(&*output.scan_target, "track:17");
+        assert_eq!(output.scan_width, std::f64::consts::TAU);
+        assert!((-std::f64::consts::PI..std::f64::consts::PI).contains(&output.scan_bearing));
+        for invalid in [
+            "target.flagellum.count=2.0;",
+            "target.flagellum.count=2/1;",
+            "scan.target=123;",
+            "scan.width=true;",
+        ] {
+            assert!(Program::compile(&format!("thrust=0;turn=0;divide=false;{invalid}")).is_err());
+        }
+        let huge = eval("thrust=0;turn=0;divide=false;target.optical.count=2147483647;target.optical.size=1e300;", Inputs::default());
+        assert_eq!(huge.body.target_counts[15], i32::MAX as u32);
+        assert_eq!(huge.body.target_sizes[15], MAX_SIGNAL);
+        for family in 0..FAMILY_COUNT {
+            let index = BODY_OUTPUT_START + family * 4;
+            let source = format!(
+                "thrust=0;turn=0;divide=false;{}={};{}=.5;{}=.7;{}=.2;",
+                OUTPUT_NAMES[index],
+                family + 1,
+                OUTPUT_NAMES[index + 1],
+                OUTPUT_NAMES[index + 2],
+                OUTPUT_NAMES[index + 3]
+            );
+            let actual = eval(&source, Inputs::default());
+            assert_eq!(actual.body.target_counts[family], family as u32 + 1);
+            assert_eq!(actual.body.target_sizes[family], 0.5);
+            assert_eq!(actual.body.build[family], 0.7);
+            assert_eq!(actual.body.recycle[family], 0.2);
+        }
+    }
+
+    #[test]
+    fn semantic_target_oracles_and_investment_aliases_are_rejected() {
+        for name in [
+            "size",
+            "food.visible",
+            "food.energy",
+            "prey.id",
+            "prey.energy",
+            "prey.same_genome",
+            "threat.size",
+            "neighbor.visible",
+            "temperature.value",
+            "flow.x",
+            "nutrient.level",
+            "body.propulsion",
+            "birth.size",
+            "maturity",
+        ] {
+            assert!(Sensor::lookup(name).is_none(), "legacy signal {name}");
+            assert!(Program::compile(&format!("thrust={name};turn=0;divide=false;")).is_err());
+        }
+        for name in [
+            "invest.propulsion",
+            "invest.photosynthesis",
+            "invest.digestion",
+            "invest.armor",
+            "invest.sensing",
+            "invest.attack",
+        ] {
+            assert!(Program::compile(&format!("thrust=0;turn=0;divide=false;{name}=1;")).is_err());
+        }
+    }
+
+    #[test]
+    fn schema_includes_every_typed_signal_and_output_once() {
+        let schema = language_schema_json();
+        assert!(schema.starts_with("{\"version\":3,"));
+        assert!(schema.contains("\"name\":\"target.flagellum.count\",\"type\":\"integer\",\"required\":false,\"default\":0"));
+        assert!(schema.contains(
+            "\"name\":\"scan.target\",\"type\":\"string\",\"required\":false,\"default\":\"\""
+        ));
+        for name in Sensor::ALL
+            .into_iter()
+            .map(|s| s.name())
+            .chain(OUTPUT_NAMES)
+        {
+            assert_eq!(
+                schema.matches(&format!("\"name\":{}", quote(name))).count(),
+                1
+            );
+        }
+        assert_eq!(OUTPUT_COUNT, 78);
+    }
+
+    #[test]
+    fn body_controls_default_consistently_and_explicit_targets_remain_independent() {
         let idle = "thrust=0;turn=0;divide=false;";
         let defaults = eval(idle, Inputs::default());
         assert_eq!(defaults, Outputs::default());
-        assert_eq!(defaults.absorb, 1.0);
-        assert_eq!(defaults.invest_propulsion, 0.2);
-        assert_eq!(defaults.invest_photosynthesis, 0.2);
-        assert_eq!(defaults.invest_digestion, 0.2);
-        assert_eq!(defaults.invest_armor, 0.2);
-        assert_eq!(defaults.invest_sensing, 0.2);
-
-        let explicit = format!(
-            "{idle}absorb=0;invest.propulsion=-1;invest.photosynthesis=2;\
-             invest.digestion=0.75;invest.armor=0.375;invest.sensing=1;feed=.25;invest.attack=.625;"
-        );
+        assert_eq!(defaults.body.target_counts, [0; FAMILY_COUNT]);
+        assert_eq!(defaults.body.target_sizes, MIN_ORGANELLE_MASS);
+        assert_eq!(defaults.body.build, [0.0; FAMILY_COUNT]);
+        assert_eq!(defaults.body.recycle, [0.0; FAMILY_COUNT]);
+        let explicit = format!("{idle}absorb=0;build.flagellum=-1;build.photosynthetic=2;build.digestive=.75;build.cortex=.375;build.optical=1;feed=.25;build.piercer=.625;target.flagellum.count=2;target.flagellum.size=.08;recycle.optical=.25;");
         let p = Program::compile(&explicit).unwrap();
         let o = p.evaluate(&Inputs::default());
         assert_eq!(o.absorb, 0.0);
-        assert_eq!(o.invest_propulsion, 0.0);
-        assert_eq!(o.invest_photosynthesis, 1.0);
-        assert_eq!(o.invest_digestion, 0.75);
-        assert_eq!(o.invest_armor, 0.375);
-        assert_eq!(o.invest_sensing, 1.0);
+        assert_eq!(o.body.build[7], 0.0);
+        assert_eq!(o.body.build[1], 1.0);
+        assert_eq!(o.body.build[3], 0.75);
+        assert_eq!(o.body.build[9], 0.375);
+        assert_eq!(o.body.build[15], 1.0);
+        assert_eq!(o.body.recycle[15], 0.25);
+        assert_eq!(o.body.target_counts[7], 2);
+        assert_eq!(o.body.target_sizes[7], 0.08);
         assert_eq!(o.feed, 0.25);
-        assert_eq!(o.invest_attack, 0.625);
-        // Physical body normalization belongs to the simulation. The language
-        // preserves independently authored requests even when their sum > 1.
-        assert!(o.invest_photosynthesis + o.invest_digestion + o.invest_armor > 1.0);
-        assert_eq!(
-            p.evaluate(&Inputs::default()),
-            eval(&p.to_source().unwrap(), Inputs::default())
-        );
+        assert_eq!(o.body.build[8], 0.625);
+        // Allocation fairness belongs to the physical body; requests are independent.
+        assert!(o.body.build[1] + o.body.build[3] + o.body.build[9] > 1.0);
+        assert_eq!(o, eval(&p.to_source().unwrap(), Inputs::default()));
         let graph = p.graph_json();
-        for name in &OUTPUT_NAMES[9..] {
+        for (i, name) in OUTPUT_NAMES.iter().enumerate() {
             let marker = format!("\"id\":\"output:{name}\"");
             let root = graph
                 .split(&marker)
@@ -2833,19 +3674,28 @@ mod tests {
                 .split('}')
                 .next()
                 .unwrap();
-            assert!(root.contains("\"default\":null"), "{name}");
-            assert!(!root.contains("\"value\":null"), "{name}");
+            assert_eq!(
+                root.contains("\"default\":null"),
+                p.output_roots[i].is_some()
+            );
+            assert_eq!(root.contains("\"value\":null"), p.output_roots[i].is_none());
         }
     }
 
     #[test]
-    fn nutrient_actions_reject_wrong_types_duplicate_assignments_and_shadowing() {
+    fn all_optional_actions_reject_wrong_types_duplicate_assignments_and_shadowing() {
         let idle = "thrust=0;turn=0;divide=false;";
-        for name in &OUTPUT_NAMES[9..] {
-            for invalid in ["true", "\"food\"", "vec(1,2)"] {
-                assert!(Program::compile(&format!("{idle}{name}={invalid};")).is_err());
+        for (index, name) in OUTPUT_NAMES.iter().enumerate().skip(9) {
+            let invalid = match output_type(index) {
+                Type::Integer => ["true", "2.0", "vec(1,2)"],
+                Type::String => ["true", "2", "vec(1,2)"],
+                _ => ["true", "\"text\"", "vec(1,2)"],
+            };
+            for value in invalid {
+                assert!(Program::compile(&format!("{idle}{name}={value};")).is_err());
             }
-            assert!(Program::compile(&format!("{idle}{name}=0;{name}=1;")).is_err());
+            let value = output_default(index).source();
+            assert!(Program::compile(&format!("{idle}{name}={value};{name}={value};")).is_err());
             assert!(Program::compile(&format!("let {name}=0;{idle}")).is_err());
             assert!(Program::compile(&format!("{idle}rf001={name};")).is_err());
         }
@@ -2893,7 +3743,7 @@ mod tests {
 
     #[test]
     fn builtins_nested_conditionals_and_reversed_clamps_are_safe() {
-        let result = eval("let value = if true then if false then 0 else .4 else .9; thrust = clamp(value, 1, 0); turn = max(-1, min(1, cos(0) - abs(-.25))); divide = neighbor.visible && neighbor.distance < 20;", Inputs { neighbor_visible: true, neighbor_distance: 10.0, ..Inputs::default() });
+        let result = eval("let value = if true then if false then 0 else .4 else .9; thrust = clamp(value, 1, 0); turn = max(-1, min(1, cos(0) - abs(-.25))); divide = flow.valid && flow.speed < 20;", Inputs { flow_valid: true, flow_speed: 10.0, ..Inputs::default() });
         assert_eq!(result.thrust, 0.4);
         assert_eq!(result.turn, 0.75);
         assert!(result.divide);
@@ -3046,13 +3896,13 @@ mod tests {
                 speed: 30.0,
                 time: 120.0,
                 id: 44.0,
-                size: 1.4,
-                food_visible: true,
-                food_distance: 37.0,
-                food_angle: -1.4,
-                neighbor_visible: true,
-                neighbor_distance: 11.0,
-                neighbor_angle: 2.5,
+                body_area: 1.4,
+                chemical_valid: true,
+                chemical_organic: 37.0,
+                chemical_organic_bearing: -1.4,
+                flow_valid: true,
+                flow_speed: 11.0,
+                flow_bearing: 2.5,
                 ..Inputs::default()
             },
             Inputs {
@@ -3061,13 +3911,13 @@ mod tests {
                 speed: 0.5,
                 time: 182.0,
                 id: 7.0,
-                size: 0.6,
-                food_visible: false,
-                food_distance: 120.0,
-                food_angle: 0.0,
-                neighbor_visible: true,
-                neighbor_distance: 89.0,
-                neighbor_angle: -3.1,
+                body_area: 0.6,
+                chemical_valid: false,
+                chemical_organic: 120.0,
+                chemical_organic_bearing: 0.0,
+                flow_valid: true,
+                flow_speed: 89.0,
+                flow_bearing: -3.1,
                 ..Inputs::default()
             },
             Inputs {
@@ -3109,13 +3959,13 @@ mod tests {
                 restored.defend,
                 restored.repair,
                 restored.absorb,
-                restored.invest_propulsion,
-                restored.invest_photosynthesis,
-                restored.invest_digestion,
-                restored.invest_armor,
-                restored.invest_sensing,
+                restored.body.build[7],
+                restored.body.build[1],
+                restored.body.build[3],
+                restored.body.build[9],
+                restored.body.build[15],
                 restored.feed,
-                restored.invest_attack,
+                restored.body.build[8],
             ] {
                 assert!(value.is_finite() && (0.0..=1.0).contains(&value));
             }
@@ -3128,9 +3978,9 @@ mod tests {
         let sources = [
             DEFAULT_PROGRAM,
             "thrust = 0.7; turn = 0; divide = false;",
-            "thrust = energy; turn = food.angle; divide = food.visible;",
-            "let a = energy / 100; let b = a; let c = b; let flag = neighbor.visible; thrust = clamp(c, 0, 1); turn = if flag then neighbor.angle else food.angle; divide = flag && energy > 110;",
-            "let tiny = 1e-300; let huge = 1e300; thrust = tiny; turn = -huge; divide = food.visible != neighbor.visible;",
+            "thrust = energy; turn = chemical.organic_bearing; divide = chemical.valid;",
+            "let a = energy / 100; let b = a; let c = b; let flag = flow.valid; thrust = clamp(c, 0, 1); turn = if flag then flow.bearing else chemical.organic_bearing; divide = flag && energy > 110;",
+            "let tiny = 1e-300; let huge = 1e300; thrust = tiny; turn = -huge; divide = chemical.valid != flow.valid;",
         ];
         let kinds = [
             MutationKind::Any,
@@ -3194,7 +4044,7 @@ mod tests {
                 index - 1
             ));
         }
-        source.push_str("thrust = x34; turn = alias; divide = food.visible;");
+        source.push_str("thrust = x34; turn = alias; divide = chemical.valid;");
         let mut program = Program::compile(&source).unwrap();
         let first = program.to_source().unwrap();
         assert!(first.len() < 10_000, "shared DAG was expanded");
@@ -3212,7 +4062,7 @@ mod tests {
 
     #[test]
     fn reference_substitution_respects_type_lexical_scope_and_alias_targets() {
-        let source = "let early = 0.2; let current = energy; let future = age; let alias = current; let flag = food.visible; thrust = alias; turn = future; divide = flag;";
+        let source = "let early = 0.2; let current = energy; let future = age; let alias = current; let flag = chemical.valid; thrust = alias; turn = future; divide = flag;";
         let program = Program::compile(source).unwrap();
         let early = program.bindings[0].node;
         let current = program.bindings[1].node;
@@ -3221,8 +4071,11 @@ mod tests {
         assert!(options.contains(&Op::Reference(early)));
         assert!(!options.contains(&Op::Reference(future)));
         assert!(!options.contains(&Op::Reference(current)));
-        assert!(!options.contains(&Op::Sensor(Sensor::FoodVisible)));
-        for sensor in &Sensor::ALL[34..] {
+        assert!(!options.contains(&Op::Sensor(Sensor::ChemicalValid)));
+        for sensor in Sensor::ALL
+            .iter()
+            .filter(|s| s.ty() == Type::Number && **s != Sensor::Energy)
+        {
             assert!(
                 options.contains(&Op::Sensor(*sensor)),
                 "{} is not an eligible scalar reference",
@@ -3254,13 +4107,15 @@ mod tests {
             }
         }
         for seed in 0..500 {
-            assert_roundtrip(&Program::mutate_source(source, seed, MutationKind::Reference).unwrap());
+            assert_roundtrip(
+                &Program::mutate_source(source, seed, MutationKind::Reference).unwrap(),
+            );
         }
     }
 
     #[test]
     fn source_mutation_preserves_scope_boundaries_and_avoids_unused_targets() {
-        let source = "let unused = 999; let first = energy; let dead = false; let later = age; thrust = first; turn = later; grow = size; divide = food.visible;";
+        let source = "let unused = 999; let first = energy; let dead = false; let later = age; thrust = first; turn = later; grow = body.area; divide = chemical.valid;";
         for seed in 0..150 {
             let mutation = Program::mutate_source(source, seed, MutationKind::Reference).unwrap();
             assert_roundtrip(&mutation);
@@ -3281,11 +4136,12 @@ mod tests {
 
     #[test]
     fn expression_mutation_can_insert_or_remove_one_typed_unary_operation() {
-        let parent = Program::compile(DEFAULT_PROGRAM).unwrap();
+        let source = "thrust=-energy;turn=0;divide=!body.division_ready;";
+        let parent = Program::compile(source).unwrap();
         let mut grew = false;
         let mut shrank = false;
         for seed in 0..500 {
-            let mutation = Program::mutate_source(DEFAULT_PROGRAM, seed, MutationKind::Expression).unwrap();
+            let mutation = Program::mutate_source(source, seed, MutationKind::Expression).unwrap();
             grew |= mutation.program.nodes.len() > parent.nodes.len();
             shrank |= mutation.program.nodes.len() < parent.nodes.len();
             assert_roundtrip(&mutation);
@@ -3310,7 +4166,8 @@ mod tests {
         for source in sources {
             let parent = Program::compile(source).unwrap();
             for seed in 0..500 {
-                let mutation = Program::mutate_source(source, seed, MutationKind::Constant).unwrap();
+                let mutation =
+                    Program::mutate_source(source, seed, MutationKind::Constant).unwrap();
                 assert_roundtrip(&mutation);
                 assert_ne!(parent.to_source(), Some(mutation.source));
             }
@@ -3319,22 +4176,40 @@ mod tests {
 
     #[test]
     fn source_limits_are_checked_without_serialization_expansion() {
-        let source = format!("thrust = {}; turn = 0; divide = false;", vec!["energy"; 3000].join(" + "));
+        let source = format!(
+            "thrust = {}; turn = 0; divide = false;",
+            vec!["energy"; 3000].join(" + ")
+        );
         let parent = Program::compile(&source).unwrap();
         assert!(parent.to_source().is_none());
         for seed in 0..50 {
-            assert_roundtrip(&Program::mutate_source(&source, seed, MutationKind::Constant).unwrap());
-            if let Some(mutation) = Program::mutate_source(&source, seed, MutationKind::Expression) {
+            assert_roundtrip(
+                &Program::mutate_source(&source, seed, MutationKind::Constant).unwrap(),
+            );
+            if let Some(mutation) = Program::mutate_source(&source, seed, MutationKind::Expression)
+            {
                 assert_roundtrip(&mutation);
             }
         }
-        assert!(Program::mutate_source("thrust=energy;turn=age;grow=size;divide=food.visible;", 1, MutationKind::Constant).is_none());
-        assert!(Program::mutate_source("thrust=0;turn=0;divide=false;", 1, MutationKind::Reference).is_none());
+        assert!(Program::mutate_source(
+            "thrust=energy;turn=age;grow=body.area;divide=chemical.valid;",
+            1,
+            MutationKind::Constant
+        )
+        .is_none());
+        assert!(Program::mutate_source(
+            "thrust=0;turn=0;divide=false;",
+            1,
+            MutationKind::Reference
+        )
+        .is_none());
         let prefix = "thrust=.9;turn=0;divide=false;#";
         let source = format!("{prefix}{}", "x".repeat(MAX_SOURCE_BYTES - prefix.len()));
         assert!(Program::compile(&source).is_ok());
         for seed in 0..50 {
-            if let Some(mutation) = Program::mutate_source(&source, seed, MutationKind::Constant) { assert_roundtrip(&mutation); }
+            if let Some(mutation) = Program::mutate_source(&source, seed, MutationKind::Constant) {
+                assert_roundtrip(&mutation);
+            }
         }
     }
 
@@ -3345,17 +4220,17 @@ mod tests {
             vec!["0.001"; 120].join(" + ")
         );
         for seed in 0..30 {
-            assert_roundtrip(&Program::mutate_source(&source, seed, MutationKind::Constant).unwrap());
+            assert_roundtrip(
+                &Program::mutate_source(&source, seed, MutationKind::Constant).unwrap(),
+            );
         }
     }
 
     #[test]
     fn mutation_is_deterministic_across_fresh_compilation_and_hash_seeds() {
         for seed in 0..100 {
-            let first = Program::mutate_source(DEFAULT_PROGRAM, seed, MutationKind::Any)
-                .unwrap();
-            let second = Program::mutate_source(DEFAULT_PROGRAM, seed, MutationKind::Any)
-                .unwrap();
+            let first = Program::mutate_source(DEFAULT_PROGRAM, seed, MutationKind::Any).unwrap();
+            let second = Program::mutate_source(DEFAULT_PROGRAM, seed, MutationKind::Any).unwrap();
             assert_eq!(first.kind, second.kind);
             assert_eq!(first.source, second.source);
         }
@@ -3363,32 +4238,32 @@ mod tests {
 
     #[test]
     fn omitted_growth_is_not_added_by_a_mutation() {
-        let source = "thrust=energy;turn=age;divide=food.visible;";
+        let source = "thrust=energy;turn=age;divide=chemical.valid;";
         assert!(Program::mutate_source(source, 1, MutationKind::Constant).is_none());
         for seed in 0..100 {
             let variant = Program::mutate_source(source, seed, MutationKind::Any).unwrap();
             assert!(!variant.source.contains("grow"));
-            assert!(variant.program.grow.is_none());
+            assert!(variant.program.output_roots[3].is_none());
             assert_roundtrip(&variant);
         }
     }
 
     #[test]
     fn size_is_an_eligible_numeric_reference_and_growth_mutations_roundtrip() {
-        let source = "let scale = energy; thrust = scale; turn = age; grow = size / 4; divide = food.visible;";
+        let source = "let scale = energy; thrust = scale; turn = age; grow = body.area / 4; divide = chemical.valid;";
         let parent = Program::compile(source).unwrap();
         let energy_node = parent.bindings[0].node;
         assert!(parent
             .reference_options(energy_node)
-            .contains(&Op::Sensor(Sensor::Size)));
+            .contains(&Op::Sensor(Sensor::BodyArea)));
         let visible_node = parent
             .nodes
             .iter()
-            .position(|n| n.op == Op::Sensor(Sensor::FoodVisible))
+            .position(|n| n.op == Op::Sensor(Sensor::ChemicalValid))
             .unwrap();
         assert!(!parent
             .reference_options(visible_node)
-            .contains(&Op::Sensor(Sensor::Size)));
+            .contains(&Op::Sensor(Sensor::BodyArea)));
         for kind in [
             MutationKind::Any,
             MutationKind::Constant,
@@ -3398,10 +4273,11 @@ mod tests {
             for seed in 0..300 {
                 let mutation = Program::mutate_source(source, seed, kind).unwrap();
                 let restored = assert_roundtrip(&mutation);
-                assert_eq!(restored.nodes[restored.grow.unwrap()].ty, Type::Number);
-                assert!(mutation
-                    .source
-                    .contains("grow = "));
+                assert_eq!(
+                    restored.nodes[restored.output_roots[3].unwrap()].ty,
+                    Type::Number
+                );
+                assert!(mutation.source.contains("grow = "));
             }
         }
     }
@@ -3450,45 +4326,45 @@ mod register_tests {
                 energy_fraction: 0.65,
                 age: tick as f64 / 30.0,
                 time: tick as f64 / 30.0,
-                size: 1.5,
+                body_area: 1.5,
                 id: 17.0,
-                food_visible: tick % 3 == 0,
-                food_distance: 20.0,
-                food_angle: 0.4,
-                neighbor_visible: tick % 2 == 0,
-                neighbor_angle: -0.5,
-                prey_visible: tick % 4 == 0,
-                prey_same_genome: tick % 5 == 0,
-                prey_distance: 10.0,
-                prey_size: 0.6,
-                prey_id: 2.0,
-                threat_visible: tick % 6 == 0,
-                threat_distance: 15.0,
-                threat_size: 3.0,
-                threat_angle: 0.8,
+                chemical_valid: tick % 3 == 0,
+                chemical_organic: 20.0,
+                chemical_organic_bearing: 0.4,
+                flow_valid: tick % 2 == 0,
+                object_valid: tick % 4 == 0,
+                object_available: tick % 5 == 0,
+                object_contrast: 10.0,
+                object_area: 0.6,
+                object_pigment: 2.0,
+                heat_valid: tick % 6 == 0,
                 memory_used: used,
                 memory_cost: used * REGISTER_ENERGY_COST,
                 light_level: 0.7,
-                light_angle: -0.3,
-                temperature: 0.4,
-                temperature_angle: 0.2,
-                flow_x: 0.25,
-                flow_y: -0.1,
+                light_bearing: -0.3,
+                heat_value: 0.4,
+                heat_bearing: 0.2,
+                flow_vector: [0.25, -0.1],
                 flow_speed: 0.269,
-                flow_angle: -0.38,
+                flow_bearing: -0.38,
                 integrity: 0.9,
                 nutrient_stored: 0.1 + tick as f64 * 0.03,
                 nutrient_capacity: 3.0,
                 nutrient_fraction: (0.1 + tick as f64 * 0.03) / 3.0,
-                nutrient_level: 0.05 + (tick % 5) as f64 * 0.1,
-                nutrient_angle: (tick as f64).sin(),
-                body_propulsion: 0.1 + tick as f64 * 0.001,
-                body_photosynthesis: 0.3,
-                body_digestion: 0.2,
-                body_armor: 0.15,
-                body_sensing: 0.15,
-                body_unassigned: 0.1 - tick as f64 * 0.001,
-                sense_range: 100.0,
+                chemical_mineral: 0.05 + (tick % 5) as f64 * 0.1,
+                chemical_mineral_bearing: (tick as f64).sin(),
+                organelle: std::array::from_fn(|i| OrganelleInput {
+                    mass: if i == 7 {
+                        0.1 + tick as f64 * 0.001
+                    } else {
+                        i as f64 * 0.03
+                    },
+                    count: 2,
+                    capacity: 100.0,
+                    damaged: 0.01,
+                    building: 0.02,
+                }),
+                body_space_free: 0.1 - tick as f64 * 0.001,
                 ..Inputs::default()
             };
             let a = program.evaluate_cell(&inputs, &mut original_memory, &mut original_scratch);
@@ -3586,8 +4462,8 @@ mod register_tests {
     }
     #[test]
     fn guarded_writes_hold_memory_and_clear_wins_independently_of_statement_order() {
-        let a = program("rf001=energy when food.visible;clear rf001 when neighbor.visible;");
-        let b = program("clear rf001 when neighbor.visible;rf001=energy when food.visible;");
+        let a = program("rf001=energy when chemical.valid;clear rf001 when flow.valid;");
+        let b = program("clear rf001 when flow.valid;rf001=energy when chemical.valid;");
         let (mut ma, mut mb) = (Registers::default(), Registers::default());
         for (write, clear, count, expected) in [
             (false, false, 0, None),
@@ -3600,11 +4476,11 @@ mod register_tests {
             let energy = if expected == Some(50.0) { 50.0 } else { 10.0 };
             let input = Inputs {
                 energy,
-                food_visible: write,
-                neighbor_visible: clear,
+                chemical_valid: write,
+                flow_valid: clear,
                 ..Inputs::default()
             };
-            tick(&a, &mut ma, input);
+            tick(&a, &mut ma, input.clone());
             tick(&b, &mut mb, input);
             assert_eq!(ma, mb);
             assert_eq!(ma.populated_count(), count);
@@ -3651,7 +4527,7 @@ mod register_tests {
             "let ri001abc=1;",
             "ri001=ri000;",
             "clear ri000;",
-            "clear food.visible;",
+            "clear chemical.valid;",
             "ri001=0.5;",
             "ri001=ri001/2;",
             "rf001=false;",
@@ -3713,7 +4589,14 @@ mod register_tests {
         let source = "ri001=ri001+1;rf001=ri001/2;thrust=0;turn=0;divide=false;";
         for seed in 0..100 {
             let variant = Program::mutate_source(source, seed, MutationKind::Expression).unwrap();
-            let root = variant.program.writes.iter().find(|rule| rule.register.name() == "rf001").unwrap().value.unwrap();
+            let root = variant
+                .program
+                .writes
+                .iter()
+                .find(|rule| rule.register.name() == "rf001")
+                .unwrap()
+                .value
+                .unwrap();
             assert_eq!(variant.program.nodes[root].ty, Type::Number);
             transition_roundtrip(&variant.program, &variant.source);
         }
@@ -3811,15 +4694,15 @@ mod register_tests {
     }
     #[test]
     fn new_sensors_outputs_and_omitted_actions_remain_typed_and_bounded() {
-        let p=Program::compile("thrust=energy.fraction;turn=flow.angle;divide=prey.visible&&!prey.same_genome;photosynthesize=light.level;engulf=prey.visible;bite=2;defend=-1;repair=integrity;rf001=memory.used+memory.cost;rf002=temperature.value+temperature.angle+light.angle+flow.x+flow.y+flow.speed+prey.id+prey.angle+prey.distance+prey.size+threat.angle+threat.distance+threat.size;rb001=threat.visible;").unwrap();
+        let p=Program::compile("thrust=energy.fraction;turn=flow.bearing;divide=object.valid&&!object.available;photosynthesize=light.level;engulf=object.valid;bite=2;defend=-1;repair=integrity;rf001=memory.used+memory.cost;rf002=heat.value+heat.bearing+light.bearing+x(flow.vector)+y(flow.vector)+flow.speed+object.pigment+light.bearing+object.contrast+object.area+heat.bearing+heat.value+chemical.mineral;rb001=heat.valid;").unwrap();
         let mut m = Registers::default();
         let o = tick(
             &p,
             &mut m,
             Inputs {
                 energy_fraction: 0.7,
-                flow_angle: -0.4,
-                prey_visible: true,
+                flow_bearing: -0.4,
+                object_valid: true,
                 light_level: 0.6,
                 integrity: 0.8,
                 memory_used: 3.0,
@@ -3849,15 +4732,15 @@ mod register_tests {
             "nutrient.stored",
             "nutrient.capacity",
             "nutrient.fraction",
-            "nutrient.level",
-            "nutrient.angle",
-            "body.propulsion",
-            "body.photosynthesis",
-            "body.digestion",
-            "body.armor",
-            "body.sensing",
-            "body.unassigned",
-            "sense.range",
+            "chemical.mineral",
+            "chemical.mineral_bearing",
+            "organelle.flagellum.mass",
+            "organelle.photosynthetic.mass",
+            "organelle.digestive.mass",
+            "organelle.cortex.mass",
+            "organelle.optical.mass",
+            "body.space.free",
+            "organelle.optical.capacity",
         ];
         let source = names
             .iter()
@@ -3873,15 +4756,21 @@ mod register_tests {
                 nutrient_stored: 1.5,
                 nutrient_capacity: 3.0,
                 nutrient_fraction: 0.5,
-                nutrient_level: 0.8,
-                nutrient_angle: -1.2,
-                body_propulsion: 0.05,
-                body_photosynthesis: 0.15,
-                body_digestion: 0.25,
-                body_armor: 0.35,
-                body_sensing: 0.12,
-                body_unassigned: 0.08,
-                sense_range: 88.0,
+                chemical_mineral: 0.8,
+                chemical_mineral_bearing: -1.2,
+                organelle: std::array::from_fn(|i| OrganelleInput {
+                    mass: match i {
+                        7 => 0.05,
+                        1 => 0.15,
+                        3 => 0.25,
+                        9 => 0.35,
+                        15 => 0.12,
+                        _ => 0.0,
+                    },
+                    capacity: 88.0,
+                    ..OrganelleInput::default()
+                }),
+                body_space_free: 0.08,
                 ..Inputs::default()
             },
         );
@@ -3923,7 +4812,10 @@ mod register_tests {
             Inputs {
                 nutrient_stored: f64::NAN,
                 nutrient_capacity: f64::INFINITY,
-                sense_range: -f64::INFINITY,
+                organelle: std::array::from_fn(|_| OrganelleInput {
+                    capacity: -f64::INFINITY,
+                    ..OrganelleInput::default()
+                }),
                 ..Inputs::default()
             },
         );
@@ -3937,28 +4829,28 @@ mod register_tests {
         let source = r#"
             let remembered=if populated(rf001) then rf001 else energy;
             let count=ri001+1;
-            ri001=count when !threat.visible;
-            rf001=remembered*0.8+energy*0.2 when food.visible;
-            rb001=if food.visible then true else rb001;
+            ri001=count when !heat.valid;
+            rf001=remembered*0.8+energy*0.2 when chemical.valid;
+            rb001=if chemical.valid then true else rb001;
             rs001=if rb001 then "feed" else rs001+".";
-            rv001=normalize(rv001+vec(flow.x,flow.y));
+            rv001=normalize(rv001+vec(x(flow.vector),y(flow.vector)));
             ri999=int(energy);rf999=length(rv001);rb999=populated(rs001);rs999="雪";rv999=vec(-1,1);
-            clear ri001 when count>15;clear rf001 when threat.visible;
-            clear rb001 when neighbor.visible;clear rs001 when length(rs001)>30;
-            clear rv001 when prey.same_genome;
+            clear ri001 when count>15;clear rf001 when heat.valid;
+            clear rb001 when flow.valid;clear rs001 when length(rs001)>30;
+            clear rv001 when object.available;
             rf002=if populated(rf002) then rf002*0.75+nutrient.stored/nutrient.capacity*0.25 else nutrient.fraction;
-            rf003=nutrient.level+nutrient.angle/sense.range;
+            rf003=chemical.mineral+chemical.mineral_bearing/organelle.optical.capacity;
             rb002=nutrient.fraction>0.1;
             clear rf002 when nutrient.fraction>0.2;
-            thrust=if rb001 then 0.7 else 0.2;turn=noise(id,time)*0.2+food.angle;
-            divide=energy>140&&ri001>5;grow=if size<2 then 1 else 0;
-            photosynthesize=light.level;engulf=prey.visible;bite=if prey.same_genome then 0 else 0.8;defend=if threat.visible then 1 else 0;repair=1-integrity;
+            thrust=if rb001 then 0.7 else 0.2;turn=noise(id,time)*0.2+chemical.organic_bearing;
+            divide=energy>140&&ri001>5;grow=if body.area<2 then 1 else 0;
+            photosynthesize=light.level;engulf=object.valid;bite=if object.available then 0 else 0.8;defend=if heat.valid then 1 else 0;repair=1-integrity;
             absorb=if rb002 then 1-rf002 else 0;
-            invest.propulsion=body.propulsion+rf003*0.05;
-            invest.photosynthesis=body.photosynthesis+light.level*0.2;
-            invest.digestion=body.digestion+0.1*nutrient.fraction;
-            invest.armor=if threat.visible then 0.6 else body.armor;
-            invest.sensing=body.sensing+body.unassigned;
+            build.flagellum=organelle.flagellum.mass+rf003*0.05;
+            build.photosynthetic=organelle.photosynthetic.mass+light.level*0.2;
+            build.digestive=organelle.digestive.mass+0.1*nutrient.fraction;
+            build.cortex=if heat.valid then 0.6 else organelle.cortex.mass;
+            build.optical=organelle.optical.mass+body.space.free;
         "#;
         let parent = Program::compile(source).unwrap();
         transition_roundtrip(&parent, &parent.to_source().unwrap());
@@ -3979,11 +4871,13 @@ mod register_tests {
         let mut internal_source = source.to_string();
         let mut restored_source = source.to_string();
         for seed in 1..=250 {
-            if let Some(m) = Program::mutate_source(&internal_source, seed * 97, MutationKind::Any) {
+            if let Some(m) = Program::mutate_source(&internal_source, seed * 97, MutationKind::Any)
+            {
                 transition_roundtrip(&m.program, &m.source);
                 internal_source = m.source;
             }
-            if let Some(m) = Program::mutate_source(&restored_source, seed * 101, MutationKind::Any) {
+            if let Some(m) = Program::mutate_source(&restored_source, seed * 101, MutationKind::Any)
+            {
                 transition_roundtrip(&Program::compile(&m.source).unwrap(), &m.source);
                 restored_source = m.source;
             }

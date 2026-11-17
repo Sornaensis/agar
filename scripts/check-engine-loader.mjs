@@ -145,7 +145,7 @@ export async function checkEngineLoader() {
     assert.equal(editorA.analyze('é'.repeat(131073)).sourceBytes, 262146);
     assert.deepEqual(editorA.saveState(), beforeAnalysis);
     const populationProbe = await Engine.load();
-    const probeGenome = populationProbe.compile('rf001=food.energy;rf002=food.nutrients;thrust=0;turn=0;divide=false;');
+    const probeGenome = populationProbe.compile('rf001=chemical.organic;rf002=chemical.mineral;thrust=0;turn=0;divide=false;');
     populationProbe.resetEmpty(81, 0);
     const beforeInvalidSeed = populationProbe.saveState();
     for (const count of [-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, 0x100000000, 0xffffffff]) {
@@ -160,86 +160,24 @@ export async function checkEngineLoader() {
     populationCopy.restoreState(populationState);
     assert.equal(populationCopy.snapshot().cells.length, 2049);
     assert.deepEqual(populationCopy.saveState(), populationState);
-    const legacyBytes = new Uint8Array(await readFile(new URL('../engine/fixtures/trophic-v1.bin', import.meta.url)));
-    const expected = JSON.parse(await readFile(new URL('../engine/fixtures/trophic-v1.json', import.meta.url), 'utf8'));
-    assert.equal(expected.provenance.abi, 4);
-    assert.equal(new DataView(legacyBytes.buffer).getUint32(8, true), 1);
-    const migrated = await Engine.load(), continued = await Engine.load();
-    migrated.restoreState(legacyBytes);
-    const world = migrated.snapshot();
-    assert.equal(world.tick, expected.header[0]);
-    assert.equal(world.cells.length, expected.cells.length);
-    for (const genome of expected.genomes) {
-      assert.equal(migrated.getGenome(genome.id).source, genome.source, 'Migration preserves editable source, including old mutation printing');
-      const graph = migrated.getGenomeGraph(genome.id);
-      assert.deepEqual(graph.nodes, genome.graph.nodes, 'Migration retains exact mutated ASTs rather than recompiling printed source');
-      assert.equal(graph.roots.length, genome.graph.roots.length + 2);
-      assert.deepEqual(graph.roots.filter(root => root.id !== 'output:feed' && root.id !== 'output:invest.attack'), genome.graph.roots,
-        'Migration preserves every legacy output and register rule, adding only the two new output defaults');
-      assert.equal(graph.roots.find(root => root.name === 'feed').default, '1');
-      assert.equal(graph.roots.find(root => root.name === 'invest.attack').default, '0');
+    const current=editorA.saveState();
+    assert.equal(new DataView(current.buffer,current.byteOffset,current.byteLength).getUint32(8,true),3);
+    for (const filename of ['trophic-v1.bin','trophic-v2.bin']) {
+      const legacy=new Uint8Array(await readFile(new URL('../engine/fixtures/'+filename,import.meta.url)));
+      assert.throws(()=>editorA.restoreState(legacy),/Unsupported simulation version.*preserved/);
+      assert.deepEqual(editorA.saveState(),current,'Old body saves are rejected atomically, never silently converted');
     }
-    const retainedFields = { id: 0, genomeId: 1, x: 2, y: 3, vx: 4, vy: 5, angle: 6, energy: 7, age: 8,
-      generation: 9, parentId: 10, size: 18, integrity: 38, nutrientStored: 40,
-      bodyPropulsion: 45, bodyPhotosynthesis: 46, bodyDigestion: 47, bodyArmor: 48, bodySensing: 49 };
-    for (const previous of expected.cells) {
-      const cell = world.cells.find(item => item.id === previous.packed[0]); assert.ok(cell);
-      for (const [field, offset] of Object.entries(retainedFields)) assert.equal(cell[field], previous.packed[offset], `${field} survives version1 migration`);
-      // The legacy JSON oracle canonicalizes signed zero; the binary checkpoint
-      // retains it and is checked byte-for-byte after upgrading below.
-      assert.deepEqual(JSON.parse(JSON.stringify(migrated.getMemory(cell.id))), previous.memory,
-        'All five typed register banks survive migration');
-      for (const field of ['bodyAttack', 'gutEnergy', 'gutNutrients', 'digestionRate', 'growthRate', 'exudationRate']) assert.equal(cell[field], 0, `${field} has an explicit legacy default`);
-      assert.equal(cell.birthSize, Math.min(cell.size, 1));
-    }
-    const upgraded = migrated.saveState();
-    assert.equal(new DataView(upgraded.buffer).getUint32(8, true), 2);
-    continued.restoreState(upgraded);
-    assert.deepEqual(continued.saveState(), upgraded, 'Current version2 roundtrip retains exact allocation accounting');
-    migrated.tick(60); continued.tick(60);
-    assert.deepEqual(migrated.saveState(), continued.saveState(), 'Migrated worlds continue deterministically under the new model');
-    const beforeRejectedSave = migrated.saveState(), unknownVersion = legacyBytes.slice();
-    new DataView(unknownVersion.buffer).setUint32(8, 3, true);
-    assert.throws(() => migrated.restoreState(unknownVersion), /unsupported save version/);
-    assert.deepEqual(migrated.saveState(), beforeRejectedSave, 'Unsupported versions cannot replace the live simulation');
-
-    // Current users' ABI5 saves already use version2. Exercise a real older
-    // binary's output, including its exact mutant AST and nonempty gut state.
-    const v2Bytes = new Uint8Array(await readFile(new URL('../engine/fixtures/trophic-v2.bin', import.meta.url)));
-    const v2Expected = JSON.parse(await readFile(new URL('../engine/fixtures/trophic-v2.json', import.meta.url), 'utf8'));
-    assert.equal(v2Expected.provenance.abi, 5);
-    assert.equal(v2Expected.provenance.checkpointVersion, 2);
-    assert.equal(new DataView(v2Bytes.buffer).getUint32(8, true), 2);
-    assert.equal(createHash('sha256').update(v2Bytes).digest('hex'), v2Expected.provenance.checkpointSha256);
-    const restoredV2 = await Engine.load(), continuedV2 = await Engine.load();
-    restoredV2.restoreState(v2Bytes);
-    assert.deepEqual(restoredV2.saveState(), v2Bytes, 'Real ABI5 version2 saves retain every encoded state byte without migration loss');
-    const v2World = restoredV2.snapshot();
-    assert.equal(v2World.tick, v2Expected.header[0]);
-    assert.equal(v2World.cells.length, v2Expected.cells.length);
-    for (const genome of v2Expected.genomes) {
-      const stored = restoredV2.getGenome(genome.id);
-      assert.deepEqual(stored, { source: genome.source, parentId: genome.parentId, mutationKind: genome.mutationKind });
-      assert.deepEqual(restoredV2.getGenomeGraph(genome.id), genome.graph, 'ABI5 programs preserve every expression, output, and register rule');
-    }
-    const v2Fields = { ...retainedFields, photosynthesisRate: 39, bodyAttack: 53, gutEnergy: 54, gutCapacity: 55,
-      gutNutrients: 56, digestionRate: 57, growthRate: 58, birthSize: 59, maturity: 60, lifespan: 61, exudationRate: 62 };
-    for (const previous of v2Expected.cells) {
-      const cell = v2World.cells.find(item => item.id === previous.packed[0]); assert.ok(cell);
-      for (const [field, offset] of Object.entries(v2Fields)) assert.equal(cell[field], previous.packed[offset], `${field} survives real ABI5 restore`);
-      assert.deepEqual(JSON.parse(JSON.stringify(restoredV2.getMemory(cell.id))), previous.memory, 'ABI5 values and occupancy survive in all five register banks');
-    }
-    continuedV2.restoreState(v2Bytes);
-    restoredV2.tick(60); continuedV2.tick(60);
-    assert.equal(restoredV2.snapshot().tick, v2Expected.header[0] + 60);
-    assert.deepEqual(restoredV2.saveState(), continuedV2.saveState(), 'Real ABI5 worlds resume deterministically under the current ecology');
+    const body=editorA.cellBody(editorA.snapshot().cells[0].id);
+    assert.ok(body.organs.length>0);assert.ok(body.spaceUsed<=body.spaceCapacity);
+    const schema=editorA.languageSchema();assert.equal(schema.signals.length,144);assert.equal(schema.outputs.length,78);
+    assert.deepEqual(editorA.saveState(),current,'Schema and body inspection do not alter saved state');
     await Engine.load();
     assert.equal(requests.length, requestsBefore + 1, 'Later loads reuse compiled code');
     assert.equal(compilations, compilationsBefore + 1);
   } finally {
     globalThis.fetch = originalFetch; WebAssembly.compile = originalCompile;
   }
-  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, and real ABI4/v1 plus ABI5/v2 checkpoint compatibility with exact programs, registers, and deterministic continuation.');
+  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, version3 body/track continuation and explicit atomic rejection of pre-organelle checkpoints.');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await checkEngineLoader();

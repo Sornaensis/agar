@@ -1,5 +1,5 @@
 {
-  "abi": 7,
+  "abi": 8,
   "memory": "memory",
   "functions": [
     "abi_version",
@@ -56,6 +56,12 @@
     "attack_count",
     "photosynthesis_total",
     "genome_bytes",
-    "genome_byte_limit"
+    "genome_byte_limit",
+    "language_schema_ptr",
+    "language_schema_len",
+    "cell_body_ptr",
+    "cell_body_len",
+    "energy_total",
+    "energy_input_total"
   ]
 }

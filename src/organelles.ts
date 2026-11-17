@@ -1,0 +1,33 @@
+import type { BodyRecipe, OrganelleKind } from './engine';
+
+/** Display names mirror the engine's physical families; the Rust body is authoritative. */
+export const ORGANELLE_CATALOG: ReadonlyArray<Readonly<{ kind: OrganelleKind; name: string; minimumMass: number; description: string; color: string }>> = Object.freeze([
+  { kind: 'core', name: 'Core', minimumMass: 0.04, description: 'Essential assembly machinery and basic metabolism. Each daughter needs a functional core.', color: '#d9c3f2' },
+  { kind: 'photosynthetic', name: 'Photosynthetic unit', minimumMass: 0.04, description: 'Converts shared light into energy. Requires internal room and exposed membrane.', color: '#83d49b' },
+  { kind: 'metabolic', name: 'Metabolic complex', minimumMass: 0.03, description: 'Raises energy-processing throughput; it needs an external energy source.', color: '#d9bc7c' },
+  { kind: 'digestive', name: 'Digestive vacuole', minimumMass: 0.04, description: 'Stores captured organic material and processes it into usable reserves.', color: '#e8b875' },
+  { kind: 'reserve', name: 'Reserve vacuole', minimumMass: 0.04, description: 'Adds energy and mineral storage. Its compartment occupies internal space.', color: '#a3b9c6' },
+  { kind: 'transporter', name: 'Mineral transporter', minimumMass: 0.015, description: 'Absorbs dissolved minerals through the membrane at a paid, supply-limited rate.', color: '#7bd5b5' },
+  { kind: 'phagocyte', name: 'Phagocytic cup', minimumMass: 0.025, description: 'Captures contacting particles and manageable objects into digestive space.', color: '#d7aa72' },
+  { kind: 'flagellum', name: 'Flagellum', minimumMass: 0.025, description: 'Produces thrust and steering. Its anchor uses membrane space and its filament adds drag.', color: '#8dcbd9' },
+  { kind: 'piercer', name: 'Piercing apparatus', minimumMass: 0.025, description: 'Damages contacting surfaces and can transfer material into available digestive space.', color: '#e8a295' },
+  { kind: 'cortex', name: 'Protective cortex', minimumMass: 0.02, description: 'Resists damage and environmental stress, at a cost in material and membrane access.', color: '#a4afd8' },
+  { kind: 'repair', name: 'Repair complex', minimumMass: 0.025, description: 'Increases paid repair throughput above the slow core baseline.', color: '#d4b5d7' },
+  { kind: 'photoreceptor', name: 'Photoreceptor', minimumMass: 0.01, description: 'Measures local light and the direction of increasing brightness. Independent of photosynthesis.', color: '#e2ce83' },
+  { kind: 'thermoreceptor', name: 'Thermoreceptor', minimumMass: 0.01, description: 'Measures local temperature and its gradient.', color: '#e9a08c' },
+  { kind: 'chemoreceptor', name: 'Chemoreceptor', minimumMass: 0.015, description: 'Measures local mineral and organic-cue concentrations and their gradients.', color: '#8bd7b2' },
+  { kind: 'mechanoreceptor', name: 'Mechanoreceptor', minimumMass: 0.01, description: 'Measures local flow and physical contact pressure and resistance.', color: '#9cbde7' },
+  { kind: 'optical', name: 'Optical detector', minimumMass: 0.02, description: 'Detects visible objects by appearance, offset and motion. It cannot read hidden energy, genome or diet.', color: '#a9d8df' },
+].map(item => Object.freeze(item)) as Array<Readonly<{ kind: OrganelleKind; name: string; minimumMass: number; description: string; color: string }>>);
+
+export const STARTER_BODIES: ReadonlyArray<Readonly<{ id: BodyRecipe; name: string; description: string }>> = Object.freeze([
+  { id: 'bare', name: 'Bare cell', description: 'Core and construction reserves. The genome must build a way to obtain energy.' },
+  { id: 'producer', name: 'Producer', description: 'Light harvesting, mineral uptake, processing, storage and light sensing.' },
+  { id: 'scavenger', name: 'Scavenger', description: 'Capture, digestion, movement and generic object/chemical sensing.' },
+  { id: 'hunter', name: 'Hunter', description: 'Contact attack and capture, digestion, movement and physical sensing.' },
+  { id: 'mixed', name: 'Mixed', description: 'Light harvesting and organic feeding share the same finite body.' },
+].map(item => Object.freeze(item)) as Array<Readonly<{ id: BodyRecipe; name: string; description: string }>>);
+
+export function isBodyRecipe(value: string): value is BodyRecipe {
+  return STARTER_BODIES.some(item => item.id === value);
+}

@@ -58,11 +58,19 @@ for (const simulation of simulations) {
 
 const portable = JSON.parse(storage.exportGenome(genomes[0]));
 assert.equal(portable.format, 'agar.genome');
+assert.equal(portable.version,2); assert.equal(portable.languageVersion,3);
+const legacyGenome = storage.validateGenomeDocument({ id:'genome:old',name:'Old genome',source:'thrust=0;turn=0;divide=false;invest.sensing=.2;',createdAt:1,updatedAt:1 });
+assert.equal(legacyGenome.languageVersion,1,'Older stored rows are preserved as older language');
+const legacyExport = JSON.parse(storage.exportGenome(legacyGenome));
+assert.equal(legacyExport.version,1); assert.equal(legacyExport.source,legacyGenome.source);
+assert.throws(() => storage.parseGenomeImport(JSON.stringify(legacyExport)), /older investment language/);
+assert.throws(() => storage.parseGenomeImport(JSON.stringify({...portable,languageVersion:2})), /Unsupported genome language/);
+for (const recipe of simulations.flatMap(run=>run.populations)) assert.ok(['bare','producer','scavenger','hunter','mixed'].includes(recipe.starterBody));
 assert.equal(storage.parseGenomeImport(JSON.stringify({ ...portable, format: 'cellarium.genome' })).source, genomes[0].source, 'Existing genome exports remain importable after the app rename');
 const environmentExport = JSON.parse(storage.exportEnvironment(environments[0]));
 assert.equal(environmentExport.format, 'agar.environment');
 assert.deepEqual(storage.parseEnvironmentImport(JSON.stringify({ ...environmentExport, format: 'cellarium.environment' })).config, environments[0].config, 'Existing environment exports remain importable after the app rename');
-for (const invalid of [null, [], {}, { ...portable, version: 2 }, { ...portable, format: 'cellarium.environment' }, { ...portable, id: 'builtin:genome:forager' }, { ...portable, name: '' }, { ...portable, name: 'x'.repeat(81) }, { ...portable, name: 'a\nb' }, { ...portable, source: '' }, { ...portable, source: true }]) {
+for (const invalid of [null, [], {}, { ...portable, version: 1 }, { ...portable, format: 'cellarium.environment' }, { ...portable, id: 'builtin:genome:forager' }, { ...portable, name: '' }, { ...portable, name: 'x'.repeat(81) }, { ...portable, name: 'a\nb' }, { ...portable, source: '' }, { ...portable, source: true }]) {
   assert.throws(() => storage.parseGenomeImport(JSON.stringify(invalid)));
 }
 assert.throws(() => storage.parseGenomeImport('{'), /JSON/);
@@ -74,7 +82,7 @@ assert.equal(storage.parseGenomeImport(storage.exportGenome(maxGenome)).source, 
 assert.throws(() => storage.newGenome('Too large', 'x'.repeat(262145)), /UTF-8/);
 assert.throws(() => storage.newGenome('Bad description', 'thrust=0;turn=0;divide=false;', 'x'.repeat(501)), /500/);
 assert.throws(() => storage.parseEnvironmentImport(JSON.stringify({ ...JSON.parse(storage.exportEnvironment(environments[0])), __proto__: null, sources: [] })), /unsupported/);
-assert.throws(() => storage.parseGenomeImport('{"format":"cellarium.genome","version":1,"name":"X","source":"abc","__proto__":{"polluted":true}}'), /unsupported/);
+assert.throws(() => storage.parseGenomeImport('{"format":"cellarium.genome","version":2,"languageVersion":3,"name":"X","source":"abc","__proto__":{"polluted":true}}'), /unsupported/);
 assert.equal({}.polluted, undefined);
 
 const baseConfig = environments[0].config;

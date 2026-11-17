@@ -56,7 +56,7 @@ function validate(network) {
   const nodes = new Map(network.nodes.map(node => [node.id, node]));
   assert.equal(nodes.size, network.nodes.length, 'Projected node IDs are unique');
   assert.equal(new Set(network.edges.map(edge => edge.id)).size, network.edges.length, 'Parallel ports have distinct edge identities');
-  assert.equal(network.nodes.filter(node => node.kind === 'output').length, 17);
+  assert.equal(network.nodes.filter(node => node.kind === 'output').length, 78);
   assert.ok(network.nodes.every(node => !['constant', 'reference'].includes(node.kind)), 'Literal and alias boxes are absent');
   for (const edge of network.edges) {
     const from = nodes.get(edge.from), to = nodes.get(edge.to);
@@ -84,13 +84,13 @@ function assertSlice(network, slice, maximum) {
 }
 const legacy = 'thrust=0;turn=0;divide=false;';
 const minimal = project(legacy).network;
-assert.equal(minimal.nodes.length, 17);
+assert.equal(minimal.nodes.length, 78);
 assert.equal(minimal.edges.length, 0);
 assert.equal(minimal.nodes.find(node => node.id === 'output:thrust').implicit, false);
 assert.equal(minimal.nodes.find(node => node.id === 'output:photosynthesize').constants[0].value, '0');
 assert.equal(minimal.nodes.find(node => node.id === 'output:absorb').constants[0].value, '1');
-assert.equal(minimal.nodes.find(node => node.id === 'output:invest.sensing').constants[0].value, '0.2');
-assert.equal(minimal.nodes.find(node => node.id === 'output:invest.sensing').implicit, true);
+assert.equal(minimal.nodes.find(node => node.id === 'output:build.optical').constants[0].value, '0');
+assert.equal(minimal.nodes.find(node => node.id === 'output:build.optical').implicit, true);
 assert.equal(networkSlice(minimal, null).omitted, 0);
 
 const alias = project(`let raw=energy;let alias=raw;
@@ -120,11 +120,11 @@ assert.ok(constantRegister.constants.some(value => value.port === 'when' && valu
 assert.ok(constantRegister.constants.some(value => value.port === 'when' && value.rule === 'clear:rf001' && value.value === 'false'));
 
 const mixedSource = `let fuel=energy;
-ri001=ri001+1 when !food.visible;clear ri001 when food.visible;
+ri001=ri001+1 when !object.valid;clear ri001 when object.valid;
 rf001=fuel+rf001 when energy<100;clear rf001 when energy>180;
 rb001=populated(rf001);rs001="<img src=x onerror=alert(1)>" when true;
-rv001=vec(flow.x,flow.y);
-thrust=clamp(rf001*0.01,0,1);turn=if rb001 then food.angle else nutrient.angle;divide=false;`;
+rv001=flow.vector;
+thrust=clamp(rf001*0.01,0,1);turn=if rb001 then light.bearing else chemical.mineral_bearing;divide=false;`;
 const mixed = project(mixedSource).network;
 for (const [address, type] of [['ri001','integer'],['rf001','scalar'],['rb001','boolean'],['rs001','string'],['rv001','vec2']]) {
   const matches = mixed.nodes.filter(node => node.id === `register:${address}`);
@@ -204,7 +204,7 @@ const banks = Array.from({ length: 999 }, (_, index) => {
     .map(([prefix, value]) => `${prefix}${suffix}=${value};clear ${prefix}${suffix};`).join('');
 }).join('\n');
 const complete = project(legacy + banks);
-assert.equal(complete.graph.roots.length, 10007);
+assert.equal(complete.graph.roots.length, 10068);
 assert.equal(complete.network.nodes.filter(node => node.kind === 'register').length, 4995);
 assert.equal(complete.network.nodes.find(node => node.id === 'register:rv999').rootIds.length, 2);
 assertSlice(complete.network, networkSlice(complete.network, null), 112);
@@ -231,4 +231,4 @@ assert.ok(inlineUses.every(value => value.bindings === sharedAliases), 'All uses
 assert.equal([...new Set(inlineUses.map(value => value.bindings))].reduce((sum, aliases) => sum + aliases.length, 0), 6000, 'Stored aliases do not multiply with consumer count');
 assertSlice(fanOutNetwork, networkSlice(fanOutNetwork, null), 112);
 
-console.log(`Genome network checks passed: ${PRESETS.length} real preset layouts, ${variants} typed variants, builtin/alias projection, all primitive registers, read/write/clear timing, exact ports, literal defaults, 8192-node chains, 10007 roots, linear alias metadata, and bounded bidirectional navigation.`);
+console.log(`Genome network checks passed: ${PRESETS.length} real preset layouts, ${variants} typed variants, builtin/alias projection, all primitive registers, read/write/clear timing, exact ports, literal defaults, 8192-node chains, 10068 roots, linear alias metadata, and bounded bidirectional navigation.`);

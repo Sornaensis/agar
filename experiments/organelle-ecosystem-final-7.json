@@ -1,0 +1,592 @@
+{
+  "startedAt": "2026-11-17T16:15:10.914Z",
+  "abi": 8,
+  "checkpointVersion": 3,
+  "wasmSha256": "3b1a1d8fd21438ecd6c670690be057e28b7d5b6c522f51a13b43e98b679e468d",
+  "wasmBytes": 466241,
+  "template": "Mixed ecosystem",
+  "environment": {
+    "id": "builtin:environment:sunlit-pond",
+    "name": "Sunlit pond",
+    "description": "Light and minerals support producers; organic food comes from living cells and their remains.",
+    "createdAt": 0,
+    "updatedAt": 0,
+    "config": {
+      "foodRate": 0,
+      "ambientTemperature": 0.5,
+      "ambientLight": 0.4,
+      "currentStrength": 3,
+      "initialNutrients": 0.3,
+      "sources": [
+        {
+          "kind": 0,
+          "x": 624,
+          "y": 364.8,
+          "strength": 0.95,
+          "radius": 280
+        },
+        {
+          "kind": 1,
+          "x": 936,
+          "y": 243.2,
+          "strength": 0.35,
+          "radius": 180
+        },
+        {
+          "kind": 2,
+          "x": 240,
+          "y": 478.8,
+          "strength": 0.25,
+          "radius": 260
+        },
+        {
+          "kind": 3,
+          "x": 576,
+          "y": 418,
+          "strength": 0.7,
+          "radius": 220
+        }
+      ]
+    }
+  },
+  "populations": [
+    {
+      "id": "builtin:genome:phototroph",
+      "name": "Phototroph",
+      "source": "# Harvesting light and measuring light are separate capabilities.\nlet hot = heat.available && heat.valid && heat.value > 0.8;\nlet cool = if heat.bearing > 0 then heat.bearing - 3.141593\n           else heat.bearing + 3.141593;\nlet needs_minerals = nutrient.fraction < 0.2;\nturn = if hot then clamp(cool, -1, 1)\n       else if needs_minerals && chemical.valid then clamp(chemical.mineral_bearing, -1, 1)\n       else if light.available && light.valid then clamp(light.bearing, -1, 1) else 0;\nthrust = if hot then 0.3 else if needs_minerals then 0.08\n         else if light.valid && light.level < 0.3 then 0.07 else 0;\nfeed = 0;\nphotosynthesize = 1;\nabsorb = if nutrient.fraction < 0.85 then 1 else 0;\nrepair = if integrity < 0.92 && energy.fraction > 0.55 then 0.4 else 0;\ngrow = if body.maturity < 1 && energy.fraction > 0.6\n          && nutrient.stored > 0.06 then 0.65 else 0;\ndivide = body.division_ready && energy.fraction > 0.62;\n\n# Targets do not grant capabilities: each organ must be built and paid for.\nlet assemble = if energy.fraction > 0.45 && nutrient.stored > 0.01 then 1 else 0;\ntarget.core.count = 2;\ntarget.core.size = max(0.04, body.area * 0.04);\nbuild.core = assemble;\ntarget.photosynthetic.count = 2;\ntarget.photosynthetic.size = 0.17;\nbuild.photosynthetic = assemble;\ntarget.metabolic.count = 2;\ntarget.metabolic.size = 0.04;\nbuild.metabolic = assemble;\ntarget.reserve.count = 2;\ntarget.reserve.size = 0.06;\nbuild.reserve = assemble;\ntarget.transporter.count = 2;\ntarget.transporter.size = 0.03;\nbuild.transporter = assemble;\ntarget.flagellum.count = 2;\ntarget.flagellum.size = 0.025;\nbuild.flagellum = assemble;\ntarget.photoreceptor.count = 2;\ntarget.photoreceptor.size = 0.01;\nbuild.photoreceptor = assemble;\ntarget.thermoreceptor.count = 2;\ntarget.thermoreceptor.size = 0.01;\nbuild.thermoreceptor = assemble;\ntarget.chemoreceptor.count = 2;\ntarget.chemoreceptor.size = 0.015;\nbuild.chemoreceptor = assemble;\ntarget.cortex.count = 2;\ntarget.cortex.size = 0.02;\nbuild.cortex = assemble;",
+      "description": "Build photosynthetic units and transporters, using paid light and chemical sensors.",
+      "languageVersion": 3,
+      "createdAt": 0,
+      "updatedAt": 0,
+      "genomeId": "builtin:genome:phototroph",
+      "starterBody": "producer",
+      "count": 72
+    },
+    {
+      "id": "builtin:genome:forager",
+      "name": "Forager",
+      "source": "# Small appearance and soft contact are useful clues, not guarantees of food.\nlet visible = object.available && object.valid;\nlet particle = visible && object.area < 0.35;\nlet sensed_contact = contact.available && contact.valid;\nlet blocked = sensed_contact && contact.resistance >= 0.12;\nlet soft_contact = sensed_contact && contact.resistance < 0.12;\nlet large_near = visible && !particle\n                 && length(object.offset) < 7 * (sqrt(body.area) + sqrt(object.area)) + 2;\nlet obstacle = if blocked then angle(contact.offset) else angle(object.offset);\n# Aim slightly beyond the tangent, so thrust carries us around and away.\nlet slide = if obstacle >= 0 then obstacle - 1.8 else obstacle + 1.8;\nlet seeking = gut.fraction < 0.55;\nlet cue = chemical.valid && chemical.organic > 0.001;\nturn = if blocked || large_near then clamp(slide * 2, -1, 1)\n       else if seeking && particle then clamp(angle(object.offset) * 1.8, -1, 1)\n       else if seeking && cue then clamp(chemical.organic_bearing * 1.5, -1, 1)\n       else sin(age * 0.65 + id) * 0.35;\nthrust = if blocked || large_near then 0.65\n         else if soft_contact || gut.fraction > 0.45 then 0\n         else if seeking && particle then 0.5 else 0.28;\nfeed = 1;\nengulf = gut.fraction < 0.65;\nphotosynthesize = 0;\nabsorb = if nutrient.fraction < 0.85 then 1 else 0;\nrepair = if integrity < 0.92 && energy.fraction > 0.55 then 0.4 else 0;\ngrow = if body.maturity < 1 && energy.fraction > 0.6\n          && nutrient.stored > 0.06 then 0.65 else 0;\ndivide = body.division_ready && energy.fraction > 0.62;\n\n# Targets do not grant capabilities: each organ must be built and paid for.\nlet assemble = if energy.fraction > 0.45 && nutrient.stored > 0.01 then 1 else 0;\ntarget.core.count = 2;\ntarget.core.size = max(0.04, body.area * 0.04);\nbuild.core = assemble;\ntarget.digestive.count = 2;\ntarget.digestive.size = 0.13;\nbuild.digestive = assemble;\ntarget.metabolic.count = 2;\ntarget.metabolic.size = 0.04;\nbuild.metabolic = assemble;\ntarget.reserve.count = 2;\ntarget.reserve.size = 0.06;\nbuild.reserve = assemble;\ntarget.transporter.count = 2;\ntarget.transporter.size = 0.02;\nbuild.transporter = assemble;\ntarget.phagocyte.count = 2;\ntarget.phagocyte.size = 0.05;\nbuild.phagocyte = assemble;\ntarget.flagellum.count = 2;\ntarget.flagellum.size = 0.05;\nbuild.flagellum = assemble;\ntarget.optical.count = 2;\ntarget.optical.size = 0.025;\nbuild.optical = assemble;\ntarget.chemoreceptor.count = 2;\ntarget.chemoreceptor.size = 0.015;\nbuild.chemoreceptor = assemble;\ntarget.mechanoreceptor.count = 2;\ntarget.mechanoreceptor.size = 0.01;\nbuild.mechanoreceptor = assemble;\ntarget.cortex.count = 2;\ntarget.cortex.size = 0.02;\nbuild.cortex = assemble;",
+      "description": "Approach small visible objects and local organic cues; slide away from resistant surfaces.",
+      "languageVersion": 3,
+      "createdAt": 0,
+      "updatedAt": 0,
+      "genomeId": "builtin:genome:forager",
+      "starterBody": "scavenger",
+      "count": 6
+    },
+    {
+      "id": "builtin:genome:mixotroph",
+      "name": "Mixotroph",
+      "source": "# Small appearance and soft contact are useful clues, not guarantees of food.\nlet visible = object.available && object.valid;\nlet particle = visible && object.area < 0.35;\nlet sensed_contact = contact.available && contact.valid;\nlet blocked = sensed_contact && contact.resistance >= 0.12;\nlet soft_contact = sensed_contact && contact.resistance < 0.12;\nlet large_near = visible && !particle\n                 && length(object.offset) < 7 * (sqrt(body.area) + sqrt(object.area)) + 2;\nlet obstacle = if blocked then angle(contact.offset) else angle(object.offset);\n# Aim slightly beyond the tangent, so thrust carries us around and away.\nlet slide = if obstacle >= 0 then obstacle - 1.8 else obstacle + 1.8;\nlet seek = particle && gut.fraction < 0.4 && energy.fraction < 0.75;\nturn = if blocked || large_near then clamp(slide * 1.5, -1, 1)\n       else if seek then clamp(angle(object.offset) * 1.5, -1, 1)\n       else if light.valid then clamp(light.bearing, -1, 1) else 0;\nthrust = if blocked || large_near then 0.45\n         else if soft_contact || gut.fraction > 0.4 then 0\n         else if seek then 0.3 else if light.valid && light.level < 0.3 then 0.1 else 0;\nfeed = 1;\nengulf = gut.fraction < 0.6;\nphotosynthesize = 1;\nabsorb = if nutrient.fraction < 0.85 then 1 else 0;\nrepair = if integrity < 0.92 && energy.fraction > 0.55 then 0.4 else 0;\ngrow = if body.maturity < 1 && energy.fraction > 0.6\n          && nutrient.stored > 0.06 then 0.65 else 0;\ndivide = body.division_ready && energy.fraction > 0.62;\n\n# Targets do not grant capabilities: each organ must be built and paid for.\nlet assemble = if energy.fraction > 0.45 && nutrient.stored > 0.01 then 1 else 0;\ntarget.core.count = 2;\ntarget.core.size = max(0.04, body.area * 0.04);\nbuild.core = assemble;\ntarget.photosynthetic.count = 2;\ntarget.photosynthetic.size = 0.1;\nbuild.photosynthetic = assemble;\ntarget.digestive.count = 2;\ntarget.digestive.size = 0.09;\nbuild.digestive = assemble;\ntarget.metabolic.count = 2;\ntarget.metabolic.size = 0.04;\nbuild.metabolic = assemble;\ntarget.reserve.count = 2;\ntarget.reserve.size = 0.05;\nbuild.reserve = assemble;\ntarget.transporter.count = 2;\ntarget.transporter.size = 0.025;\nbuild.transporter = assemble;\ntarget.phagocyte.count = 2;\ntarget.phagocyte.size = 0.04;\nbuild.phagocyte = assemble;\ntarget.flagellum.count = 2;\ntarget.flagellum.size = 0.035;\nbuild.flagellum = assemble;\ntarget.photoreceptor.count = 2;\ntarget.photoreceptor.size = 0.01;\nbuild.photoreceptor = assemble;\ntarget.chemoreceptor.count = 2;\ntarget.chemoreceptor.size = 0.015;\nbuild.chemoreceptor = assemble;\ntarget.optical.count = 2;\ntarget.optical.size = 0.02;\nbuild.optical = assemble;\ntarget.mechanoreceptor.count = 2;\ntarget.mechanoreceptor.size = 0.01;\nbuild.mechanoreceptor = assemble;",
+      "description": "Share finite internal space between light harvesting and contact feeding.",
+      "languageVersion": 3,
+      "createdAt": 0,
+      "updatedAt": 0,
+      "genomeId": "builtin:genome:mixotroph",
+      "starterBody": "mixed",
+      "count": 4
+    },
+    {
+      "id": "builtin:genome:predator",
+      "name": "Predator",
+      "source": "# Neither vision nor contact reveals another cell’s genome, diet or energy.\nlet hungry = energy.fraction < 0.7 && gut.fraction < 0.45;\nlet visible = object.available && object.valid;\nlet approachable = visible && object.area < body.area * 1.2;\nlet hot = heat.valid && heat.value > 0.82;\nlet cool = if heat.bearing > 0 then heat.bearing - 3.141593 else heat.bearing + 3.141593;\nlet touching = contact.available && contact.valid;\nturn = if hot then clamp(cool, -1, 1)\n       else if hungry && approachable then clamp(angle(object.offset) * 1.8, -1, 1)\n       else sin(age * 0.5 + id) * 0.4;\nthrust = if hot then 0.35 else if touching || gut.fraction > 0.45 then 0\n         else if hungry && approachable then 0.5 else 0.07;\nfeed = 1;\nphotosynthesize = 0;\nbite = if hungry && touching then 0.8 else 0;\nengulf = hungry && touching;\ndefend = if touching then 0.2 else 0;\nabsorb = if nutrient.fraction < 0.85 then 1 else 0;\nrepair = if integrity < 0.92 && energy.fraction > 0.55 then 0.4 else 0;\ngrow = if body.maturity < 1 && energy.fraction > 0.6\n          && nutrient.stored > 0.06 then 0.65 else 0;\ndivide = body.division_ready && energy.fraction > 0.62;\n\n# Targets do not grant capabilities: each organ must be built and paid for.\nlet assemble = if energy.fraction > 0.55 && nutrient.stored > 0.01 then 1 else 0;\ntarget.core.count = 2;\ntarget.core.size = max(0.04, body.area * 0.04);\nbuild.core = assemble;\ntarget.digestive.count = 2;\ntarget.digestive.size = 0.13;\nbuild.digestive = assemble;\ntarget.metabolic.count = 2;\ntarget.metabolic.size = 0.04;\nbuild.metabolic = assemble;\ntarget.reserve.count = 2;\ntarget.reserve.size = 0.06;\nbuild.reserve = assemble;\ntarget.transporter.count = 2;\ntarget.transporter.size = 0.02;\nbuild.transporter = assemble;\ntarget.phagocyte.count = 2;\ntarget.phagocyte.size = 0.04;\nbuild.phagocyte = assemble;\ntarget.flagellum.count = 2;\ntarget.flagellum.size = 0.065;\nbuild.flagellum = assemble;\ntarget.piercer.count = 2;\ntarget.piercer.size = 0.07;\nbuild.piercer = assemble;\ntarget.optical.count = 2;\ntarget.optical.size = 0.035;\nbuild.optical = assemble;\ntarget.mechanoreceptor.count = 2;\ntarget.mechanoreceptor.size = 0.015;\nbuild.mechanoreceptor = assemble;\ntarget.thermoreceptor.count = 2;\ntarget.thermoreceptor.size = 0.01;\nbuild.thermoreceptor = assemble;\ntarget.cortex.count = 2;\ntarget.cortex.size = 0.035;\nbuild.cortex = assemble;",
+      "description": "Approach visible objects when hungry and test contacted surfaces with a built piercer.",
+      "languageVersion": 3,
+      "createdAt": 0,
+      "updatedAt": 0,
+      "genomeId": "builtin:genome:predator",
+      "starterBody": "hunter",
+      "count": 2
+    }
+  ],
+  "mutationRate": 0,
+  "seeds": [
+    7
+  ],
+  "durationSeconds": 300,
+  "sampleSeconds": [
+    0,
+    30,
+    120,
+    299,
+    300
+  ],
+  "results": [
+    {
+      "seed": 7,
+      "wallSeconds": 155.903,
+      "samples": [
+        {
+          "seconds": 0,
+          "population": 84,
+          "births": 0,
+          "deaths": 0,
+          "organicParticles": 0,
+          "organicEnergy": 0,
+          "attacks": 0,
+          "predations": 0,
+          "mutations": 0,
+          "mineralError": 0,
+          "lineages": [
+            {
+              "name": "Phototroph",
+              "count": 72,
+              "area": 72,
+              "material": 186.912,
+              "energy": 12729.6,
+              "meanEnergyFraction": 0.85,
+              "gutEnergy": 0,
+              "photosynthesisRate": 0,
+              "digestionRate": 0,
+              "growthRate": 0,
+              "maxGeneration": 0,
+              "organelleMass": {
+                "photosynthetic": 14.4,
+                "digestive": 0,
+                "flagellum": 0,
+                "piercer": 0,
+                "optical": 0
+              }
+            },
+            {
+              "name": "Forager",
+              "count": 6,
+              "area": 6,
+              "material": 16.146,
+              "energy": 1060.8,
+              "meanEnergyFraction": 0.85,
+              "gutEnergy": 0,
+              "photosynthesisRate": 0,
+              "digestionRate": 0,
+              "growthRate": 0,
+              "maxGeneration": 0,
+              "organelleMass": {
+                "photosynthetic": 0,
+                "digestive": 0.72,
+                "flagellum": 0.42,
+                "piercer": 0,
+                "optical": 0.12
+              }
+            },
+            {
+              "name": "Mixotroph",
+              "count": 4,
+              "area": 4,
+              "material": 10.724,
+              "energy": 707.2,
+              "meanEnergyFraction": 0.85,
+              "gutEnergy": 0,
+              "photosynthesisRate": 0,
+              "digestionRate": 0,
+              "growthRate": 0,
+              "maxGeneration": 0,
+              "organelleMass": {
+                "photosynthetic": 0.48,
+                "digestive": 0.32,
+                "flagellum": 0.14,
+                "piercer": 0,
+                "optical": 0
+              }
+            },
+            {
+              "name": "Predator",
+              "count": 2,
+              "area": 2,
+              "material": 5.582,
+              "energy": 353.6,
+              "meanEnergyFraction": 0.85,
+              "gutEnergy": 0,
+              "photosynthesisRate": 0,
+              "digestionRate": 0,
+              "growthRate": 0,
+              "maxGeneration": 0,
+              "organelleMass": {
+                "photosynthetic": 0,
+                "digestive": 0.2,
+                "flagellum": 0.18,
+                "piercer": 0.16,
+                "optical": 0.08
+              }
+            }
+          ]
+        },
+        {
+          "seconds": 30,
+          "population": 90,
+          "births": 9,
+          "deaths": 3,
+          "organicParticles": 280,
+          "organicEnergy": 828.282,
+          "attacks": 287,
+          "predations": 2,
+          "mutations": 0,
+          "mineralError": 4.172306944383308e-11,
+          "lineages": [
+            {
+              "name": "Phototroph",
+              "count": 78,
+              "area": 104.752,
+              "material": 273.158,
+              "energy": 12655.698,
+              "meanEnergyFraction": 0.587,
+              "gutEnergy": 0,
+              "photosynthesisRate": 267.403,
+              "digestionRate": 0,
+              "growthRate": 0.685,
+              "maxGeneration": 1,
+              "organelleMass": {
+                "photosynthetic": 23.984,
+                "digestive": 0,
+                "flagellum": 3.684,
+                "piercer": 0,
+                "optical": 0
+              }
+            },
+            {
+              "name": "Forager",
+              "count": 5,
+              "area": 5.996,
+              "material": 17.44,
+              "energy": 655.073,
+              "meanEnergyFraction": 0.524,
+              "gutEnergy": 0.015,
+              "photosynthesisRate": 0,
+              "digestionRate": 0.286,
+              "growthRate": 0,
+              "maxGeneration": 0,
+              "organelleMass": {
+                "photosynthetic": 0,
+                "digestive": 0.737,
+                "flagellum": 0.486,
+                "piercer": 0,
+                "optical": 0.236
+              }
+            },
+            {
+              "name": "Mixotroph",
+              "count": 5,
+              "area": 6.754,
+              "material": 14.937,
+              "energy": 636.721,
+              "meanEnergyFraction": 0.574,
+              "gutEnergy": 0.058,
+              "photosynthesisRate": 11.997,
+              "digestionRate": 0.119,
+              "growthRate": 0.07,
+              "maxGeneration": 1,
+              "organelleMass": {
+                "photosynthetic": 0.82,
+                "digestive": 0.701,
+                "flagellum": 0.307,
+                "piercer": 0,
+                "optical": 0.147
+              }
+            },
+            {
+              "name": "Predator",
+              "count": 2,
+              "area": 3.096,
+              "material": 11.819,
+              "energy": 374.473,
+              "meanEnergyFraction": 0.591,
+              "gutEnergy": 58.899,
+              "photosynthesisRate": 0,
+              "digestionRate": 4.685,
+              "growthRate": 0.064,
+              "maxGeneration": 0,
+              "organelleMass": {
+                "photosynthetic": 0,
+                "digestive": 0.362,
+                "flagellum": 0.259,
+                "piercer": 0.252,
+                "optical": 0.14
+              }
+            }
+          ]
+        },
+        {
+          "seconds": 120,
+          "population": 164,
+          "births": 99,
+          "deaths": 19,
+          "organicParticles": 379,
+          "organicEnergy": 2191.169,
+          "attacks": 1961,
+          "predations": 10,
+          "mutations": 0,
+          "mineralError": 1.61662683240138e-10,
+          "lineages": [
+            {
+              "name": "Phototroph",
+              "count": 152,
+              "area": 179.089,
+              "material": 482.691,
+              "energy": 20506.79,
+              "meanEnergyFraction": 0.527,
+              "gutEnergy": 0,
+              "photosynthesisRate": 491.31,
+              "digestionRate": 0,
+              "growthRate": 0.655,
+              "maxGeneration": 3,
+              "organelleMass": {
+                "photosynthetic": 38.56,
+                "digestive": 0,
+                "flagellum": 7.438,
+                "piercer": 0,
+                "optical": 0
+              }
+            },
+            {
+              "name": "Forager",
+              "count": 5,
+              "area": 5.996,
+              "material": 21.289,
+              "energy": 473.193,
+              "meanEnergyFraction": 0.378,
+              "gutEnergy": 1.103,
+              "photosynthesisRate": 0,
+              "digestionRate": 4.787,
+              "growthRate": 0,
+              "maxGeneration": 0,
+              "organelleMass": {
+                "photosynthetic": 0,
+                "digestive": 0.737,
+                "flagellum": 0.486,
+                "piercer": 0,
+                "optical": 0.236
+              }
+            },
+            {
+              "name": "Mixotroph",
+              "count": 4,
+              "area": 4.067,
+              "material": 12.34,
+              "energy": 455.942,
+              "meanEnergyFraction": 0.6,
+              "gutEnergy": 0.013,
+              "photosynthesisRate": 6.05,
+              "digestionRate": 0.25,
+              "growthRate": 0,
+              "maxGeneration": 1,
+              "organelleMass": {
+                "photosynthetic": 0.458,
+                "digestive": 0.418,
+                "flagellum": 0.198,
+                "piercer": 0,
+                "optical": 0.138
+              }
+            },
+            {
+              "name": "Predator",
+              "count": 3,
+              "area": 4.178,
+              "material": 14.154,
+              "energy": 329.88,
+              "meanEnergyFraction": 0.466,
+              "gutEnergy": 18.867,
+              "photosynthesisRate": 0,
+              "digestionRate": 1.026,
+              "growthRate": 0,
+              "maxGeneration": 1,
+              "organelleMass": {
+                "photosynthetic": 0,
+                "digestive": 0.513,
+                "flagellum": 0.318,
+                "piercer": 0.333,
+                "optical": 0.192
+              }
+            }
+          ]
+        },
+        {
+          "seconds": 299,
+          "population": 319,
+          "births": 265,
+          "deaths": 30,
+          "organicParticles": 810,
+          "organicEnergy": 3667.694,
+          "attacks": 2989,
+          "predations": 17,
+          "mutations": 0,
+          "mineralError": 4.0449776861350983e-10,
+          "lineages": [
+            {
+              "name": "Phototroph",
+              "count": 306,
+              "area": 388.641,
+              "material": 923.75,
+              "energy": 44099.842,
+              "meanEnergyFraction": 0.536,
+              "gutEnergy": 0,
+              "photosynthesisRate": 693.256,
+              "digestionRate": 0,
+              "growthRate": 0.949,
+              "maxGeneration": 5,
+              "organelleMass": {
+                "photosynthetic": 86.638,
+                "digestive": 0,
+                "flagellum": 15.271,
+                "piercer": 0,
+                "optical": 0
+              }
+            },
+            {
+              "name": "Forager",
+              "count": 3,
+              "area": 3.671,
+              "material": 12.11,
+              "energy": 206.615,
+              "meanEnergyFraction": 0.347,
+              "gutEnergy": 48.905,
+              "photosynthesisRate": 0,
+              "digestionRate": 4.785,
+              "growthRate": 0,
+              "maxGeneration": 0,
+              "organelleMass": {
+                "photosynthetic": 0,
+                "digestive": 0.453,
+                "flagellum": 0.294,
+                "piercer": 0,
+                "optical": 0.144
+              }
+            },
+            {
+              "name": "Mixotroph",
+              "count": 8,
+              "area": 8.563,
+              "material": 22.336,
+              "energy": 848.568,
+              "meanEnergyFraction": 0.558,
+              "gutEnergy": 6.012,
+              "photosynthesisRate": 9.736,
+              "digestionRate": 2.837,
+              "growthRate": 0.129,
+              "maxGeneration": 2,
+              "organelleMass": {
+                "photosynthetic": 0.952,
+                "digestive": 0.872,
+                "flagellum": 0.432,
+                "piercer": 0,
+                "optical": 0.291
+              }
+            },
+            {
+              "name": "Predator",
+              "count": 2,
+              "area": 2.961,
+              "material": 14.155,
+              "energy": 278.627,
+              "meanEnergyFraction": 0.5,
+              "gutEnergy": 116.068,
+              "photosynthesisRate": 0,
+              "digestionRate": 8.813,
+              "growthRate": 0,
+              "maxGeneration": 1,
+              "organelleMass": {
+                "photosynthetic": 0,
+                "digestive": 0.361,
+                "flagellum": 0.231,
+                "piercer": 0.241,
+                "optical": 0.139
+              }
+            }
+          ]
+        },
+        {
+          "seconds": 300,
+          "population": 252,
+          "births": 266,
+          "deaths": 98,
+          "organicParticles": 1200,
+          "organicEnergy": 12292.707,
+          "attacks": 2989,
+          "predations": 17,
+          "mutations": 0,
+          "mineralError": 4.063167580170557e-10,
+          "lineages": [
+            {
+              "name": "Phototroph",
+              "count": 245,
+              "area": 309.143,
+              "material": 717.297,
+              "energy": 34835.243,
+              "meanEnergyFraction": 0.531,
+              "gutEnergy": 0,
+              "photosynthesisRate": 614.38,
+              "digestionRate": 0,
+              "growthRate": 0.85,
+              "maxGeneration": 5,
+              "organelleMass": {
+                "photosynthetic": 69.188,
+                "digestive": 0,
+                "flagellum": 12.193,
+                "piercer": 0,
+                "optical": 0
+              }
+            },
+            {
+              "name": "Forager",
+              "count": 0,
+              "area": 0,
+              "material": 0,
+              "energy": 0,
+              "meanEnergyFraction": null,
+              "gutEnergy": 0,
+              "photosynthesisRate": 0,
+              "digestionRate": 0,
+              "growthRate": 0,
+              "maxGeneration": null,
+              "organelleMass": {
+                "photosynthetic": 0,
+                "digestive": 0,
+                "flagellum": 0,
+                "piercer": 0,
+                "optical": 0
+              }
+            },
+            {
+              "name": "Mixotroph",
+              "count": 6,
+              "area": 6.415,
+              "material": 16.989,
+              "energy": 638.364,
+              "meanEnergyFraction": 0.56,
+              "gutEnergy": 8.072,
+              "photosynthesisRate": 7.696,
+              "digestionRate": 2.841,
+              "growthRate": 0,
+              "maxGeneration": 2,
+              "organelleMass": {
+                "photosynthetic": 0.713,
+                "digestive": 0.653,
+                "flagellum": 0.323,
+                "piercer": 0,
+                "optical": 0.218
+              }
+            },
+            {
+              "name": "Predator",
+              "count": 1,
+              "area": 1.566,
+              "material": 7.392,
+              "energy": 192.689,
+              "meanEnergyFraction": 0.6,
+              "gutEnergy": 45.21,
+              "photosynthesisRate": 0,
+              "digestionRate": 4.744,
+              "growthRate": 0,
+              "maxGeneration": 1,
+              "organelleMass": {
+                "photosynthetic": 0,
+                "digestive": 0.194,
+                "flagellum": 0.128,
+                "piercer": 0.134,
+                "optical": 0.07
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

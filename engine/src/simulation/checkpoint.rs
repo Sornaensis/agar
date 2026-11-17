@@ -1,159 +1,407 @@
 use super::*;
 use crate::checkpoint::{ensure, Reader, Result, Writer};
-
 impl World {
     pub(crate) fn write_checkpoint(&self, w: &mut Writer) {
-        for count in [self.ticks, self.births, self.deaths, self.eaten, self.mutations, self.mutations_skipped, self.predations, self.attacks] { w.u64(count); }
-        for value in [self.food_rate, self.mutation_rate, self.photosynthesis_total, self.nutrient_imports, self.food_credit] { w.f64(value); }
-        w.u32(self.next_id); w.u32(self.rng.0); w.u32(self.seed);
+        for v in [
+            self.ticks,
+            self.births,
+            self.deaths,
+            self.eaten,
+            self.mutations,
+            self.mutations_skipped,
+            self.predations,
+            self.attacks,
+        ] {
+            w.u64(v);
+        }
+        for v in [
+            self.food_rate,
+            self.mutation_rate,
+            self.photosynthesis_total,
+            self.nutrient_imports,
+            self.energy_imports,
+            self.food_credit,
+        ] {
+            w.f64(v);
+        }
+        w.u32(self.next_id);
+        w.u64(self.next_food_id);
+        w.u32(self.rng.0);
+        w.u32(self.seed);
         self.environment.write_checkpoint(w);
         w.count(self.cells.len());
-        for cell in &self.cells {
-            if w.failed() { return; }
-            for id in [cell.id, cell.genome_id, cell.generation, cell.parent_id] { w.u32(id); }
-            for value in [cell.x, cell.y, cell.vx, cell.vy, cell.angle, cell.energy, cell.size, cell.age, cell.cooldown,
-                cell.integrity, cell.photosynthesis_rate, cell.nutrient_stored, cell.uptake_rate, cell.remodeling_rate, cell.engulf_cooldown] { w.f64(value); }
-            for value in cell.body { w.f64(value); }
-            for value in [cell.gut_energy, cell.gut_nutrients, cell.digestion_rate, cell.growth_rate,
-                cell.birth_size, cell.exudation_rate] { w.f64(value); }
-            cell.memory.write_checkpoint(w);
+        for c in &self.cells {
+            if w.failed() {
+                return;
+            }
+            for id in [c.id, c.genome_id, c.generation, c.parent_id] {
+                w.u32(id);
+            }
+            for v in [
+                c.x,
+                c.y,
+                c.vx,
+                c.vy,
+                c.angle,
+                c.energy,
+                c.age,
+                c.cooldown,
+                c.integrity,
+                c.nutrient_stored,
+                c.gut_energy,
+                c.gut_nutrients,
+                c.birth_area,
+                c.photosynthesis_rate,
+                c.uptake_rate,
+                c.digestion_rate,
+                c.growth_rate,
+                c.exudation_rate,
+                c.construction_rate,
+                c.recycling_rate,
+                c.repair_rate,
+                c.engulf_cooldown,
+                c.scan_bearing,
+                c.scan_width,
+            ] {
+                w.f64(v);
+            }
+            c.body.write_checkpoint(w);
+            c.memory.write_checkpoint(w);
+            w.text(&c.scan_target);
+            for i in 0..FAMILY_COUNT {
+                w.u32(c.requested.target_counts[i]);
+                for v in [
+                    c.requested.target_sizes[i],
+                    c.requested.build[i],
+                    c.requested.recycle[i],
+                ] {
+                    w.f64(v);
+                }
+            }
+            w.u64(c.tracking.next_serial);
+            w.count(c.tracking.entries.len());
+            for t in &c.tracking.entries {
+                w.u64(t.entity);
+                w.u64(t.serial);
+                w.u64(t.seen);
+            }
         }
         w.count(self.food.len());
-        for food in &self.food { for value in [food.x, food.y, food.energy, food.nutrients] { w.f64(value); } }
+        for f in &self.food {
+            w.u64(f.id);
+            for v in [f.x, f.y, f.energy, f.nutrients] {
+                w.f64(v);
+            }
+        }
     }
     pub(crate) fn read_checkpoint(r: &mut Reader<'_>, genome_count: usize) -> Result<Self> {
         let mut counts = [0; 8];
-        for count in &mut counts { *count = r.u64()?; ensure(*count < u64::MAX / 2, "counter is outside its safe range")?; }
-        let food_rate = r.range(0.0, 60.0)?; let mutation_rate = r.range(0.0, 1.0)?;
-        let photosynthesis_total = r.range(0.0, 1e100)?; let nutrient_imports = r.range(0.0, 1e100)?;
+        for v in &mut counts {
+            *v = r.u64()?;
+            ensure(*v < u64::MAX / 2, "counter outside safe range")?;
+        }
+        let food_rate = r.range(0.0, 60.0)?;
+        let mutation_rate = r.range(0.0, 1.0)?;
+        let photosynthesis_total = r.range(0.0, 1e100)?;
+        let nutrient_imports = r.range(0.0, 1e100)?;
+        let energy_imports = r.range(0.0, 1e100)?;
         let food_credit = r.range(0.0, 1.0)?;
-        let next_id = r.u32()?; let random_state = r.u32()?; let seed = r.u32()?;
-        ensure(next_id > 0 && random_state != 0, "invalid cell or random sequence")?;
+        let next_id = r.u32()?;
+        let next_food_id = r.u64()?;
+        let rng = r.u32()?;
+        let seed = r.u32()?;
+        ensure(
+            next_id > 0 && next_food_id > 0 && next_food_id <= u64::MAX / 2 && rng != 0,
+            "invalid identifier or random sequence",
+        )?;
         let environment = Environment::read_checkpoint(r)?;
         let count = r.u32()? as usize;
-        // Every cell has fixed fields and a register count before any occupied
-        // registers. Bound untrusted counts by actual remaining checkpoint bytes,
-        // not an ecological population ceiling.
-        let minimum_cell_bytes = if r.version() == 1 { 180 } else { 236 };
-        ensure(count <= r.remaining().saturating_sub(4) / minimum_cell_bytes, "cell count exceeds the available checkpoint data")?;
+        ensure(
+            count <= r.remaining().saturating_sub(4) / 700,
+            "cell count exceeds checkpoint data",
+        )?;
         let mut cells = Vec::new();
-        cells.try_reserve_exact(count).map_err(|_| "Invalid simulation save: not enough memory to restore the organisms.".to_owned())?;
+        cells
+            .try_reserve_exact(count)
+            .map_err(|_| "Not enough memory to restore organisms".to_owned())?;
         let mut ids = std::collections::HashSet::new();
-        ids.try_reserve(count).map_err(|_| "Invalid simulation save: not enough memory to restore organism identifiers.".to_owned())?;
         for _ in 0..count {
-            let id = r.u32()?; let genome_id = r.u32()?; let generation = r.u32()?; let parent_id = r.u32()?;
-            ensure(id > 0 && id < next_id && ids.insert(id), "invalid or duplicate cell ID")?;
-            ensure(genome_id > 0 && genome_id as usize <= genome_count, "cell refers to an unavailable genome")?;
-            ensure(parent_id < id && ((parent_id == 0) == (generation == 0)), "invalid cell ancestry")?;
-            let x = r.range(0.0, WIDTH)?; let y = r.range(0.0, HEIGHT)?;
-            ensure(x < WIDTH && y < HEIGHT, "cell is outside the habitat")?;
-            let vx = r.range(-1e12, 1e12)?; let vy = r.range(-1e12, 1e12)?; let angle = r.range(0.0, TAU)?;
-            let energy = r.range(0.0, MAX_ENERGY * MAX_SIZE)?; let size = r.range(MIN_SIZE, MAX_SIZE)?;
-            let age = r.range(0.0, 1e100)?; let cooldown = r.range(0.0, DIVISION_COOLDOWN)?;
-            let integrity = r.range(0.0, 1.0)?; let photosynthesis_rate = r.range(0.0, 1e12)?;
-            let nutrient_stored = r.range(0.0, 2.0 * size + 1e-12)?;
-            let uptake_rate = r.range(0.0, 1e12)?; let remodeling_rate = r.range(0.0, 1e12)?;
-            let engulf_cooldown = r.range(0.0, 8.0)?;
-            let mut body = [0.0; 6];
-            let body_count = if r.version() >= 2 { 6 } else { 5 };
-            for value in &mut body[..body_count] { *value = r.range(0.0, 1.0)?; }
-            let (gut_energy, gut_nutrients, digestion_rate, growth_rate, birth_size, exudation_rate) = if r.version() >= 2 {
-                (r.range(0.0, 100.0 * size * body[DIGESTION] / 0.2 + 1e-9)?, r.range(0.0, 1e100)?,
-                    r.range(0.0, 1e12)?, r.range(0.0, 1e12)?, r.range(MIN_SIZE, size)?, r.range(0.0, 1e12)?)
-            } else { (0.0, 0.0, 0.0, 0.0, size.min(1.0), 0.0) };
-            ensure(gut_energy > 0.0 || gut_nutrients == 0.0, "empty gut contains undigested minerals")?;
-            ensure(energy > 0.0 && energy <= MAX_ENERGY * size + 1e-9 && integrity > 0.0 && body.iter().sum::<f64>() <= 1.0 + 1e-12, "cell violates biological limits")?;
+            let id = r.u32()?;
+            let genome_id = r.u32()?;
+            let generation = r.u32()?;
+            let parent_id = r.u32()?;
+            ensure(
+                id > 0 && id < next_id && ids.insert(id),
+                "invalid or duplicate cell ID",
+            )?;
+            ensure(
+                genome_id > 0 && genome_id as usize <= genome_count,
+                "unavailable cell genome",
+            )?;
+            ensure(
+                parent_id < id && ((parent_id == 0) == (generation == 0)),
+                "invalid ancestry",
+            )?;
+            let x = r.range(0.0, WIDTH)?;
+            let y = r.range(0.0, HEIGHT)?;
+            ensure(x < WIDTH && y < HEIGHT, "cell outside habitat")?;
+            let vx = r.range(-1e12, 1e12)?;
+            let vy = r.range(-1e12, 1e12)?;
+            let angle = r.range(0.0, TAU)?;
+            let energy = r.range(0.0, 1e12)?;
+            let age = r.range(0.0, LIFESPAN)?;
+            let cooldown = r.range(0.0, DIVISION_COOLDOWN)?;
+            let integrity = r.range(0.0, 1.0)?;
+            let nutrient_stored = r.range(0.0, 1e12)?;
+            let gut_energy = r.range(0.0, 1e12)?;
+            let gut_nutrients = r.range(0.0, 1e12)?;
+            let birth_area = r.range(0.0, MAX_AREA)?;
+            let mut rates = [0.0; 8];
+            for v in &mut rates {
+                *v = r.range(0.0, 1e12)?;
+            }
+            let engulf_cooldown = r.range(0.0, 2.0)?;
+            let scan_bearing = r.range(-PI, PI)?;
+            let scan_width = r.range(0.0, TAU)?;
+            let body = Body::read_checkpoint(r)?;
             let memory = Registers::read_checkpoint(r)?;
-            cells.push(Cell { id, genome_id, x, y, vx, vy, angle, energy, size, age, generation, parent_id, cooldown,
-                memory, integrity, photosynthesis_rate, nutrient_stored, body, uptake_rate, remodeling_rate, engulf_cooldown,
-                gut_energy, gut_nutrients, digestion_rate, growth_rate, birth_size, exudation_rate });
+            let scan_target = Rc::from(r.text(128)?);
+            let mut requested = BodyControls::default();
+            for i in 0..FAMILY_COUNT {
+                requested.target_counts[i] = r.u32()?;
+                ensure(
+                    requested.target_counts[i] <= i32::MAX as u32,
+                    "invalid target count",
+                )?;
+                requested.target_sizes[i] = r.range(0.0, 1e12)?;
+                requested.build[i] = r.range(0.0, 1.0)?;
+                requested.recycle[i] = r.range(0.0, 1.0)?;
+            }
+            let next_serial = r.u64()?;
+            let track_count = r.count(TRACK_LIMIT)?;
+            let mut entries = Vec::with_capacity(track_count);
+            let mut entities = std::collections::HashSet::new();
+            let mut serials = std::collections::HashSet::new();
+            for _ in 0..track_count {
+                let entity = r.u64()?;
+                let serial = r.u64()?;
+                let seen = r.u64()?;
+                ensure(
+                    entity > 1
+                        && entities.insert(entity)
+                        && serial > 0
+                        && serial <= next_serial
+                        && serials.insert(serial)
+                        && seen <= counts[0],
+                    "invalid observation track",
+                )?;
+                // Expired tracks are allowed at save time but cannot grant sight.
+                if entity & 1 == 0 {
+                    ensure(entity >> 1 < next_id as u64, "track names an unissued cell")?;
+                } else {
+                    ensure(
+                        entity >> 1 < next_food_id,
+                        "track names an unissued particle",
+                    )?;
+                }
+                entries.push(Track {
+                    entity,
+                    serial,
+                    seen,
+                });
+            }
+            let c = Cell {
+                id,
+                genome_id,
+                generation,
+                parent_id,
+                x,
+                y,
+                vx,
+                vy,
+                angle,
+                energy,
+                age,
+                cooldown,
+                integrity,
+                body,
+                memory,
+                nutrient_stored,
+                gut_energy,
+                gut_nutrients,
+                birth_area,
+                photosynthesis_rate: rates[0],
+                uptake_rate: rates[1],
+                digestion_rate: rates[2],
+                growth_rate: rates[3],
+                exudation_rate: rates[4],
+                construction_rate: rates[5],
+                recycling_rate: rates[6],
+                repair_rate: rates[7],
+                engulf_cooldown,
+                requested,
+                scan_bearing,
+                scan_width,
+                scan_target,
+                tracking: Tracking {
+                    entries,
+                    next_serial,
+                },
+            };
+            let caps = c.body.capacities();
+            ensure(
+                c.alive()
+                    && c.body.area <= MAX_AREA
+                    && birth_area > 0.0
+                    && birth_area <= c.body.area + 1e-10
+                    && age < LIFESPAN,
+                "invalid living body",
+            )?;
+            ensure(
+                energy <= caps.energy + 1e-9
+                    && nutrient_stored <= caps.minerals + 1e-9
+                    && gut_energy <= caps.gut_energy + 1e-9
+                    && gut_nutrients <= caps.gut_minerals + 1e-9,
+                "contents exceed physical compartments",
+            )?;
+            ensure(
+                gut_energy > 0.0 || gut_nutrients == 0.0,
+                "empty gut contains minerals",
+            )?;
+            cells.push(c);
         }
-        let count = r.count(MAX_FOOD)?; let mut food = Vec::with_capacity(count);
+        let count = r.count(MAX_FOOD)?;
+        let mut food = Vec::with_capacity(count);
+        let mut food_ids = std::collections::HashSet::new();
         for _ in 0..count {
-            let x = r.range(0.0, WIDTH)?; let y = r.range(0.0, HEIGHT)?;
-            let energy = r.range(0.0, 24.0)?; let nutrients = r.range(0.0, 1e100)?;
-            ensure(x < WIDTH && y < HEIGHT && energy > 0.0, "invalid food particle")?;
-            food.push(Food { x, y, energy, nutrients });
+            let id = r.u64()?;
+            let x = r.range(0.0, WIDTH)?;
+            let y = r.range(0.0, HEIGHT)?;
+            let energy = r.range(0.0, 24.0)?;
+            let nutrients = r.range(0.0, 1e100)?;
+            ensure(
+                id > 0
+                    && id < next_food_id
+                    && food_ids.insert(id)
+                    && x < WIDTH
+                    && y < HEIGHT
+                    && energy > 0.0,
+                "invalid particle",
+            )?;
+            food.push(Food {
+                id,
+                x,
+                y,
+                energy,
+                nutrients,
+            });
         }
-        Ok(Self { cells, food, ticks: counts[0], births: counts[1], deaths: counts[2], eaten: counts[3], food_rate, mutation_rate,
-            mutations: counts[4], mutations_skipped: counts[5], environment, predations: counts[6], attacks: counts[7],
-            photosynthesis_total, nutrient_imports, food_credit, next_id, rng: Rng(random_state), seed })
+        let world = Self {
+            cells,
+            food,
+            ticks: counts[0],
+            births: counts[1],
+            deaths: counts[2],
+            eaten: counts[3],
+            mutations: counts[4],
+            mutations_skipped: counts[5],
+            predations: counts[6],
+            attacks: counts[7],
+            food_rate,
+            mutation_rate,
+            photosynthesis_total,
+            nutrient_imports,
+            energy_imports,
+            food_credit,
+            next_id,
+            next_food_id,
+            rng: Rng(rng),
+            seed,
+            environment,
+        };
+        // Individual compartment bounds cannot detect a forged but locally
+        // plausible reserve or particle. Preserve the complete world's ledger.
+        // Tolerance accommodates accumulated floating-point transfer rounding,
+        // without making the admissible error depend on the forged total.
+        let material = world.nutrient_total();
+        let introduced_material = world.nutrient_input_total();
+        let material_tolerance = 1e-6 + introduced_material.abs() * 1e-9;
+        ensure(
+            material.is_finite()
+                && introduced_material.is_finite()
+                && (material - introduced_material).abs() <= material_tolerance,
+            "material ledger does not match recorded introductions",
+        )?;
+        // Introduction energy includes fabrication heat; metabolism, conversion
+        // losses and particle decay also dissipate energy. Equality is incorrect.
+        let energy = world.energy_total();
+        let supplied = world.energy_input_total() + world.photosynthesis_total;
+        let energy_tolerance = 1e-6 + supplied.abs() * 1e-9;
+        ensure(
+            energy.is_finite() && supplied.is_finite() && energy <= supplied + energy_tolerance,
+            "stored energy exceeds recorded introductions and photosynthesis",
+        )?;
+        Ok(world)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::checkpoint::{restore, save};
+    use super::*;
+    use crate::{checkpoint, Engine};
 
     #[test]
-    fn trophic_fields_roundtrip_exactly_and_invalid_guts_or_birth_mass_are_atomic() {
-        let mut engine = crate::Engine::new();
-        let id = engine.compile("thrust = 0; turn = 0; divide = false; grow = .5; photosynthesize = 1; invest.photosynthesis = 0; invest.attack = .2;");
-        engine.world.seed_cells(id, 1, -1.0, -1.0);
-        let cell = &mut engine.world.cells[0];
-        cell.body = [0.2, 0.0, 0.2, 0.2, 0.2, 0.2];
-        cell.age = 37.25; cell.size = 1.8; cell.birth_size = 0.9;
-        cell.gut_energy = 42.75; cell.gut_nutrients = 0.625;
-        cell.digestion_rate = 1.25; cell.growth_rate = 0.03; cell.exudation_rate = 0.125;
-        let body = cell.body;
-        let bytes = save(&engine).unwrap();
-        let mut copy = restore(&bytes).unwrap();
-        let actual = &copy.world.cells[0];
-        assert_eq!(actual.body, body);
-        assert_eq!((actual.gut_energy, actual.gut_nutrients, actual.digestion_rate,
-            actual.growth_rate, actual.birth_size, actual.exudation_rate),
-            (42.75, 0.625, 1.25, 0.03, 0.9, 0.125));
-        assert_eq!(save(&copy).unwrap(), bytes);
-        for _ in 0..60 { engine.world.step(&mut engine.genomes); copy.world.step(&mut copy.genomes); }
-        assert_eq!(save(&engine).unwrap(), save(&copy).unwrap());
-
-        let before = save(&engine).unwrap();
-        for invalid in 0..7 {
-            let mut bad = restore(&before).unwrap();
-            let cell = &mut bad.world.cells[0];
-            match invalid {
-                0 => cell.gut_energy = cell.gut_capacity() + 1.0,
-                1 => cell.gut_energy = f64::NAN,
-                2 => cell.gut_nutrients = -1.0,
-                3 => cell.birth_size = 0.0,
-                4 => cell.birth_size = cell.size + 0.1,
-                5 => cell.growth_rate = f64::INFINITY,
-                _ => { cell.gut_energy = 0.0; cell.gut_nutrients = 1.0; }
+    fn aggregate_restore_ledgers_reject_checksum_correct_resource_injection_atomically() {
+        let mut live = Engine::new();
+        let id = live.compile("thrust=0;turn=0;divide=false;feed=0;absorb=0;");
+        live.world.reset_empty(97, 0);
+        live.world
+            .try_seed_body(id, 1, 200.0, 200.0, BodyRecipe::Bare)
+            .unwrap();
+        live.world.add_food(300.0, 200.0, 1);
+        let before = checkpoint::save(&live).unwrap();
+        assert_eq!(
+            checkpoint::save(&checkpoint::restore(&before).unwrap()).unwrap(),
+            before
+        );
+        for variation in 0..5 {
+            let mut forged = checkpoint::restore(&before).unwrap();
+            match variation {
+                0 => forged.world.food[0].nutrients += 1.0,
+                1 => forged.world.cells[0].nutrient_stored += 0.1,
+                2 => {
+                    // This bare recipe's remaining energy capacity exceeds its
+                    // initial fabrication losses; filling it grants unrecorded
+                    // energy while remaining inside the compartment bound.
+                    let cell = &mut forged.world.cells[0];
+                    cell.energy = cell.energy_capacity();
+                    assert!(forged.world.energy_total() > forged.world.energy_input_total() + 1e-3);
+                }
+                3 => forged.world.cells[0].body.organs[0].embodied_energy += 1.0,
+                _ => forged.world.cells[0].body.scaffold_energy += 1.0,
             }
-            assert!(!engine.restore_state(&save(&bad).unwrap()));
-            assert_eq!(save(&engine).unwrap(), before);
+            // Saving the forged in-memory state supplies a valid checksum; the
+            // rejection must come from semantic validation, not corruption.
+            let bytes = checkpoint::save(&forged).unwrap();
+            assert!(
+                !live.restore_state(&bytes),
+                "accepted resource injection {variation}"
+            );
+            assert!(!live.error.contains("checksum"));
+            if variation <= 1 {
+                assert!(live.error.contains("material ledger"), "{}", live.error);
+            }
+            if variation == 2 {
+                assert!(live.error.contains("stored energy"), "{}", live.error);
+            }
+            if variation >= 3 {
+                assert!(live.error.contains("energy ledger"), "{}", live.error);
+            }
+            assert_eq!(
+                checkpoint::save(&live).unwrap(),
+                before,
+                "failed restore changed live state"
+            );
         }
-    }
-
-    #[test]
-    fn full_guts_roundtrip_after_division_and_capacity_reducing_remodeling() {
-        let mut engine = crate::Engine::new();
-        let id = engine.compile("thrust = 0; turn = 0; divide = true; feed = 0; absorb = 0;");
-        engine.world.seed_cells(id, 1, -1.0, -1.0);
-        engine.world.food_rate = 0.0; engine.world.mutation_rate = 0.0;
-        let cell = &mut engine.world.cells[0];
-        cell.size = 2.0; cell.energy = 300.0; cell.cooldown = 0.0; cell.age = 20.0;
-        cell.gut_energy = cell.gut_capacity(); cell.gut_nutrients = 1.0;
-        let minerals = engine.world.nutrient_total();
-        engine.world.step(&mut engine.genomes);
-        assert_eq!(engine.world.cells.len(), 2);
-        for cell in &engine.world.cells {
-            assert_eq!(cell.gut_energy, cell.gut_capacity());
-            assert_eq!(cell.gut_nutrients, 0.5);
-        }
-        let divided = save(&engine).unwrap();
-        assert_eq!(save(&restore(&divided).unwrap()).unwrap(), divided);
-        let smaller_gut = engine.compile("thrust = 0; turn = 0; divide = false; feed = 0; absorb = 0; invest.digestion = .1; invest.attack = .1;");
-        for cell in &mut engine.world.cells { cell.genome_id = smaller_gut; }
-        engine.world.step(&mut engine.genomes);
-        assert!(engine.world.cells.iter().all(|cell| cell.gut_capacity() < 100.0
-            && (cell.gut_energy - cell.gut_capacity()).abs() < 1e-9));
-        assert!(!engine.world.food.is_empty(), "remodeling spills the digestive contents that no longer fit");
-        assert!((engine.world.nutrient_total() - minerals).abs() < 1e-9);
-        let remodeled = save(&engine).unwrap();
-        let mut restored = restore(&remodeled).unwrap();
-        assert_eq!(save(&restored).unwrap(), remodeled);
-        for _ in 0..30 { engine.world.step(&mut engine.genomes); restored.world.step(&mut restored.genomes); }
-        assert_eq!(save(&restored).unwrap(), save(&engine).unwrap());
     }
 }
