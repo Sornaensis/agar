@@ -84,6 +84,20 @@ function setup() {
   assert.equal(Object.hasOwn(committed[0], 'state'), false, 'List metadata does not retain checkpoint bytes');
 }
 
+// A batch may fail after earlier ticks advanced. Save metadata must still align
+// with those completed ticks, and the original failure must remain visible.
+{
+  const { engine, session, writes } = setup();
+  engine.tick = function () { this.time += 2; throw new Error('Organism allocation failed'); };
+  assert.throws(() => session.advance(5), /allocation failed/);
+  assert.equal(session.world.time, 2);
+  assert.equal(session.metadata.summary.time, 2);
+  assert.notEqual(session.savedRevision, session.revision);
+  const saved = session.checkpoint();
+  assert.equal(writes[0].record.summary.time, decode(writes[0].record.state).time);
+  writes[0].resolve(); await saved;
+}
+
 // Both synchronous validation failure and asynchronous commit failure remain dirty and retryable.
 for (const failure of ['snapshot', 'validation', 'commit']) {
   const { engine, session, storage, writes, statuses, committed } = setup();

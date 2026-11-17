@@ -7,12 +7,14 @@ export const PRESETS: Preset[] = [
 let danger = threat.visible;
 let away = if threat.angle > 0 then threat.angle - 3.141593
            else threat.angle + 3.141593;
-let seeking = food.visible && gut.fraction < 0.8;
+let meal = food.visible && food.energy > size * (0.5 + food.distance * 0.04);
+let seeking = meal && gut.fraction < 0.7;
+let at_food = meal && food.distance <= 7 * sqrt(size) + 2.5;
 let wander = sin(age * 0.7 + id) * 0.5;
 turn = if danger then clamp(away * 2, -1, 1)
        else if seeking then clamp(food.angle * 1.8, -1, 1) else wander;
-thrust = if danger then 0.8 else if seeking then 0.45
-         else if gut.fraction > 0.3 then 0.05 else 0.15;
+thrust = if danger then 0.8 else if at_food || gut.fraction > 0.45 then 0
+         else if gut.fraction > 0.1 then 0.05 else if seeking then 0.45 else 0.08;
 
 # Keep feeding enabled so stored food can continue digesting.
 feed = 1;
@@ -20,9 +22,9 @@ photosynthesize = 0;
 absorb = if nutrient.fraction < 0.5 then 1 else 0;
 defend = if danger then 0.4 else 0;
 repair = if integrity < 0.9 && energy.fraction > 0.6 then 0.3 else 0;
-grow = if maturity < 1 && energy.fraction > 0.65
+grow = if maturity < 1 && energy.fraction > 0.52
           && nutrient.stored > 0.05 then 0.75 else 0;
-divide = maturity >= 1 && energy.fraction > 0.72;
+divide = maturity >= 1 && energy.fraction > 0.6;
 
 invest.propulsion = 0.22;
 invest.photosynthesis = 0;
@@ -38,18 +40,21 @@ invest.attack = 0;`,
 let danger = threat.visible;
 let away = if threat.angle > 0 then threat.angle - 3.141593
            else threat.angle + 3.141593;
-let seeking = food.visible && gut.fraction < 0.6;
+let meal = food.visible && food.energy > size * (0.5 + food.distance * 0.04);
+let seeking = meal && gut.fraction < 0.6;
+let at_food = meal && food.distance <= 7 * sqrt(size) + 2.5;
 turn = if danger then clamp(away * 2, -1, 1)
        else if seeking then clamp(food.angle * 1.5, -1, 1)
        else sin(age * 0.45 + id) * 0.22;
-thrust = if danger then 0.75 else if seeking then 0.3 else 0.06;
+thrust = if danger then 0.75 else if at_food || gut.fraction > 0.45 then 0
+         else if gut.fraction > 0.1 then 0.02 else if seeking then 0.3 else 0.04;
 feed = 1;
 photosynthesize = 0;
 absorb = if nutrient.fraction < 0.5 then 1 else 0;
 defend = if danger then 0.3 else 0;
-grow = if maturity < 1 && energy.fraction > 0.7
+grow = if maturity < 1 && energy.fraction > 0.58
           && nutrient.stored > 0.05 then 0.5 else 0;
-divide = maturity >= 1 && energy.fraction > 0.8;
+divide = maturity >= 1 && energy.fraction > 0.65;
 
 invest.propulsion = 0.08;
 invest.photosynthesis = 0;
@@ -65,19 +70,22 @@ invest.attack = 0;`,
 let hungry = energy.fraction < 0.55 && gut.fraction < 0.4;
 let away = if threat.angle > 0 then threat.angle - 3.141593
            else threat.angle + 3.141593;
-let seeking = food.visible && gut.fraction < 0.7;
+let meal = food.visible && food.energy > size * (0.5 + food.distance * 0.04);
+let seeking = meal && gut.fraction < 0.7;
+let at_food = meal && food.distance <= 7 * sqrt(size) + 2.5;
 turn = if danger then clamp(away * 2, -1, 1)
        else if seeking then clamp(food.angle * 2, -1, 1)
        else sin(age * 0.4 + id) * 0.4;
-thrust = if danger then 0.75 else if seeking then 0.35
-         else if hungry then 0.12 else 0.03;
+thrust = if danger then 0.75 else if at_food || gut.fraction > 0.45 then 0
+         else if gut.fraction > 0.1 then 0.02 else if seeking then 0.35
+         else if hungry then 0.1 else 0.02;
 feed = 1;
 photosynthesize = 0;
 absorb = if nutrient.fraction < 0.6 then 1 else 0;
 defend = if danger then 0.3 else 0;
-grow = if maturity < 1 && energy.fraction > 0.75
+grow = if maturity < 1 && energy.fraction > 0.6
           && nutrient.stored > 0.05 then 0.35 else 0;
-divide = maturity >= 1 && energy.fraction > 0.85;
+divide = maturity >= 1 && energy.fraction > 0.68;
 
 # Leave 40% unassigned, while retaining digestion and a lookout.
 invest.propulsion = 0.10;
@@ -94,19 +102,22 @@ invest.attack = 0;`,
 let danger = threat.visible;
 let away = if threat.angle > 0 then threat.angle - 3.141593
            else threat.angle + 3.141593;
-let seeking = food.visible && gut.fraction < 0.8;
+let meal = food.visible && food.energy > size * (0.5 + food.distance * 0.04);
+let seeking = meal && gut.fraction < 0.7;
+let at_food = meal && food.distance <= 7 * sqrt(size) + 2.5;
 turn = if danger then clamp(away * 2, -1, 1)
        else if seeking then clamp(food.angle * 1.8, -1, 1)
        else sin(age * 0.6 + id) * 0.4;
-thrust = if danger then 0.8 else if seeking then 0.4 else 0.1;
+thrust = if danger then 0.8 else if at_food || gut.fraction > 0.45 then 0
+         else if gut.fraction > 0.1 then 0.03 else if seeking then 0.4 else 0.06;
 feed = 1;
 photosynthesize = 0;
 absorb = if nutrient.fraction < 0.6 then 1 else 0;
 defend = if danger then 0.5 else 0;
 repair = if integrity < 0.9 && energy.fraction > 0.6 then 0.3 else 0;
-grow = if size < target && energy.fraction > 0.65
+grow = if size < target && energy.fraction > 0.55
           && nutrient.stored > 0.05 then 0.8 else 0;
-divide = size >= target && maturity >= 1 && energy.fraction > 0.8;
+divide = size >= target && maturity >= 1 && energy.fraction > 0.65;
 
 invest.propulsion = 0.12;
 invest.photosynthesis = 0;
@@ -119,13 +130,15 @@ invest.attack = 0;`,
     name: 'Rememberer',
     description: 'Heterotroph. Remember food bearings and a feeding mode while keeping watch for attackers.',
     source: `# Reads see old memory. Writes commit together after this tick.
-ri001 = ri001 + 1 when !food.visible;
-clear ri001 when food.visible;
-rf001 = food.angle when food.visible;
-clear rf001 when !food.visible && ri001 > 90;
+let meal = food.visible && food.energy > size * (0.5 + food.distance * 0.04);
+let at_food = meal && food.distance <= 7 * sqrt(size) + 2.5;
+ri001 = ri001 + 1 when !meal;
+clear ri001 when meal;
+rf001 = food.angle when meal;
+clear rf001 when !meal && ri001 > 90;
 rb001 = if energy.fraction < 0.35 then true
         else if energy.fraction > 0.75 then false else rb001;
-rs001 = if food.visible then "forage" else "search";
+rs001 = if meal then "forage" else "search";
 rv001 = vec(flow.x, flow.y);
 
 let danger = threat.visible;
@@ -133,19 +146,20 @@ let away = if threat.angle > 0 then threat.angle - 3.141593
            else threat.angle + 3.141593;
 let remembered = populated(rf001) && ri001 < 90;
 turn = if danger then clamp(away * 2, -1, 1)
-       else if food.visible then clamp(food.angle * 1.8, -1, 1)
+       else if meal then clamp(food.angle * 1.8, -1, 1)
        else if remembered then clamp(rf001, -1, 1)
        else sin(age * 0.7 + id) * 0.5;
-thrust = if danger then 0.8
-         else if rs001 == "forage" && gut.fraction < 0.8 then 0.42
+thrust = if danger then 0.8 else if at_food || gut.fraction > 0.45 then 0
+         else if gut.fraction > 0.1 then 0.03
+         else if rs001 == "forage" && gut.fraction < 0.7 then 0.42
          else if rb001 || length(rv001) > 10 then 0.2 else 0.05;
 feed = 1;
 photosynthesize = 0;
 absorb = if nutrient.fraction < 0.6 then 1 else 0;
 defend = if danger then 0.4 else 0;
-grow = if maturity < 1 && energy.fraction > 0.65
+grow = if maturity < 1 && energy.fraction > 0.55
           && nutrient.stored > 0.05 then 0.6 else 0;
-divide = maturity >= 1 && energy.fraction > 0.78;
+divide = maturity >= 1 && energy.fraction > 0.65;
 
 invest.propulsion = 0.20;
 invest.photosynthesis = 0;
@@ -192,23 +206,41 @@ invest.attack = 0;`,
   {
     name: 'Predator',
     description: 'Heterotroph. Split a finite body between attacking and digesting; hunt only when hungry.',
-    source: `# Organic feeding and attacks share a finite gut.
-let hungry = energy.fraction < 0.72 && gut.fraction < 0.35;
+    source: `# Fill a reserve before spending it on growth. Empty rb001 starts false.
+let replenish = if energy.fraction >= 0.75 || gut.fraction >= 0.65 then false
+                else if energy.fraction < 0.4 then true else rb001;
+rb001 = replenish;
+let hungry = replenish && gut.fraction < 0.35;
+let hot = temperature.value > 0.8;
+# A fully heated patch has no gradient: swim straight until its edge.
+let cool = if temperature.value > 0.99 then 0
+           else if temperature.angle > 0 then temperature.angle - 3.141593
+           else temperature.angle + 3.141593;
 let vulnerable = prey.visible && !prey.same_genome
                  && prey.attack < body.attack;
-let hunt = hungry && vulnerable;
+let meal = food.visible && food.energy > size * (0.5 + food.distance * 0.04);
+let seeking = meal && gut.fraction < 0.7;
+let nearby_meal = seeking && (food.distance < 40 || !prey.visible
+                             || food.distance < prey.distance);
+let at_food = meal && food.distance <= 7 * sqrt(size) + 2.5;
+let hunt = !hot && hungry && vulnerable && !nearby_meal;
 # Contact distance follows the cells' radius = 7 * sqrt(size).
 let contact = prey.distance <= 7 * (sqrt(size) + sqrt(prey.size)) + 0.75;
-let seeking = food.visible && gut.fraction < 0.7;
 let escape = threat.visible && threat.size > size * 1.25;
 let away = if threat.angle > 0 then threat.angle - 3.141593
            else threat.angle + 3.141593;
 turn = if escape then clamp(away * 2, -1, 1)
+       else if hot then clamp(cool * 1.5, -1, 1)
+       else if nearby_meal then clamp(food.angle * 1.8, -1, 1)
        else if hunt then clamp(prey.angle * 2, -1, 1)
        else if seeking then clamp(food.angle * 1.8, -1, 1)
        else sin(age * 0.6 + id) * 0.4;
-thrust = if escape then 0.85 else if hunt then 0.6
-         else if seeking then 0.4 else if gut.fraction > 0.3 then 0.04 else 0.12;
+thrust = if escape then 0.85 else if hot then 0.6
+         else if gut.fraction > 0.45 then 0
+         else if nearby_meal && at_food then 0
+         else if hunt then if contact then 0.22 else 0.6
+         else if seeking then if at_food then 0 else 0.4
+         else if gut.fraction > 0.1 then 0.03 else 0.08;
 feed = 1;
 photosynthesize = 0;
 bite = if hunt && contact then 0.8 else 0;
@@ -217,9 +249,9 @@ engulf = hunt && contact && prey.integrity <= 0.35
 defend = if escape then 0.5 else 0;
 repair = if integrity < 0.9 && energy.fraction > 0.6 then 0.3 else 0;
 absorb = if nutrient.fraction < 0.6 then 1 else 0;
-grow = if maturity < 1 && energy.fraction > 0.7
+grow = if !hot && !replenish && maturity < 1 && energy.fraction > 0.45
           && nutrient.stored > 0.05 then 0.6 else 0;
-divide = maturity >= 1 && energy.fraction > 0.8;
+divide = !replenish && maturity >= 1 && energy.fraction > 0.6;
 
 # Attack tissue has to displace another capability.
 invest.propulsion = 0.23;
@@ -235,20 +267,23 @@ invest.attack = 0.25;`,
     source: `let danger = threat.visible;
 let away = if threat.angle > 0 then threat.angle - 3.141593
            else threat.angle + 3.141593;
-let seeking = food.visible && gut.fraction < 0.55 && energy.fraction < 0.8;
+let meal = food.visible && food.energy > size * (0.5 + food.distance * 0.04);
+let seeking = meal && gut.fraction < 0.55 && energy.fraction < 0.8;
+let at_food = meal && food.distance <= 7 * sqrt(size) + 2.5;
 turn = if danger then clamp(away * 2, -1, 1)
        else if seeking then clamp(food.angle * 1.8, -1, 1)
        else clamp(light.angle * 1.8, -1, 1);
-thrust = if danger then 0.8 else if seeking then 0.35
+thrust = if danger then 0.8 else if at_food || gut.fraction > 0.45 then 0
+         else if gut.fraction > 0.1 then 0.02 else if seeking then 0.35
          else if light.level < 0.3 then 0.12 else 0.035;
 feed = 1;
 photosynthesize = if light.level > 0.08 then 1 else 0;
 absorb = if nutrient.fraction < 0.6 then 1 else 0;
 defend = if danger then 0.4 else 0;
 repair = if integrity < 0.9 && energy.fraction > 0.6 then 0.3 else 0;
-grow = if maturity < 1 && energy.fraction > 0.7
+grow = if maturity < 1 && energy.fraction > 0.55
           && nutrient.stored > 0.05 then 0.5 else 0;
-divide = maturity >= 1 && energy.fraction > 0.8;
+divide = maturity >= 1 && energy.fraction > 0.65;
 
 # Both energy paths share the same body budget.
 invest.propulsion = 0.12;

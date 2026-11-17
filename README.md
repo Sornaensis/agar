@@ -215,16 +215,24 @@ The environment editor controls ambient conditions, external organic input, star
 
 Particles and captured prey enter a finite gut. Capacity is `100 × size × (body.digestion / 0.2)` raw energy. Processing is bounded by `6 × size × (body.digestion / 0.2) × feed` raw energy/s. Only 65% becomes usable reserve energy; the remainder dissipates. Capturing a cell therefore cannot instantly refill reserves. Gut minerals are transferred proportionally as material is processed; excess free minerals return to the water.
 
-`photosynthesize` requests light harvesting, limited by tissue, local light, and competition. At least 12% of gross production is allocated to organic release; production beyond reserve capacity can also be released. It becomes particles when space is available; energy that cannot fit the particle budget dissipates. Releases appear outside the producer membrane so consumers can reach them. Nearby releases merge outside the producer body, avoiding a new particle for every cell on every tick. Exudates contain energy but no invented minerals. Organic material decays, returning its minerals to water while energy dissipates.
+`food.*` selects a sensed particle by `energy / (distance + 20)`, balancing meal size against travel distance. It does not always select the nearest trace. `food.energy` and `food.nutrients` expose the selected particle's raw energy and mineral content; both are zero when no food is visible. The built-in consumers slow down at a meal and while digesting, and predators can scavenge a worthwhile nearby meal before hunting.
+
+The built-in Predator uses `rb001` to remember a hunger cycle. It enters replenishment below 40% reserve and leaves at 75%, or when its gut is sufficiently full. Growth and division wait while it replenishes; feeding stays enabled so digestion can continue. It also swims away from hot water and suspends hunting and growth during that escape. These behaviors are ordinary editable genome code.
+
+`photosynthesize` requests light harvesting, limited by tissue, local light, and competition. Producers draw from overlapping, smoothly weighted capture areas with radius `60 × sqrt(size)`, so collection area scales with biomass. Each patch shares its finite light supply between those demands; the whole habitat supplies at most 2,400 gross energy/s under uniform light level 1. Local light scales the supply. This makes crowding reduce the energy available per cell without imposing a population limit.
+
+At least 12% of gross photosynthesis is allocated to organic release; production beyond reserve capacity can also be released. It becomes particles when space is available; energy that cannot fit the particle budget dissipates. Releases appear outside the producer membrane so consumers can reach them. Nearby releases merge outside the producer body, avoiding a new particle for every cell on every tick. Exudates contain energy but no invented minerals. Organic material decays, returning its minerals to water while energy dissipates.
 
 | Output | Behavior |
 | --- | --- |
-| `bite` | Spend energy to wound the sensed prey in contact. Requires attack tissue; digestion does not increase damage. |
+| `bite` | Spend energy to wound the sensed prey in contact. Requires attack tissue. With feeding active and gut room, a successful bite also transfers some of the prey's existing reserve energy and free minerals into the attacker's gut. |
 | `engulf` | Request capture of touching prey with **integrity ≤ 35%** and no more than **1 / 1.6** of the attacker's biomass. Attack and digestion tissue, gut room, energy, and a handling cooldown are also required. |
 | `defend` | Spend energy on active defense; armor also provides passive protection. |
 | `repair` | Spend energy to restore integrity. Cost scales with body mass. |
 
-Prey sensing prefers a non-kin target, with a same-genome fallback, including larger cells. Programs can inspect prey size and capabilities to decide whether to attack; the engulf size restriction still applies. Threat sensing detects nearby attack-capable cells of comparable or larger size; it reports capability, not intent. New `prey.integrity`, `prey.attack`, and `prey.photosynthesis` signals allow selective hunting and avoidance.
+Prey sensing prefers a non-kin target, with a same-genome fallback, including larger cells. Programs can inspect prey size and capabilities to decide whether to attack; the engulf size restriction still applies. Threat sensing detects nearby attack-capable cells, including smaller hunters that can bite a larger organism. It reports capability, not intent. New `prey.integrity`, `prey.attack`, and `prey.photosynthesis` signals allow selective hunting and avoidance.
+
+Bites can feed a hunter before it finishes a kill. The raw meal is proportional to defended damage and prey biomass, bounded by the victim's reserves and the attacker's free gut capacity. It still needs digestion on a later tick; structural biomass is not removed by this transfer. Simultaneous attackers share the available reserve proportionally.
 
 Targets retain stable IDs throughout a tick. A body can be consumed only once; simultaneous bite damage cannot resurrect a killed cell. Gut contents, reserves, and embodied growth energy are counted once during predation and death. All minerals remain in a cell, a particle, or the water, even when the particle limit is full. See [engine/ABI.md](engine/ABI.md) for exact coefficients and resolution rules.
 
@@ -294,7 +302,7 @@ Eight built-in programs include strict **Phototroph**, **Forager**, **Predator**
 | Free mineral capacity | `2 × size`, in addition to body/gut minerals |
 | Register upkeep | `0.0025 × populated registers` energy/s |
 | Movement cost | `1.45 × thrust × size × (body.propulsion / 0.2)` energy/s |
-| Division requirements | At least **twice birth biomass**, `energy ≥ 90 × size`, a 12-second cooldown, and a free cell slot |
+| Division requirements | At least **twice birth biomass**, `energy ≥ 90 × size`, and a 12-second cooldown |
 | Division cost | `12 × size` energy; remaining energy, biomass, free minerals, and gut contents split equally |
 | Lifespan | 300 simulated seconds; age is chronological and the retained parent's age continues after division |
 
@@ -303,6 +311,8 @@ Eight built-in programs include strict **Phototroph**, **Forager**, **Predator**
 Cells die from depleted energy, destroyed integrity, or reaching `lifespan`. Remains include structural material, stored resources, and undigested material. A finite lifetime makes recycling part of a sustained ecosystem rather than requiring every producer to be killed by a predator.
 
 Larger cells have greater contact reach, capacity, collision mass, and upkeep. Growth is slower relative to mass as cells get larger. Size alone does not improve sensing or commanded acceleration; these depend on body allocation.
+
+**There is no fixed population cap.** Starting populations, adding organisms, and division can all pass the former 384-cell limit. Local light, food, minerals, upkeep, and mortality determine which populations can sustain themselves. Collisions use a local spatial search instead of checking every possible cell pair. Browser memory and execution time still constrain practical simulation size; allocation failures are reported, and complete saves retain their existing 128 MiB file-size limit.
 
 ## Mutations
 

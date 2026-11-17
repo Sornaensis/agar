@@ -9,6 +9,7 @@ impl World {
         self.environment.write_checkpoint(w);
         w.count(self.cells.len());
         for cell in &self.cells {
+            if w.failed() { return; }
             for id in [cell.id, cell.genome_id, cell.generation, cell.parent_id] { w.u32(id); }
             for value in [cell.x, cell.y, cell.vx, cell.vy, cell.angle, cell.energy, cell.size, cell.age, cell.cooldown,
                 cell.integrity, cell.photosynthesis_rate, cell.nutrient_stored, cell.uptake_rate, cell.remodeling_rate, cell.engulf_cooldown] { w.f64(value); }
@@ -29,8 +30,16 @@ impl World {
         let next_id = r.u32()?; let random_state = r.u32()?; let seed = r.u32()?;
         ensure(next_id > 0 && random_state != 0, "invalid cell or random sequence")?;
         let environment = Environment::read_checkpoint(r)?;
-        let count = r.count(MAX_CELLS)?; let mut cells = Vec::with_capacity(count);
+        let count = r.u32()? as usize;
+        // Every cell has fixed fields and a register count before any occupied
+        // registers. Bound untrusted counts by actual remaining checkpoint bytes,
+        // not an ecological population ceiling.
+        let minimum_cell_bytes = if r.version() == 1 { 180 } else { 236 };
+        ensure(count <= r.remaining().saturating_sub(4) / minimum_cell_bytes, "cell count exceeds the available checkpoint data")?;
+        let mut cells = Vec::new();
+        cells.try_reserve_exact(count).map_err(|_| "Invalid simulation save: not enough memory to restore the organisms.".to_owned())?;
         let mut ids = std::collections::HashSet::new();
+        ids.try_reserve(count).map_err(|_| "Invalid simulation save: not enough memory to restore organism identifiers.".to_owned())?;
         for _ in 0..count {
             let id = r.u32()?; let genome_id = r.u32()?; let generation = r.u32()?; let parent_id = r.u32()?;
             ensure(id > 0 && id < next_id && ids.insert(id), "invalid or duplicate cell ID")?;

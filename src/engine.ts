@@ -96,7 +96,7 @@ export interface GenomeRecord { source: string; parentId: number; mutationKind: 
 export interface MutationResult { id: number; changed: boolean; reason: string }
 export interface WorldSnapshot {
   tick: number; time: number; cells: Cell[]; food: Food[]; births: number; deaths: number;
-  eaten: number; width: number; height: number; maxCells: number; maxFood: number; foodRate: number;
+  eaten: number; width: number; height: number; maxFood: number; foodRate: number;
   mutationRate: number; mutatedBirths: number; mutationSkipped: number; genomeCount: number; genomeLimit: number;
   genomeBytes: number; genomeByteLimit: number; predationCount: number; attackCount: number; photosynthesisTotal: number;
   nutrientTotal: number; nutrientInputTotal: number; nutrientDissolvedTotal: number; nutrientFoodTotal: number; nutrientCellTotal: number;
@@ -111,7 +111,7 @@ interface WasmExports extends WebAssembly.Exports {
   analyze_genome(ptr: number, len: number): number;
   genome_analysis_len(): number;
   error_ptr(): number; error_len(): number;
-  reset(seed: number, genomeId: number): void;
+  reset(seed: number, genomeId: number): number;
   reset_empty(seed: number, initialFood: number): void;
   alloc_state(len: number): number;
   save_state_ptr(): number; save_state_len(): number;
@@ -126,7 +126,7 @@ interface WasmExports extends WebAssembly.Exports {
   set_mutation_rate(rate: number): void; mutation_rate(): number;
   mutation_count(): number; mutation_skipped_count(): number;
   genome_count(): number; genome_limit(): number;
-  tick(steps: number): void;
+  tick(steps: number): number;
   snapshot_ptr(): number; snapshot_len(): number;
   set_environment(temperature: number, light: number, current: number): void;
   set_initial_nutrients(level: number): void; add_nutrients(x: number, y: number, amount: number): number;
@@ -222,7 +222,9 @@ export class Engine {
       return id;
     } finally { this.wasm.dealloc(ptr, bytes.length); }
   }
-  reset(seed: number, genomeId: number): void { this.wasm.reset(seed >>> 0, genomeId); }
+  reset(seed: number, genomeId: number): void {
+    if (this.wasm.reset(seed >>> 0, genomeId) !== 1) throw new Error(this.readError() || 'The simulation could not be reset.');
+  }
   /** Fresh dynamics and no cells; the configured environment and rates are retained. */
   resetEmpty(seed: number, initialFood = 360): void {
     if (!Number.isInteger(initialFood) || initialFood < 0 || initialFood > 1200) throw new Error('Initial food must be between 0 and 1,200 particles.');
@@ -248,7 +250,13 @@ export class Engine {
   private readError(): string {
     return new TextDecoder().decode(new Uint8Array(this.wasm.memory.buffer, this.wasm.error_ptr(), this.wasm.error_len()));
   }
-  seed(genomeId: number, count = 8, x = -1, y = -1): number { return this.wasm.seed_cells(genomeId, count, x, y); }
+  seed(genomeId: number, count = 8, x = -1, y = -1): number {
+    if (!Number.isSafeInteger(count) || count < 0) throw new Error('Organism count must be a nonnegative safe whole number.');
+    const added = this.wasm.seed_cells(genomeId, count, x, y);
+    const error = this.readError();
+    if (error || added !== count) throw new Error(error || 'The engine could not create the requested organisms.');
+    return added;
+  }
   addFood(x = -1, y = -1, count = 40): number { return this.wasm.add_food(x, y, count); }
   setFoodRate(rate: number): void { this.wasm.set_food_rate(rate); }
   setMutationRate(rate: number): void { this.wasm.set_mutation_rate(rate); }
@@ -297,7 +305,9 @@ export class Engine {
     const source = new TextDecoder().decode(new Uint8Array(this.wasm.memory.buffer, pointer, length));
     return validateGenomeGraph(JSON.parse(source));
   }
-  tick(steps = 1): void { this.wasm.tick(steps); }
+  tick(steps = 1): void {
+    if (this.wasm.tick(steps) !== 1) throw new Error(this.readError() || 'The simulation could not advance.');
+  }
 
   environment(): EnvironmentSnapshot {
     const pointer = this.wasm.environment_snapshot_ptr();
@@ -347,7 +357,7 @@ export class Engine {
     }
     // Copy every snapshot value before further calls: Rust may grow its memory.
     const state = { tick:data[0], time:data[1], cells, food, births:data[4], deaths:data[5], eaten:data[6],
-      width:data[7], height:data[8], maxCells:data[9], maxFood:data[10], foodRate:data[11] };
+      width:data[7], height:data[8], maxFood:data[10], foodRate:data[11] };
     return { ...state, mutationRate: this.wasm.mutation_rate(), mutatedBirths: this.wasm.mutation_count(),
       mutationSkipped: this.wasm.mutation_skipped_count(), genomeCount: this.wasm.genome_count(), genomeLimit: this.wasm.genome_limit(),
       genomeBytes: this.wasm.genome_bytes(), genomeByteLimit: this.wasm.genome_byte_limit(),

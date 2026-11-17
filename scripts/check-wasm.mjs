@@ -12,7 +12,7 @@ for (const name of ['alloc', 'dealloc', 'compile_genome', 'error_ptr', 'error_le
 assert.ok(api.memory instanceof WebAssembly.Memory);
 assert.equal(typeof api.genome_graph_ptr, 'function');
 assert.equal(typeof api.genome_graph_len, 'function');
-assert.equal(api.abi_version(), 5);
+assert.equal(api.abi_version(), 6);
 const HEADER_SIZE = 12;
 const CELL_STRIDE = 63;
 const FOOD_STRIDE = 4;
@@ -50,7 +50,7 @@ function cellsOf(state) {
   });
 }
 function advance(module, steps) {
-  while (steps > 0) { const chunk = Math.min(steps, 120); module.tick(chunk); steps -= chunk; }
+  while (steps > 0) { const chunk = Math.min(steps, 120); assert.equal(module.tick(chunk), 1, errorOf(module)); steps -= chunk; }
   return snapshotOf(module);
 }
 function normalizedGenomes(state) {
@@ -114,7 +114,7 @@ const final = snapshot();
 assert.ok(final[6] > 0, 'Cells actually eat');
 assert.ok(final[4] > 0, 'Cells actually reproduce');
 assert.ok(final[5] > 0, 'Cells actually die');
-console.log(`WASM integration passed: fixed ticks, deterministic seeds, typed programs, bounded finite state, ${Math.round(final[4])} births, ${Math.round(final[5])} deaths, ${Math.round(final[6])} meals.`);
+console.log(`WASM integration passed: fixed ticks, deterministic seeds, typed programs, finite state, ${Math.round(final[4])} births, ${Math.round(final[5])} deaths, ${Math.round(final[6])} meals.`);
 
 // Exercise mutations through the actual boundary used by the TypeScript UI.
 function sourceOf(module, id) {
@@ -129,9 +129,11 @@ function errorOf(module) {
 function snapshotOf(module) {
   const ptr = module.snapshot_ptr();
   const values = new Float32Array(module.memory.buffer, ptr, module.snapshot_len()).slice();
-  assert.equal(values.length, HEADER_SIZE + values[2] * CELL_STRIDE + values[3] * FOOD_STRIDE, 'ABI5 snapshot layout');
+  assert.equal(values.length, HEADER_SIZE + values[2] * CELL_STRIDE + values[3] * FOOD_STRIDE, 'ABI6 snapshot layout');
   assert.ok(values.every(Number.isFinite), 'Simulation state must remain finite');
-  assert.ok(values[2] <= values[9] && values[3] <= values[10], 'Entity caps');
+  assert.equal(values[9], 0, 'Former population-limit slot is reserved, with no population ceiling');
+  assert.ok(Number.isSafeInteger(values[2]) && values[2] >= 0, 'Population is a nonnegative count');
+  assert.ok(values[3] <= values[10], 'Organic particle budget');
   for (const cell of cellsOf(values)) {
     assert.ok(cell.x >= 0 && cell.x < values[7], 'Cell x wraps');
     assert.ok(cell.y >= 0 && cell.y < values[8], 'Cell y wraps');
@@ -228,11 +230,19 @@ const fed = cellsOf(advance(feedback, 2400)).find(cell => cell.id === feedingTar
 assert.ok(fed.energy > 200, 'A grown cell can store more energy than a size1 founder');
 close(fed.energy, fed.capacity, 0.0003, 'Abundant food fills the size-dependent energy capacity over time');
 
-// Unconditional growth reaches the size cap instead of exceeding it.
-const abundantGrowth = await worldFor(`${growthSource} photosynthesize=1;`, 31415, 5);
+// Unconditional growth reaches the size bound when actually supplied. Keep
+// this fixture isolated from the local light competition tested separately.
+const abundantGrowth = await fresh();
+const abundantGenome = compileIn(abundantGrowth, `${growthSource} photosynthesize=1;`);
+abundantGrowth.set_initial_nutrients(5);
+abundantGrowth.reset_empty(31415, 0);
+abundantGrowth.set_food_rate(0);
 abundantGrowth.set_environment(0.5, 1, 0);
+assert.equal(abundantGrowth.seed_cells(abundantGenome, 1, 600, 380), 1);
+const abundantCell = cellsOf(snapshotOf(abundantGrowth))[0];
+assert.equal(abundantGrowth.add_food(abundantCell.x, abundantCell.y, 1200), 1200);
 const capped = advance(abundantGrowth, 4200);
-assert.equal(capped[2], growthInitial[2], 'Supplied light and minerals let every founder reach the cap');
+assert.equal(capped[2], 1, 'The supplied cell survives its growth cycle');
 assert.ok(cellsOf(capped).every(cell => Math.abs(cell.size - 4) < 0.000001), 'Growth stops at size4');
 console.log('Growth WASM checks passed: legacy programs, paid/clamped growth, reactive size feedback, scaled maintenance, real feeding capacity, and size bounds.');
 
@@ -309,6 +319,7 @@ ordinary.reset(2026, ordinaryId);
 evolving.reset(2026, evolvingId);
 ordinary.set_mutation_rate(0);
 evolving.set_mutation_rate(1);
+ordinary.set_food_rate(0); evolving.set_food_rate(0);
 ordinary.set_environment(0.5,1,0); evolving.set_environment(0.5,1,0);
 const noDivision = await worldFor(divisionSource.replace("divide=true", "divide=false"), 2026);
 noDivision.set_environment(0.5,1,0);
@@ -732,7 +743,7 @@ for (const cell of cellsOf(advance(coreBody, 390))) {
   close(cell.senseRange, 40, 0.00002, 'Unspecialized cells retain only basic sensing');
 }
 checkMinerals(coreBody, 'Body remodeling preserves mineral mass');
-console.log('Nutrient/body WASM checks passed: ABI5, compartment accounting, explicit inputs, spring/reset behavior, mineral-limited growth, founder specialization, paid delayed remodeling, frozen body sensors, shared targets, and core upkeep.');
+console.log('Nutrient/body WASM checks passed: ABI6, compartment accounting, explicit inputs, spring/reset behavior, mineral-limited growth, founder specialization, paid delayed remodeling, frozen body sensors, shared targets, and core upkeep.');
 
 // Structural inspection must expose the compiler's graph without executing it
 // or creating same-tick feedback edges between register writes and reads.
@@ -872,6 +883,29 @@ assert.equal(resumedWorld.seed_cells(1, 1, -1, -1), 1, 'Adding one organism crea
 assert.equal(snapshotOf(resumedWorld)[2], 1);
 assert.equal(snapshotOf(resumedWorld)[11], 30, 'Empty reset preserves food supply');
 console.log('Checkpoint WASM checks passed: exact cross-instance continuation, retained mutation ASTs, memory/fields/RNG/lineage, atomic corruption rejection, size bounds, empty reset, and single-organism addition.');
+
+// Populations are constrained by resources and available memory, not a fixed
+// engine/UI quota. Exercise the real f64 WASM input and checkpoint boundary.
+const uncappedWorld = await fresh();
+const uncappedGenome = compileIn(uncappedWorld, 'rf001=food.energy;rf002=food.nutrients;thrust=0;turn=0;grow=0;divide=false;');
+assert.ok(uncappedGenome > 0, errorOf(uncappedWorld));
+uncappedWorld.reset_empty(2026, 0);
+uncappedWorld.set_food_rate(0);
+assert.equal(uncappedWorld.seed_cells(uncappedGenome, 512, -1, -1), 512, 'Seeding is not truncated at the former384 limit');
+assert.equal(advance(uncappedWorld, 60)[2], 512, 'A population above384 advances normally');
+assert.equal(memoryOf(uncappedWorld, 1).rf001, 0, 'Invisible food has zero energy');
+assert.equal(memoryOf(uncappedWorld, 1).rf002, 0, 'Invisible food has zero minerals');
+const uncappedCheckpoint = saveStateOf(uncappedWorld);
+for (const count of [-1, 0.5, NaN, Infinity, 2 ** 32]) {
+  assert.equal(uncappedWorld.seed_cells(uncappedGenome, count, -1, -1), 0, `Invalid count ${count} is rejected before WASM integer coercion`);
+  assert.ok(errorOf(uncappedWorld).length, 'Invalid counts report a visible reason');
+  assert.deepEqual(saveStateOf(uncappedWorld), uncappedCheckpoint, 'A rejected count leaves the world unchanged');
+}
+const uncappedRestore = await fresh();
+assert.equal(restoreStateIn(uncappedRestore, uncappedCheckpoint), 1, errorOf(uncappedRestore));
+assert.equal(snapshotOf(uncappedRestore)[2], 512, 'Checkpoints retain all organisms above the former limit');
+assert.deepEqual(advance(uncappedRestore, 120), advance(uncappedWorld, 120), 'Larger populations resume deterministically');
+console.log('Population WASM checks passed:512 living cells, continued simulation, exact save/resume, food-value signals, and atomic invalid-count rejection.');
 
 for (const name of ['analyze_genome', 'genome_analysis_len']) assert.equal(typeof api[name], 'function', `Missing analysis export: ${name}`);
 function analyzeBytes(module, encoded) {

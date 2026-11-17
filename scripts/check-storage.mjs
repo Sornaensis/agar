@@ -52,7 +52,8 @@ for (const environment of environments) {
 for (const simulation of simulations) {
   assert.ok(environments.some(environment => environment.id === simulation.environmentId));
   assert.ok(simulation.populations.every(population => genomes.some(genome => genome.id === population.genomeId)));
-  assert.ok(simulation.populations.reduce((sum, population) => sum + population.count, 0) <= 384);
+  const total = simulation.populations.reduce((sum, population) => sum + population.count, 0);
+  assert.ok(Number.isSafeInteger(total) && total >= 0);
 }
 
 const portable = JSON.parse(storage.exportGenome(genomes[0]));
@@ -94,7 +95,12 @@ const simulation = {
   genomeNames: { 1: 'Forager' }, history: [{ ...summary, time: 1 }, { ...summary, time: 12 }], summary,
 };
 assert.equal(storage.validateSimulationRecord(simulation).speed, 5);
-for (const patch of [{ speed: 4 }, { state: new ArrayBuffer(4) }, { state: new Uint8Array() }, { seed: -1 }, { paused: 1 }, { id: 'builtin:simulation:x' }, { history: Array(721).fill(summary) }, { history: [{ ...summary, time: 13 }] }, { history: [{ ...summary, time: 5 }, { ...summary, time: 4 }] }, { genomeNames: { 2049: 'Bad' } }, { genomeNames: JSON.parse('{"__proto__":"bad"}') }, { summary: { ...summary, population: 385 } }, { summary: { ...summary, time: Infinity } }]) {
+for (const population of [385, 2049, 10000, Number.MAX_SAFE_INTEGER]) {
+  const record = storage.validateSimulationRecord({ ...simulation, summary: { ...summary, population }, history: [{ ...summary, population }] });
+  assert.equal(record.summary.population, population, 'Simulation metadata has no fixed population ceiling');
+  assert.equal(record.history[0].population, population);
+}
+for (const patch of [{ speed: 4 }, { state: new ArrayBuffer(4) }, { state: new Uint8Array() }, { seed: -1 }, { paused: 1 }, { id: 'builtin:simulation:x' }, { history: Array(721).fill(summary) }, { history: [{ ...summary, time: 13 }] }, { history: [{ ...summary, time: 5 }, { ...summary, time: 4 }] }, { genomeNames: { 2049: 'Bad' } }, { genomeNames: JSON.parse('{"__proto__":"bad"}') }, { summary: { ...summary, population: -1 } }, { summary: { ...summary, population: 1.5 } }, { summary: { ...summary, population: Number.MAX_SAFE_INTEGER + 1 } }, { summary: { ...summary, population: Infinity } }, { summary: { ...summary, time: Infinity } }]) {
   assert.throws(() => storage.validateSimulationRecord({ ...simulation, ...patch }));
 }
 

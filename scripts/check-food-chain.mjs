@@ -5,16 +5,30 @@ import { performance } from 'node:perf_hooks';
 import ts from 'typescript';
 
 // Default: short acquisition/recipe checks. --measure adds a bounded, three-seed
-// 300-second study; population outcomes are reported, not forced to coexist.
+// 900-second study; population outcomes are reported, not forced to coexist.
 const arguments_ = process.argv.slice(2);
 const measure = arguments_.includes('--measure');
-const outputIndex = arguments_.indexOf('--output');
-const output = outputIndex >= 0 ? arguments_[outputIndex + 1] : null;
-if (outputIndex >= 0) assert.ok(output && !output.startsWith('--'), '--output needs a file path');
+let output = null;
+let measuredSeeds = [42, 7, 2026];
+let measuredMutationRate = 0;
 for (let index = 0; index < arguments_.length; index++) {
-  if (arguments_[index] === '--output') { index++; continue; }
-  assert.equal(arguments_[index], '--measure', `Unknown argument: ${arguments_[index]}`);
+  const argument = arguments_[index];
+  if (argument === '--measure') continue;
+  assert.ok(['--output', '--seed', '--mutation'].includes(argument), `Unknown argument: ${argument}`);
+  const value = arguments_[++index];
+  assert.ok(value && !value.startsWith('--'), `${argument} needs a value`);
+  if (argument === '--output') output = value;
+  if (argument === '--seed') {
+    const seed = Number(value);
+    assert.ok(Number.isInteger(seed) && seed >= 0 && seed <= 0xffffffff, '--seed must be an unsigned 32-bit integer');
+    measuredSeeds = [seed];
+  }
+  if (argument === '--mutation') {
+    measuredMutationRate = Number(value);
+    assert.ok(Number.isFinite(measuredMutationRate) && measuredMutationRate >= 0 && measuredMutationRate <= 1, '--mutation must be between 0 and 1');
+  }
 }
+assert.ok(measure || arguments_.length === 0, 'Measurement options require --measure');
 
 async function moduleUrl(relative, imports = {}) {
   const source = await readFile(new URL(relative, import.meta.url), 'utf8');
@@ -38,13 +52,13 @@ const capabilities = ['propulsion', 'photosynthesis', 'digestion', 'armor', 'sen
 const round = number => Math.round(number * 1000) / 1000;
 const preset = name => { const found = PRESETS.find(item => item.name === name); assert.ok(found, `Missing preset: ${name}`); return found; };
 
-async function fresh(config, seed = 42, initialFood = config.foodRate > 0 ? 360 : 0) {
+async function fresh(config, seed = 42, initialFood = config.foodRate > 0 ? 360 : 0, mutationRate = 0) {
   const instance = await WebAssembly.instantiate(module, {}), api = instance.exports;
-  assert.equal(api.abi_version(), 5, 'Rebuild the trophic engine with npm run build:wasm.');
+  assert.equal(api.abi_version(), 6, 'Rebuild the trophic engine with npm run build:wasm.');
   api.set_environment(config.ambientTemperature, config.ambientLight, config.currentStrength);
   api.set_initial_nutrients(config.initialNutrients); api.set_food_rate(config.foodRate); api.clear_sources();
   for (const source of config.sources) assert.ok(api.add_source(source.kind, source.x, source.y, source.strength, source.radius));
-  api.set_mutation_rate(0); api.reset_empty(seed, initialFood);
+  api.set_mutation_rate(mutationRate); api.reset_empty(seed, initialFood);
   return api;
 }
 function compile(api, source) {
@@ -61,6 +75,10 @@ function graph(api, id) {
   const pointer = api.genome_graph_ptr(id);
   return JSON.parse(new TextDecoder().decode(new Uint8Array(api.memory.buffer, pointer, api.genome_graph_len())));
 }
+function memory(api, id) {
+  const pointer = api.cell_memory_ptr(id);
+  return JSON.parse(new TextDecoder().decode(new Uint8Array(api.memory.buffer, pointer, api.cell_memory_len())));
+}
 function snapshot(api) {
   const pointer = api.snapshot_ptr();
   const data = new Float32Array(api.memory.buffer, pointer, api.snapshot_len()).slice();
@@ -68,6 +86,7 @@ function snapshot(api) {
   const cells = Array.from({ length: data[2] }, (_, index) => {
     const at = 12 + index * STRIDE;
     return { id: data[at], genome: data[at + 1], x: data[at + 2], y: data[at + 3],
+      vx: data[at + 4], vy: data[at + 5], temperature: data[at + 25],
       energy: data[at + 7], age: data[at + 8], generation: data[at + 9], parentId: data[at + 10], size: data[at + 18], capacity: data[at + 19],
       light: data[at + 23], integrity: data[at + 38], photosynthesisRate: data[at + 39], nutrients: data[at + 40],
       body: [...data.slice(at + 45, at + 50), data[at + 53]], gutEnergy: data[at + 54], gutCapacity: data[at + 55],
@@ -76,10 +95,15 @@ function snapshot(api) {
   });
   let foodEnergy = 0;
   for (let index = 0; index < data[3]; index++) foodEnergy += data[12 + data[2] * STRIDE + index * 4 + 2];
-  const state = { seconds: data[1], population: data[2], foodParticles: data[3], foodEnergy, births: data[4], deaths: data[5],
+  const bodyRoles = { photoOnly: 0, digestOnly: 0, mixed: 0, neither: 0, attackCapable: 0 };
+  for (const cell of cells) {
+    const photo = cell.body[1] >= 0.05, digest = cell.body[2] >= 0.05;
+    bodyRoles[photo ? digest ? 'mixed' : 'photoOnly' : digest ? 'digestOnly' : 'neither']++;
+    if (cell.body[5] >= 0.05) bodyRoles.attackCapable++;
+  }
+  const state = { seconds: data[1], population: data[2], foodParticles: data[3], foodEnergy, births: data[4], deaths: data[5], bodyRoles,
     foodParticlesEaten: data[6], predations: Number(api.predation_count()), biteTicks: Number(api.attack_count()),
-    photosynthesisEnergy: Number(api.photosynthesis_total()), cells };
-  assert.ok(state.population <= 384);
+    photosynthesisEnergy: Number(api.photosynthesis_total()), mutations: Number(api.mutation_count()), genomes: Number(api.genome_count()), cells };
   for (const cell of cells) {
     assert.ok(Number.isFinite(cell.energy) && cell.energy > 0 && cell.energy <= cell.capacity + 0.001);
     assert.ok(Number.isFinite(cell.gutEnergy) && cell.gutEnergy >= 0 && cell.gutEnergy <= cell.gutCapacity + 0.001);
@@ -131,6 +155,65 @@ assert.ok(physiology.get('Predator').attack > 0 && physiology.get('Predator').di
 assert.ok(physiology.get('Mixotroph').photosynthesis > 0 && physiology.get('Mixotroph').digestion > 0);
 assert.equal(physiology.get('Mixotroph').feed, 1); assert.equal(physiology.get('Mixotroph').attack, 0);
 
+// Exercise the authored reserve controller in the real runtime: an empty
+// register starts resting, low reserves enter replenishment, and eating exits
+// that mode before growth spends the newly acquired reserve.
+const predatorCycle = await fresh({ foodRate: 0, ambientTemperature: 0.5, ambientLight: 0, currentStrength: 0, initialNutrients: 1, sources: [] }, 42, 0);
+const predatorId = compile(predatorCycle, preset('Predator').source);
+const canonicalPointer = predatorCycle.genome_source_ptr(predatorId);
+const canonicalPredator = new TextDecoder().decode(new Uint8Array(predatorCycle.memory.buffer, canonicalPointer, predatorCycle.genome_source_len()));
+assert.ok(compile(predatorCycle, canonicalPredator), 'The memory-using Predator canonical source recompiles');
+assert.equal(predatorCycle.seed_cells(predatorId, 1, 600, 380), 1);
+let predatorState = snapshot(predatorCycle).cells[0];
+assert.deepEqual(memory(predatorCycle, predatorState.id), [], 'Newborn Predator memory starts empty');
+const replenishing = () => memory(predatorCycle, predatorState.id).find(entry => entry.name === 'rb001')?.value;
+predatorState = advance(predatorCycle, 1).cells[0];
+assert.equal(replenishing(), false, 'An empty boolean register starts the Predator in its resting band');
+for (let step = 0; step < 1800 && !replenishing(); step++) predatorState = advance(predatorCycle, 1).cells[0];
+assert.equal(replenishing(), true, 'Spending the reserve starts a replenishment episode');
+assert.ok(predatorState.energy / predatorState.capacity < 0.401);
+assert.equal(predatorState.growthRate, 0, 'Replenishment reserves energy for feeding instead of growth');
+predatorCycle.add_food(predatorState.x, predatorState.y, 256);
+let previousState = predatorState;
+for (let step = 0; step < 1800 && replenishing(); step++) {
+  previousState = predatorState;
+  predatorState = advance(predatorCycle, 1).cells[0];
+  if (replenishing()) assert.equal(predatorState.growthRate, 0);
+}
+assert.equal(replenishing(), false, 'A substantial meal ends replenishment');
+assert.ok(previousState.energy / previousState.capacity >= 0.75 - 0.00001 || previousState.gutEnergy / previousState.gutCapacity >= 0.65 - 0.00001);
+let grewAfterMeal = false;
+for (let step = 0; step < 900 && !grewAfterMeal; step++) {
+  predatorState = advance(predatorCycle, 1).cells[0];
+  grewAfterMeal = !replenishing() && predatorState.growthRate > 0;
+}
+assert.ok(grewAfterMeal, 'The satiated Predator resumes growth instead of being trapped in its hunger band');
+
+// A hot patch is a real environmental hazard. Even with attractive organic
+// food present, the full authored program must move into cooler water.
+const predatorHeat = await fresh({ foodRate: 0, ambientTemperature: 0.5, ambientLight: 0, currentStrength: 0, initialNutrients: 1,
+  sources: [{ kind: 1, x: 600, y: 380, strength: 1, radius: 180 }] }, 42, 0);
+advance(predatorHeat, 1800);
+assert.equal(predatorHeat.seed_cells(compile(predatorHeat, preset('Predator').source), 1, 600, 380), 1);
+let hotCell = snapshot(predatorHeat).cells[0];
+assert.ok(hotCell.temperature > 0.9, 'The heat-response fixture starts in genuinely hot water');
+predatorHeat.add_food(hotCell.x, hotCell.y, 256);
+let hotTicks = 0, wellFedHotTicks = 0, fastestEscape = 0;
+for (let step = 0; step < 900 && hotCell.temperature > 0.8; step++) {
+  const previous = hotCell;
+  hotCell = advance(predatorHeat, 1).cells[0];
+  assert.ok(hotCell, 'The Predator must survive its bounded escape from the hot patch');
+  if (previous.temperature > 0.801) {
+    hotTicks++;
+    if (previous.energy / previous.capacity > 0.45) wellFedHotTicks++;
+    assert.equal(hotCell.growthRate, 0, 'The Predator suspends growth while escaping heat');
+  }
+  fastestEscape = Math.max(fastestEscape, Math.hypot(hotCell.vx, hotCell.vy));
+}
+assert.ok(hotTicks > 0 && wellFedHotTicks > 0, 'Heat suppresses growth even after food restores its reserve');
+assert.ok(fastestEscape > 20, 'Heat triggers purposeful swimming instead of the slow resting drift');
+assert.ok(hotCell.temperature <= 0.8, 'The Predator follows the temperature gradient into cooler water');
+
 // Hold movement, growth, and division constant to isolate energy acquisition.
 function stationary(source) {
   for (const [name, value] of [['thrust', '0'], ['turn', '0'], ['grow', '0'], ['divide', 'false']]) {
@@ -166,30 +249,38 @@ assert.ok(consumerEmpty.after.cells[0].energy < consumerEmpty.before.cells[0].en
 assert.ok(consumerFed.after.cells[0].energy > consumerEmpty.after.cells[0].energy, 'Organic food supplies the consumer through its gut');
 assert.ok(mixerLight.after.cells[0].energy > mixerDark.after.cells[0].energy, 'A mixotroph can use light as an alternate energy source');
 
-console.log(`Food-chain mechanics passed: ${PRESETS.length} compiled presets, explicit six-capability budgets, distinct diets, independent mineral uptake, and producer-fed organic food.`);
+console.log(`Food-chain mechanics passed: ${PRESETS.length} compiled presets, explicit six-capability budgets, distinct diets, independent mineral uptake, producer-fed organic food, and Predator reserve/heat responses.`);
 
 if (measure) {
   const template = BUILTIN_SIMULATIONS.find(item => item.id === 'builtin:simulation:mixed-ecosystem');
   const environment = BUILTIN_ENVIRONMENTS.find(item => item.id === template.environmentId);
   const populations = template.populations.map(item => ({ ...BUILTIN_GENOMES.find(genome => genome.id === item.genomeId), count: item.count }));
-  const study = { startedAt: new Date().toISOString(), wasmSha256: wasmHash, wasmBytes: binary.length, abi: 5,
-    template: template.name, environment, populations, mutationRate: 0, initialFood: environment.config.foodRate > 0 ? 360 : 0,
+  const study = { startedAt: new Date().toISOString(), wasmSha256: wasmHash, wasmBytes: binary.length, abi: 6,
+    template: template.name, environment, populations, mutationRate: measuredMutationRate, initialFood: environment.config.foodRate > 0 ? 360 : 0,
     // Sampling just before the lifespan limit distinguishes consumer starvation
-    // from founders reaching old age at the final 300-second checkpoint.
-    seeds: [42, 7, 2026], sampleSeconds: [0, 30, 120, 299, 300], results: [] };
+    // from founders reaching old age at the 300-second checkpoint.
+    seeds: measuredSeeds, sampleSeconds: [0, 30, 120, 299, 300, 600, 900], results: [] };
   for (const seed of study.seeds) {
-    const started = performance.now(), api = await fresh(environment.config, seed), names = new Map();
+    const started = performance.now(), api = await fresh(environment.config, seed, study.initialFood, study.mutationRate), names = new Map();
     for (const item of populations) {
       const id = compile(api, item.source); names.set(id, item.name);
       assert.equal(api.seed_cells(id, item.count, -1, -1), item.count);
+    }
+    const foundingNames = [...names.values()];
+    function lineageName(id) {
+      if (names.has(id)) return names.get(id);
+      assert.ok(study.mutationRate > 0, 'Mutation-free measurements retain their founding genomes');
+      const parent = api.genome_parent(id);
+      assert.ok(parent && parent !== id, 'A mutated program retains its registered ancestry');
+      const name = lineageName(parent); names.set(id, name); return name;
     }
     const samples = [];
     let tick = 0;
     for (const seconds of study.sampleSeconds) {
       const state = advance(api, seconds * 30 - tick); tick = seconds * 30;
-      assert.ok(state.cells.every(cell => names.has(cell.genome)), 'Mutation-free measurements retain their founding genomes');
-      const lineages = [...names].map(([id, name]) => {
-        const cells = state.cells.filter(cell => cell.genome === id);
+      for (const cell of state.cells) lineageName(cell.genome);
+      const lineages = foundingNames.map(name => {
+        const cells = state.cells.filter(cell => lineageName(cell.genome) === name);
         const sum = field => cells.reduce((total, cell) => total + cell[field], 0);
         return { name, count: cells.length, biomass: round(sum('size')), energy: round(sum('energy')),
           meanEnergy: cells.length ? round(sum('energy') / cells.length) : null,
@@ -201,6 +292,7 @@ if (measure) {
           founders: cells.filter(cell => cell.parentId === 0).length,
           gutEnergy: round(sum('gutEnergy')), digestionRate: round(sum('digestionRate')),
           photosynthesisRate: round(sum('photosynthesisRate')), exudationRate: round(sum('exudationRate')),
+          tissueMass: capabilities.map((_, index) => round(cells.reduce((total, cell) => total + cell.body[index] * cell.size, 0))),
           growthRate: round(sum('growthRate')), maxGeneration: cells.length ? Math.max(...cells.map(cell => cell.generation)) : null };
       });
       const { cells: _cells, ...totals } = state;
@@ -212,4 +304,4 @@ if (measure) {
   }
   if (!output) console.log(JSON.stringify({ measurement: study }));
   else console.log(`Food-chain measurements saved to ${output}`);
-} else if (output) throw new Error('--output requires --measure');
+}

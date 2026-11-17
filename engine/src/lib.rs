@@ -80,7 +80,7 @@ impl Engine {
 thread_local! { static ENGINE: RefCell<Engine> = RefCell::new(Engine::new()); }
 
 #[no_mangle]
-pub extern "C" fn abi_version() -> u32 { 5 }
+pub extern "C" fn abi_version() -> u32 { 6 }
 
 /// Allocate a writable, zero-initialized byte buffer. The caller must deallocate
 /// it exactly once with the same pointer and length, after compile_genome.
@@ -95,7 +95,10 @@ pub extern "C" fn alloc(len: u32) -> *mut u8 {
 #[no_mangle]
 pub extern "C" fn alloc_state(len: u32) -> *mut u8 {
     if len as usize > checkpoint::MAX_STATE_BYTES || len < 20 { return std::ptr::null_mut(); }
-    Box::into_raw(vec![0u8; len as usize].into_boxed_slice()) as *mut u8
+    let mut bytes = Vec::new();
+    if bytes.try_reserve_exact(len as usize).is_err() { return std::ptr::null_mut(); }
+    bytes.resize(len as usize, 0u8);
+    Box::into_raw(bytes.into_boxed_slice()) as *mut u8
 }
 
 /// Owned checkpoint buffer. Copy before any other engine operation.
@@ -379,11 +382,15 @@ pub extern "C" fn environment_snapshot_ptr() -> *const f32 {
 pub extern "C" fn environment_snapshot_len() -> u32 { ENGINE.with(|e| e.borrow().environment_snapshot.len() as u32) }
 
 #[no_mangle]
-pub extern "C" fn reset(seed: u32, genome_id: u32) {
+pub extern "C" fn reset(seed: u32, genome_id: u32) -> u32 {
     ENGINE.with(|e| {
         let mut e = e.borrow_mut();
-        if e.valid_genome(genome_id) { e.world.reset(seed, genome_id); }
-    });
+        if !e.valid_genome(genome_id) { return 0; }
+        match e.world.try_reset(seed, genome_id) {
+            Ok(()) => 1,
+            Err(error) => { e.error = error; 0 }
+        }
+    })
 }
 
 /// Reset dynamic state, retain the environment recipe and rates, and seed no cells.
@@ -393,11 +400,19 @@ pub extern "C" fn reset_empty(seed: u32, initial_food: u32) {
 }
 
 #[no_mangle]
-pub extern "C" fn seed_cells(genome_id: u32, count: u32, x: f32, y: f32) -> u32 {
+pub extern "C" fn seed_cells(genome_id: u32, count: f64, x: f32, y: f32) -> u32 {
     ENGINE.with(|e| {
         let mut e = e.borrow_mut();
-        if e.valid_genome(genome_id) { e.world.seed_cells(genome_id, count as usize, x as f64, y as f64) as u32 }
-        else { 0 }
+        e.error.clear();
+        if !count.is_finite() || count < 0.0 || count.fract() != 0.0 || count > u32::MAX as f64 {
+            e.error = "Organism count must be a nonnegative whole number within the addressable identifier range.".into();
+            return 0;
+        }
+        if !e.valid_genome(genome_id) { return 0; }
+        match e.world.try_seed_cells(genome_id, count as usize, x as f64, y as f64) {
+            Ok(added) => added as u32,
+            Err(error) => { e.error = error; 0 }
+        }
     })
 }
 
@@ -410,12 +425,16 @@ pub extern "C" fn add_food(x: f32, y: f32, count: u32) -> u32 {
 pub extern "C" fn set_food_rate(rate: f32) { ENGINE.with(|e| e.borrow_mut().world.set_food_rate(rate as f64)); }
 
 #[no_mangle]
-pub extern "C" fn tick(steps: u32) {
+pub extern "C" fn tick(steps: u32) -> u32 {
     ENGINE.with(|e| {
         let mut e = e.borrow_mut();
-        let Engine { world, genomes, .. } = &mut *e;
-        for _ in 0..steps.min(120) { world.step(genomes); }
-    });
+        e.error.clear();
+        let Engine { world, genomes, error, .. } = &mut *e;
+        for _ in 0..steps.min(120) {
+            if let Err(message) = world.try_step(genomes) { *error = message; return 0; }
+        }
+        1
+    })
 }
 
 /// Rebuild the snapshot and return its pointer. Read snapshot_len afterwards,
@@ -506,11 +525,11 @@ mod tests {
         engine.compile(genome::DEFAULT_PROGRAM);
         engine.world.reset(11, 1);
         engine.world.snapshot(&mut engine.snapshot);
-        assert_eq!(abi_version(), 5);
+        assert_eq!(abi_version(), 6);
         assert_eq!(engine.snapshot.len(), 12 + 22 * simulation::CELL_STRIDE + 360 * 4);
         assert_eq!(engine.snapshot[7], simulation::WIDTH as f32);
         assert_eq!(engine.snapshot[8], simulation::HEIGHT as f32);
-        assert_eq!(engine.snapshot[9], simulation::MAX_CELLS as f32);
+        assert_eq!(engine.snapshot[9], 0.0, "the former population-limit slot is reserved");
         assert_eq!(engine.snapshot[12 + 11], simulation::CELL_RADIUS as f32);
         assert_eq!(engine.snapshot[12 + 18], 1.0);
         assert_eq!(engine.snapshot[12 + 19], simulation::MAX_ENERGY as f32);
@@ -598,11 +617,27 @@ mod tests {
     }
 
     #[test]
+    fn seed_export_rejects_unrepresentable_counts_without_mutating_the_world() {
+        ENGINE.with(|e| *e.borrow_mut() = Engine::new());
+        let id = ENGINE.with(|e| e.borrow_mut().compile("thrust=0;turn=0;divide=false;"));
+        let before = ENGINE.with(|e| checkpoint::save(&e.borrow()).unwrap());
+        for count in [-1.0, 0.5, f64::NAN, f64::INFINITY, u32::MAX as f64 + 1.0, u32::MAX as f64] {
+            assert_eq!(seed_cells(id, count, -1.0, -1.0), 0);
+            assert!(error_len() > 0, "invalid or ID-exhausting requests must report why they failed");
+            assert_eq!(ENGINE.with(|e| checkpoint::save(&e.borrow()).unwrap()), before);
+        }
+        assert_eq!(seed_cells(id, 0.0, -1.0, -1.0), 0);
+        assert_eq!(error_len(), 0, "zero is an intentional no-op");
+        assert_eq!(seed_cells(id, 513.0, -1.0, -1.0), 513);
+        assert_eq!(error_len(), 0);
+    }
+
+    #[test]
     fn environment_and_memory_exports_have_independent_owned_buffers() {
         ENGINE.with(|e| *e.borrow_mut() = Engine::new());
         let id = ENGINE.with(|e| e.borrow_mut().compile("ri001 = 7; rb999 = true; rs002 = \"hello\"; rv003 = vec(1, 2); thrust = 0; turn = 0; divide = false;"));
         assert!(id > 0);
-        assert_eq!(seed_cells(id, 1, -1.0, -1.0), 1);
+        assert_eq!(seed_cells(id, 1.0, -1.0, -1.0), 1);
         tick(1);
         let pointer = cell_memory_ptr(1);
         let memory = unsafe { std::slice::from_raw_parts(pointer, cell_memory_len() as usize) };

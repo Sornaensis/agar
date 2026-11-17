@@ -1,0 +1,1025 @@
+{
+  "provenance": {
+    "abi": 5,
+    "checkpointVersion": 2,
+    "wasmSha256": "e62f3081a52ec33f80e150ea3ebf73c4f5a726182c9aaab95784ff807c7fe7ff",
+    "checkpointSha256": "d211874d99df49940282839f2cce24db59d3a6ad34621f1ca21968b315ea7abc",
+    "recipe": {
+      "source": "ri001=ri001+1;rf001=gut.energy;rb001=food.visible;rs001=\"v2\";rv001=vec(flow.x,flow.y);thrust=.1;turn=sin(age);divide=false;grow=.5;photosynthesize=.4;feed=1;invest.attack=.1;",
+      "mutation": {
+        "parent": 1,
+        "seed": 7,
+        "kind": 2
+      },
+      "environment": {
+        "temperature": 0.5,
+        "light": 0.8,
+        "current": 3,
+        "initialNutrients": 1.2,
+        "foodRate": 0,
+        "mutationRate": 0,
+        "sources": [
+          {
+            "kind": 3,
+            "x": 600,
+            "y": 380,
+            "strength": 0.5,
+            "radius": 180
+          }
+        ]
+      },
+      "reset": {
+        "seed": 73,
+        "initialFood": 0
+      },
+      "founders": [
+        {
+          "genome": 1,
+          "count": 1,
+          "x": 600,
+          "y": 380
+        },
+        {
+          "genome": 2,
+          "count": 1,
+          "x": 600,
+          "y": 380
+        }
+      ],
+      "food": {
+        "x": 600,
+        "y": 380,
+        "count": 24
+      },
+      "steps": 30
+    },
+    "environmentSnapshotSha256": "2e2210c14951c178f616988a444f6ae1a05201efe40439e0f2a637bbbd087f11"
+  },
+  "header": [
+    30,
+    1,
+    2,
+    22,
+    0,
+    0,
+    2,
+    1200,
+    760,
+    384,
+    1200,
+    0
+  ],
+  "genomes": [
+    {
+      "id": 1,
+      "source": "ri001=ri001+1;rf001=gut.energy;rb001=food.visible;rs001=\"v2\";rv001=vec(flow.x,flow.y);thrust=.1;turn=sin(age);divide=false;grow=.5;photosynthesize=.4;feed=1;invest.attack=.1;",
+      "parentId": 0,
+      "mutationKind": 0,
+      "graph": {
+        "version": 1,
+        "nodes": [
+          {
+            "id": 0,
+            "kind": "register",
+            "type": "integer",
+            "label": "ri001",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 1,
+            "kind": "constant",
+            "type": "integer",
+            "label": "1",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 2,
+            "kind": "binary",
+            "type": "integer",
+            "label": "+",
+            "inputs": [
+              0,
+              1
+            ],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 3,
+            "kind": "sensor",
+            "type": "scalar",
+            "label": "gut.energy",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 4,
+            "kind": "sensor",
+            "type": "boolean",
+            "label": "food.visible",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 5,
+            "kind": "constant",
+            "type": "string",
+            "label": "\"v2\"",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 6,
+            "kind": "sensor",
+            "type": "scalar",
+            "label": "flow.x",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 7,
+            "kind": "sensor",
+            "type": "scalar",
+            "label": "flow.y",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 8,
+            "kind": "call",
+            "type": "vec2",
+            "label": "vec",
+            "inputs": [
+              6,
+              7
+            ],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 9,
+            "kind": "constant",
+            "type": "scalar",
+            "label": "0.1",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 10,
+            "kind": "sensor",
+            "type": "scalar",
+            "label": "age",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 11,
+            "kind": "call",
+            "type": "scalar",
+            "label": "sin",
+            "inputs": [
+              10
+            ],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 12,
+            "kind": "constant",
+            "type": "boolean",
+            "label": "false",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 13,
+            "kind": "constant",
+            "type": "scalar",
+            "label": "0.5",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 14,
+            "kind": "constant",
+            "type": "scalar",
+            "label": "0.4",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 15,
+            "kind": "constant",
+            "type": "integer",
+            "label": "1",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 16,
+            "kind": "constant",
+            "type": "scalar",
+            "label": "0.1",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          }
+        ],
+        "roots": [
+          {
+            "id": "output:thrust",
+            "kind": "output",
+            "name": "thrust",
+            "type": "scalar",
+            "value": 9,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "output:turn",
+            "kind": "output",
+            "name": "turn",
+            "type": "scalar",
+            "value": 11,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "output:divide",
+            "kind": "output",
+            "name": "divide",
+            "type": "boolean",
+            "value": 12,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "output:grow",
+            "kind": "output",
+            "name": "grow",
+            "type": "scalar",
+            "value": 13,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "output:photosynthesize",
+            "kind": "output",
+            "name": "photosynthesize",
+            "type": "scalar",
+            "value": 14,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "output:engulf",
+            "kind": "output",
+            "name": "engulf",
+            "type": "boolean",
+            "value": null,
+            "guard": null,
+            "default": "false"
+          },
+          {
+            "id": "output:bite",
+            "kind": "output",
+            "name": "bite",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0"
+          },
+          {
+            "id": "output:defend",
+            "kind": "output",
+            "name": "defend",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0"
+          },
+          {
+            "id": "output:repair",
+            "kind": "output",
+            "name": "repair",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0"
+          },
+          {
+            "id": "output:absorb",
+            "kind": "output",
+            "name": "absorb",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "1"
+          },
+          {
+            "id": "output:invest.propulsion",
+            "kind": "output",
+            "name": "invest.propulsion",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "output:invest.photosynthesis",
+            "kind": "output",
+            "name": "invest.photosynthesis",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "output:invest.digestion",
+            "kind": "output",
+            "name": "invest.digestion",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "output:invest.armor",
+            "kind": "output",
+            "name": "invest.armor",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "output:invest.sensing",
+            "kind": "output",
+            "name": "invest.sensing",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "output:feed",
+            "kind": "output",
+            "name": "feed",
+            "type": "scalar",
+            "value": 15,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "output:invest.attack",
+            "kind": "output",
+            "name": "invest.attack",
+            "type": "scalar",
+            "value": 16,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "write:ri001",
+            "kind": "write",
+            "name": "ri001",
+            "type": "integer",
+            "value": 2,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "write:rf001",
+            "kind": "write",
+            "name": "rf001",
+            "type": "scalar",
+            "value": 3,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "write:rb001",
+            "kind": "write",
+            "name": "rb001",
+            "type": "boolean",
+            "value": 4,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "write:rs001",
+            "kind": "write",
+            "name": "rs001",
+            "type": "string",
+            "value": 5,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "write:rv001",
+            "kind": "write",
+            "name": "rv001",
+            "type": "vec2",
+            "value": 8,
+            "guard": null,
+            "default": null
+          }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "source": "let _g0 = ri001;\nlet _g1 = 1;\nlet _g2 = _g0 + _g1;\nlet _g3 = gut.energy;\nlet _g4 = food.visible;\nlet _g5 = \"v2\";\nlet _g6 = flow.x;\nlet _g7 = flow.y;\nlet _g8 = vec(_g6, _g7);\nlet _g9 = 0.1;\nlet _g10 = age;\nlet _g11 = sin(_g10);\nlet _g12 = false;\nlet _g13 = 0.5;\nlet _g14 = 0.4;\nlet _g15 = -_g14;\nlet _g16 = 1;\nlet _g17 = 0.1;\nthrust = _g9;\nturn = _g11;\ndivide = _g12;\ngrow = _g13;\nphotosynthesize = _g15;\nfeed = _g16;\ninvest.attack = _g17;\nri001 = _g2;\nrf001 = _g3;\nrb001 = _g4;\nrs001 = _g5;\nrv001 = _g8;\n",
+      "parentId": 1,
+      "mutationKind": 2,
+      "graph": {
+        "version": 1,
+        "nodes": [
+          {
+            "id": 0,
+            "kind": "register",
+            "type": "integer",
+            "label": "ri001",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 1,
+            "kind": "constant",
+            "type": "integer",
+            "label": "1",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 2,
+            "kind": "binary",
+            "type": "integer",
+            "label": "+",
+            "inputs": [
+              0,
+              1
+            ],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 3,
+            "kind": "sensor",
+            "type": "scalar",
+            "label": "gut.energy",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 4,
+            "kind": "sensor",
+            "type": "boolean",
+            "label": "food.visible",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 5,
+            "kind": "constant",
+            "type": "string",
+            "label": "\"v2\"",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 6,
+            "kind": "sensor",
+            "type": "scalar",
+            "label": "flow.x",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 7,
+            "kind": "sensor",
+            "type": "scalar",
+            "label": "flow.y",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 8,
+            "kind": "call",
+            "type": "vec2",
+            "label": "vec",
+            "inputs": [
+              6,
+              7
+            ],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 9,
+            "kind": "constant",
+            "type": "scalar",
+            "label": "0.1",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 10,
+            "kind": "sensor",
+            "type": "scalar",
+            "label": "age",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 11,
+            "kind": "call",
+            "type": "scalar",
+            "label": "sin",
+            "inputs": [
+              10
+            ],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 12,
+            "kind": "constant",
+            "type": "boolean",
+            "label": "false",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 13,
+            "kind": "constant",
+            "type": "scalar",
+            "label": "0.5",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 14,
+            "kind": "constant",
+            "type": "scalar",
+            "label": "0.4",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 15,
+            "kind": "unary",
+            "type": "scalar",
+            "label": "-",
+            "inputs": [
+              14
+            ],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 16,
+            "kind": "constant",
+            "type": "integer",
+            "label": "1",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          },
+          {
+            "id": 17,
+            "kind": "constant",
+            "type": "scalar",
+            "label": "0.1",
+            "inputs": [],
+            "bindings": [],
+            "reachable": true
+          }
+        ],
+        "roots": [
+          {
+            "id": "output:thrust",
+            "kind": "output",
+            "name": "thrust",
+            "type": "scalar",
+            "value": 9,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "output:turn",
+            "kind": "output",
+            "name": "turn",
+            "type": "scalar",
+            "value": 11,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "output:divide",
+            "kind": "output",
+            "name": "divide",
+            "type": "boolean",
+            "value": 12,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "output:grow",
+            "kind": "output",
+            "name": "grow",
+            "type": "scalar",
+            "value": 13,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "output:photosynthesize",
+            "kind": "output",
+            "name": "photosynthesize",
+            "type": "scalar",
+            "value": 15,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "output:engulf",
+            "kind": "output",
+            "name": "engulf",
+            "type": "boolean",
+            "value": null,
+            "guard": null,
+            "default": "false"
+          },
+          {
+            "id": "output:bite",
+            "kind": "output",
+            "name": "bite",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0"
+          },
+          {
+            "id": "output:defend",
+            "kind": "output",
+            "name": "defend",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0"
+          },
+          {
+            "id": "output:repair",
+            "kind": "output",
+            "name": "repair",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0"
+          },
+          {
+            "id": "output:absorb",
+            "kind": "output",
+            "name": "absorb",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "1"
+          },
+          {
+            "id": "output:invest.propulsion",
+            "kind": "output",
+            "name": "invest.propulsion",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "output:invest.photosynthesis",
+            "kind": "output",
+            "name": "invest.photosynthesis",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "output:invest.digestion",
+            "kind": "output",
+            "name": "invest.digestion",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "output:invest.armor",
+            "kind": "output",
+            "name": "invest.armor",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "output:invest.sensing",
+            "kind": "output",
+            "name": "invest.sensing",
+            "type": "scalar",
+            "value": null,
+            "guard": null,
+            "default": "0.2"
+          },
+          {
+            "id": "output:feed",
+            "kind": "output",
+            "name": "feed",
+            "type": "scalar",
+            "value": 16,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "output:invest.attack",
+            "kind": "output",
+            "name": "invest.attack",
+            "type": "scalar",
+            "value": 17,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "write:ri001",
+            "kind": "write",
+            "name": "ri001",
+            "type": "integer",
+            "value": 2,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "write:rf001",
+            "kind": "write",
+            "name": "rf001",
+            "type": "scalar",
+            "value": 3,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "write:rb001",
+            "kind": "write",
+            "name": "rb001",
+            "type": "boolean",
+            "value": 4,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "write:rs001",
+            "kind": "write",
+            "name": "rs001",
+            "type": "string",
+            "value": 5,
+            "guard": null,
+            "default": null
+          },
+          {
+            "id": "write:rv001",
+            "kind": "write",
+            "name": "rv001",
+            "type": "vec2",
+            "value": 8,
+            "guard": null,
+            "default": null
+          }
+        ]
+      }
+    }
+  ],
+  "cells": [
+    {
+      "packed": [
+        1,
+        1,
+        620.29296875,
+        382.9949951171875,
+        3.051238775253296,
+        3.5019872188568115,
+        1.7162007093429565,
+        96.64163970947266,
+        1,
+        0,
+        0,
+        7.08748197555542,
+        -2.312521457672119,
+        15.008935928344727,
+        1,
+        1.0269588232040405,
+        22.52762794494629,
+        1,
+        1.025151014328003,
+        205.0301971435547,
+        0.7129459381103516,
+        5,
+        0.012500000186264515,
+        0.800000011920929,
+        0,
+        0.5,
+        0,
+        -0.04522845894098282,
+        -0.27686023712158203,
+        2,
+        1.0269588232040405,
+        22.52762794494629,
+        1.025151014328003,
+        1,
+        1.0269588232040405,
+        22.52762794494629,
+        1.025151014328003,
+        1,
+        1,
+        0.8939412236213684,
+        0.7858126163482666,
+        2.050302028656006,
+        1.0679824352264404,
+        -2.248493194580078,
+        0.25302019715309143,
+        0.1818181872367859,
+        0.1818181872367859,
+        0.1818181872367859,
+        0.1818181872367859,
+        0.1818181872367859,
+        112.7272720336914,
+        0,
+        0.35414308309555054,
+        0.09090909361839294,
+        17.011821746826172,
+        93.19554901123047,
+        0.18944235146045685,
+        3.631636142730713,
+        0.025302020832896233,
+        1,
+        0.02515101060271263,
+        300,
+        0.10727294534444809
+      ],
+      "memory": [
+        {
+          "name": "ri001",
+          "type": "integer",
+          "value": 30
+        },
+        {
+          "name": "rf001",
+          "type": "scalar",
+          "value": 17.198060147091656
+        },
+        {
+          "name": "rb001",
+          "type": "boolean",
+          "value": true
+        },
+        {
+          "name": "rs001",
+          "type": "string",
+          "value": "v2"
+        },
+        {
+          "name": "rv001",
+          "type": "vec2",
+          "value": [
+            -0.04414764562971016,
+            -0.2733543638220469
+          ]
+        }
+      ]
+    },
+    {
+      "packed": [
+        2,
+        2,
+        599.5299072265625,
+        391.7351379394531,
+        -3.922029733657837,
+        2.510117769241333,
+        3.420114040374756,
+        91.25961303710938,
+        1,
+        0,
+        0,
+        7.08748197555542,
+        -0.45125246047973633,
+        14.314526557922363,
+        1,
+        2.4646379947662354,
+        22.52762794494629,
+        1,
+        1.025151014328003,
+        205.0301971435547,
+        0.7129459381103516,
+        5,
+        0.012500000186264515,
+        0.800000011920929,
+        0,
+        0.5,
+        0,
+        0.17084215581417084,
+        -0.07119080424308777,
+        1,
+        2.4646379947662354,
+        22.52762794494629,
+        1.025151014328003,
+        1,
+        2.4646379947662354,
+        22.52762794494629,
+        1.025151014328003,
+        1,
+        1,
+        0,
+        0.7821384072303772,
+        2.050302028656006,
+        1.010432481765747,
+        -0.3991740942001343,
+        0.25302019715309143,
+        0.1818181872367859,
+        0.1818181872367859,
+        0.1818181872367859,
+        0.1818181872367859,
+        0.1818181872367859,
+        112.7272720336914,
+        0,
+        0.35414308309555054,
+        0.09090909361839294,
+        18.477794647216797,
+        93.19554901123047,
+        0.19305101037025452,
+        3.631636142730713,
+        0.025302020832896233,
+        1,
+        0.02515101060271263,
+        300,
+        0
+      ],
+      "memory": [
+        {
+          "name": "ri001",
+          "type": "integer",
+          "value": 30
+        },
+        {
+          "name": "rf001",
+          "type": "scalar",
+          "value": 18.66403166472221
+        },
+        {
+          "name": "rb001",
+          "type": "boolean",
+          "value": true
+        },
+        {
+          "name": "rs001",
+          "type": "string",
+          "value": "v2"
+        },
+        {
+          "name": "rv001",
+          "type": "vec2",
+          "value": [
+            0.17276661673654733,
+            -0.06995834439000358
+          ]
+        }
+      ]
+    }
+  ]
+}

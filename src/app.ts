@@ -219,7 +219,7 @@ function newSimulationDialog(template?: BuiltinSimulation, environmentId?: strin
     <h3>Starting organisms</h3><div id="starting-populations"></div><button type="button" class="button subtle" id="add-population">${icon('plus')}Add genome</button>
     <p class="form-error" role="alert" hidden></p><footer class="dialog-actions"><button class="button primary" type="submit">Start simulation ${icon('arrow')}</button></footer></form>`, 'new-simulation-dialog');
   const rows = dialog.querySelector<HTMLElement>('#starting-populations')!;
-  const drawRows = (): void => { rows.innerHTML = populations.map((item, index) => `<div class="population-row"><select data-population="${index}" aria-label="Genome ${index + 1}">${genomeOptions(item.genomeId)}</select><input type="number" min="0" max="384" step="1" data-count="${index}" value="${item.count}" aria-label="Organism count ${index + 1}"><button class="icon-button" type="button" data-remove-population="${index}" aria-label="Remove genome ${index + 1}">${icon('close')}</button></div>`).join(''); };
+  const drawRows = (): void => { rows.innerHTML = populations.map((item, index) => `<div class="population-row"><select data-population="${index}" aria-label="Genome ${index + 1}">${genomeOptions(item.genomeId)}</select><input type="number" min="0" step="1" data-count="${index}" value="${item.count}" aria-label="Organism count ${index + 1}"><button class="icon-button" type="button" data-remove-population="${index}" aria-label="Remove genome ${index + 1}">${icon('close')}</button></div>`).join(''); };
   drawRows();
   const syncPopulation = (event: Event): void => {
     const target = event.target as HTMLInputElement;
@@ -250,7 +250,7 @@ function newSimulationDialog(template?: BuiltinSimulation, environmentId?: strin
           genomeId: rows.querySelector<HTMLSelectElement>(`[data-population="${index}"]`)!.value,
           count: rows.querySelector<HTMLInputElement>(`[data-count="${index}"]`)!.valueAsNumber,
         }));
-        if (founders.some(item => !Number.isInteger(item.count) || item.count < 0 || item.count > 384) || founders.reduce((sum, item) => sum + item.count, 0) > 384) throw new Error('Choose at most 384 starting organisms.');
+        if (founders.some(item => !Number.isSafeInteger(item.count) || item.count < 0)) throw new Error('Organism counts must be nonnegative whole numbers.');
         const environment = findEnvironment(dialog.querySelector<HTMLSelectElement>('#simulation-environment')!.value);
         if (!environment) throw new Error('Choose an environment.');
         const environmentConfig = structuredClone(environment.config), environmentName = environment.name;
@@ -388,9 +388,8 @@ function addOrganismDialog(): void {
     const button = (event.target as Element).closest<HTMLButtonElement>('[data-add-id]'); if (!button || active !== session || transitioning) return;
     const genome = findGenome(button.dataset.addId!); if (!genome) return;
     try {
-      if (session.world.cells.length >= session.world.maxCells) throw new Error('This simulation has reached its organism limit.');
       const id = session.engine.compile(genome.source);
-      if (session.engine.seed(id,1) !== 1) throw new Error('This simulation has reached its organism limit.');
+      session.engine.seed(id,1);
       session.metadata.genomeNames[String(id)] = genome.name; session.refresh(); session.touch();
       dialog.close(); void session.checkpoint().catch(() => {}); updateSimulationUi();
       toast('One '+genome.name+' organism added.');

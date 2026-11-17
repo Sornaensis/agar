@@ -3,6 +3,7 @@ import { mkdtemp, readFile, writeFile, rm, truncate } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import ts from 'typescript';
 import { validateEngineArtifact } from './check-engine-artifact.mjs';
 
@@ -143,6 +144,22 @@ export async function checkEngineLoader() {
     assert.equal(editorA.analyze('').diagnostics[0].from, 0);
     assert.equal(editorA.analyze('é'.repeat(131073)).sourceBytes, 262146);
     assert.deepEqual(editorA.saveState(), beforeAnalysis);
+    const populationProbe = await Engine.load();
+    const probeGenome = populationProbe.compile('rf001=food.energy;rf002=food.nutrients;thrust=0;turn=0;divide=false;');
+    populationProbe.resetEmpty(81, 0);
+    const beforeInvalidSeed = populationProbe.saveState();
+    for (const count of [-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, 0x100000000, 0xffffffff]) {
+      assert.throws(() => populationProbe.seed(probeGenome, count), /count|identifier/i);
+      assert.deepEqual(populationProbe.saveState(), beforeInvalidSeed, 'Rejected requests cannot partially seed or wrap their count');
+    }
+    assert.equal(populationProbe.seed(probeGenome, 0), 0);
+    assert.equal(populationProbe.seed(probeGenome, 2049), 2049, 'There is no fixed 384 or 2048 population ceiling');
+    assert.equal(populationProbe.snapshot().cells.length, 2049);
+    assert.equal(Object.hasOwn(populationProbe.snapshot(), 'maxCells'), false);
+    const populationState = populationProbe.saveState(), populationCopy = await Engine.load();
+    populationCopy.restoreState(populationState);
+    assert.equal(populationCopy.snapshot().cells.length, 2049);
+    assert.deepEqual(populationCopy.saveState(), populationState);
     const legacyBytes = new Uint8Array(await readFile(new URL('../engine/fixtures/trophic-v1.bin', import.meta.url)));
     const expected = JSON.parse(await readFile(new URL('../engine/fixtures/trophic-v1.json', import.meta.url), 'utf8'));
     assert.equal(expected.provenance.abi, 4);
@@ -185,13 +202,44 @@ export async function checkEngineLoader() {
     new DataView(unknownVersion.buffer).setUint32(8, 3, true);
     assert.throws(() => migrated.restoreState(unknownVersion), /unsupported save version/);
     assert.deepEqual(migrated.saveState(), beforeRejectedSave, 'Unsupported versions cannot replace the live simulation');
+
+    // Current users' ABI5 saves already use version2. Exercise a real older
+    // binary's output, including its exact mutant AST and nonempty gut state.
+    const v2Bytes = new Uint8Array(await readFile(new URL('../engine/fixtures/trophic-v2.bin', import.meta.url)));
+    const v2Expected = JSON.parse(await readFile(new URL('../engine/fixtures/trophic-v2.json', import.meta.url), 'utf8'));
+    assert.equal(v2Expected.provenance.abi, 5);
+    assert.equal(v2Expected.provenance.checkpointVersion, 2);
+    assert.equal(new DataView(v2Bytes.buffer).getUint32(8, true), 2);
+    assert.equal(createHash('sha256').update(v2Bytes).digest('hex'), v2Expected.provenance.checkpointSha256);
+    const restoredV2 = await Engine.load(), continuedV2 = await Engine.load();
+    restoredV2.restoreState(v2Bytes);
+    assert.deepEqual(restoredV2.saveState(), v2Bytes, 'Real ABI5 version2 saves retain every encoded state byte without migration loss');
+    const v2World = restoredV2.snapshot();
+    assert.equal(v2World.tick, v2Expected.header[0]);
+    assert.equal(v2World.cells.length, v2Expected.cells.length);
+    for (const genome of v2Expected.genomes) {
+      const stored = restoredV2.getGenome(genome.id);
+      assert.deepEqual(stored, { source: genome.source, parentId: genome.parentId, mutationKind: genome.mutationKind });
+      assert.deepEqual(restoredV2.getGenomeGraph(genome.id), genome.graph, 'ABI5 programs preserve every expression, output, and register rule');
+    }
+    const v2Fields = { ...retainedFields, photosynthesisRate: 39, bodyAttack: 53, gutEnergy: 54, gutCapacity: 55,
+      gutNutrients: 56, digestionRate: 57, growthRate: 58, birthSize: 59, maturity: 60, lifespan: 61, exudationRate: 62 };
+    for (const previous of v2Expected.cells) {
+      const cell = v2World.cells.find(item => item.id === previous.packed[0]); assert.ok(cell);
+      for (const [field, offset] of Object.entries(v2Fields)) assert.equal(cell[field], previous.packed[offset], `${field} survives real ABI5 restore`);
+      assert.deepEqual(JSON.parse(JSON.stringify(restoredV2.getMemory(cell.id))), previous.memory, 'ABI5 values and occupancy survive in all five register banks');
+    }
+    continuedV2.restoreState(v2Bytes);
+    restoredV2.tick(60); continuedV2.tick(60);
+    assert.equal(restoredV2.snapshot().tick, v2Expected.header[0] + 60);
+    assert.deepEqual(restoredV2.saveState(), continuedV2.saveState(), 'Real ABI5 worlds resume deterministically under the current ecology');
     await Engine.load();
     assert.equal(requests.length, requestsBefore + 1, 'Later loads reuse compiled code');
     assert.equal(compilations, compilationsBefore + 1);
   } finally {
     globalThis.fetch = originalFetch; WebAssembly.compile = originalCompile;
   }
-  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, and real ABI4 version1 checkpoint migration with exact mutated graphs and registers.');
+  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, and real ABI4/v1 plus ABI5/v2 checkpoint compatibility with exact programs, registers, and deterministic continuation.');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await checkEngineLoader();

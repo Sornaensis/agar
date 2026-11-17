@@ -11,23 +11,42 @@ pub(crate) fn ensure(ok: bool, message: &str) -> Result<()> {
     if ok { Ok(()) } else { Err(format!("Invalid simulation save: {message}.")) }
 }
 
-pub(crate) struct Writer(pub Vec<u8>);
+pub(crate) struct Writer(pub Vec<u8>, Option<&'static str>);
 impl Writer {
-    pub fn u8(&mut self, value: u8) { self.0.push(value); }
-    pub fn u16(&mut self, value: u16) { self.0.extend(value.to_le_bytes()); }
-    pub fn u32(&mut self, value: u32) { self.0.extend(value.to_le_bytes()); }
-    pub fn u64(&mut self, value: u64) { self.0.extend(value.to_le_bytes()); }
-    pub fn i32(&mut self, value: i32) { self.0.extend(value.to_le_bytes()); }
+    pub fn new() -> Self { Self(Vec::new(), None) }
+    pub fn failed(&self) -> bool { self.1.is_some() }
+    fn bytes(&mut self, bytes: &[u8]) {
+        if self.failed() { return; }
+        let Some(length) = self.0.len().checked_add(bytes.len()).filter(|&length| length <= MAX_STATE_BYTES) else {
+            self.1 = Some("save exceeds 128 MiB"); return;
+        };
+        if length > self.0.capacity() {
+            let capacity = length.max(self.0.capacity().saturating_mul(2)).max(64).min(MAX_STATE_BYTES);
+            if self.0.try_reserve_exact(capacity - self.0.len()).is_err() {
+                self.1 = Some("not enough memory to create the simulation save"); return;
+            }
+        }
+        self.0.extend_from_slice(bytes);
+    }
+    fn finish(self) -> Result<Vec<u8>> {
+        match self.1 { Some(message) => Err(format!("Cannot save simulation: {message}.")), None => Ok(self.0) }
+    }
+    pub fn u8(&mut self, value: u8) { self.bytes(&[value]); }
+    pub fn u16(&mut self, value: u16) { self.bytes(&value.to_le_bytes()); }
+    pub fn u32(&mut self, value: u32) { self.bytes(&value.to_le_bytes()); }
+    pub fn u64(&mut self, value: u64) { self.bytes(&value.to_le_bytes()); }
+    pub fn i32(&mut self, value: i32) { self.bytes(&value.to_le_bytes()); }
     pub fn f64(&mut self, value: f64) { self.u64(value.to_bits()); }
     pub fn count(&mut self, value: usize) { self.u32(value as u32); }
     pub fn option(&mut self, value: Option<usize>) { self.u32(value.map_or(u32::MAX, |n| n as u32)); }
-    pub fn text(&mut self, text: &str) { self.count(text.len()); self.0.extend(text.as_bytes()); }
+    pub fn text(&mut self, text: &str) { self.count(text.len()); self.bytes(text.as_bytes()); }
 }
 
 pub(crate) struct Reader<'a> { bytes: &'a [u8], offset: usize, version: u32 }
 impl<'a> Reader<'a> {
     pub fn new(bytes: &'a [u8]) -> Self { Self { bytes, offset: 0, version: VERSION } }
     pub fn version(&self) -> u32 { self.version }
+    pub fn remaining(&self) -> usize { self.bytes.len() - self.offset }
     fn take(&mut self, count: usize) -> Result<&'a [u8]> {
         let end = self.offset.checked_add(count).ok_or("Invalid simulation save: length overflow.")?;
         ensure(end <= self.bytes.len(), "truncated data")?;
@@ -53,21 +72,22 @@ fn checksum(bytes: &[u8]) -> u32 {
 }
 
 pub(crate) fn save(engine: &Engine) -> Result<Vec<u8>> {
-    let mut w = Writer(Vec::new());
-    w.0.extend(MAGIC); w.u32(VERSION); w.u32(0); w.u32(0);
+    let mut w = Writer::new();
+    w.bytes(MAGIC); w.u32(VERSION); w.u32(0); w.u32(0);
     w.count(engine.genomes.len());
     for genome in &engine.genomes {
+        if w.failed() { break; }
         w.u32(genome.parent_id); w.u32(genome.mutation_kind); w.count(genome.bytes);
         w.text(&genome.source);
         genome.program.write_checkpoint(&mut w);
     }
-    engine.world.write_checkpoint(&mut w);
-    ensure(w.0.len() <= MAX_STATE_BYTES, "save exceeds 128 MiB")?;
-    let len = w.0.len() as u32;
-    w.0[12..16].copy_from_slice(&len.to_le_bytes());
-    let hash = checksum(&w.0[20..]);
-    w.0[16..20].copy_from_slice(&hash.to_le_bytes());
-    Ok(w.0)
+    if !w.failed() { engine.world.write_checkpoint(&mut w); }
+    let mut bytes = w.finish()?;
+    let len = bytes.len() as u32;
+    bytes[12..16].copy_from_slice(&len.to_le_bytes());
+    let hash = checksum(&bytes[20..]);
+    bytes[16..20].copy_from_slice(&hash.to_le_bytes());
+    Ok(bytes)
 }
 
 pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
@@ -219,6 +239,40 @@ mod tests {
             assert!(!e.error.is_empty());
             assert_eq!(save(&e).unwrap(), before, "rejection must preserve the live engine");
         }
+    }
+
+    #[test]
+    fn oversized_save_writer_rejects_before_growing_its_buffer() {
+        let oversized = vec![0u8; MAX_STATE_BYTES + 1];
+        let mut writer = Writer::new();
+        writer.bytes(&oversized);
+        assert!(writer.failed());
+        assert!(writer.0.is_empty());
+        assert_eq!(writer.0.capacity(), 0);
+        writer.u32(42);
+        assert!(writer.0.is_empty(), "writes after rejection cannot produce a partial successful save");
+        assert!(writer.finish().unwrap_err().contains("128 MiB"));
+    }
+
+    #[test]
+    fn population_restore_uses_available_bytes_instead_of_a_fixed_cell_ceiling() {
+        let mut engine = Engine::new();
+        let id = engine.compile("rf001=food.energy;rf002=food.nutrients;thrust=0;turn=0;divide=false;");
+        assert_eq!(engine.world.seed_cells(id, 2049, -1.0, -1.0), 2049);
+        let bytes = save(&engine).unwrap();
+        let restored = restore(&bytes).unwrap();
+        assert_eq!(restored.world.cells.len(), 2049);
+        assert_eq!(save(&restored).unwrap(), bytes);
+
+        // An empty world ends with cell_count and food_count. Recompute the
+        // checksum so rejection tests the count boundary, not corruption checks.
+        let mut malformed = save(&Engine::new()).unwrap();
+        let offset = malformed.len() - 8;
+        malformed[offset..offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+        let hash = checksum(&malformed[20..]); malformed[16..20].copy_from_slice(&hash.to_le_bytes());
+        assert!(!engine.restore_state(&malformed));
+        assert!(engine.error.contains("available checkpoint data"));
+        assert_eq!(save(&engine).unwrap(), bytes, "rejected counts cannot replace the live population");
     }
 
     #[test]

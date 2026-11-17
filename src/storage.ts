@@ -114,7 +114,7 @@ function historyPoint(value: unknown): HistoryPoint {
   const item = object(value, 'History point');
   return {
     time: number(item.time, 'Simulation time', 0, Number.MAX_SAFE_INTEGER),
-    population: number(item.population, 'Population', 0, 384, true),
+    population: number(item.population, 'Population', 0, Number.MAX_SAFE_INTEGER, true),
     food: number(item.food, 'Organic particle count', 0, 1200, true),
     births: number(item.births, 'Births', 0, Number.MAX_SAFE_INTEGER, true),
     deaths: number(item.deaths, 'Deaths', 0, Number.MAX_SAFE_INTEGER, true),

@@ -30,7 +30,11 @@ export class SimulationSession {
     }
     this.metadata.summary = summarize(this.world);
   }
-  advance(steps: number): void { this.engine.tick(steps); this.refresh(); this.touch(); }
+  advance(steps: number): void {
+    // A batch can advance some ticks before an allocation failure stops it.
+    // Keep metadata aligned with the engine even when playback must pause.
+    try { this.engine.tick(steps); } finally { this.refresh(); this.touch(); }
+  }
   async checkpoint(): Promise<void> {
     if (this.pending) return this.pending;
     if (this.revision === this.savedRevision) return;

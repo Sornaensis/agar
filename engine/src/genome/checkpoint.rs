@@ -49,9 +49,9 @@ impl Registers {
 impl Program {
     pub(crate) fn checkpoint_source_matches(&self, compiled: &Self, source: &str, authored: bool) -> bool {
         if authored {
-            let mut a = Writer(Vec::new()); let mut b = Writer(Vec::new());
+            let mut a = Writer::new(); let mut b = Writer::new();
             self.write_checkpoint(&mut a); compiled.write_checkpoint(&mut b);
-            a.0 == b.0
+            !a.failed() && !b.failed() && a.0 == b.0
         } else { self.to_source().as_deref() == Some(source) }
     }
 
@@ -167,12 +167,12 @@ mod tests {
                 2 => program.bindings[0].name = "if".into(),
                 _ => program.writes.push(program.writes[0].clone()),
             }
-            let mut w = Writer(Vec::new()); program.write_checkpoint(&mut w);
+            let mut w = Writer::new(); program.write_checkpoint(&mut w);
             assert!(Program::read_checkpoint(&mut Reader::new(&w.0)).is_err());
         }
         let key = Register::parse("ri001").unwrap();
         let mut memory = Registers::default(); memory.entries.insert(key, Value::Boolean(false));
-        let mut w = Writer(Vec::new()); memory.write_checkpoint(&mut w);
+        let mut w = Writer::new(); memory.write_checkpoint(&mut w);
         assert!(Registers::read_checkpoint(&mut Reader::new(&w.0)).is_err());
     }
 }

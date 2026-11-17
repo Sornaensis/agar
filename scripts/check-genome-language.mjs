@@ -132,6 +132,9 @@ assert.equal(roots.find(root => root.name === 'invest.attack').default, '0');
 compileProgram(`${required} feed = true;`, false);
 compileProgram(`${required} invest.attack = false;`, false);
 compileProgram(`${required} feed = 1 - gut.fraction; invest.attack = prey.attack;`);
+compileProgram(`rf001 = food.energy; rf002 = food.nutrients; ${required}`);
+compileProgram(`ri001 = food.energy; ${required}`, false);
+compileProgram(`food.nutrients = 1; ${required}`, false);
 const functionCases = [
   ['sin(1)', 'scalar'], ['cos(1)', 'scalar'], ['abs(1)', 'integer'], ['abs(1.5)', 'scalar'],
   ['min(1, 2)', 'integer'], ['min(1, 2.0)', 'scalar'], ['max(1, 2)', 'integer'], ['max(1.0, 2)', 'scalar'],

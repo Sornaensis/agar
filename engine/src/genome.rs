@@ -82,6 +82,8 @@ pub struct Inputs {
     pub prey_integrity: f64,
     pub prey_attack: f64,
     pub prey_photosynthesis: f64,
+    pub food_energy: f64,
+    pub food_nutrients: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -427,10 +429,12 @@ enum Sensor {
     PreyIntegrity,
     PreyAttack,
     PreyPhotosynthesis,
+    FoodEnergy,
+    FoodNutrients,
 }
 impl Sensor {
     // Checkpoint version 1 stores the first 46 indices; never reorder them.
-    const ALL: [Self; 59] = [
+    const ALL: [Self; 61] = [
         Self::Energy,
         Self::Age,
         Self::Speed,
@@ -490,6 +494,8 @@ impl Sensor {
         Self::PreyIntegrity,
         Self::PreyAttack,
         Self::PreyPhotosynthesis,
+        Self::FoodEnergy,
+        Self::FoodNutrients,
     ];
     fn name(self) -> &'static str {
         match self {
@@ -552,6 +558,8 @@ impl Sensor {
             Self::PreyIntegrity => "prey.integrity",
             Self::PreyAttack => "prey.attack",
             Self::PreyPhotosynthesis => "prey.photosynthesis",
+            Self::FoodEnergy => "food.energy",
+            Self::FoodNutrients => "food.nutrients",
         }
     }
     fn ty(self) -> Type {
@@ -631,6 +639,8 @@ impl Sensor {
             Self::PreyIntegrity => Value::Scalar(finite(i.prey_integrity)),
             Self::PreyAttack => Value::Scalar(finite(i.prey_attack)),
             Self::PreyPhotosynthesis => Value::Scalar(finite(i.prey_photosynthesis)),
+            Self::FoodEnergy => Value::Scalar(finite(i.food_energy)),
+            Self::FoodNutrients => Value::Scalar(finite(i.food_nutrients)),
         }
     }
 }
@@ -2630,14 +2640,14 @@ mod tests {
         let mut source = (0..MAX_NODES - 3).map(|index| format!("let a{index}={index};")).collect::<String>();
         source.push_str("thrust=0;turn=0;divide=false;");
         let program = Program::compile(&source).unwrap();
-        let mut before = crate::checkpoint::Writer(Vec::new());
+        let mut before = crate::checkpoint::Writer::new();
         program.write_checkpoint(&mut before);
         let analysis = Program::analyze(&source);
         assert!(analysis.valid);
         assert_eq!(analysis.node_count, MAX_NODES);
         assert_eq!(analysis.bindings.len(), MAX_NODES - 3);
         let compiled = Program::compile(&source).unwrap();
-        let mut after = crate::checkpoint::Writer(Vec::new());
+        let mut after = crate::checkpoint::Writer::new();
         compiled.write_checkpoint(&mut after);
         assert_eq!(before.0, after.0);
         assert_eq!(program.estimated_bytes(), compiled.estimated_bytes());
@@ -2726,13 +2736,15 @@ mod tests {
         assert_eq!(Sensor::ALL[45], Sensor::SenseRange);
         assert_eq!(Sensor::ALL[46], Sensor::BodyAttack);
         assert_eq!(Sensor::ALL[58], Sensor::PreyPhotosynthesis);
+        assert_eq!(Sensor::ALL[59], Sensor::FoodEnergy);
+        assert_eq!(Sensor::ALL[60], Sensor::FoodNutrients);
         let inputs = Inputs {
             body_attack: 0.2, gut_energy: 32.0, gut_capacity: 80.0, gut_fraction: 0.4,
             digestion_rate: 4.1, growth_rate: 0.03, birth_size: 0.8, maturity: 0.5,
             lifespan: 300.0, exudation_rate: 0.8, prey_integrity: 0.3,
-            prey_attack: 0.1, prey_photosynthesis: 0.6, ..Inputs::default()
+            prey_attack: 0.1, prey_photosynthesis: 0.6, food_energy: 12.5, food_nutrients: 0.125, ..Inputs::default()
         };
-        let expected = [0.2, 32.0, 80.0, 0.4, 4.1, 0.03, 0.8, 0.5, 300.0, 0.8, 0.3, 0.1, 0.6];
+        let expected = [0.2, 32.0, 80.0, 0.4, 4.1, 0.03, 0.8, 0.5, 300.0, 0.8, 0.3, 0.1, 0.6, 12.5, 0.125];
         for (sensor, value) in Sensor::ALL[46..].iter().zip(expected) {
             assert_eq!(sensor.ty(), Type::Number);
             assert_eq!(sensor.read(&inputs), Value::Scalar(value));
