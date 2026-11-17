@@ -1,0 +1,36 @@
+{
+  "name": "agar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "check": "tsc --noEmit",
+    "build": "npm run check && vite build",
+    "build:pages": "npm run check && vite build --outDir docs",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "build:all": "npm run build:wasm && npm run build",
+    "test:engine": "cargo test --manifest-path engine/Cargo.toml",
+    "test:wasm": "node scripts/check-wasm.mjs",
+    "test:graph": "node scripts/check-genome-network.mjs",
+    "test:language": "node scripts/check-genome-language.mjs",
+    "preview": "vite preview --host 0.0.0.0",
+    "test:storage": "node scripts/check-storage.mjs",
+    "test:session": "node scripts/check-session.mjs",
+    "check:engine": "node scripts/check-engine-artifact.mjs"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vite": "7.2.2"
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "6.20.4",
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/lint": "6.9.8",
+    "@codemirror/search": "6.7.2",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.15",
+    "@lezer/highlight": "1.2.5"
+  }
+}
