@@ -1,0 +1,46 @@
+{
+  "passed": true,
+  "checkpointVersion": 9,
+  "engines": [
+    {
+      "name": "baseline",
+      "abi": 12,
+      "sha256": "4ab05a714ceaf34c4fe86d73c2f24e0b43c1aa93c4da7a7addacb3b8df712130"
+    },
+    {
+      "name": "current",
+      "abi": 13,
+      "sha256": "3ecb2671f2d07847a473ffa07817324aa1e258010364deaa00ce82db6e75a1e4"
+    }
+  ],
+  "comparisons": 74,
+  "division": {
+    "tick": 2517,
+    "seconds": 83.9,
+    "daughterId": 2,
+    "daughterGenome": 2,
+    "mutations": 1,
+    "restore": {
+      "checkpointBytes": 201893,
+      "checkpointSha256": "c8ef0da3a1bd5695b042275724eb4409c53fb62d67a76f9ed42dc0d7be5edd8e",
+      "continuationTicks": 240
+    }
+  },
+  "edits": {
+    "finalTick": 1740,
+    "restore": {
+      "checkpointBytes": 218973,
+      "checkpointSha256": "d7bc22b22cb3a6affa3b3591d8b51183555539745438827e429433c5d808d727",
+      "continuationTicks": 240
+    }
+  },
+  "compared": [
+    "canonical checkpoint bytes",
+    "full cell/particle snapshot bytes",
+    "all environmental field and object bytes"
+  ],
+  "excludes": [
+    "runtime genome allocation diagnostics",
+    "timing claims"
+  ]
+}

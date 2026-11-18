@@ -1,0 +1,137 @@
+{
+  "nativeReleaseTests": 306,
+  "nativePassed": true,
+  "checks": [
+    {
+      "script": "check-engine-artifact.mjs",
+      "passed": true,
+      "seconds": 0.358,
+      "output": "Validated engine/pkg/agar_engine.wasm: ABI 13, 85 functions, 862,444 bytes.\n",
+      "stderr": ""
+    },
+    {
+      "script": "check-engine-loader.mjs",
+      "passed": true,
+      "seconds": 3.451,
+      "output": "Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, version9 body/product/substrate/mechanism/control/environment/gas continuation and explicit atomic rejection of pre-organelle checkpoints.\n",
+      "stderr": ""
+    },
+    {
+      "script": "check-worker.mjs",
+      "passed": true,
+      "seconds": 4.691,
+      "output": "Worker checks passed: threaded WASM, ordered commands, compact/full parity, transfer ownership, checkpoints, partial errors, responsive main loop, environment editing, gas sources/sinks/aerators, conservative resize, carbon/oxygen budgets, v8 migration, deterministic replay, and disposal.\n",
+      "stderr": ""
+    },
+    {
+      "script": "check-session.mjs",
+      "passed": true,
+      "seconds": 1.042,
+      "output": "Session checks passed: ordered commands; exact summary-only progress and partial errors; immutable visual frames; metadata/field reuse; shared same-state inspection and mutation invalidation; checkpoints, retries, bounded history, disposal and locks.\n",
+      "stderr": ""
+    },
+    {
+      "script": "check-player-view.mjs",
+      "passed": true,
+      "seconds": 1.736,
+      "output": "Player view: shared DOM/state, app navigation, cross-window controls, explicit pause, hidden-player timer stepping, bounded batches/checkpoints, visibility cancellation and close/stop cleanup passed.\n",
+      "stderr": ""
+    },
+    {
+      "script": "check-simulation-loop.mjs",
+      "passed": true,
+      "seconds": 0.804,
+      "output": "Simulation loop: 1\u00d7/2\u00d7/5\u00d7/10\u00d7 without rAF, hidden >80 ticks/s, adaptive \u22648-tick batches, one in flight, pause/command fairness, no offline catch-up and window/stop cleanup passed.\n",
+      "stderr": ""
+    },
+    {
+      "script": "check-presentation.mjs",
+      "passed": true,
+      "seconds": 1.232,
+      "output": "Presentation: omitted render/grid projections, metadata without transfer buffers, partial progress, single visible inspector paint, exact trace version gating and reused field pixels passed.\n",
+      "stderr": ""
+    },
+    {
+      "script": "check-camera.mjs",
+      "passed": true,
+      "seconds": 0.875,
+      "output": "Camera: fit, anchoring, pan, resize and bounds; 3276 allocation-free torus image cases match exact ordered seam/viewport behavior.\n",
+      "stderr": ""
+    },
+    {
+      "script": "check-storage.mjs",
+      "passed": true,
+      "seconds": 1.49,
+      "output": "Storage checks passed: immutable built-ins, distinct imported copies, versioned JSON round-trips, UTF-8 limits, invalid imports, environment bounds, checkpoint metadata, atomic rename and missing-item rejection, commit completion, history limits, draft recovery, and surfaced quota failures.\n",
+      "stderr": ""
+    },
+    {
+      "script": "check-environment-controls.mjs",
+      "passed": true,
+      "seconds": 0.731,
+      "output": "Environment controls: precision-preserving edits, bounded geometry, gas boundary validation, and builder-only starting gas pools passed.\n",
+      "stderr": ""
+    },
+    {
+      "script": "check-cellular-ui.mjs",
+      "passed": true,
+      "seconds": 2.18,
+      "output": "Cellular UI checks passed: mechanism/receptor schema parity, typed local readings and concentrations, pure function scope, initiation/recycling controls, live values, physical inventory validation and escaped rendering.\n",
+      "stderr": ""
+    },
+    {
+      "script": "check-genome-network.mjs",
+      "passed": true,
+      "seconds": 3.11,
+      "output": "Genome network checks passed: 32 local-control/mechanism/cellular-family/legacy preset layouts, 24 typed variants, builtin/alias projection, all primitive registers, read/write/clear timing, exact ports, literal defaults, 8192-node chains, 10071 roots, linear alias metadata, and bounded bidirectional navigation.\n",
+      "stderr": ""
+    },
+    {
+      "script": "check-genome-language.mjs",
+      "passed": true,
+      "seconds": 1.736,
+      "output": "Genome language checks passed: 174 signals, 24 functions, 81 outputs; typed registers, lexical isolation, cursor ranges, and compiler result types.\n",
+      "stderr": ""
+    },
+    {
+      "script": "check-program-inspection.mjs",
+      "passed": true,
+      "seconds": 2.453,
+      "output": "Program inspection passed: real WASM values, Unicode ranges, snapshots, register previews, persistence, and boundary validation.\n",
+      "stderr": ""
+    },
+    {
+      "script": "check-wasm.mjs",
+      "passed": true,
+      "seconds": 9.642,
+      "output": "WASM organelle integration passed: ABI12, typed174/81schema, five register banks, original-source mutations, genome-grown bodies, closed material, checkpoint9 replay and v3/v4 compatibility, uncapped2,049-organism restore, 1 producer births.\nEngine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, version9 body/product/substrate/mechanism/control/environment/gas continuation and explicit atomic rejection of pre-organelle checkpoints.\n",
+      "stderr": "",
+      "note": "Its success message retained the historical ABI12 label during this run. The harness and loader asserted ABI13; the message label was subsequently corrected."
+    },
+    {
+      "script": "check-cellular.mjs",
+      "passed": true,
+      "seconds": 24.027,
+      "output": "Cellular checks passed: 8 authored genomes, 8 importable examples, local receptor separation, bright/shade motor recycling and regrowth, paid development, frozen inspection, resource conservation, whole-machine fission with functioning consumer daughters, gene/placement mutations, and exact v9 continuation.\n{\"conditions\":\"One founder; 0.85 light; 3 initial minerals per patch; 4 supplied exudate particles/s for non-phototrophs. The Predator tissue-funded lifecycle is tested separately in the native engine.\",\"cycles\":[{\"name\":\"Forager\",\"suppliedSubstrate\":\"exudate\",\"firstDivisionSeconds\":93.67,\"timeLimitSeconds\":150},{\"name\":\"Drifter\",\"suppliedSubstrate\":\"exudate\",\"firstDivisionSeconds\":87.5,\"timeLimitSeconds\":150},{\"name\":\"Conserver\",\"suppliedSubstrate\":\"exudate\",\"firstDivisionSeconds\":90.67,\"timeLimitSeconds\":150},{\"name\":\"Giant\",\"suppliedSubstrate\":\"exudate\",\"firstDivisionSeconds\":122.23,\"timeLimitSeconds\":150},{\"name\":\"Rememberer\",\"suppliedSubstrate\":\"exudate\",\"firstDivisionSeconds\":98.7,\"timeLimitSeconds\":150},{\"name\":\"Phototroph\",\"suppliedSubstrate\":\"none\",\"firstDivisionSeconds\":83.9,\"timeLimitSeconds\":150},{\"name\":\"Predator\",\"suppliedSubstrate\":\"exudate\",\"firstDivisionSeconds\":206.43,\"timeLimitSeconds\":900},{\"name\":\"Mixotroph\",\"suppliedSubstrate\":\"exudate\",\"firstDivisionSeconds\":123.97,\"timeLimitSeconds\":150}]}\n",
+      "stderr": ""
+    },
+    {
+      "script": "check-cellular-navigation.mjs",
+      "passed": true,
+      "seconds": 9.802,
+      "output": "Predator soft-contact approach passed: a particle beyond capture range is captured after 0.80 seconds without an attack.\nCurrent cellular navigation passed: Forager travels 7.7 radians around a resistant surface and captures particles (gut 34.7, digestion 49.9); Predator equips before growth, attacks 352 times and digests killed prey (tissue 6.6, digestion 1.1).\nLate tissue recovery passed: the current Forager pays carbon and ATP for its missing enzyme and assimilates 1.03 chemical-potential units from a naturally produced carcass.\nPaid maintenance passed after real thermal stress: [{\"name\":\"Forager\",\"repairedMass\":0.013083503624694903,\"remainingEnergy\":67.52008730454702},{\"name\":\"Predator\",\"repairedMass\":0.019058062538187644,\"remainingEnergy\":49.50407379642654}].\nEarly damage recovery passed: maintenance completes while damaged developmental prerequisites recover.\n",
+      "stderr": ""
+    }
+  ],
+  "browser": "Real Chromium smoke test unavailable in this environment; desktop/browser socket access was denied earlier in this session.",
+  "engineAbi": 13,
+  "checkpointVersion": 9,
+  "wasmSha256": "3ecb2671f2d07847a473ffa07817324aa1e258010364deaa00ce82db6e75a1e4",
+  "productionBuildPassed": true,
+  "productionWasmCopies": {
+    "engine/pkg/agar_engine.wasm": "3ecb2671f2d07847a473ffa07817324aa1e258010364deaa00ce82db6e75a1e4",
+    "public/wasm/cellarium_engine.wasm": "3ecb2671f2d07847a473ffa07817324aa1e258010364deaa00ce82db6e75a1e4",
+    "docs/wasm/cellarium_engine.wasm": "3ecb2671f2d07847a473ffa07817324aa1e258010364deaa00ce82db6e75a1e4",
+    "docs/assets/agar_engine-BrZKdvlk.wasm": "3ecb2671f2d07847a473ffa07817324aa1e258010364deaa00ce82db6e75a1e4"
+  }
+}
