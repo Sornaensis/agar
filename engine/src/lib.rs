@@ -127,7 +127,7 @@ thread_local! { static ENGINE: RefCell<Engine> = RefCell::new(Engine::new()); }
 
 #[no_mangle]
 pub extern "C" fn abi_version() -> u32 {
-    10
+    11
 }
 
 /// Allocate a writable, zero-initialized byte buffer. The caller must deallocate
@@ -572,7 +572,7 @@ pub extern "C" fn set_environment(temperature: f32, light: f32, current: f32) {
     });
 }
 
-/// Kinds: 0 light, 1 heat, 2 vortex, 3 nutrient spring. Position wraps.
+/// Kinds: 0 light, 1 heat, 2 vortex, 3 spring, 4 absorber, 5 jet, 6 band, 7 radial. Position wraps.
 /// Returns zero without changing the environment if invalid or already full.
 #[no_mangle]
 pub extern "C" fn add_source(kind: u32, x: f32, y: f32, strength: f32, radius: f32) -> u32 {
@@ -581,7 +581,7 @@ pub extern "C" fn add_source(kind: u32, x: f32, y: f32, strength: f32, radius: f
         e.error.clear();
         let id = e.world.environment.add_source(kind, x as f64, y as f64, strength as f64, radius as f64);
         if id == 0 {
-            e.error = "Could not add source: use kind 0 (light), 1 (heat), 2 (vortex), or 3 (nutrient spring), finite values, and at most 16 sources.".into();
+            e.error = "Could not add source: use a kind from 0 through 7, finite values, and at most 64 sources.".into();
         }
         id
     })
@@ -608,6 +608,48 @@ pub extern "C" fn clear_sources() {
         e.error.clear();
         e.world.environment.clear_sources();
     });
+}
+
+/// Edit the same emitter; its identity and the existing dynamic fields survive.
+#[no_mangle]
+pub extern "C" fn update_source(id:u32,kind:u32,x:f32,y:f32,strength:f32,radius:f32,angle:f32,length:f32)->u32 {
+    ENGINE.with(|e|{let mut e=e.borrow_mut();e.error.clear();
+        let ok=e.world.environment.update_source(id,kind,x as f64,y as f64,strength as f64,radius as f64,angle as f64,length as f64);
+        if !ok {e.error="Unknown source or invalid source parameters.".into();}u32::from(ok)})
+}
+#[no_mangle]
+pub extern "C" fn set_world_size(width:f32,height:f32)->u32 {
+    ENGINE.with(|e|{let mut e=e.borrow_mut();e.error.clear();
+        let ok=e.world.set_world_size(width as f64,height as f64);
+        if !ok {e.error="World dimensions must be multiples of 20, width 400–4800 and height 400–3040.".into();}u32::from(ok)})
+}
+#[no_mangle]
+pub extern "C" fn nutrient_removed_total()->f64 {
+    ENGINE.with(|e|e.borrow().world.environment.nutrient_removed_total())
+}
+#[no_mangle]
+pub extern "C" fn add_barrier(x:f32,y:f32,length:f32,width:f32,angle:f32,floating:u32)->u32 {
+    ENGINE.with(|e|{let mut e=e.borrow_mut();e.error.clear();
+        if floating>1 {e.error="Floating must be zero or one.".into();return 0;}
+        let id=e.world.environment.add_barrier(x as f64,y as f64,length as f64,width as f64,angle as f64,floating!=0);
+        if id==0 {e.error="Could not add barrier: use finite values and at most 64 barriers.".into();}
+        else {e.world.settle_barriers();}id})
+}
+#[no_mangle]
+pub extern "C" fn update_barrier(id:u32,x:f32,y:f32,length:f32,width:f32,angle:f32,floating:u32)->u32 {
+    ENGINE.with(|e|{let mut e=e.borrow_mut();e.error.clear();
+        if floating>1 {e.error="Floating must be zero or one.".into();return 0;}
+        let ok=e.world.environment.update_barrier(id,x as f64,y as f64,length as f64,width as f64,angle as f64,floating!=0);
+        if !ok {e.error="Unknown barrier or invalid barrier parameters.".into();}else{e.world.settle_barriers();}u32::from(ok)})
+}
+#[no_mangle]
+pub extern "C" fn remove_barrier(id:u32)->u32 {
+    ENGINE.with(|e|{let mut e=e.borrow_mut();e.error.clear();let ok=e.world.environment.remove_barrier(id);
+        if !ok {e.error="Unknown barrier.".into();}u32::from(ok)})
+}
+#[no_mangle]
+pub extern "C" fn clear_barriers() {
+    ENGINE.with(|e|{let mut e=e.borrow_mut();e.error.clear();e.world.environment.clear_barriers();});
 }
 
 /// Packed grid/source snapshot; copy immediately using environment_snapshot_len.
@@ -931,7 +973,7 @@ mod tests {
         engine.world.cells[0].vy = -1.25;
         engine.world.cells[0].integrity = 0.8;
         engine.world.snapshot(&mut engine.snapshot);
-        assert_eq!(abi_version(), 10);
+        assert_eq!(abi_version(), 11);
         assert_eq!(simulation::CELL_STRIDE, 158);
         assert_eq!(engine.snapshot.len(), 12 + 22 * 158 + 360 * 5);
         assert_eq!(engine.snapshot[7], simulation::WIDTH as f64);
@@ -1149,11 +1191,11 @@ mod tests {
         let env_pointer = environment_snapshot_ptr();
         let env =
             unsafe { std::slice::from_raw_parts(env_pointer, environment_snapshot_len() as usize) };
-        assert_eq!(env.len(), 7 + environment::PATCHES * 5 + 6);
+        assert_eq!(env.len(), 11 + environment::PATCHES * 5 + 8);
         assert_eq!(&env[..7], &[60.0, 38.0, 0.5, 0.0, 0.0, 1.0, 0.3]);
         assert_eq!(
-            &env[7 + environment::PATCHES * 5..],
-            &[source as f32, 0.0, 1199.0, 1.0, 1.0, 40.0]
+            &env[11 + environment::PATCHES * 5..],
+            &[source as f32, 0.0, 1199.0, 1.0, 1.0, 20.0, 0.0, 600.0]
         );
         assert_eq!(
             unsafe { std::slice::from_raw_parts(pointer, cell_memory_len() as usize) },

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { catalog, moduleUrl, compile, seed, snapshot, body, source, save, restore, error } from './organelle-harness.mjs';
+import { catalog, moduleUrl, compile, seed, snapshot, body, source, save, restore, error, legacyEnvironmentProjection } from './organelle-harness.mjs';
 
 // Migration and behavior equivalence are different checks. New optical hardware
 // was previously assigned a zero field of view, so its corrected future is
@@ -46,7 +46,7 @@ for (const preset of MECHANISM_PRESETS_V6) {
 
 async function create(module) {
   const api = (await WebAssembly.instantiate(module, {})).exports;
-  assert.equal(api.abi_version(), 10);
+  assert.ok([10, 11].includes(api.abi_version()), 'Known historical or current ABI');
   api.set_environment(0.5, 0.85, 0);
   api.set_initial_nutrients(3);
   api.set_food_rate(0);
@@ -77,8 +77,7 @@ function physicalBody(value) {
 function compare(reference, candidate, label) {
   exactBytes(raw(candidate, 'snapshot_ptr', 'snapshot_len', Float64Array),
     raw(reference, 'snapshot_ptr', 'snapshot_len', Float64Array), `${label}: world`);
-  exactBytes(raw(candidate, 'environment_snapshot_ptr', 'environment_snapshot_len', Float32Array),
-    raw(reference, 'environment_snapshot_ptr', 'environment_snapshot_len', Float32Array), `${label}: environment`);
+  exactBytes(legacyEnvironmentProjection(candidate), legacyEnvironmentProjection(reference), `${label}: environment`);
   const state = snapshot(reference);
   assert.deepEqual(snapshot(candidate), state, `${label}: decoded state and conserved totals`);
   for (const cell of state.cells) {
@@ -116,7 +115,7 @@ for (const preset of MECHANISM_PRESETS_V6) {
   compare(baseline, migrated, `${preset.name}: immediate v6 import`);
   for (const cell of state.cells) assert.equal(source(migrated, cell.genome), preset.source);
   const upgraded = save(migrated);
-  assert.equal(version(upgraded), 7);
+  assert.equal(version(upgraded), 8);
   const replay = await create(newModule);
   assert.equal(restore(replay, upgraded), 1, error(replay));
   assert.deepEqual(save(replay), upgraded, `${preset.name}: upgraded state restores exactly`);
@@ -125,7 +124,7 @@ for (const preset of MECHANISM_PRESETS_V6) {
     feed(migrated, current, preset.name);
     feed(replay, current, preset.name);
     tick(migrated, 30); tick(replay, 30);
-    assert.deepEqual(save(replay), save(migrated), `${preset.name}: v7 continuation is byte-exact`);
+    assert.deepEqual(save(replay), save(migrated), `${preset.name}: current continuation is byte-exact`);
   }
   migrations.push({
     name: preset.name, sourceSha256: hash(preset.source), preservedSourceMatchesBaseline: true,

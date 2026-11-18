@@ -124,7 +124,7 @@ impl World {
             next_id > 0 && next_food_id > 0 && next_food_id <= u64::MAX / 2 && rng != 0,
             "invalid identifier or random sequence",
         )?;
-        let environment = Environment::read_checkpoint(r)?;
+        let environment = Environment::read_checkpoint(r, version)?;
         let count = r.u32()? as usize;
         ensure(
             count <= r.remaining().saturating_sub(4) / 700,
@@ -152,9 +152,9 @@ impl World {
                 parent_id < id && ((parent_id == 0) == (generation == 0)),
                 "invalid ancestry",
             )?;
-            let x = r.range(0.0, WIDTH)?;
-            let y = r.range(0.0, HEIGHT)?;
-            ensure(x < WIDTH && y < HEIGHT, "cell outside habitat")?;
+            let x = r.range(0.0, environment.width)?;
+            let y = r.range(0.0, environment.height)?;
+            ensure(x < environment.width && y < environment.height, "cell outside habitat")?;
             let vx = r.range(-1e12, 1e12)?;
             let vy = r.range(-1e12, 1e12)?;
             let angle = r.range(0.0, TAU)?;
@@ -324,8 +324,8 @@ impl World {
             .map_err(|_| "Not enough memory to restore organic particle identities".to_owned())?;
         for _ in 0..count {
             let id = r.u64()?;
-            let x = r.range(0.0, WIDTH)?;
-            let y = r.range(0.0, HEIGHT)?;
+            let x = r.range(0.0, environment.width)?;
+            let y = r.range(0.0, environment.height)?;
             let energy = r.range(0.0, 24.0)?;
             let nutrients = r.range(0.0, 1e100)?;
             let kind = if version >= 4 {
@@ -338,8 +338,8 @@ impl World {
                 id > 0
                     && id < next_food_id
                     && food_ids.insert(id)
-                    && x < WIDTH
-                    && y < HEIGHT
+                    && x < environment.width
+                    && y < environment.height
                     && energy > 0.0,
                 "invalid particle",
             )?;
@@ -387,7 +387,7 @@ impl World {
         ensure(
             material.is_finite()
                 && introduced_material.is_finite()
-                && (material - introduced_material).abs() <= material_tolerance,
+                && (material + world.environment.nutrient_removed_total() - introduced_material).abs() <= material_tolerance,
             "material ledger does not match recorded introductions",
         )?;
         // Introduction energy includes fabrication heat; metabolism, conversion

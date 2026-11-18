@@ -52,13 +52,20 @@ try {
   await page.locator('.live-program-dialog .program-evaluation-time').waitFor({ state: 'visible' });
   await page.locator('.live-program-dialog [data-close]').click();
 
-  await page.locator('[data-view="settings"]').click();
+  await page.locator('[data-action="toggle-environment"]').click();
+  await page.locator('[data-live-tool]').selectOption('source:6');
+  await page.locator('#world').press('Enter');
+  await page.locator('#live-environment [data-live-remove]').waitFor();
   // Adjacent changes must preserve one another despite crossing the worker boundary.
   await page.evaluate(() => {
-    for (const [id, value] of [['setting-temperature', '.73'], ['setting-light', '61'], ['setting-current', '7']]) {
-      const input = document.getElementById(id); input.value = value; input.dispatchEvent(new Event('change', { bubbles: true }));
+    for (const [field, value] of [['strength', '-.6'], ['radius', '140'], ['angle', '90']]) {
+      const input = document.querySelector(`#live-environment [data-object-field="${field}"]`); input.value = value; input.dispatchEvent(new Event('change', { bubbles: true }));
     }
   });
+  await textIs('#save-state', 'Saved');
+  await page.locator('[data-action="close-environment"]').click();
+  await page.locator('[data-view="settings"]').click();
+  assert.equal(await page.locator('#setting-current,#setting-temperature,#setting-light').count(),0,'Environment editing is per object');
   await page.locator('#setting-overlay').selectOption('nutrients');
   await page.locator('[data-view="metrics"]').click();
   await textIs('#metric-population', '12');
@@ -77,11 +84,12 @@ try {
   await page.locator('[data-action="open-simulation"]').first().click();
   await page.locator('#world').waitFor();
   assert.equal(page.workers().length, 1);
-  await page.locator('[data-view="settings"]').click();
-  assert.equal(await page.locator('#setting-temperature').inputValue(), '0.73');
-  assert.equal(await page.locator('#setting-light').inputValue(), '61');
-  assert.equal(await page.locator('#setting-current').inputValue(), '7');
-  await page.locator('[data-view="player"]').click();
+  await page.locator('[data-action="toggle-environment"]').click();
+  await page.locator('#live-environment [data-object-kind="source"]').click();
+  assert.ok(Math.abs(Number(await page.locator('#live-environment [data-object-field="strength"]').inputValue())+.6)<1e-6);
+  assert.equal(await page.locator('#live-environment [data-object-field="radius"]').inputValue(), '140');
+  assert.equal(await page.locator('#live-environment [data-object-field="angle"]').inputValue(), '90');
+  await page.locator('[data-action="close-environment"]').click();
   await page.getByRole('button', { name: 'Play simulation' }).click();
   await page.waitForFunction(() => document.querySelector('#play-pause')?.getAttribute('aria-label') === 'Pause simulation');
   await page.locator('[data-view="metrics"]').click();
@@ -102,9 +110,9 @@ try {
   assert.equal(page.workers().length, 2, 'Environment preview uses its own worker');
   await page.locator('.environment-editor-dialog [data-copy]').click();
   await page.locator('.environment-editor-dialog .preview-status').waitFor({ state: 'hidden' });
-  await page.locator('#environment-current').fill('12');
-  await page.locator('#environment-light').fill('.65');
-  await page.locator('#environment-current').fill('4');
+  await page.locator('#environment-width').fill('2400');
+  await page.locator('#environment-height').fill('1520');
+  await page.locator('.environment-editor-dialog [data-object-field="strength"]').fill('.65');
   await page.locator('.environment-editor-dialog [data-close]').click();
   await page.waitForFunction(() => !document.querySelector('.environment-editor-dialog'));
   await page.getByRole('tab', { name: 'Simulation', exact: true }).click();
@@ -113,7 +121,7 @@ try {
   await page.locator('[data-action="open-simulation"]').waitFor();
   assert.equal(page.workers().length, 0, 'All closed workers have been disposed');
   assert.deepEqual(failures, [], 'No browser or worker errors');
-  console.log('Browser checks passed: production worker loading, pause/save/reopen, adjacent setting edits, compact metrics, all inspector modes, live evaluation, insertion, exclusive locks, asynchronous previews and worker disposal.');
+  console.log('Browser checks passed: production worker loading, pause/save/reopen, adjacent per-source edits, compact metrics, all inspector modes, live evaluation, insertion, exclusive locks, resized asynchronous previews and worker disposal.');
 } catch (error) {
   console.error('Browser errors:', failures);
   console.error('Visible page:', (await page.locator('body').innerText()).slice(0, 6000));

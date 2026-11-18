@@ -1,5 +1,5 @@
 import './style.css';
-import { Engine, type Cell, type BodyInspection, type RegisterEntry, type GenomeRecord, type MetricsSnapshot } from './engine';
+import { Engine, type Cell, type BodyInspection, type RegisterEntry, type GenomeRecord, type MetricsSnapshot, type SourceKind } from './engine';
 import { WorkerEngine } from './worker-engine';
 import { Renderer, genomeColor } from './renderer';
 import { GenomeVisualizer } from './genome-visualizer';
@@ -8,6 +8,7 @@ import { Storage, loadPreferences, savePreferences, newGenome, validateName, par
   exportGenome, exportEnvironment, GENOME_LANGUAGE_VERSION, MAX_GENOME_IMPORT_BYTES, MAX_ENVIRONMENT_IMPORT_BYTES,
   type GenomeDocument, type EnvironmentDocument, type EnvironmentConfig, type SimulationMetadata, type UiPreferences } from './storage';
 import { CatalogUI } from './catalog-ui';
+import { SOURCE_NAMES, SOURCE_FIELDS, defaultSource, defaultBarrier, toolOptions, toolName, sourceFields, barrierFields, readObjectFields, objectList, cameraControls, formatEnvironmentNumber, type EnvironmentTool, type ObjectSelection, type SourceConfig, type BarrierConfig } from './environment-controls';
 import { ProgramEditor } from './program-editor';
 import { SimulationSession, claimSimulation } from './session';
 import { icon, escapeHtml as esc, createDialog, setDialogError, downloadFile, inputNumber, clock, readableError } from './ui';
@@ -32,6 +33,11 @@ const inspectedRevisions = new WeakMap<ProgramEditor, { session: SimulationSessi
 let ready = false, transitioning = false, saveFailed = false;
 let lifecycleFlushes = 0;
 let selectedId: number | null = null;
+let environmentOpen = false, environmentSelection: ObjectSelection | null = null;
+let environmentTool: EnvironmentTool = 'select';
+let liveSourceDraft: SourceConfig | null = null, liveBarrierDraft: BarrierConfig | null = null;
+let livePlacementPending = false, environmentEditSequence = 0;
+const pendingEnvironmentInputs = new WeakMap<Element, number>();
 let inspectorView: 'overview' | 'body' | 'memory' | 'program' = 'overview';
 let memoryFilter = '', memoryPage = 0, catalogQuery = '', simulationOpenError = '';
 let lastFrame = 0, lastUi = 0, accumulator = 0, toastTimer = 0;
@@ -118,10 +124,11 @@ function menu(kind: 'genome' | 'environment' | 'simulation', id: string, name: s
   </div></details>`;
 }
 function environmentThumb(environment: EnvironmentDocument): string {
-  const colors = ['#e8c578', '#ef9380', '#84b7ed', '#7cdbad'];
-  return `<svg class="environment-thumb" viewBox="0 0 1200 760" aria-hidden="true"><rect width="1200" height="760" fill="#101d22"/>${environment.config.sources.map(source =>
-    `<circle cx="${source.x}" cy="${source.y}" r="${source.radius}" fill="${colors[source.kind]}" opacity=".08"/><circle cx="${source.x}" cy="${source.y}" r="10" fill="${colors[source.kind]}"/>`).join('')}</svg>`;
+  const config = environment.config, colors = ['#e8c578', '#ef9380', '#84b7ed', '#7cdbad', '#bd9cdd', '#84b7ed', '#84b7ed', '#84b7ed'];
+  return `<svg class="environment-thumb" viewBox="0 0 ${config.width} ${config.height}" aria-hidden="true"><rect width="${config.width}" height="${config.height}" fill="#101d22"/>${config.sources.map(source =>
+    `<circle cx="${source.x}" cy="${source.y}" r="${source.radius}" fill="${colors[source.kind]}" opacity=".12"/><circle cx="${source.x}" cy="${source.y}" r="10" fill="${colors[source.kind]}"/>`).join('')}${config.barriers.map(barrier => `<rect x="${barrier.x-barrier.length/2}" y="${barrier.y-barrier.width/2}" width="${barrier.length}" height="${barrier.width}" rx="8" transform="rotate(${barrier.angle*180/Math.PI} ${barrier.x} ${barrier.y})" fill="${barrier.floating ? '#b9c5ca' : '#61717b'}"/>`).join('')}</svg>`;
 }
+
 function renderSimulationList(): string {
   return `<div class="page library-page"><header class="page-header"><h1>Simulations</h1><button class="button primary" data-action="new-simulation">${icon('plus')}New simulation</button></header>
     ${simulationOpenError ? `<p class="compatibility-notice" role="alert">${esc(simulationOpenError)}${simulationOpenError.includes('preserved') ? '' : ' Your saved simulation remains unchanged.'}</p>` : ''}
@@ -162,20 +169,29 @@ function renderView(): void {
   if (prefs.simulationView === 'player') {
     const canvas = $<HTMLCanvasElement>('world'); renderer = new Renderer(canvas);
     canvas.addEventListener('click', event => {
-      if (!active || !renderer || transitioning) return;
+      if (!active || !renderer || transitioning || renderer.wasDragging()) return;
+      if (environmentOpen) {
+        if (environmentTool !== 'select') { const position = renderer.toWorld(event.clientX,event.clientY); if (position) void placeLiveEnvironmentObject(position.x,position.y).catch(error=>toast(readableError(error))); return; }
+        const source = renderer.pickSource(active.world,event.clientX,event.clientY), barrier = source ? null : renderer.pickBarrier(active.world,event.clientX,event.clientY);
+        selectEnvironmentObject(source ? {kind:'source',id:source.id} : barrier ? {kind:'barrier',id:barrier.id} : null); return;
+      }
       selectedId = renderer.pickCell(active.world, event.clientX, event.clientY)?.id ?? null;
       inspectorView = 'overview'; memoryPage = 0; memoryFilter = ''; renderInspector();
     });
     canvas.addEventListener('keydown', event => {
       if (!active || transitioning) return;
-      if (event.code === 'Space') { event.preventDefault(); void togglePlayback(); }
-      else if (event.key === 'Escape') { selectedId = null; renderInspector(); }
+      if (event.key === 'Enter' && environmentOpen && environmentTool !== 'select') { event.preventDefault(); const center=renderer?.getCamera(); void placeLiveEnvironmentObject(center?.x ?? active.world.width/2,center?.y ?? active.world.height/2).catch(error=>toast(readableError(error))); }
+      else if (event.code === 'Space') { event.preventDefault(); void togglePlayback(); }
+      else if (event.key === 'Escape') { if (environmentOpen) { environmentTool='select'; environmentSelection=null; renderLiveEnvironment(); } selectedId = null; renderInspector(); }
       else if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
         event.preventDefault();
+        if(environmentOpen){environmentOpen=false;environmentTool='select';environmentSelection=null;renderLiveEnvironment();}
         const cells = active.world.cells, index = cells.findIndex(cell => cell.id === selectedId), direction = event.key === 'ArrowRight' ? 1 : -1;
         selectedId = cells.length ? cells[index < 0 ? (direction > 0 ? 0 : cells.length - 1) : (index + direction + cells.length) % cells.length].id : null; renderInspector();
       }
     });
+    bindLiveEnvironment(); renderLiveEnvironment();
+    canvas.closest('.player-stage')!.querySelectorAll<HTMLButtonElement>('[data-camera]').forEach(button=>button.addEventListener('click',()=>{if(button.dataset.camera==='player:fit')renderer?.fitWorld();else renderer?.zoomBy(button.dataset.camera==='player:in'?1.25:.8);}));
     renderInspector(); updatePlayback(); renderer.render(active.world, selectedId, prefs, cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.cell : null, cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.body ?? null : null);
   }
   updateSimulationUi();
@@ -185,7 +201,7 @@ async function navigate(tab: UiPreferences['tab']): Promise<void> {
   transitioning = true;
   try {
     if (active) {
-      await active.refresh({ metrics: true, environment: prefs.overlay !== 'none' });
+      await active.refresh({ metrics: true, environment: true });
       await active.flush();
     }
     await refreshCatalogs(false); prefs.tab = tab; catalogQuery = ''; accumulator = 0; persistPreferences(); renderView();
@@ -193,10 +209,13 @@ async function navigate(tab: UiPreferences['tab']): Promise<void> {
   catch (error) { toast(readableError(error)); } finally { transitioning = false; }
 }
 async function applyEnvironment(engine: WorkerEngine, config: EnvironmentConfig): Promise<void> {
+  if (!await engine.setWorldSize(config.width, config.height)) throw new Error('The environment world size is invalid.');
   await engine.setEnvironment(config.ambientTemperature, config.ambientLight, config.currentStrength);
-  await engine.setInitialNutrients(config.initialNutrients); await engine.setFoodRate(config.foodRate); await engine.clearSources();
-  for (const source of config.sources) if (!await engine.addSource(source.kind, source.x, source.y, source.strength, source.radius)) throw new Error('Could not create an environment source.');
+  await engine.setInitialNutrients(config.initialNutrients); await engine.setFoodRate(config.foodRate); await engine.clearSources(); await engine.clearBarriers();
+  for (const source of config.sources) if (!await engine.addSource(source.kind, source.x, source.y, source.strength, source.radius, source.angle, source.length)) throw new Error('Could not create an environment source.');
+  for (const barrier of config.barriers) if (!await engine.addBarrier(barrier.x, barrier.y, barrier.length, barrier.width, barrier.angle, barrier.floating)) throw new Error('Could not create an environment barrier.');
 }
+
 async function makeSession(engine: WorkerEngine, metadata: SimulationMetadata): Promise<SimulationSession> {
   const initial = await engine.presentation({ metrics: true, environment: true });
   return new SimulationSession(engine, metadata, initial, storage, saveStatus, upsertMetadata);
@@ -226,7 +245,7 @@ async function openSimulation(id: string): Promise<void> {
     if (active) await active.flush();
     const { state: _state, ...metadata } = record; metadata.paused = true;
     const next = await makeSession(engine, metadata); next.release = release;
-    if (active) disposeSession(active); active = next; release = null; candidate = null;
+    if (active) disposeSession(active); active = next; environmentSelection = null; environmentTool = 'select'; release = null; candidate = null;
     prefs.activeSimulationId = id; prefs.tab = 'simulation'; prefs.simulationView = 'player';
     selectedId = null; accumulator = 0; persistPreferences(); renderView();
   } catch (error) {
@@ -307,7 +326,7 @@ function newSimulationDialog(template?: BuiltinSimulation, environmentId?: strin
         if (active) await active.flush();
         const now = Date.now(), id = 'simulation:' + crypto.randomUUID(); release = await claimSimulation(id);
         const next = await makeSession(engine, { id, name, environmentName, createdAt: now, updatedAt: now, seed, paused: false, speed: 1, genomeNames: names, history: [], summary: await engine.summary() });
-        next.touch(); await next.checkpoint(); next.release = release; if (active) disposeSession(active); active = next; release = null; candidate = null;
+        next.touch(); await next.checkpoint(); next.release = release; if (active) disposeSession(active); active = next; environmentSelection = null; environmentTool = 'select'; release = null; candidate = null;
         prefs.activeSimulationId = id; prefs.tab = 'simulation'; prefs.simulationView = 'player'; selectedId = null; accumulator = 0;
         simulationOpenError = ''; persistPreferences(); dialog.close(); renderView();
       } catch (error) { candidate?.dispose(); release?.(); setDialogError(dialog, error); }
@@ -318,10 +337,189 @@ function newSimulationDialog(template?: BuiltinSimulation, environmentId?: strin
 }
 
 function playerMarkup(): string {
-  return `<section class="player-stage" aria-label="Simulation player"><canvas id="world" tabindex="0" role="img" aria-label="Simulation. Click an organism to inspect it. Arrow keys select organisms; Space plays or pauses."></canvas>
-    <div class="player-toolbar"><div class="playback"><button class="play-button" id="play-pause" data-action="play"></button><select class="playback-speed" id="playback-speed" aria-label="Playback speed" title="Playback speed">${[1,2,5,10].map(speed => `<option value="${speed}">${speed}×</option>`).join('')}</select></div><button class="button primary" data-action="add-organism">${icon('plus')}Add organism</button></div>
-    <div class="player-caption" id="player-caption"></div><aside class="cell-inspector" id="cell-inspector" aria-label="Organism inspector" hidden></aside></section>`;
+  return `<section class="player-stage" aria-label="Simulation player"><canvas id="world" tabindex="0" role="img" aria-label="Simulation. Click an organism to inspect it. Scroll to zoom; Shift-drag to pan. Arrow keys select organisms; Space plays or pauses."></canvas>
+    <div class="player-toolbar"><div class="playback"><button class="play-button" id="play-pause" data-action="play"></button><select class="playback-speed" id="playback-speed" aria-label="Playback speed" title="Playback speed">${[1,2,5,10].map(speed => `<option value="${speed}">${speed}×</option>`).join('')}</select></div><button class="button subtle" data-action="toggle-environment" aria-pressed="${environmentOpen}">${icon('flow')}Environment</button><button class="button primary" data-action="add-organism">${icon('plus')}Add organism</button></div>
+    <div class="player-view-controls">${cameraControls('player')}<span>Scroll to zoom · Shift-drag to pan</span></div><aside class="live-environment" id="live-environment" aria-label="Environment controls" hidden></aside><div class="player-caption" id="player-caption"></div><aside class="cell-inspector" id="cell-inspector" aria-label="Organism inspector" hidden></aside></section>`;
 }
+function renderLiveEnvironment(): void {
+  const panel = $('live-environment');
+  if (!panel || !active) return;
+  panel.hidden = !environmentOpen;
+  const environment = active.world.environment;
+  if (environmentSelection && !(environmentSelection.kind === 'source' ? environment.sources : environment.barriers).some(object => object.id === environmentSelection!.id)) environmentSelection = null;
+  renderer?.setEnvironmentSelection(environmentOpen ? environmentSelection : null);
+  document.querySelector('[data-action="toggle-environment"]')?.setAttribute('aria-pressed', String(environmentOpen));
+  if (!environmentOpen) { $('world')?.classList.remove('placing-object'); return; }
+  const source = environmentSelection?.kind === 'source' ? environment.sources.find(item => item.id === environmentSelection!.id) : null;
+  const barrier = environmentSelection?.kind === 'barrier' ? environment.barriers.find(item => item.id === environmentSelection!.id) : null;
+  let detail = '<p class="environment-hint">Choose an object in the list or click it in the world to tune it.</p>';
+  if (environmentTool !== 'select') detail = `<h3>Place ${toolName(environmentTool).toLowerCase()}</h3>` + (environmentTool.startsWith('source:') ? sourceFields(liveSourceDraft!, environment.width, environment.height, true, false) : barrierFields(liveBarrierDraft!, environment.width, environment.height, true, false));
+  else if (source || barrier) detail = `<div class="source-detail-heading"><h3 data-object-title>${source ? SOURCE_NAMES[source.kind] : barrier!.floating ? 'Floating barrier' : 'Fixed barrier'}</h3><button type="button" class="icon-button" data-live-remove aria-label="Remove selected object">${icon('trash')}</button></div>`
+    + (source ? sourceFields(source, environment.width, environment.height) : barrierFields(barrier!, environment.width, environment.height));
+  panel.innerHTML = `<header class="inspector-header"><h2>Environment</h2><button class="icon-button" data-action="close-environment" aria-label="Close environment controls">${icon('close')}</button></header>
+    <div class="live-environment-tools"><label class="environment-tool-select"><span class="visually-hidden">Environment tool</span><select data-live-tool aria-label="Environment tool">${toolOptions(environmentTool)}</select></label><label class="environment-overlay-select"><span class="visually-hidden">View field</span><select data-live-overlay aria-label="View field">${[['none','No overlay'],['light','Light'],['heat','Temperature'],['flow','Water flow'],['nutrients','Nutrients']].map(([value,label])=>`<option value="${value}"${prefs.overlay===value?' selected':''}>${label}</option>`).join('')}</select></label></div>
+    <p class="environment-hint environment-placement-hint">${environmentTool === 'select' ? 'Select an object to edit it. Changes apply to this simulation.' : 'Click the world to place this object. Enter places it at the view center.'}</p>
+    <div class="source-list" aria-label="Live environment objects">${objectList(environment.sources, environment.barriers, environmentSelection, true)}</div>
+    <div class="source-detail">${detail}</div>
+    <details class="environment-baseline"><summary data-live-size-summary>World size · ${environment.width} × ${environment.height}</summary><div class="source-fields"><label>Width<input type="number" data-live-width value="${environment.width}" min="400" max="4800" step="20"></label><label>Height<input type="number" data-live-height value="${environment.height}" min="400" max="3040" step="20"></label></div><button class="button subtle small" data-live-resize>Apply size</button></details>
+    <p class="environment-hint environment-accounting">Minerals absorbed: <span data-absorbed-total>${environment.nutrientRemovedTotal.toFixed(2)}</span></p>`;
+  $('world')?.classList.toggle('placing-object', environmentTool !== 'select');
+  updateLiveEnvironmentReadout();
+}
+function updateLiveEnvironmentReadout(): void {
+  const panel = $('live-environment');
+  if (!active || !environmentOpen || !panel || panel.hidden) return;
+  const environment = active.world.environment;
+  const absorbed = panel.querySelector('[data-absorbed-total]'); if (absorbed) absorbed.textContent = environment.nutrientRemovedTotal.toFixed(2);
+  const list = panel.querySelector<HTMLElement>('.source-list');
+  const signature = environment.sources.map(object=>`s${object.id}:${object.kind}`).join(',') + '|' + environment.barriers.map(object=>`b${object.id}:${object.floating}`).join(',') + `|${environmentSelection?.kind}:${environmentSelection?.id}`;
+  if (list && list.dataset.signature !== signature) { list.innerHTML = objectList(environment.sources, environment.barriers, environmentSelection, true); list.dataset.signature = signature; }
+  const sizeSummary = panel.querySelector('[data-live-size-summary]'); if (sizeSummary) sizeSummary.textContent = `World size · ${environment.width} × ${environment.height}`;
+  if (environmentTool !== 'select' || !environmentSelection) return;
+  const current = (environmentSelection.kind === 'source' ? environment.sources : environment.barriers).find(object=>object.id===environmentSelection!.id);
+  if (!current) { environmentSelection = null; renderLiveEnvironment(); return; }
+  const title = panel.querySelector('[data-object-title]');
+  if (title) title.textContent = 'kind' in current ? SOURCE_NAMES[current.kind] : current.floating ? 'Floating barrier' : 'Fixed barrier';
+  if ('floating' in current) {
+    const hint = panel.querySelector('.source-detail .environment-hint');
+    if (hint) hint.textContent = current.floating ? 'Drifts with the local current and obstructs organisms, particles and field transport.' : 'Stays in place and obstructs organisms, particles and field transport.';
+  }
+  panel.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-object-field]').forEach(input => {
+    const key = input.dataset.objectField!;
+    if (key === 'x') (input as HTMLInputElement).max = String(environment.width - Number.EPSILON * environment.width);
+    if (key === 'y') (input as HTMLInputElement).max = String(environment.height - Number.EPSILON * environment.height);
+    if (document.activeElement === input || pendingEnvironmentInputs.has(input) || input.getAttribute('aria-invalid') === 'true') return;
+    const value = (current as unknown as Record<string, number | boolean>)[key];
+    if (value === undefined) return;
+    input.value = typeof value === 'boolean' ? String(value) : formatEnvironmentNumber(key === 'angle' ? value * 180 / Math.PI : value, key, Number((input as HTMLInputElement).min), Number((input as HTMLInputElement).max));
+    input.dataset.presentedValue = input.value;
+  });
+}
+
+function selectEnvironmentObject(selection: ObjectSelection | null): void {
+  environmentSelection = selection; environmentTool = 'select'; environmentOpen = true;
+  if (selection?.kind === 'source') { const source=active?.world.environment.sources.find(item=>item.id===selection.id); if(source)prefs.overlay=SOURCE_FIELDS[source.kind]; }
+  else if(selection?.kind==='barrier')prefs.overlay='flow';
+  persistPreferences(); selectedId = null; renderInspector(); renderLiveEnvironment();
+}
+async function placeLiveEnvironmentObject(x: number, y: number): Promise<void> {
+  if (!active || environmentTool === 'select' || transitioning || livePlacementPending) return;
+  const session = active, tool = environmentTool;
+  livePlacementPending = true;
+  try {
+    const detail = $('live-environment').querySelector('.source-detail')!;
+    const environment = session.world.environment;
+    const source = tool.startsWith('source:') ? { ...readObjectFields(detail, liveSourceDraft!, environment.width, environment.height), x, y } : null;
+    const barrier = !tool.startsWith('source:') ? { ...readObjectFields(detail, liveBarrierDraft!, environment.width, environment.height), x, y } : null;
+    const id = await session.mutate(async engine => {
+      const created = tool.startsWith('source:')
+        ? await engine.addSource(source!.kind, source!.x, source!.y, source!.strength, source!.radius, source!.angle, source!.length)
+        : await engine.addBarrier(barrier!.x, barrier!.y, barrier!.length, barrier!.width, barrier!.angle, barrier!.floating);
+      if (!created) throw new Error('The environment object could not be added. Check the object limit and its dimensions.');
+      return created;
+    });
+    if (active === session) {
+      if (environmentOpen && environmentTool === tool && !environmentSelection) selectEnvironmentObject({ kind: tool.startsWith('source:') ? 'source' : 'barrier', id });
+      else updateLiveEnvironmentReadout();
+    }
+    await session.checkpoint();
+  } finally { livePlacementPending = false; }
+}
+
+function bindLiveEnvironment(): void {
+  const panel = $('live-environment');
+  panel.addEventListener('change', event => {
+    if (!active || transitioning) return;
+    const input = event.target as HTMLInputElement | HTMLSelectElement;
+    if (input.matches('[data-live-overlay]')) { prefs.overlay=input.value as UiPreferences['overlay']; persistPreferences(); void active.refresh({environment:true}).catch(error=>toast(readableError(error))); return; }
+    if (input.matches('[data-live-tool]')) {
+      environmentTool = input.value as EnvironmentTool; environmentSelection = null;
+      if (environmentTool.startsWith('source:')) {
+        const kind = Number(environmentTool.split(':')[1]) as SourceKind;
+        liveSourceDraft = defaultSource(kind, 0, 0); prefs.overlay = SOURCE_FIELDS[kind];
+      } else if (environmentTool !== 'select') { liveBarrierDraft = defaultBarrier(environmentTool === 'barrier:floating', 0, 0); prefs.overlay = 'flow'; }
+      persistPreferences(); renderLiveEnvironment();
+      void active.refresh({ environment: true }).catch(error => toast(readableError(error))); return;
+    }
+    const key = input.dataset.objectField;
+    if (!key) return;
+    input.removeAttribute('aria-invalid');
+    const environment = active.world.environment;
+    if (environmentTool !== 'select') {
+      try {
+        const detail = panel.querySelector('.source-detail')!;
+        if (environmentTool.startsWith('source:')) liveSourceDraft = readObjectFields(detail, liveSourceDraft!, environment.width, environment.height);
+        else liveBarrierDraft = readObjectFields(detail, liveBarrierDraft!, environment.width, environment.height);
+      } catch (error) { input.setAttribute('aria-invalid','true'); toast(readableError(error)); }
+      return;
+    }
+    const selection = environmentSelection, session = active;
+    if (!selection) return;
+    try {
+      const value = key === 'floating' ? input.value === 'true' : inputNumber(input as HTMLInputElement, input.getAttribute('aria-label') || key, Number((input as HTMLInputElement).min), Number((input as HTMLInputElement).max)) * (key === 'angle' ? Math.PI / 180 : 1);
+      const edit = ++environmentEditSequence; pendingEnvironmentInputs.set(input, edit);
+      void session.mutate(async engine => {
+        // Field projections can lag a running frame. Read the current engine
+        // state inside this serialized command before editing a moving barrier.
+        const currentEnvironment = await engine.environment();
+        const objects = selection.kind === 'source' ? currentEnvironment.sources : currentEnvironment.barriers;
+        const current = objects.find(item => item.id === selection.id);
+        if (!current) throw new Error('This environment object no longer exists.');
+        const next = { ...current, [key]: value };
+        let updated: boolean;
+        if (selection.kind === 'source') {
+          const source = next as SourceConfig & { id: number };
+          updated = await engine.updateSource(source.id, source.kind, source.x, source.y, source.strength, source.radius, source.angle, source.length);
+        } else {
+          const barrier = next as BarrierConfig & { id: number };
+          updated = await engine.updateBarrier(barrier.id, barrier.x, barrier.y, barrier.length, barrier.width, barrier.angle, barrier.floating);
+        }
+        if (!updated) throw new Error('The environment object could not be updated.');
+      }).then(() => session.checkpoint()).catch(error => { toast(readableError(error)); }).finally(() => {
+        if (pendingEnvironmentInputs.get(input) === edit) pendingEnvironmentInputs.delete(input);
+        if (active === session) updateLiveEnvironmentReadout();
+      });
+    } catch (error) { input.setAttribute('aria-invalid','true'); toast(readableError(error)); }
+  });
+  panel.addEventListener('click', event => {
+    if (!active || transitioning) return;
+    const target = (event.target as Element).closest<HTMLButtonElement>('button'); if (!target) return;
+    if (target.dataset.objectKind) { selectEnvironmentObject({ kind: target.dataset.objectKind as 'source' | 'barrier', id: Number(target.dataset.objectId) }); return; }
+    const session = active;
+    if (target.hasAttribute('data-live-remove') && environmentSelection) {
+      const selection = environmentSelection;
+      void session.mutate(async engine => {
+        if (selection.kind === 'source') await engine.removeSource(selection.id); else await engine.removeBarrier(selection.id);
+      }).then(async () => {
+        if (active === session) {
+          if(environmentSelection?.kind===selection.kind && environmentSelection.id===selection.id)selectEnvironmentObject(null);
+          else updateLiveEnvironmentReadout();
+        }
+        await session.checkpoint();
+      }).catch(error => toast(readableError(error)));
+    }
+    if (target.hasAttribute('data-live-resize')) {
+      try {
+        const width = inputNumber(panel.querySelector('[data-live-width]')!, 'Width', 400, 4800);
+        const height = inputNumber(panel.querySelector('[data-live-height]')!, 'Height', 400, 3040);
+        if (width % 20 || height % 20) throw new Error('World dimensions must be multiples of 20.');
+        void session.mutate(async engine => { if (!await engine.setWorldSize(width, height)) throw new Error('The world size could not be changed. Every barrier must fit inside the new dimensions.'); })
+          .then(async () => {
+            if (active === session) {
+              renderer?.fitWorld(); updateLiveEnvironmentReadout();
+              const currentPanel=$('live-environment');
+              for(const [key,value] of [['width',width],['height',height]] as const){
+                const field=currentPanel?.querySelector<HTMLInputElement>(`[data-live-${key}]`);
+                if(field && document.activeElement!==field)field.value=String(value);
+              }
+            }
+            await session.checkpoint();
+          }).catch(error => toast(readableError(error)));
+      } catch (error) { toast(readableError(error)); }
+    }
+  });
+}
+
 function updatePlayback(): void {
   const button = $('play-pause'); if (!active || !button) return;
   button.innerHTML = icon(active.metadata.paused ? 'play' : 'pause');
@@ -339,7 +537,7 @@ async function togglePlayback(): Promise<void> {
     if (pausing) {
       // Finish any accepted batch, then refresh the slower projections once so
       // a paused overlay and metrics describe the final rendered tick.
-      await session.refresh({ metrics: true, environment: prefs.overlay !== 'none' });
+      await session.refresh({ metrics: true, environment: true });
       await session.flush();
     } else await session.checkpoint();
   }
@@ -564,7 +762,7 @@ function metricsMarkup(): string {
     <section class="chart-panel"><div class="section-heading"><h2>Population</h2><span id="history-duration"></span></div><svg class="metrics-chart" id="history-chart" viewBox="0 0 1000 240" preserveAspectRatio="none" role="img" aria-label="Population history"></svg></section>
     <section class="trophic-panel"><div class="section-heading"><h2>Food chain</h2><span title="Based on functional organs that have actually been built.">Current capabilities</span></div><div class="metrics-grid">${cards([['autotrophs','Autotrophs'],['heterotrophs','Heterotrophs'],['mixotrophs','Mixotrophs'],['hunters','Attack-capable']])}</div><div class="energy-flow">${[['production','Photosynthesis'],['digestion','Digestion'],['exudation','Organic release']].map(([key,label])=>`<div><span>${label}</span><strong id="flow-${key}">—</strong></div>`).join('')}</div><div class="energy-flow">${[['exudate','Exudate'],['tissue','Cell tissue'],['waste','Waste']].map(([key,label])=>`<div><span>${label}</span><strong id="organic-${key}">—</strong></div>`).join('')}</div><p class="muted">Exudate is readily digested. Cell tissue yields energy and waste; refractory waste takes more processing and returns minerals to the water.</p></section>
     <section class="nutrient-panel"><h2>Minerals</h2><div class="metrics-grid nutrient-metrics">${[['water','Water'],['food','Organic particles'],['cells','Organisms & guts'],['total','Total']].map(([key,label])=>`<div class="metric-card"><span>${label}</span><strong id="nutrient-${key}">—</strong></div>`).join('')}</div></section>
-    <details class="metrics-secondary"><summary>Resource accounting</summary><div class="inspector-metrics">${metricRow('Material introduced','<span id="introduced-material">—</span>')}${metricRow('Organic energy introduced','<span id="introduced-energy">—</span>')}${metricRow('Energy currently held','<span id="held-energy">—</span>')}${metricRow('Light energy collected','<span id="light-energy">—</span>')}</div></details>
+    <details class="metrics-secondary"><summary>Resource accounting</summary><div class="inspector-metrics">${metricRow('Material introduced','<span id="introduced-material">—</span>')}${metricRow('Minerals absorbed','<span id="removed-material">—</span>')}${metricRow('Organic energy introduced','<span id="introduced-energy">—</span>')}${metricRow('Energy currently held','<span id="held-energy">—</span>')}${metricRow('Light energy collected','<span id="light-energy">—</span>')}</div></details>
     <details class="metrics-secondary"><summary>Evolution & interactions</summary><div class="metrics-grid">${cards(metricDefinitions.slice(4))}</div></details></div>`;
 }
 function renderMetrics(world: MetricsSnapshot): void {
@@ -576,6 +774,7 @@ function renderMetrics(world: MetricsSnapshot): void {
   ['exudate','tissue','waste'].forEach((kind,index) => { $('organic-'+kind).textContent = organicCounts[index]+' particles'; });
   for (const [key,value] of Object.entries({water:world.nutrientDissolvedTotal,food:world.nutrientFoodTotal,cells:world.nutrientCellTotal,total:world.nutrientTotal})) $('nutrient-'+key).textContent=value.toFixed(1);
   $('introduced-material').textContent = world.nutrientInputTotal.toFixed(2);
+  $('removed-material').textContent = active!.world.environment.nutrientRemovedTotal.toFixed(2);
   $('introduced-energy').textContent = world.energyInputTotal.toFixed(2);
   $('held-energy').textContent = world.energyTotal.toFixed(2);
   $('light-energy').textContent = world.photosynthesisTotal.toFixed(2);
@@ -593,15 +792,14 @@ function rangeField(key: string,label: string,value: number,min: number,max: num
   return `<div class="form-field"><label for="setting-${key}">${label}<output id="value-${key}">${value}${suffix}</output></label><input id="setting-${key}" data-setting="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${value}"></div>`;
 }
 function settingsMarkup(): string {
-  const world=active!.world,environment=world.environment;
+  const world=active!.world;
   return `<div class="page"><div class="settings-grid">
     <section class="settings-panel"><h2>Simulation</h2><div class="form-field"><label for="setting-name">Name</label><input id="setting-name" data-setting="name" maxlength="80" value="${esc(active!.metadata.name)}"></div>
-    ${rangeField('food','External organic input / s',world.foodRate,0,60,1)}${rangeField('mutation','Mutation chance',Math.round(world.mutationRate*100),0,100,1,'%')}
+    ${rangeField('mutation','Mutation chance',Math.round(world.mutationRate*100),0,100,1,'%')}
     <p class="muted">Seed ${active!.metadata.seed} · ${esc(active!.metadata.environmentName)}</p></section>
     <section class="settings-panel"><h2>Display</h2><div class="form-field"><label for="setting-overlay">Field</label><select id="setting-overlay" data-setting="overlay">${[['none','None'],['light','Light'],['heat','Temperature'],['flow','Water flow'],['nutrients','Dissolved nutrients']].map(([value,label])=>`<option value="${value}"${prefs.overlay===value?' selected':''}>${label}</option>`).join('')}</select></div>
     <label class="toggle-field"><span>Organelle highlights</span><input type="checkbox" role="switch" data-setting="sensors"${prefs.sensors?' checked':''}></label><label class="toggle-field"><span>Movement trails</span><input type="checkbox" role="switch" data-setting="trails"${prefs.trails?' checked':''}></label></section>
-    <section class="settings-panel"><h2>Environment</h2>${rangeField('light','Ambient light',Math.round(environment.ambientLight*100),0,100,1,'%')}${rangeField('temperature','Temperature',Math.round(environment.ambientTemperature*100)/100,0,1,.01)}${rangeField('current','Current strength',Math.round(environment.currentStrength),0,30,1)}
-    </section>
+    <section class="settings-panel"><h2>Environment</h2><p class="muted">${world.width} × ${world.height} · ${world.environment.sources.length} emitters · ${world.environment.barriers.length} barriers</p><p class="muted">Select emitters and barriers in the player to adjust their strength, size, direction and position.</p><button class="button subtle" data-action="edit-live-environment">${icon('flow')}Edit environment</button></section>
   </div></div>`;
 }
 function renderActiveGenomes(): void {
@@ -622,6 +820,7 @@ function updateSimulationUi(): void {
   for (const inspection of expandedInspections) updateProgramEvaluation(inspection.editor, inspection.session, inspection.cellId);
   if(prefs.simulationView==='player') {
     $('player-caption').textContent=active.world.cells.length+' organisms · '+clock(active.world.time);
+    updateLiveEnvironmentReadout();
     updateInspector();
   } else if(prefs.simulationView==='metrics') renderMetrics(active.metrics);
   else if(prefs.simulationView==='genomes') renderActiveGenomes();
@@ -706,6 +905,13 @@ async function action(name:string,id?:string,genomeId?:number):Promise<void>{
   if(name==='open-simulation'&&id){await openSimulation(id);return;}
   if(name==='close-simulation'){await closeSimulation();return;}
   if(name==='play'){await togglePlayback();return;}
+  if(name==='toggle-environment'||name==='close-environment'||name==='edit-live-environment'){
+    environmentOpen=name==='edit-live-environment'||name==='toggle-environment'&&!environmentOpen;
+    if(!environmentOpen){environmentTool='select';environmentSelection=null;$('world')?.classList.remove('placing-object');}
+    if(name==='edit-live-environment'){prefs.simulationView='player';persistPreferences();renderView();}
+    else{if(environmentOpen){selectedId=null;renderInspector();}renderLiveEnvironment();}
+    return;
+  }
   if(name==='add-organism'){await refreshCatalogs(false);addOrganismDialog();return;}
   if(name==='close-inspector'){selectedId=null;renderInspector();return;}
   if(name==='memory-previous'||name==='memory-next'){memoryPage+=name==='memory-next'?1:-1;updateInspector();return;}
@@ -733,7 +939,7 @@ document.addEventListener('click',event=>{
     prefs.simulationView=target.dataset.view as UiPreferences['simulationView'];persistPreferences();renderView();
     const session=active;
     void session.refresh({metrics:prefs.simulationView==='metrics'||prefs.simulationView==='genomes',
-      environment:prefs.simulationView==='player'&&prefs.overlay!=='none'})
+      environment:prefs.simulationView==='player'||prefs.simulationView==='metrics'})
       .then(()=>{if(active===session)updateSimulationUi();}).catch(error=>runError(session,error));
     document.querySelector<HTMLButtonElement>('[data-view="'+prefs.simulationView+'"]')?.focus({preventScroll:true});return;
   }
@@ -777,22 +983,10 @@ document.addEventListener('change',event=>{
       const heading=document.querySelector('.simulation-title h1');if(heading)heading.textContent=session.metadata.name;
       session.touch();void session.checkpoint().catch(()=>{});return;
     }
-    // Read the edited value now; read the other settings when this command runs,
-    // after earlier queued edits have refreshed the session's environment.
-    const value=key==='food'?inputNumber(input,'External organic input',0,60)
-      :key==='mutation'?inputNumber(input,'Mutation chance',0,100)/100
-      :key==='temperature'?inputNumber(input,'Temperature',0,1)
-      :key==='light'?inputNumber(input,'Light',0,100)/100
-      :inputNumber(input,'Current strength',0,30);
-    void session.mutate(async engine=>{
-      if(key==='food')await engine.setFoodRate(value);
-      else if(key==='mutation')await engine.setMutationRate(value);
-      else{
-        const environment=session.world.environment;
-        await engine.setEnvironment(key==='temperature'?value:environment.ambientTemperature,
-          key==='light'?value:environment.ambientLight,key==='current'?value:environment.currentStrength);
-      }
-    }).then(()=>session.checkpoint()).catch(error=>runError(session,error));
+    if(key!=='mutation')return;
+    const value=inputNumber(input,'Mutation chance',0,100)/100;
+    void session.mutate(async engine=>{await engine.setMutationRate(value);})
+      .then(()=>session.checkpoint()).catch(error=>runError(session,error));
   }catch(error){toast(readableError(error));renderView();}
 });
 document.addEventListener('keydown',event=>{
@@ -820,7 +1014,7 @@ function frame(now:number):void{
         const steps=session.busy?0:Math.min(8,Math.floor(accumulator*30));
         if(steps){
           const metrics=now-lastMetrics>=250&&(prefs.simulationView==='metrics'||prefs.simulationView==='genomes');
-          const environment=now-lastEnvironment>=250&&prefs.simulationView==='player'&&prefs.overlay!=='none';
+          const environment=now-lastEnvironment>=(prefs.simulationView==='player'?100:250)&&(prefs.simulationView==='player'||prefs.simulationView==='metrics');
           if(metrics)lastMetrics=now;if(environment)lastEnvironment=now;
           void session.advance(steps,{metrics,environment}).catch(error=>runError(session,error));
           accumulator-=steps/30;
@@ -841,7 +1035,7 @@ window.setInterval(()=>{
 async function flushLifecycle(session: SimulationSession): Promise<void> {
   lifecycleFlushes++;
   try {
-    await session.refresh({ metrics: true, environment: prefs.overlay !== 'none' });
+    await session.refresh({ metrics: true, environment: true });
     await session.flush();
   }
   catch (error) { runError(session, error); }

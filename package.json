@@ -27,7 +27,9 @@
     "test:ecosystem": "node --no-liftoff scripts/check-ecosystem.mjs --assert --duration 600 --seed 42",
     "bench:simulation": "node --no-liftoff scripts/benchmark-simulation.mjs",
     "test:worker": "node scripts/check-worker.mjs",
-    "test:cellular": "node scripts/check-cellular.mjs"
+    "test:cellular": "node scripts/check-cellular.mjs",
+    "test:camera": "node scripts/check-camera.mjs",
+    "test:environment-controls": "node scripts/check-environment-controls.mjs"
   },
   "devDependencies": {
     "typescript": "5.9.3",

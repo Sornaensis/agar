@@ -45,14 +45,15 @@ impl World {
                 if power <= 0.0 { continue; }
                 let at = cell.angle + assembly.recipe.at;
                 let outward = [at.cos(), at.sin()];
-                let x = wrap(cell.x + cell.radius() * outward[0], WIDTH);
-                let y = wrap(cell.y + cell.radius() * outward[1], HEIGHT);
+                let x = wrap(cell.x + cell.radius() * outward[0], self.environment.width);
+                let y = wrap(cell.y + cell.radius() * outward[1], self.environment.height);
                 let reach = 0.75 + 12.0 * mass.sqrt();
                 let mut best: Option<(usize, f64)> = None;
                 for victim in cell_grid.nearby_radius(x, y, reach + max_radius) {
                     if victim == attacker || !self.cells[victim].alive() { continue; }
-                    let dx = delta(geometry.positions[victim][0] - x, WIDTH);
-                    let dy = delta(geometry.positions[victim][1] - y, HEIGHT);
+                    let dx = delta(geometry.positions[victim][0] - x, self.environment.width);
+                    let dy = delta(geometry.positions[victim][1] - y, self.environment.height);
+                    if self.environment.segment_blocked((x,y),(x+dx,y+dy)) {continue;}
                     let gap = dx.hypot(dy) - geometry.radii[victim];
                     if gap > reach || dx * outward[0] + dy * outward[1] < -1e-9
                         || relative_angle(dy.atan2(dx) - cell.angle - assembly.recipe.direction).abs() > PI * 0.4 {
@@ -64,8 +65,8 @@ impl World {
                     }
                 }
                 if let Some((victim, _)) = best {
-                    let angle = relative_angle(delta(y - geometry.positions[victim][1], HEIGHT)
-                        .atan2(delta(x - geometry.positions[victim][0], WIDTH)) - geometry.angles[victim]);
+                    let angle = relative_angle(delta(y - geometry.positions[victim][1], self.environment.height)
+                        .atan2(delta(x - geometry.positions[victim][0], self.environment.width)) - geometry.angles[victim]);
                     primitive_hits.push((attacker, victim, power, angle));
                 }
             }

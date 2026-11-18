@@ -35,6 +35,31 @@ For cellular programs, the Body inspector shows product inventories, actual synt
 
 Built-ins stay unchanged. Editing or importing creates independent catalog items. Running simulations own their programs and environment state, so catalog renames and deletions do not alter existing worlds.
 
+## Editing the environment
+
+Open **Environment** in the player to select, tune, add or remove individual objects while a simulation runs or is paused. Choose an object from the list or click its marker in the world. Its controls edit that object immediately; strength **0** disables an emitter. Choose a tool and click the world to place another object, or focus the canvas and press **Enter** to place it at the view center. The trash button removes the selected object.
+
+The same controls are available when creating or copying an **Environment** recipe. Its field preview holds barriers at their authored positions; floating motion begins when the actual simulation runs. The builder also has background temperature/light/flow, starting mineral concentration and external organic input under **Background & starting conditions**. Live environmental tuning uses object controls; simulation-wide mutation and display preferences remain in Settings.
+
+| Object | Controls and effect |
+| --- | --- |
+| Light | Strength and radius set local illumination. |
+| Heat / cooling | Positive strength heats and negative strength cools. |
+| Vortex | Radius sets its extent; strength controls intensity and rotation direction. |
+| Nutrient spring / absorber | Add or remove dissolved minerals locally; the absorber cannot remove more material than is available. Cumulative absorbed material appears in the Environment drawer and Metrics resource accounting. |
+| Directional jet | Direction, length and half-width describe a local stream. Negative strength reverses it. |
+| Current band | Direction, length and half-width describe a long current; combine bands with opposite strengths for neighboring currents. |
+| Radial flow | Positive strength drives outward flow; negative strength draws inward. |
+| Fixed / floating barrier | Length, thickness and angle define the obstacle. Fixed barriers stay in place; floating barriers drift with the local current. Their motion mode can be changed after placement. |
+
+**World size** is configurable in the builder and live drawer: width **400–4,800**, height **400–3,040**, in increments of **20** world units. This changes the simulated domain and field grid. A resize preserves existing material; newly added space does not create nutrients. Every rotated barrier must fit within the world dimensions. The **Current bands** preset demonstrates a larger world with opposing currents, a vortex, fixed and floating barriers, and a nutrient absorber.
+
+**Navigation:** scroll to zoom around the pointer; Shift-drag, middle-drag or right-drag to pan. Touch supports dragging and pinch zoom. The **−**, **+** and **Fit** buttons work in both views. With the canvas focused, **+ / −** zoom and **Home** fits the world.
+
+Currents are prescribed flow fields, not a pressure-solving fluid simulation. Barriers represent full-depth obstacles in this wrapping 2D domain: they obstruct organisms, particles and transport across the wall; they are not boats that water can pass underneath. Their field effects are resolved on the 20-unit grid. Floating barriers follow the current without a full rigid-body buoyancy or angular-momentum model. Gas exchange is not part of the implemented physiology yet.
+
+The proposed next biology change is described in [Gas exchange and material cycles](design/gas-exchange.md); gas physiology is not yet implemented.
+
 ## Bodies and capabilities
 
 `body.area` is paid envelope area; `body.mass` is actual material in the scaffold, organs, assembly proteins, reserve minerals and gut minerals. Usable energy, raw gut energy and embodied structural energy are separate. Energy does not add material mass. Compartment contents occupy their reserved capacity without being counted twice as internal space.
@@ -72,7 +97,7 @@ Each `express.<family>` produces that family’s assembly proteins from minerals
 
 Division requires doubled birth area, sufficient energy, cooldown and a feasible packing of actual organs with a viable core in each half. Discrete organs are assigned, never cloned. Cellular partitioning prefers to distribute functioning copies of each exact recipe between the two cells, subject to core support and space limits. Build duplicate essential capabilities before division if both daughters should inherit them. The retained parent keeps its memory and age; the daughter starts with empty registers and no object tracks. Mutations affect the inherited program, not the inherited body.
 
-There is **no fixed population cap, organic-particle count cap or age-based death timer**. Cells die from physical damage, loss of essential machinery or exhausted energy. Age remains observable; the compatibility signal `lifespan` is zero, meaning no fixed maximum. Resources, mortality, browser memory and execution time constrain practical populations. The former area-4 growth ceiling is gone. A separate geometry bound keeps cell radius at or below 95 world units, one eighth of the shorter world dimension; maximum envelope area is about 184.18. Collision queries use actual radii. These are simulation abstractions, not biological fidelity claims.
+There is **no fixed population cap, organic-particle count cap or age-based death timer**. Cells die from physical damage, loss of essential machinery or exhausted energy. Age remains observable; the compatibility signal `lifespan` is zero, meaning no fixed maximum. Resources, mortality, browser memory and execution time constrain practical populations. The former area-4 growth ceiling is gone. A separate geometry bound keeps cell radius at or below 95 world units, retained from the original habitat geometry; maximum envelope area is about 184.18. Collision queries use actual radii. These are simulation abstractions, not biological fidelity claims.
 
 Death returns the cell's remaining body and gut contents to the environment. This also applies to a newborn that immediately dies after inheriting insufficient storage.
 
@@ -176,7 +201,7 @@ In an organism's read-only Program view, hover, place the caret or select an exp
 
 IndexedDB stores documents and complete worlds; localStorage stores preferences and editor drafts. Changing runs checkpoint every two seconds and after key actions, and reopen paused. The save indicator reports failures. Only the open, visible simulation advances; there is no offline catch-up. Web Locks protect a run from competing writers in multiple tabs. Clearing browser site data removes its local saves; export genomes and environments for portable copies.
 
-**Current formats: engine ABI 10, checkpoint 7, genome language 3 with additive cellular metadata.** Genome JSON exports use `agar.genome` version 2 with `languageVersion: 3`; environment JSON remains version 1. Plain `.cell` source is checked with the current compiler. Checkpoint-3 simulations retain their actual organs, resources, memory and source. Their previously unclassified organic particles and gut contents import as tissue; their new protein pools start empty. Checkpoints 4, 5 and 6 also remain readable. New saves retain cellular products, ingredient ledgers, replication, mechanism identities and construction controls. Existing recipes default to allowing new starts and requesting no recycling. Corrected optical coverage and directional primitive interactions intentionally change affected trajectories. The old `build.*` source spelling remains an alias for expression.
+**Current formats: engine ABI 11, checkpoint 8, genome language 3 with additive cellular metadata.** Genome JSON exports use `agar.genome` version 2 with `languageVersion: 3`; environment JSON remains version 1. Plain `.cell` source is checked with the current compiler. Checkpoint-3 simulations retain their actual organs, resources, memory and source. Their previously unclassified organic particles and gut contents import as tissue; their new protein pools start empty. Checkpoints 4, 5, 6 and 7 also remain readable. New saves retain cellular products, ingredient ledgers, replication, mechanism identities and construction controls. Existing recipes default to allowing new starts and requesting no recycling. Corrected optical coverage and directional primitive interactions intentionally change affected trajectories. The old `build.*` source spelling remains an alias for expression.
 
 The organelle model is an intentional compatibility break. Checkpoints 1/2 are rejected before replacing the engine state. Older saved genomes remain viewable, renameable and exportable, but must be manually updated in a new copy before introduction. Their investment fractions and omniscient sensors are not silently converted into free organs. Saved records and old files remain preserved. New and old browser documents keep the same storage namespace.
 

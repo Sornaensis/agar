@@ -6,7 +6,7 @@ use crate::body::{
     Body, BodyCapacities, BodyControls, FounderBudget, OrganelleKind as Kind, FAMILY_COUNT,
 };
 use crate::cellular::{AssemblyKind, CellularWorkScratch, MechanismKind};
-use crate::environment::{Environment, COLUMNS as FIELD_COLUMNS, PATCHES, ROWS as FIELD_ROWS};
+use crate::environment::{Environment, PATCHES};
 use crate::genome::{
     EvalScratch, Inputs, MutationKind, OrganelleInput, Outputs, Program, ReceptorInput, Registers,
 };
@@ -29,6 +29,8 @@ mod local_control_tests;
 mod predation_tests;
 #[cfg(test)]
 mod foraging_tests;
+#[cfg(test)]
+mod environment_tests;
 
 pub const WIDTH: f64 = 1200.0;
 pub const HEIGHT: f64 = 760.0;
@@ -185,70 +187,48 @@ impl Rng {
 /// Wrapped broad-phase queries visit each bucket at most once, even when a
 /// specialized cell senses farther than half the world's shorter dimension.
 struct Grid {
-    buckets: [Vec<usize>; GRID_BUCKETS],
+    buckets: Vec<Vec<usize>>,
+    columns: usize, rows: usize, width: f64, height: f64,
 }
-impl Default for Grid {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+impl Default for Grid { fn default() -> Self { Self::new() } }
 impl Grid {
     fn new() -> Self {
-        Self {
-            buckets: std::array::from_fn(|_| Vec::new()),
-        }
+        Self { buckets: (0..GRID_BUCKETS).map(|_|Vec::new()).collect(),
+            columns: GRID_COLUMNS, rows: GRID_ROWS, width: WIDTH, height: HEIGHT }
     }
-    fn index(x: f64, y: f64) -> usize {
-        let col = ((x / WIDTH * GRID_COLUMNS as f64) as usize).min(GRID_COLUMNS - 1);
-        let row = ((y / HEIGHT * GRID_ROWS as f64) as usize).min(GRID_ROWS - 1);
-        row * GRID_COLUMNS + col
+    fn configure(&mut self, width: f64, height: f64) {
+        let columns = (width / 60.0).ceil() as usize;
+        let rows = (height / 60.0).ceil() as usize;
+        if self.columns != columns || self.rows != rows { self.buckets = (0..columns*rows).map(|_|Vec::new()).collect(); }
+        self.columns=columns;self.rows=rows;self.width=width;self.height=height;
     }
-    fn insert(&mut self, x: f64, y: f64, id: usize) {
-        self.buckets[Self::index(x, y)].push(id);
+    fn index(&self, x: f64, y: f64) -> usize {
+        let col=((x.rem_euclid(self.width)/self.width*self.columns as f64) as usize).min(self.columns-1);
+        let row=((y.rem_euclid(self.height)/self.height*self.rows as f64) as usize).min(self.rows-1);
+        row*self.columns+col
     }
-    fn clear(&mut self) {
-        for bucket in &mut self.buckets {
-            bucket.clear();
-        }
-    }
-    fn index_cells(&mut self, geometry: &CellGeometry) -> f64 {
-        self.clear();
-        let mut max_radius: f64 = 0.0;
-        for i in 0..geometry.ids.len() {
-            if geometry.alive[i] {
-                let [x, y] = geometry.positions[i];
-                self.insert(x, y, i);
-                max_radius = max_radius.max(geometry.radii[i]);
-            }
-        }
+    fn insert(&mut self, x:f64, y:f64, id:usize) { let i=self.index(x,y);self.buckets[i].push(id); }
+    fn clear(&mut self) { for bucket in &mut self.buckets {bucket.clear();} }
+    fn index_cells(&mut self, geometry:&CellGeometry) -> f64 {
+        self.clear();let mut max_radius:f64=0.0;
+        for i in 0..geometry.ids.len() {if geometry.alive[i] {let [x,y]=geometry.positions[i];self.insert(x,y,i);max_radius=max_radius.max(geometry.radii[i]);}}
         max_radius
     }
-    fn relocate(&mut self, from: (f64, f64), to: (f64, f64), id: usize) {
-        let old = Self::index(from.0, from.1);
-        let new = Self::index(to.0, to.1);
-        if old == new {
-            return;
-        }
-        if let Some(position) = self.buckets[old].iter().position(|&item| item == id) {
-            self.buckets[old].swap_remove(position);
-        }
+    fn relocate(&mut self, from:(f64,f64), to:(f64,f64), id:usize) {
+        let old=self.index(from.0,from.1);let new=self.index(to.0,to.1);if old==new{return;}
+        if let Some(position)=self.buckets[old].iter().position(|&item|item==id){self.buckets[old].swap_remove(position);}
         self.buckets[new].push(id);
     }
-    fn nearby_radius(&self, x: f64, y: f64, radius: f64) -> impl Iterator<Item = usize> + '_ {
-        let index = Self::index(x, y);
-        let col = (index % GRID_COLUMNS) as isize;
-        let row = (index / GRID_COLUMNS) as isize;
-        let dx = (radius / (WIDTH / GRID_COLUMNS as f64)).ceil() as isize;
-        let dy = (radius / (HEIGHT / GRID_ROWS as f64)).ceil() as isize;
-        let columns = (2 * dx + 1).min(GRID_COLUMNS as isize);
-        let rows = (2 * dy + 1).min(GRID_ROWS as isize);
-        (0..rows).flat_map(move |y| {
-            (0..columns).flat_map(move |x| {
-                let c = (col - dx + x).rem_euclid(GRID_COLUMNS as isize) as usize;
-                let r = (row - dy + y).rem_euclid(GRID_ROWS as isize) as usize;
-                self.buckets[r * GRID_COLUMNS + c].iter().copied()
-            })
-        })
+    fn nearby_radius(&self,x:f64,y:f64,radius:f64)->impl Iterator<Item=usize>+'_ {
+        let index=self.index(x,y);let col=(index%self.columns) as isize;let row=(index/self.columns) as isize;
+        let dx=(radius/(self.width/self.columns as f64)).ceil() as isize;
+        let dy=(radius/(self.height/self.rows as f64)).ceil() as isize;
+        let columns=(2*dx+1).min(self.columns as isize);let rows=(2*dy+1).min(self.rows as isize);
+        (0..rows).flat_map(move |y| (0..columns).flat_map(move |x| {
+            let c=(col-dx+x).rem_euclid(self.columns as isize) as usize;
+            let r=(row-dy+y).rem_euclid(self.rows as isize) as usize;
+            self.buckets[r*self.columns+c].iter().copied()
+        }))
     }
 }
 
@@ -462,8 +442,8 @@ impl OrganicEmission {
     fn new(kind: OrganicKind, x: f64, y: f64, energy: f64, nutrients: f64) -> Self {
         Self {
             kind,
-            x: wrap(x, WIDTH),
-            y: wrap(y, HEIGHT),
+            x,
+            y,
             energy,
             nutrients,
             outside: None,
@@ -644,6 +624,29 @@ impl World {
             workspace: TickWorkspace::default(),
         }
     }
+    pub fn set_world_size(&mut self, width: f64, height: f64) -> bool {
+        let old=(self.environment.width,self.environment.height);
+        if !self.environment.set_size(width,height) {return false;}
+        if old==(width,height) {return true;}
+        for cell in &mut self.cells {
+            cell.x*=width/old.0;cell.y*=height/old.1;
+            (cell.x,cell.y)=self.environment.move_circle((cell.x,cell.y),(cell.x,cell.y),cell.radius());
+        }
+        for food in &mut self.food {
+            food.x*=width/old.0;food.y*=height/old.1;
+            (food.x,food.y)=self.environment.move_circle((food.x,food.y),(food.x,food.y),2.5);
+        }
+        self.workspace=TickWorkspace::default();true
+    }
+    pub fn settle_barriers(&mut self) {
+        if self.environment.barriers.is_empty() { return; }
+        for cell in &mut self.cells {
+            (cell.x,cell.y)=self.environment.move_circle((cell.x,cell.y),(cell.x,cell.y),cell.radius());
+        }
+        for food in &mut self.food {
+            (food.x,food.y)=self.environment.move_circle((food.x,food.y),(food.x,food.y),2.5);
+        }
+    }
     pub fn reset(&mut self, seed: u32, genome_id: u32) {
         self.try_reset(seed, genome_id)
             .expect("Unable to allocate simulation")
@@ -741,15 +744,16 @@ impl World {
         let scatter = x < 0.0 || y < 0.0 || !x.is_finite() || !y.is_finite();
         for _ in 0..count {
             let (cx, cy) = if scatter {
-                (self.rng.unit() * WIDTH, self.rng.unit() * HEIGHT)
+                (self.rng.unit() * self.environment.width, self.rng.unit() * self.environment.height)
             } else {
                 let a = self.rng.unit() * TAU;
                 let r = self.rng.unit().sqrt() * 38.0;
-                (wrap(x + a.cos() * r, WIDTH), wrap(y + a.sin() * r, HEIGHT))
+                (wrap(x + a.cos() * r, self.environment.width), wrap(y + a.sin() * r, self.environment.height))
             };
             let angle = self.rng.unit() * TAU;
             let (body, budget) = create_body();
             let birth_area = body.area;
+            let (cx,cy)=self.environment.move_circle((cx,cy),(cx,cy),CELL_RADIUS*body.area.sqrt());
             self.cells.push(Cell {
                 id: self.next_id,
                 genome_id,
@@ -797,11 +801,12 @@ impl World {
         if self.next_food_id >= u64::MAX / 2 || self.food.try_reserve(1).is_err() {
             return false;
         }
+        let (x,y)=self.environment.move_circle((x,y),(x,y),2.5);
         self.food.push(Food {
             id: self.next_food_id,
             kind,
-            x: wrap(x, WIDTH),
-            y: wrap(y, HEIGHT),
+            x: wrap(x, self.environment.width),
+            y: wrap(y, self.environment.height),
             energy,
             nutrients,
         });
@@ -823,11 +828,11 @@ impl World {
         let mut added = 0;
         for _ in 0..count {
             let (fx, fy) = if x < 0.0 || y < 0.0 || !x.is_finite() || !y.is_finite() {
-                (self.rng.unit() * WIDTH, self.rng.unit() * HEIGHT)
+                (self.rng.unit() * self.environment.width, self.rng.unit() * self.environment.height)
             } else {
                 let a = self.rng.unit() * TAU;
                 let r = self.rng.unit().sqrt() * 45.0;
-                (wrap(x + a.cos() * r, WIDTH), wrap(y + a.sin() * r, HEIGHT))
+                (wrap(x + a.cos() * r, self.environment.width), wrap(y + a.sin() * r, self.environment.height))
             };
             let energy = 18.0 + self.rng.unit() * 6.0;
             if !self.particle(OrganicKind::Exudate, fx, fy, energy, FOOD_NUTRIENTS) {
@@ -881,7 +886,9 @@ impl World {
             max_radius: maximum_radius,
             ..
         } = workspace;
+        cell_grid.configure(self.environment.width,self.environment.height);
         cell_grid.clear();
+        food_grid.configure(self.environment.width,self.environment.height);
         food_grid.clear();
         let mut max_radius: f64 = 0.0;
         let spatial_sensing = capacities.iter().enumerate().any(|(i, caps)| {
@@ -1102,7 +1109,7 @@ impl World {
                         // surface, not whether the observer itself is in shadow.
                         let illumination = self
                             .environment
-                            .light_at(wrap(cell.x + o.dx, WIDTH), wrap(cell.y + o.dy, HEIGHT))
+                            .light_at(wrap(cell.x + o.dx, self.environment.width), wrap(cell.y + o.dy, self.environment.height))
                             .clamp(0.0, 1.0);
                         o.contrast *= illumination;
                         let threshold = 0.005 / (1.0 + 10.0 * caps.optical_sensing.sqrt());
@@ -1136,8 +1143,8 @@ impl World {
                     let pigment = geometry.pigments[i];
                     consider(Observation {
                         entity: (geometry.ids[i] as u64) << 1,
-                        dx: delta(x - cell.x, WIDTH),
-                        dy: delta(y - cell.y, HEIGHT),
+                        dx: delta(x - cell.x, self.environment.width),
+                        dy: delta(y - cell.y, self.environment.height),
                         radius: geometry.radii[i],
                         area: geometry.areas[i],
                         contrast: 0.45 + 0.4 * pigment,
@@ -1154,8 +1161,8 @@ impl World {
                     let f = &self.food[i];
                     consider(Observation {
                         entity: (f.id << 1) | 1,
-                        dx: delta(f.x - cell.x, WIDTH),
-                        dy: delta(f.y - cell.y, HEIGHT),
+                        dx: delta(f.x - cell.x, self.environment.width),
+                        dy: delta(f.y - cell.y, self.environment.height),
                         radius: 2.5,
                         area: (2.5 / CELL_RADIUS).powi(2),
                         contrast: [0.28, 0.4, 0.32][f.kind as usize],
@@ -1218,8 +1225,9 @@ impl World {
     ) -> bool {
         let [x, y] = geometry.positions[observer];
         let length_squared = target.dx * target.dx + target.dy * target.dy;
-        let midpoint_x = wrap(x + target.dx * 0.5, WIDTH);
-        let midpoint_y = wrap(y + target.dy * 0.5, HEIGHT);
+        if self.environment.segment_blocked((x,y),(x+target.dx,y+target.dy)) { return false; }
+        let midpoint_x = wrap(x + target.dx * 0.5, self.environment.width);
+        let midpoint_y = wrap(y + target.dy * 0.5, self.environment.height);
         let reach = length_squared.sqrt() * 0.5 + max_radius;
         for index in grid.nearby_radius(midpoint_x, midpoint_y, reach) {
             if index == observer
@@ -1228,8 +1236,8 @@ impl World {
             {
                 continue;
             }
-            let dx = delta(geometry.positions[index][0] - x, WIDTH);
-            let dy = delta(geometry.positions[index][1] - y, HEIGHT);
+            let dx = delta(geometry.positions[index][0] - x, self.environment.width);
+            let dy = delta(geometry.positions[index][1] - y, self.environment.height);
             let t = if length_squared > 1e-12 {
                 ((dx * target.dx + dy * target.dy) / length_squared).clamp(0.0, 1.0)
             } else {
@@ -1432,8 +1440,13 @@ impl World {
                 cell.vx = flow_x + (cell.vx - flow_x + cell.angle.cos() * acceleration * DT) * drag;
                 cell.vy = flow_y + (cell.vy - flow_y + cell.angle.sin() * acceleration * DT) * drag;
             }
-            cell.x = wrap(cell.x + cell.vx * DT, WIDTH);
-            cell.y = wrap(cell.y + cell.vy * DT, HEIGHT);
+            let old=(cell.x,cell.y);
+            let desired=(cell.x+cell.vx*DT,cell.y+cell.vy*DT);
+            (cell.x,cell.y)=self.environment.move_circle(old,desired,cell.radius());
+            if !self.environment.barriers.is_empty() {
+                cell.vx=delta(cell.x-old.0,self.environment.width)/DT;
+                cell.vy=delta(cell.y-old.1,self.environment.height)/DT;
+            }
             cell.cooldown = (cell.cooldown - DT).max(0.0);
             cell.engulf_cooldown = (cell.engulf_cooldown - DT).max(0.0);
             let maintenance = (cell.basal_metabolism() * metabolic_factor(temperature)
@@ -1457,13 +1470,14 @@ impl World {
         self.absorb_nutrients_in(outputs, caps, phases);
         for food in &mut self.food {
             let (vx, vy) = self.environment.flow_at(food.x, food.y, time);
-            food.x = wrap(food.x + vx * DT, WIDTH);
-            food.y = wrap(food.y + vy * DT, HEIGHT);
+            (food.x,food.y)=self.environment.move_circle((food.x,food.y),(food.x+vx*DT,food.y+vy*DT),2.5);
         }
         // Phase 2: rebuild geometry after movement, maintenance and digestion.
         // Collisions update these columns in pair order while their grid stays
         // frozen. Capture and target selection then index the settled positions.
         self.resolve_collisions_in(phases);
+        self.settle_barriers();
+        if !self.environment.barriers.is_empty() { phases.geometry.rebuild(&self.cells,false,false); }
         self.eat_in(outputs, caps, phases);
         self.photosynthesize_in(outputs, caps, processing, phases);
         self.resolve_predation_in(outputs, caps, phases);
@@ -1553,8 +1567,8 @@ impl World {
             daughter.energy = energy;
             daughter.nutrient_stored *= 0.5;
             daughter.scale_gut(0.5);
-            daughter.x = wrap(cell.x + dx, WIDTH);
-            daughter.y = wrap(cell.y + dy, HEIGHT);
+            daughter.x = wrap(cell.x + dx, self.environment.width);
+            daughter.y = wrap(cell.y + dy, self.environment.height);
             daughter.vx += split_angle.cos() * 3.0;
             daughter.vy += split_angle.sin() * 3.0;
             daughter.angle = wrap(cell.angle + 0.5, TAU);
@@ -1573,8 +1587,8 @@ impl World {
             cell.energy = energy;
             cell.nutrient_stored *= 0.5;
             cell.scale_gut(0.5);
-            cell.x = wrap(cell.x - dx, WIDTH);
-            cell.y = wrap(cell.y - dy, HEIGHT);
+            cell.x = wrap(cell.x - dx, self.environment.width);
+            cell.y = wrap(cell.y - dy, self.environment.height);
             cell.vx -= split_angle.cos() * 3.0;
             cell.vy -= split_angle.sin() * 3.0;
             cell.cooldown = DIVISION_COOLDOWN;
@@ -1619,6 +1633,7 @@ impl World {
         let food = self.food_credit.floor() as usize;
         self.food_credit -= food as f64;
         self.add_food(-1.0, -1.0, food);
+        self.settle_barriers();
         self.ticks += 1;
         Ok(())
     }
@@ -1650,7 +1665,7 @@ impl World {
         workspace: &mut PhaseWorkspace,
     ) {
         let groups = &mut workspace.groups;
-        groups.resize_with(PATCHES, Vec::new);
+        groups.resize_with(self.environment.patch_count(), Vec::new);
         for group in groups.iter_mut() {
             group.clear();
         }
@@ -1662,7 +1677,7 @@ impl World {
                 .min((caps[i].minerals - c.nutrient_stored).max(0.0))
                 .min((c.energy - 0.05 * caps[i].energy).max(0.0));
             if request > 0.0 {
-                groups[Environment::patch(c.x, c.y)].push((i, request));
+                groups[self.environment.patch_index(c.x, c.y)].push((i, request));
             }
         }
         for (patch, group) in groups.iter_mut().enumerate() {
@@ -1843,7 +1858,7 @@ impl World {
             ..
         } = workspace;
         requests.clear();
-        totals.resize(PATCHES, 0.0);
+        totals.resize(self.environment.patch_count(), 0.0);
         totals.fill(0.0);
         for (i, c) in self.cells.iter().enumerate() {
             if !c.alive() {
@@ -1855,7 +1870,7 @@ impl World {
             if capacity <= 0.0 {
                 continue;
             }
-            photon_footprint_into(c.x, c.y, c.body.area, footprint);
+            photon_footprint_into(&self.environment, c.x, c.y, c.body.area, footprint);
             for &(patch, weight) in footprint.iter() {
                 let request = capacity * weight * self.environment.patch_light(patch);
                 if request > 0.0 {
@@ -1911,6 +1926,7 @@ impl World {
             targets,
             ..
         } = workspace;
+        grid.configure(self.environment.width,self.environment.height);
         let max_radius = grid.index_cells(geometry);
         targets.resize(geometry.ids.len(), None);
         targets.fill(None);
@@ -1935,8 +1951,9 @@ impl World {
                 if i == j || !geometry.alive[j] {
                     continue;
                 }
-                let dx = delta(geometry.positions[j][0] - x, WIDTH);
-                let dy = delta(geometry.positions[j][1] - y, HEIGHT);
+                let dx = delta(geometry.positions[j][0] - x, self.environment.width);
+                let dy = delta(geometry.positions[j][1] - y, self.environment.height);
+                if self.environment.segment_blocked((x,y),(x+dx,y+dy)) { continue; }
                 let gap = dx.hypot(dy) - geometry.radii[i] - geometry.radii[j];
                 if gap > reach || relative_angle(dy.atan2(dx) - geometry.angles[i]).abs() > PI * 0.6
                 {
@@ -2007,7 +2024,7 @@ impl World {
             {
                 continue;
             }
-            let distance = delta(b.x - a.x, WIDTH).hypot(delta(b.y - a.y, HEIGHT));
+            let distance = delta(b.x - a.x, self.environment.width).hypot(delta(b.y - a.y, self.environment.height));
             if distance > a.radius() + b.radius() + 0.75 {
                 continue;
             }
@@ -2043,8 +2060,8 @@ impl World {
             if !self.cells[j].alive() {
                 continue;
             }
-            let contact_angle = relative_angle(delta(self.cells[i].y - self.cells[j].y, HEIGHT)
-                .atan2(delta(self.cells[i].x - self.cells[j].x, WIDTH)) - self.cells[j].angle);
+            let contact_angle = relative_angle(delta(self.cells[i].y - self.cells[j].y, self.environment.height)
+                .atan2(delta(self.cells[i].x - self.cells[j].x, self.environment.width)) - self.cells[j].angle);
             let protection = self.contact_protection(j, contact_angle,
                 self.legacy_shield_effort(j, &outputs[j]), caps);
             let has_primitive = self.cells[i].body.cellular.as_ref().is_some_and(|state|
@@ -2179,6 +2196,7 @@ impl World {
             emissions.clear();
             return;
         }
+        grid.configure(self.environment.width,self.environment.height);
         grid.clear();
         for (i, food) in self.food.iter().enumerate() {
             grid.insert(food.x, food.y, i);
@@ -2203,7 +2221,8 @@ impl World {
             for &index in nearby.iter() {
                 let food = &mut self.food[index];
                 if food.kind != kind
-                    || delta(food.x - x, WIDTH).hypot(delta(food.y - y, HEIGHT)) > 24.0
+                    || self.environment.segment_blocked((x,y),(food.x,food.y))
+                    || delta(food.x - x, self.environment.width).hypot(delta(food.y - y, self.environment.height)) > 24.0
                 {
                     continue;
                 }
@@ -2222,10 +2241,10 @@ impl World {
                     // Both points are within the 24-unit local merge radius;
                     // moving it tangentially around the envelope instead would
                     // repeatedly shed tiny drops from a translating cell.
-                    let to = if delta(from.0 - cx, WIDTH).hypot(delta(from.1 - cy, HEIGHT)) + 1e-9
+                    let to = if delta(from.0 - cx, self.environment.width).hypot(delta(from.1 - cy, self.environment.height)) + 1e-9
                         < radius + 2.5 + ORGANIC_RELEASE_CLEARANCE
                     {
-                        outside_envelope((x, y), envelope, (x, y))
+                        outside_envelope(&self.environment, (x, y), envelope, (x, y))
                     } else {
                         from
                     };
@@ -2248,10 +2267,10 @@ impl World {
                 let material = nutrients * (amount / energy);
                 let angle = n as f64 * 2.399963229728653;
                 let radius = (n as f64).sqrt() * 2.0;
-                let mut px = wrap(x + angle.cos() * radius, WIDTH);
-                let mut py = wrap(y + angle.sin() * radius, HEIGHT);
+                let mut px = wrap(x + angle.cos() * radius, self.environment.width);
+                let mut py = wrap(y + angle.sin() * radius, self.environment.height);
                 if let Some(envelope) = outside {
-                    (px, py) = outside_envelope((px, py), envelope, (x, y));
+                    (px, py) = outside_envelope(&self.environment, (px, py), envelope, (x, y));
                 }
                 let index = self.food.len();
                 // try_step preflights storage and identifier headroom before
@@ -2260,7 +2279,7 @@ impl World {
                     self.particle(kind, px, py, amount, material),
                     "Unable to store accounted organic material"
                 );
-                grid.insert(px, py, index);
+                grid.insert(self.food[index].x, self.food[index].y, index);
                 energy -= amount;
                 nutrients = (nutrients - material).max(0.0);
                 n += 1;
@@ -2276,6 +2295,7 @@ impl World {
             ..
         } = workspace;
         geometry.rebuild(&self.cells, false, true);
+        grid.configure(self.environment.width,self.environment.height);
         let max_radius = grid.index_cells(geometry);
         // The broad-phase buckets deliberately stay frozen for the whole pass.
         // Pair resolution updates positions/velocities in both representations.
@@ -2301,8 +2321,9 @@ impl World {
                 if !geometry.alive[j] {
                     continue;
                 }
-                let dx = delta(geometry.positions[j][0] - geometry.positions[i][0], WIDTH);
-                let dy = delta(geometry.positions[j][1] - geometry.positions[i][1], HEIGHT);
+                let dx = delta(geometry.positions[j][0] - geometry.positions[i][0], self.environment.width);
+                let dy = delta(geometry.positions[j][1] - geometry.positions[i][1], self.environment.height);
+                if self.environment.segment_blocked((a.x,a.y),(b.x,b.y)) {continue;}
                 let distance = dx.hypot(dy);
                 let contact = geometry.radii[i] + geometry.radii[j];
                 if distance >= contact {
@@ -2317,10 +2338,10 @@ impl World {
                 let ma = geometry.inertia[i];
                 let mb = geometry.inertia[j];
                 let overlap = contact - distance;
-                a.x = wrap(a.x - nx * overlap * mb / (ma + mb), WIDTH);
-                a.y = wrap(a.y - ny * overlap * mb / (ma + mb), HEIGHT);
-                b.x = wrap(b.x + nx * overlap * ma / (ma + mb), WIDTH);
-                b.y = wrap(b.y + ny * overlap * ma / (ma + mb), HEIGHT);
+                (a.x,a.y)=self.environment.move_circle((a.x,a.y),
+                    (a.x-nx*overlap*mb/(ma+mb),a.y-ny*overlap*mb/(ma+mb)),geometry.radii[i]);
+                (b.x,b.y)=self.environment.move_circle((b.x,b.y),
+                    (b.x+nx*overlap*ma/(ma+mb),b.y+ny*overlap*ma/(ma+mb)),geometry.radii[j]);
                 let approaching = (geometry.velocities[j][0] - geometry.velocities[i][0]) * nx
                     + (geometry.velocities[j][1] - geometry.velocities[i][1]) * ny;
                 if approaching < 0.0 {
@@ -2349,6 +2370,7 @@ impl World {
             budgets,
             ..
         } = workspace;
+        grid.configure(self.environment.width,self.environment.height);
         let max_radius = grid.index_cells(geometry);
         budgets.clear();
         budgets.extend(
@@ -2372,9 +2394,10 @@ impl World {
                 {
                     continue;
                 }
-                let distance = delta(geometry.positions[i][0] - food.x, WIDTH)
-                    .hypot(delta(geometry.positions[i][1] - food.y, HEIGHT));
+                let distance = delta(geometry.positions[i][0] - food.x, self.environment.width)
+                    .hypot(delta(geometry.positions[i][1] - food.y, self.environment.height));
                 if distance <= geometry.radii[i] + 2.5
+                    && !self.environment.segment_blocked((c.x,c.y),(food.x,food.y))
                     && (distance < best
                         || (distance == best
                             && winner.is_none_or(|old: usize| geometry.ids[i] < geometry.ids[old])))
@@ -2459,8 +2482,8 @@ impl World {
             self.births as f64,
             self.deaths as f64,
             self.eaten as f64,
-            WIDTH as f64,
-            HEIGHT as f64,
+            self.environment.width as f64,
+            self.environment.height as f64,
             0.0,
             0.0,
             self.food_rate as f64,
@@ -2545,25 +2568,26 @@ impl Observation {
 /// The emission point gives the outward direction when a particle is exactly
 /// at the cell center. The same rule handles new and coalescing packets.
 fn outside_envelope(
+    environment: &Environment,
     point: (f64, f64),
     envelope: (f64, f64, f64),
     emission: (f64, f64),
 ) -> (f64, f64) {
     let (cx, cy, radius) = envelope;
     let release_radius = radius + 2.5 + ORGANIC_RELEASE_CLEARANCE;
-    let dx = delta(point.0 - cx, WIDTH);
-    let dy = delta(point.1 - cy, HEIGHT);
+    let dx = delta(point.0 - cx, environment.width);
+    let dy = delta(point.1 - cy, environment.height);
     if dx.hypot(dy) + 1e-9 >= release_radius {
         return point;
     }
     let outward = if dx.hypot(dy) > 1e-12 {
         dy.atan2(dx)
     } else {
-        delta(emission.1 - cy, HEIGHT).atan2(delta(emission.0 - cx, WIDTH))
+        delta(emission.1 - cy, environment.height).atan2(delta(emission.0 - cx, environment.width))
     };
     (
-        wrap(cx + outward.cos() * release_radius, WIDTH),
-        wrap(cy + outward.sin() * release_radius, HEIGHT),
+        wrap(cx + outward.cos() * release_radius, environment.width),
+        wrap(cy + outward.sin() * release_radius, environment.height),
     )
 }
 fn shared_digestive_work(budget: f64, demands: [f64; 3], weights: [f64; 3]) -> [f64; 3] {
@@ -2609,27 +2633,27 @@ fn metabolic_factor(temperature: f64) -> f64 {
 #[cfg(test)]
 fn photon_footprint(x: f64, y: f64, area: f64) -> Vec<(usize, f64)> {
     let mut result = Vec::new();
-    photon_footprint_into(x, y, area, &mut result);
+    photon_footprint_into(&Environment::default(), x, y, area, &mut result);
     result
 }
-fn photon_footprint_into(x: f64, y: f64, area: f64, result: &mut Vec<(usize, f64)>) {
+fn photon_footprint_into(environment: &Environment, x: f64, y: f64, area: f64, result: &mut Vec<(usize, f64)>) {
     let radius = (60.0 * area.sqrt()).max(20.0);
     let span = (radius / 20.0).ceil() as isize;
-    let center = Environment::patch(x, y);
-    let col = (center % FIELD_COLUMNS) as isize;
-    let row = (center / FIELD_COLUMNS) as isize;
-    let cols = (2 * span + 1).min(FIELD_COLUMNS as isize);
-    let rows = (2 * span + 1).min(FIELD_ROWS as isize);
+    let center = environment.patch_index(x, y);
+    let col = (center % environment.columns) as isize;
+    let row = (center / environment.columns) as isize;
+    let cols = (2 * span + 1).min(environment.columns as isize);
+    let rows = (2 * span + 1).min(environment.rows as isize);
     result.clear();
     let mut total = 0.0;
     for dy in 0..rows {
         for dx in 0..cols {
-            let c = (col - span + dx).rem_euclid(FIELD_COLUMNS as isize) as usize;
-            let r = (row - span + dy).rem_euclid(FIELD_ROWS as isize) as usize;
-            let patch = r * FIELD_COLUMNS + c;
-            let (px, py) = Environment::patch_center(patch);
+            let c = (col - span + dx).rem_euclid(environment.columns as isize) as usize;
+            let r = (row - span + dy).rem_euclid(environment.rows as isize) as usize;
+            let patch = r * environment.columns + c;
+            let (px, py) = environment.patch_position(patch);
             let scaled =
-                (delta(px - x, WIDTH).powi(2) + delta(py - y, HEIGHT).powi(2)) / radius.powi(2);
+                (delta(px - x, environment.width).powi(2) + delta(py - y, environment.height).powi(2)) / radius.powi(2);
             if scaled < 1.0 {
                 let weight = (1.0 - scaled * scaled).powi(2);
                 result.push((patch, weight));
@@ -2729,7 +2753,7 @@ mod workspace_tests {
             }
             let bytes = state(&reused);
             let mut reader = Reader::new(&bytes);
-            let mut fresh = World::read_checkpoint(&mut reader, programs.len(), 5).unwrap();
+            let mut fresh = World::read_checkpoint(&mut reader, programs.len(), 8).unwrap();
             assert!(reader.finished());
             assert!(fresh.workspace.capacities.is_empty());
             let mut fresh_programs = programs.clone();

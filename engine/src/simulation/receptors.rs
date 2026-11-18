@@ -53,8 +53,8 @@ impl World {
             };
             let attachment = cell.angle + recipe.at;
             let outward = [attachment.cos(), attachment.sin()];
-            let x = wrap(cell.x + cell.radius() * outward[0], WIDTH);
-            let y = wrap(cell.y + cell.radius() * outward[1], HEIGHT);
+            let x = wrap(cell.x + cell.radius() * outward[0], self.environment.width);
+            let y = wrap(cell.y + cell.radius() * outward[1], self.environment.height);
             let reading = &mut input.receptors[recipe_index];
             reading.available = true;
             match kind {
@@ -105,7 +105,7 @@ impl World {
                                 return;
                             }
                             let illumination = self.environment.light_at(
-                                wrap(x + observation.dx, WIDTH), wrap(y + observation.dy, HEIGHT)
+                                wrap(x + observation.dx, self.environment.width), wrap(y + observation.dy, self.environment.height)
                             ).clamp(0.0, 1.0);
                             observation.contrast *= illumination;
                             if observation.contrast < 0.005 / (1.0 + 10.0 * mass.sqrt())
@@ -126,11 +126,11 @@ impl World {
                         let [ox, oy] = geometry.positions[other];
                         let [vx, vy] = geometry.velocities[other];
                         let pigment = geometry.pigments[other];
-                        let contact_angle = relative_angle(delta(y - oy, HEIGHT)
-                            .atan2(delta(x - ox, WIDTH)) - geometry.angles[other]);
+                        let contact_angle = relative_angle(delta(y - oy, self.environment.height)
+                            .atan2(delta(x - ox, self.environment.width)) - geometry.angles[other]);
                         consider(Observation {
                             entity: (geometry.ids[other] as u64) << 1,
-                            dx: delta(ox - x, WIDTH), dy: delta(oy - y, HEIGHT),
+                            dx: delta(ox - x, self.environment.width), dy: delta(oy - y, self.environment.height),
                             radius: geometry.radii[other], area: geometry.areas[other],
                             contrast: 0.45 + 0.4 * pigment, pigment,
                             motion: ObservedMotion::Relative(vx - cell.vx, vy - cell.vy),
@@ -141,7 +141,7 @@ impl World {
                         let food = &self.food[particle];
                         consider(Observation {
                             entity: (food.id << 1) | 1,
-                            dx: delta(food.x - x, WIDTH), dy: delta(food.y - y, HEIGHT),
+                            dx: delta(food.x - x, self.environment.width), dy: delta(food.y - y, self.environment.height),
                             radius: 2.5, area: (2.5 / CELL_RADIUS).powi(2),
                             contrast: [0.28, 0.4, 0.32][food.kind as usize],
                             pigment: [0.1, 0.24, 0.06][food.kind as usize],
@@ -177,15 +177,16 @@ impl World {
         target: &Observation, grid: &Grid, max_radius: f64, geometry: &CellGeometry) -> bool {
         let [x, y] = origin;
         let length_squared = target.dx * target.dx + target.dy * target.dy;
-        let midpoint_x = wrap(x + target.dx * 0.5, WIDTH);
-        let midpoint_y = wrap(y + target.dy * 0.5, HEIGHT);
+        if self.environment.segment_blocked((x,y),(x+target.dx,y+target.dy)) { return false; }
+        let midpoint_x = wrap(x + target.dx * 0.5, self.environment.width);
+        let midpoint_y = wrap(y + target.dy * 0.5, self.environment.height);
         let reach = length_squared.sqrt() * 0.5 + max_radius;
         for index in grid.nearby_radius(midpoint_x, midpoint_y, reach) {
             if index == observer || (geometry.ids[index] as u64) << 1 == target.entity || !geometry.alive[index] {
                 continue;
             }
-            let dx = delta(geometry.positions[index][0] - x, WIDTH);
-            let dy = delta(geometry.positions[index][1] - y, HEIGHT);
+            let dx = delta(geometry.positions[index][0] - x, self.environment.width);
+            let dy = delta(geometry.positions[index][1] - y, self.environment.height);
             let t = if length_squared > 1e-12 {
                 ((dx * target.dx + dy * target.dy) / length_squared).clamp(0.0, 1.0)
             } else { 0.0 };

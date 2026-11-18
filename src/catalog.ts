@@ -1,5 +1,5 @@
 import { PRESETS } from './presets';
-import type { EnvironmentDocument, GenomeDocument } from './storage';
+import type { EnvironmentConfig, EnvironmentDocument, GenomeDocument } from './storage';
 
 function freeze<T>(value: T): T {
   if (value && typeof value === 'object') {
@@ -45,7 +45,31 @@ export const BUILTIN_ENVIRONMENTS: readonly EnvironmentDocument[] = freeze([
       ],
     },
   },
-]);
+  {
+    id: 'builtin:environment:current-bands', name: 'Current bands',
+    description: 'A larger habitat with opposing currents, a sheltered channel, a drifting barrier, and local nutrient input and removal.', createdAt: 0, updatedAt: 0,
+    config: {
+      width: 2400, height: 1520, foodRate: 0, ambientTemperature: 0.5, ambientLight: 0, currentStrength: 0, initialNutrients: 0.3,
+      sources: [
+        { kind: 0, x: 750, y: 440, strength: 0.95, radius: 620 },
+        { kind: 0, x: 1750, y: 1050, strength: 0.85, radius: 560 },
+        { kind: 6, x: 1200, y: 430, strength: 0.6, radius: 180, angle: 0, length: 2400 },
+        { kind: 6, x: 1200, y: 1070, strength: -0.6, radius: 180, angle: 0, length: 2400 },
+        { kind: 2, x: 1920, y: 760, strength: 0.45, radius: 360 },
+        { kind: 3, x: 390, y: 430, strength: 0.55, radius: 140 },
+        { kind: 4, x: 2030, y: 1070, strength: 0.45, radius: 160 },
+      ],
+      barriers: [
+        { x: 1000, y: 680, length: 760, width: 40, angle: 0, floating: false },
+        { x: 1300, y: 840, length: 760, width: 40, angle: 0, floating: false },
+        { x: 850, y: 1040, length: 170, width: 36, angle: 0.35, floating: true },
+      ],
+    },
+  },
+].map(item => ({ ...item, config: {
+  width: 1200, height: 760, barriers: [], ...item.config,
+  sources: item.config.sources.map(source => ({ angle: 0, length: 600, ...source })),
+} as EnvironmentConfig })));
 
 export interface BuiltinSimulation {
   id: string; name: string; description: string; environmentId: string; seed: number;
@@ -70,6 +94,15 @@ export const BUILTIN_SIMULATIONS: readonly BuiltinSimulation[] = freeze([
       { genomeId: 'builtin:genome:forager', count: 6 },
       { genomeId: 'builtin:genome:mixotroph', count: 4 },
       { genomeId: 'builtin:genome:predator', count: 2 },
+    ],
+  },
+  {
+    id: 'builtin:simulation:current-bands', name: 'Current bands', description: 'Explore a larger habitat with editable currents, walls, and a nutrient sink.',
+    environmentId: 'builtin:environment:current-bands', seed: 42,
+    populations: [
+      { genomeId: 'builtin:genome:phototroph', count: 80 },
+      { genomeId: 'builtin:genome:forager', count: 6 },
+      { genomeId: 'builtin:genome:mixotroph', count: 8 },
     ],
   },
 ]);

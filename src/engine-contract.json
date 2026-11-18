@@ -1,5 +1,5 @@
 {
-  "abi": 10,
+  "abi": 11,
   "memory": "memory",
   "functions": [
     "abi_version",
@@ -67,6 +67,13 @@
     "metrics_snapshot_ptr",
     "cell_snapshot_ptr",
     "summary_snapshot_ptr",
-    "presentation_len"
+    "presentation_len",
+    "set_world_size",
+    "update_source",
+    "nutrient_removed_total",
+    "add_barrier",
+    "update_barrier",
+    "remove_barrier",
+    "clear_barriers"
   ]
 }

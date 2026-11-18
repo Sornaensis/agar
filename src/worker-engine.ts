@@ -99,11 +99,17 @@ export class WorkerEngine {
   setFoodRate(rate: number): Promise<void> { return this.call('setFoodRate', [rate]); }
   setMutationRate(rate: number): Promise<void> { return this.call('setMutationRate', [rate]); }
   setEnvironment(temperature: number, light: number, current: number): Promise<void> { return this.call('setEnvironment', [temperature, light, current]); }
+  setWorldSize(width: number, height: number): Promise<boolean> { return this.call('setWorldSize', [width, height]); }
   setInitialNutrients(level: number): Promise<void> { return this.call('setInitialNutrients', [level]); }
   addNutrients(x = -1, y = -1, amount = 25): Promise<number> { return this.call('addNutrients', [x, y, amount]); }
-  addSource(kind: SourceKind, x: number, y: number, strength: number, radius: number): Promise<number> { return this.call('addSource', [kind, x, y, strength, radius]); }
+  addSource(kind: SourceKind, x: number, y: number, strength: number, radius: number, angle = 0, length = 600): Promise<number> { return this.call('addSource', [kind, x, y, strength, radius, angle, length]); }
+  updateSource(id: number, kind: SourceKind, x: number, y: number, strength: number, radius: number, angle: number, length: number): Promise<boolean> { return this.call('updateSource', [id, kind, x, y, strength, radius, angle, length]); }
   removeSource(id: number): Promise<boolean> { return this.call('removeSource', [id]); }
   clearSources(): Promise<void> { return this.call('clearSources'); }
+  addBarrier(x: number, y: number, length: number, width: number, angle: number, floating: boolean): Promise<number> { return this.call('addBarrier', [x, y, length, width, angle, floating]); }
+  updateBarrier(id: number, x: number, y: number, length: number, width: number, angle: number, floating: boolean): Promise<boolean> { return this.call('updateBarrier', [id, x, y, length, width, angle, floating]); }
+  removeBarrier(id: number): Promise<boolean> { return this.call('removeBarrier', [id]); }
+  clearBarriers(): Promise<void> { return this.call('clearBarriers'); }
   getMemory(id: number): Promise<RegisterEntry[]> { return this.call('getMemory', [id]); }
   getCellEvaluation(id: number): Promise<GenomeEvaluation> { return this.call('getCellEvaluation', [id]); }
   languageSchema(): Promise<LanguageSchema> { return this.call('languageSchema'); }

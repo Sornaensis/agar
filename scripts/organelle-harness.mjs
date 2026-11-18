@@ -7,10 +7,12 @@ export const kinds=['core','photosynthetic','metabolic','digestive','reserve','t
 export const STRIDE=158;
 export const error=api=>new TextDecoder().decode(new Uint8Array(api.memory.buffer,api.error_ptr(),api.error_len()));
 export async function fresh(config={}){
-  const api=(await WebAssembly.instantiate(module,{})).exports;assert.equal(api.abi_version(),10);
+  const api=(await WebAssembly.instantiate(module,{})).exports;assert.equal(api.abi_version(),11);
+  assert.equal(api.set_world_size(config.width??1200,config.height??760),1,error(api));
   api.set_environment(config.ambientTemperature??.5,config.ambientLight??0,config.currentStrength??0);
   api.set_initial_nutrients(config.initialNutrients??.3);api.set_food_rate(config.foodRate??0);api.set_mutation_rate(config.mutationRate??0);
-  for(const s of config.sources??[])assert.ok(api.add_source(s.kind,s.x,s.y,s.strength,s.radius));
+  for(const s of config.sources??[]){const id=api.add_source(s.kind,s.x,s.y,s.strength,s.radius);assert.ok(id,error(api));assert.equal(api.update_source(id,s.kind,s.x,s.y,s.strength,s.radius,s.angle??0,s.length??600),1,error(api));}
+  for(const b of config.barriers??[])assert.ok(api.add_barrier(b.x,b.y,b.length,b.width,b.angle,Number(b.floating)),error(api));
   assert.equal(api.reset_empty(config.seed??42,config.initialFood??0),1,error(api));return api;
 }
 export function compile(api,source){
@@ -27,6 +29,16 @@ export const evaluation=(api,id)=>json(api,'cell_evaluation_ptr','cell_evaluatio
 export function source(api,id){const p=api.genome_source_ptr(id);return new TextDecoder().decode(new Uint8Array(api.memory.buffer,p,api.genome_source_len()));}
 export function save(api){const p=api.save_state_ptr(),n=api.save_state_len();assert.ok(p&&n,error(api));return new Uint8Array(api.memory.buffer,p,n).slice();}
 export function restore(api,data){const p=api.alloc_state(data.length);assert.ok(p);try{new Uint8Array(api.memory.buffer,p,data.length).set(data);return api.restore_state(p,data.length);}finally{api.dealloc(p,data.length);}}
+// Historical migration comparisons use the original habitat projection. The
+// ABI11 header and source shape are larger even for an unchanged imported world.
+export function legacyEnvironmentProjection(api){
+  const p=api.environment_snapshot_ptr(),data=new Float32Array(api.memory.buffer,p,api.environment_snapshot_len()).slice();
+  if(api.abi_version()<11)return data;
+  assert.equal(data[7],1200);assert.equal(data[8],760);assert.equal(data[9],0);assert.equal(data[10],0);
+  const end=11+data[0]*data[1]*5,values=[...data.slice(0,7),...data.slice(11,end)];
+  for(let i=0;i<data[5];i++)values.push(...data.slice(end+i*8,end+i*8+6));
+  return Float32Array.from(values);
+}
 export function snapshot(api){
   const p=api.snapshot_ptr(),v=new Float64Array(api.memory.buffer,p,api.snapshot_len()).slice();
   assert.ok(v.every(Number.isFinite));assert.equal(v.length,12+v[2]*STRIDE+v[3]*5);assert.equal(v[9],0);assert.equal(v[10],0);
@@ -39,7 +51,7 @@ export function snapshot(api){
       gutEnergyByKind:Array.from(v.slice(n+135,n+138)),gutMineralsByKind:Array.from(v.slice(n+138,n+141)),
       proteins:Object.fromEntries(kinds.map((kind,k)=>[kind,v[n+141+k]])),expressionRate:v[n+157],
       organs:Object.fromEntries(kinds.map((kind,k)=>{const at=n+39+k*6;return[kind,{count:v[at],mass:v[at+1],capacity:v[at+2],damaged:v[at+3],building:v[at+4],functionalMass:v[at+5]}];}))};
-    assert.ok(Number.isInteger(c.id)&&c.id>0);assert.ok(c.x>=0&&c.x<1200&&c.y>=0&&c.y<760);
+    assert.ok(Number.isInteger(c.id)&&c.id>0);assert.ok(c.x>=0&&c.x<v[7]&&c.y>=0&&c.y<v[8]);
     assert.ok(c.energy>0&&c.energy<=c.capacity+1e-8);assert.ok(c.area>=.25&&c.area<185&&Math.abs(c.radius-7*Math.sqrt(c.area))<1e-9);
     assert.ok(c.spaceUsed<=c.spaceCapacity+1e-8&&c.surfaceUsed<=c.surfaceCapacity+1e-8);
     assert.ok(c.nutrients>=0&&c.nutrients<=c.mineralCapacity+1e-8&&c.gutEnergy>=0&&c.gutEnergy<=c.gutCapacity+1e-8);

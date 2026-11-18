@@ -97,12 +97,22 @@ export interface Cell {
 }
 export type OrganicKind = 0 | 1 | 2;
 export interface Food { x: number; y: number; energy: number; nutrients: number; kind:OrganicKind }
-export type SourceKind = 0 | 1 | 2 | 3;
-export interface EnvironmentSource { id: number; kind: SourceKind; x: number; y: number; strength: number; radius: number }
+export type SourceKind = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export interface EnvironmentSource {
+  id: number; kind: SourceKind; x: number; y: number; strength: number; radius: number;
+  /** Orientation in radians, and longitudinal extent for directional flow. */
+  angle: number; length: number;
+}
+export interface EnvironmentBarrier {
+  id: number; x: number; y: number; length: number; width: number; angle: number;
+  floating: boolean; vx: number; vy: number;
+}
 export interface EnvironmentSnapshot {
-  columns: number; rows: number; ambientTemperature: number; ambientLight: number; currentStrength: number; initialNutrients: number;
+  columns: number; rows: number; width: number; height: number;
+  ambientTemperature: number; ambientLight: number; currentStrength: number; initialNutrients: number;
+  nutrientRemovedTotal: number;
   /** Interleaved light, temperature, flow x, flow y, dissolved nutrients; an owned copy. */
-  samples: Float32Array; sources: EnvironmentSource[];
+  samples: Float32Array; sources: EnvironmentSource[]; barriers: EnvironmentBarrier[];
 }
 export interface RegisterEntry { name: string; type: string; value: unknown }
 export type GenomeValueType = 'integer' | 'scalar' | 'boolean' | 'string' | 'vec2';
@@ -384,11 +394,17 @@ interface WasmExports extends WebAssembly.Exports {
   render_snapshot_ptr(): number; metrics_snapshot_ptr(): number; cell_snapshot_ptr(id: number): number;
   summary_snapshot_ptr(): number; presentation_len(): number;
   set_environment(temperature: number, light: number, current: number): void;
+  set_world_size(width: number, height: number): number;
   set_initial_nutrients(level: number): void; add_nutrients(x: number, y: number, amount: number): number;
   nutrient_total(): number; nutrient_input_total(): number; nutrient_dissolved_total(): number;
   nutrient_food_total(): number; nutrient_cell_total(): number;
+  nutrient_removed_total(): number;
   add_source(kind: number, x: number, y: number, strength: number, radius: number): number;
+  update_source(id: number, kind: number, x: number, y: number, strength: number, radius: number, angle: number, length: number): number;
   remove_source(id: number): number; clear_sources(): void;
+  add_barrier(x: number, y: number, length: number, width: number, angle: number, floating: number): number;
+  update_barrier(id: number, x: number, y: number, length: number, width: number, angle: number, floating: number): number;
+  remove_barrier(id: number): number; clear_barriers(): void;
   environment_snapshot_ptr(): number; environment_snapshot_len(): number;
   cell_memory_ptr(id: number): number; cell_memory_len(): number;
   cell_evaluation_ptr(id: number): number; cell_evaluation_len(): number;
@@ -523,13 +539,31 @@ export class Engine {
   setFoodRate(rate: number): void { this.wasm.set_food_rate(rate); }
   setMutationRate(rate: number): void { this.wasm.set_mutation_rate(rate); }
   setEnvironment(temperature: number, light: number, current: number): void { this.wasm.set_environment(temperature, light, current); }
+  setWorldSize(width: number, height: number): boolean { return this.wasm.set_world_size(width, height) !== 0; }
   setInitialNutrients(level: number): void { this.wasm.set_initial_nutrients(level); }
   addNutrients(x = -1, y = -1, amount = 25): number { return this.wasm.add_nutrients(x, y, amount); }
-  addSource(kind: SourceKind, x: number, y: number, strength: number, radius: number): number {
-    return this.wasm.add_source(kind, x, y, strength, radius);
+  addSource(kind: SourceKind, x: number, y: number, strength: number, radius: number, angle = 0, length = 600): number {
+    if (![x, y, strength, radius, angle, length].every(Number.isFinite)) return 0;
+    const id = this.wasm.add_source(kind, x, y, strength, radius);
+    if (id && !this.updateSource(id, kind, x, y, strength, radius, angle, length)) {
+      this.wasm.remove_source(id);
+      return 0;
+    }
+    return id;
+  }
+  updateSource(id: number, kind: SourceKind, x: number, y: number, strength: number, radius: number, angle: number, length: number): boolean {
+    return this.wasm.update_source(id, kind, x, y, strength, radius, angle, length) !== 0;
   }
   removeSource(id: number): boolean { return this.wasm.remove_source(id) !== 0; }
   clearSources(): void { this.wasm.clear_sources(); }
+  addBarrier(x: number, y: number, length: number, width: number, angle: number, floating: boolean): number {
+    return this.wasm.add_barrier(x, y, length, width, angle, Number(floating));
+  }
+  updateBarrier(id: number, x: number, y: number, length: number, width: number, angle: number, floating: boolean): boolean {
+    return this.wasm.update_barrier(id, x, y, length, width, angle, Number(floating)) !== 0;
+  }
+  removeBarrier(id: number): boolean { return this.wasm.remove_barrier(id) !== 0; }
+  clearBarriers(): void { this.wasm.clear_barriers(); }
   getMemory(id: number): RegisterEntry[] {
     const pointer = this.wasm.cell_memory_ptr(id);
     const length = this.wasm.cell_memory_len();
@@ -594,18 +628,29 @@ export class Engine {
   environment(): EnvironmentSnapshot {
     const pointer = this.wasm.environment_snapshot_ptr();
     const data = new Float32Array(this.wasm.memory.buffer, pointer, this.wasm.environment_snapshot_len());
-    const columns = data[0], rows = data[1], count = data[5];
-    const sampleEnd = 7 + columns * rows * 5;
+    const columns = data[0], rows = data[1], count = data[5], width = data[7], height = data[8], barrierCount = data[9];
+    const sampleEnd = 11 + columns * rows * 5, barrierStart = sampleEnd + count * 8;
     if (!Number.isInteger(columns) || !Number.isInteger(rows) || columns < 1 || rows < 1
-      || !Number.isInteger(count) || count < 0 || count > 16
-      || data.length !== sampleEnd + count * 6) throw new Error('The environment snapshot has an invalid layout.');
-    const samples = data.slice(7, sampleEnd);
+      || columns > 240 || rows > 152 || width !== columns * 20 || height !== rows * 20
+      || !Number.isInteger(count) || count < 0 || count > 64
+      || !Number.isInteger(barrierCount) || barrierCount < 0 || barrierCount > 64
+      || !Number.isFinite(data[10]) || data[10] < 0
+      || data.length !== barrierStart + barrierCount * 10) throw new Error('The environment snapshot has an invalid layout.');
+    const samples = data.slice(11, sampleEnd);
     const sources: EnvironmentSource[] = [];
     for (let i = 0; i < count; i++) {
-      const n = sampleEnd + i * 6;
-      sources.push({ id: data[n], kind: data[n + 1] as SourceKind, x: data[n + 2], y: data[n + 3], strength: data[n + 4], radius: data[n + 5] });
+      const n = sampleEnd + i * 8;
+      if (!Number.isInteger(data[n + 1]) || data[n + 1] < 0 || data[n + 1] > 7
+        || !data.subarray(n, n + 8).every(Number.isFinite)) throw new Error('The environment contains an invalid source.');
+      sources.push({ id: data[n], kind: data[n + 1] as SourceKind, x: data[n + 2], y: data[n + 3], strength: data[n + 4], radius: data[n + 5], angle: data[n + 6], length: data[n + 7] });
     }
-    return { columns, rows, ambientTemperature: data[2], ambientLight: data[3], currentStrength: data[4], initialNutrients: data[6], samples, sources };
+    const barriers: EnvironmentBarrier[] = [];
+    for (let i = 0; i < barrierCount; i++) {
+      const n = barrierStart + i * 10;
+      if (![0, 1].includes(data[n + 6]) || !data.subarray(n, n + 10).every(Number.isFinite)) throw new Error('The environment contains an invalid barrier.');
+      barriers.push({ id: data[n], x: data[n + 1], y: data[n + 2], length: data[n + 3], width: data[n + 4], angle: data[n + 5], floating: data[n + 6] === 1, vx: data[n + 7], vy: data[n + 8] });
+    }
+    return { columns, rows, width, height, ambientTemperature: data[2], ambientLight: data[3], currentStrength: data[4], initialNutrients: data[6], nutrientRemovedTotal: data[10], samples, sources, barriers };
   }
 
   /** Owned compact bytes can be transferred to the UI without cloning cell objects. */

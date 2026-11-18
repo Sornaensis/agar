@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { catalog, compile, seed, snapshot, body, save, restore, error } from './organelle-harness.mjs';
+import { catalog, compile, seed, snapshot, body, save, restore, error, legacyEnvironmentProjection } from './organelle-harness.mjs';
 
 // Compare actual old and new WASM on preserved cellular-family sources. Save
 // formats differ (v5/v6), so compare exact world/environment bytes and complete
@@ -35,7 +35,7 @@ assert.equal(CELLULAR_FAMILY_PRESETS.length, 8);
 
 async function create(module) {
   const api = (await WebAssembly.instantiate(module, {})).exports;
-  assert.equal(api.abi_version(), 10);
+  assert.ok([10, 11].includes(api.abi_version()), 'Known historical or current ABI');
   api.set_environment(0.5, 0.85, 0);
   api.set_initial_nutrients(3);
   api.set_food_rate(0);
@@ -59,8 +59,7 @@ function exactBytes(actual, expected, label) {
 function compare(reference, candidate, label) {
   exactBytes(raw(candidate, 'snapshot_ptr', 'snapshot_len', Float64Array),
     raw(reference, 'snapshot_ptr', 'snapshot_len', Float64Array), `${label}: world`);
-  exactBytes(raw(candidate, 'environment_snapshot_ptr', 'environment_snapshot_len', Float32Array),
-    raw(reference, 'environment_snapshot_ptr', 'environment_snapshot_len', Float32Array), `${label}: environment`);
+  exactBytes(legacyEnvironmentProjection(candidate), legacyEnvironmentProjection(reference), `${label}: environment`);
   const state = snapshot(reference);
   assert.deepEqual(snapshot(candidate), state, `${label}: decoded state and conserved totals`);
   for (const cell of state.cells) {

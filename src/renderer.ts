@@ -1,5 +1,6 @@
 import { ORGANELLE_CATALOG } from './organelles';
-import type { BodyInspection, Cell, RenderCell, EnvironmentSnapshot, EnvironmentSource } from './engine';
+import { WorldCamera } from './world-camera';
+import type { BodyInspection, Cell, RenderCell, EnvironmentSnapshot, EnvironmentSource, EnvironmentBarrier } from './engine';
 import type { RenderWorldSnapshot } from './session';
 
 const PALETTE = ['#5ce1ba', '#aaa2ff', '#efa66b', '#6dcbea', '#ed9db7', '#d7d889'];
@@ -17,10 +18,21 @@ function rgba(hex: string, alpha: number): string {
 interface TrailPoint { x: number; y: number; time: number }
 export type FieldOverlay = 'none' | 'light' | 'heat' | 'flow' | 'nutrients';
 interface RenderOptions { sensors?: boolean; trails?: boolean; overlay?: FieldOverlay }
+export type EnvironmentSelection = { kind: 'source' | 'barrier'; id: number } | null;
+interface CameraPointer { x: number; y: number; startX: number; startY: number; touch: boolean }
 
 /** Draws snapshots only. Rust owns every position, velocity, and biological state. */
 export class Renderer {
   private readonly context: CanvasRenderingContext2D;
+  private readonly camera = new WorldCamera();
+  private readonly input = new AbortController();
+  private readonly pointers = new Map<number, CameraPointer>();
+  private readonly originalTouchAction: string;
+  private readonly originalCursor: string;
+  private suppressClickUntil = 0;
+  private selection: EnvironmentSelection = null;
+  private cameraFrame = 0;
+  private renderOptions: RenderOptions = {};
   private readonly observer: ResizeObserver;
   private readonly sprites = new Map<string, HTMLCanvasElement>();
   private readonly trails = new Map<number, TrailPoint[]>();
@@ -49,6 +61,10 @@ export class Renderer {
     const context = canvas.getContext('2d', { alpha: false });
     if (!context) throw new Error('This browser does not support the 2D simulation view.');
     this.context = context;
+    this.originalTouchAction = canvas.style.touchAction;
+    this.originalCursor = canvas.style.cursor;
+    canvas.style.touchAction = 'none';
+    this.bindCameraInput();
     this.observer = new ResizeObserver(() => this.resize());
     this.observer.observe(canvas);
     this.resize();
@@ -64,13 +80,114 @@ export class Renderer {
     const height = Math.max(1, Math.round(this.cssHeight * this.pixelRatio));
     if (this.canvas.width !== width) this.canvas.width = width;
     if (this.canvas.height !== height) this.canvas.height = height;
+    this.camera.setViewport(this.cssWidth, this.cssHeight);
     this.updateTransform();
+    this.requestRedraw();
   }
 
   private updateTransform(): void {
-    this.scale = Math.min(this.cssWidth / this.worldWidth, this.cssHeight / this.worldHeight);
-    this.offsetX = (this.cssWidth - this.worldWidth * this.scale) / 2;
-    this.offsetY = (this.cssHeight - this.worldHeight * this.scale) / 2;
+    this.scale = this.camera.scale;
+    this.offsetX = this.camera.offsetX;
+    this.offsetY = this.camera.offsetY;
+  }
+
+  /** Reset to a complete view without changing the simulated world. */
+  fitWorld(): void { this.camera.fit(); this.cameraChanged(); }
+
+  /** Zoom around a client coordinate, or the canvas center for toolbar controls. */
+  zoomBy(factor: number, clientX?: number, clientY?: number): void {
+    const rect = this.canvas.getBoundingClientRect();
+    this.camera.zoomAt(factor, clientX === undefined ? this.cssWidth / 2 : clientX - rect.left,
+      clientY === undefined ? this.cssHeight / 2 : clientY - rect.top);
+    this.cameraChanged();
+  }
+
+  getZoom(): number { return this.camera.zoom; }
+  getCamera(): { x: number; y: number; zoom: number } { return { x: this.camera.x, y: this.camera.y, zoom: this.camera.zoom }; }
+
+  setEnvironmentSelection(selection: EnvironmentSelection): void {
+    if (this.selection?.kind === selection?.kind && this.selection?.id === selection?.id) return;
+    this.selection = selection;
+    this.resizeVersion++;
+    this.requestRedraw();
+  }
+
+  /** Consume the synthetic click following a pan or pinch, before picking/placing. */
+  wasDragging(): boolean {
+    const dragged = performance.now() < this.suppressClickUntil;
+    this.suppressClickUntil = 0;
+    return dragged;
+  }
+
+  private requestRedraw(): void {
+    if (this.cameraFrame || !this.lastWorld) return;
+    this.cameraFrame = requestAnimationFrame(() => {
+      this.cameraFrame = 0;
+      if (this.lastWorld) this.render(this.lastWorld, this.lastSelected, this.renderOptions, this.lastDetails, this.lastBody);
+    });
+  }
+
+  private cameraChanged(): void {
+    this.updateTransform();
+    this.resizeVersion++;
+    this.requestRedraw();
+    this.canvas.dispatchEvent(new CustomEvent('camerachange', { detail: this.getCamera() }));
+  }
+
+  private bindCameraInput(): void {
+    const signal = this.input.signal;
+    this.canvas.addEventListener('wheel', event => {
+      event.preventDefault();
+      const amount = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? this.cssHeight : 1);
+      this.zoomBy(Math.exp(-Math.max(-250, Math.min(250, amount)) * 0.0025), event.clientX, event.clientY);
+    }, { passive: false, signal });
+    this.canvas.addEventListener('pointerdown', event => {
+      if (!this.pointers.size) this.suppressClickUntil = 0;
+      const touch = event.pointerType === 'touch';
+      if (!touch && event.button !== 1 && event.button !== 2 && !(event.button === 0 && event.shiftKey)) return;
+      if (!touch) { event.preventDefault(); this.suppressClickUntil = performance.now() + 700; }
+      this.canvas.focus({ preventScroll: true });
+      this.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY, touch });
+      this.canvas.setPointerCapture(event.pointerId);
+      this.canvas.style.cursor = 'grabbing';
+      if (this.pointers.size > 1) this.suppressClickUntil = performance.now() + 700;
+    }, { signal });
+    this.canvas.addEventListener('pointermove', event => {
+      const pointer = this.pointers.get(event.pointerId);
+      if (!pointer) return;
+      const oldX = pointer.x, oldY = pointer.y;
+      const other = pointer.touch ? [...this.pointers.entries()].find(([id, value]) => id !== event.pointerId && value.touch)?.[1] : undefined;
+      pointer.x = event.clientX; pointer.y = event.clientY;
+      if (other) {
+        const oldDistance = Math.hypot(oldX - other.x, oldY - other.y);
+        const distance = Math.hypot(pointer.x - other.x, pointer.y - other.y);
+        const rect = this.canvas.getBoundingClientRect();
+        if (oldDistance > 1 && distance > 1) this.camera.zoomAt(distance / oldDistance, (oldX + other.x) / 2 - rect.left, (oldY + other.y) / 2 - rect.top);
+        this.camera.pan((pointer.x - oldX) / 2, (pointer.y - oldY) / 2);
+        this.suppressClickUntil = performance.now() + 700;
+      } else {
+        if (Math.hypot(pointer.x - pointer.startX, pointer.y - pointer.startY) < 4 && !this.suppressClickUntil) return;
+        this.camera.pan(pointer.x - oldX, pointer.y - oldY);
+        this.suppressClickUntil = performance.now() + 700;
+      }
+      event.preventDefault();
+      this.cameraChanged();
+    }, { signal });
+    const release = (event: PointerEvent): void => {
+      if (!this.pointers.delete(event.pointerId)) return;
+      if (this.suppressClickUntil) this.suppressClickUntil = performance.now() + 700;
+      if (this.canvas.hasPointerCapture(event.pointerId)) this.canvas.releasePointerCapture(event.pointerId);
+      if (!this.pointers.size) this.canvas.style.cursor = this.originalCursor;
+    };
+    this.canvas.addEventListener('pointerup', release, { signal });
+    this.canvas.addEventListener('pointercancel', release, { signal });
+    this.canvas.addEventListener('lostpointercapture', release, { signal });
+    this.canvas.addEventListener('contextmenu', event => event.preventDefault(), { signal });
+    this.canvas.addEventListener('keydown', event => {
+      if (event.key === '+' || event.key === '=') { event.preventDefault(); this.zoomBy(1.25); }
+      else if (event.key === '-') { event.preventDefault(); this.zoomBy(0.8); }
+      else if (event.key === 'Home' || event.key === '0') { event.preventDefault(); this.fitWorld(); }
+    }, { signal });
   }
 
   toWorld(clientX: number, clientY: number): { x: number; y: number } | null {
@@ -117,11 +234,28 @@ export class Renderer {
     return nearest;
   }
 
+  pickBarrier(world: RenderWorldSnapshot, clientX: number, clientY: number): EnvironmentBarrier | null {
+    const position = this.toWorld(clientX, clientY);
+    if (!position) return null;
+    const tolerance = 5 / this.scale;
+    // Last drawn wins where barriers overlap.
+    for (const barrier of [...(world.environment.barriers ?? [])].reverse()) {
+      const cos = Math.cos(barrier.angle), sin = Math.sin(barrier.angle);
+      for (const point of this.wrappedPositions(barrier.x, barrier.y, Math.hypot(barrier.length, barrier.width) / 2 + tolerance)) {
+        const dx = position.x - point.x, dy = position.y - point.y;
+        if (Math.abs(dx * cos + dy * sin) <= barrier.length / 2 + tolerance
+          && Math.abs(-dx * sin + dy * cos) <= barrier.width / 2 + tolerance) return barrier;
+      }
+    }
+    return null;
+  }
+
   render(world: RenderWorldSnapshot, selectedId: number | null, options: RenderOptions = {}, details: Cell | null = null, body: BodyInspection | null = null): void {
     if (world.width !== this.worldWidth || world.height !== this.worldHeight) {
       this.worldWidth = world.width;
       this.worldHeight = world.height;
       this.background = null;
+      this.camera.setWorld(world.width, world.height);
       this.updateTransform();
     }
     if (this.pixelRatio !== Math.min(window.devicePixelRatio || 1, 2)) this.resize();
@@ -129,7 +263,7 @@ export class Renderer {
     if (this.lastWorld === world && this.lastSelected === selectedId && this.lastDetails === details && this.lastBody === body
       && this.lastOptions === optionsKey && this.renderedResize === this.resizeVersion) return;
     this.lastWorld = world; this.lastSelected = selectedId; this.lastDetails = details; this.lastBody = body;
-    this.lastOptions = optionsKey; this.renderedResize = this.resizeVersion;
+    this.lastOptions = optionsKey; this.renderOptions = { ...options }; this.renderedResize = this.resizeVersion;
     const context = this.context;
     context.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0);
     context.globalAlpha = 1;
@@ -141,7 +275,7 @@ export class Renderer {
     context.beginPath();
     context.rect(0, 0, this.worldWidth, this.worldHeight);
     context.clip();
-    context.drawImage(this.getBackground(), 0, 0, this.worldWidth, this.worldHeight);
+    this.drawBackground();
     const overlay = options.overlay ?? 'none';
     if (overlay !== 'none') this.drawEnvironment(world.environment, overlay);
 
@@ -195,6 +329,7 @@ export class Renderer {
     if (selected && details?.id===selected.id && body?.cellId===selected.id && body.cellular && options.sensors!==false) {
       for (const point of this.wrappedPositions(selected.x,selected.y,selected.radius+32/this.scale)) this.drawCellularDetails(details,body,point.x,point.y);
     }
+    this.drawBarriers(world.environment.barriers ?? []);
     this.drawSources(world.environment.sources, overlay);
     context.restore();
   }
@@ -241,8 +376,13 @@ export class Renderer {
       context.strokeStyle = 'rgba(145,209,233,0.46)';
       context.lineWidth = 0.8 / this.scale;
       context.beginPath();
-      for (let row = 1; row < rows; row += 3) {
-        for (let column = 1; column < columns; column += 3) {
+      const stride = Math.max(1, Math.ceil(38 / (this.worldWidth / columns * this.scale)));
+      const firstColumn = Math.max(0, Math.floor(-this.offsetX / this.scale / this.worldWidth * columns));
+      const lastColumn = Math.min(columns, Math.ceil((this.cssWidth - this.offsetX) / this.scale / this.worldWidth * columns));
+      const firstRow = Math.max(0, Math.floor(-this.offsetY / this.scale / this.worldHeight * rows));
+      const lastRow = Math.min(rows, Math.ceil((this.cssHeight - this.offsetY) / this.scale / this.worldHeight * rows));
+      for (let row = Math.ceil(firstRow / stride) * stride; row < lastRow; row += stride) {
+        for (let column = Math.ceil(firstColumn / stride) * stride; column < lastColumn; column += stride) {
           const offset = (row * columns + column) * 5;
           const vx = samples[offset + 2], vy = samples[offset + 3];
           const speed = Math.hypot(vx, vy);
@@ -269,28 +409,58 @@ export class Renderer {
     const context = this.context;
     context.save();
     for (const source of sources) {
-      const color = source.kind === 0 ? '#efd089' : source.kind === 1 ? (source.strength >= 0 ? '#ed9c82' : '#83c5eb') : source.kind === 2 ? '#b6acf5' : '#81d99d';
-      const label = source.kind === 0 ? 'L' : source.kind === 1 ? (source.strength >= 0 ? 'H' : 'C') : source.kind === 2 ? 'V' : 'N';
-      const showRadius = (source.kind === 0 && overlay === 'light') || (source.kind === 1 && overlay === 'heat') || (source.kind === 2 && overlay === 'flow') || (source.kind === 3 && overlay === 'nutrients');
-      for (const point of this.wrappedPositions(source.x, source.y, showRadius ? source.radius : 12 / this.scale)) {
+      const color = source.kind === 0 ? '#efd089' : source.kind === 1 ? (source.strength >= 0 ? '#ed9c82' : '#83c5eb')
+        : source.kind === 3 ? '#81d99d' : source.kind === 4 ? '#e69bcb' : '#a5c4f7';
+      const label = ['L', source.strength >= 0 ? 'H' : 'C', 'V', 'N', 'A', 'J', 'B', 'R'][source.kind];
+      const selected = this.selection?.kind === 'source' && this.selection.id === source.id;
+      const showRadius = selected || (source.kind === 0 && overlay === 'light') || (source.kind === 1 && overlay === 'heat')
+        || ([2,5,6,7].includes(source.kind) && overlay === 'flow') || ([3,4].includes(source.kind) && overlay === 'nutrients');
+      const directional = source.kind === 5 || source.kind === 6;
+      const margin = showRadius ? directional ? Math.hypot(source.length / 2, source.radius) : source.radius : 14 / this.scale;
+      for (const point of this.wrappedPositions(source.x, source.y, margin)) {
         if (showRadius) {
-          context.lineWidth = 0.7 / this.scale;
-          context.strokeStyle = rgba(color, 0.22);
-          context.setLineDash([3 / this.scale, 6 / this.scale]);
+          context.save(); context.translate(point.x, point.y); context.rotate(source.angle);
+          context.lineWidth = (selected ? 1.15 : 0.7) / this.scale;
+          context.strokeStyle = rgba(color, selected ? 0.7 : 0.32);
+          context.fillStyle = rgba(color, selected ? 0.045 : 0.018);
+          context.setLineDash([4 / this.scale, 6 / this.scale]);
           context.beginPath();
-          context.arc(point.x, point.y, source.radius, 0, Math.PI * 2);
-          context.stroke();
+          if (directional) context.roundRect(-source.length / 2, -source.radius, source.length, source.radius * 2, Math.min(source.radius, source.length * 0.15));
+          else context.arc(0, 0, source.radius, 0, Math.PI * 2);
+          context.fill(); context.stroke(); context.setLineDash([]);
+          if (directional) {
+            const sign = source.strength < 0 ? -1 : 1;
+            this.drawArrow(-Math.min(source.length * 0.3, 35 / this.scale) * sign, 0,
+              Math.min(source.length * 0.3, 35 / this.scale) * sign, 0, color, selected ? 0.85 : 0.6);
+          } else if (source.kind === 7) {
+            const inward = source.strength < 0;
+            for (let index = 0; index < 4; index++) {
+              const angle = index * Math.PI / 2, start = source.radius * (inward ? 0.72 : 0.36), end = source.radius * (inward ? 0.36 : 0.72);
+              this.drawArrow(Math.cos(angle) * start, Math.sin(angle) * start, Math.cos(angle) * end, Math.sin(angle) * end, color, 0.6);
+            }
+          } else if (source.kind === 2 && source.radius * this.scale > 24) {
+            const radius = source.radius * 0.5, sign = source.strength < 0 ? -1 : 1;
+            context.beginPath(); context.arc(0, 0, radius, 0, sign * Math.PI * 1.4, sign < 0); context.stroke();
+            const end = sign * Math.PI * 1.4;
+            this.drawArrow(Math.cos(end - sign * 0.16) * radius, Math.sin(end - sign * 0.16) * radius,
+              Math.cos(end) * radius, Math.sin(end) * radius, color, 0.65);
+          }
+          context.restore();
+        }
+        if (selected) {
+          context.beginPath(); context.arc(point.x, point.y, 13 / this.scale, 0, Math.PI * 2);
+          context.strokeStyle = rgba(color, 0.42); context.lineWidth = 1 / this.scale; context.stroke();
         }
         context.setLineDash([]);
         context.beginPath();
-        context.arc(point.x, point.y, 8 / this.scale, 0, Math.PI * 2);
-        context.fillStyle = '#142329';
+        context.arc(point.x, point.y, 9 / this.scale, 0, Math.PI * 2);
+        context.fillStyle = selected ? '#233b42' : '#142329';
         context.fill();
-        context.lineWidth = 1 / this.scale;
-        context.strokeStyle = rgba(color, 0.8);
+        context.lineWidth = (selected ? 1.5 : 1) / this.scale;
+        context.strokeStyle = rgba(color, 0.9);
         context.stroke();
         context.fillStyle = color;
-        context.font = `600 ${8 / this.scale}px ui-monospace, monospace`;
+        context.font = `600 ${9 / this.scale}px ui-monospace, monospace`;
         context.textAlign = 'center';
         context.textBaseline = 'middle';
         context.fillText(label, point.x, point.y + 0.3 / this.scale);
@@ -299,31 +469,85 @@ export class Renderer {
     context.restore();
   }
 
+  private drawArrow(fromX: number, fromY: number, toX: number, toY: number, color: string, alpha: number): void {
+    const context = this.context, distance = Math.hypot(toX - fromX, toY - fromY);
+    if (distance < 1e-6) return;
+    const dx = (toX - fromX) / distance, dy = (toY - fromY) / distance;
+    const head = Math.min(5 / this.scale, distance * 0.4);
+    context.strokeStyle = rgba(color, alpha); context.lineWidth = 1 / this.scale;
+    context.beginPath(); context.moveTo(fromX, fromY); context.lineTo(toX, toY);
+    context.moveTo(toX - dx * head - dy * head * 0.6, toY - dy * head + dx * head * 0.6);
+    context.lineTo(toX, toY); context.lineTo(toX - dx * head + dy * head * 0.6, toY - dy * head - dx * head * 0.6);
+    context.stroke();
+  }
+
+  private drawBarriers(barriers: EnvironmentBarrier[]): void {
+    const context = this.context;
+    context.save();
+    for (const barrier of barriers) {
+      const selected = this.selection?.kind === 'barrier' && this.selection.id === barrier.id;
+      const color = barrier.floating ? '#79c6df' : '#a8b6bd';
+      const margin = Math.hypot(barrier.length, barrier.width) / 2 + 6 / this.scale;
+      for (const point of this.wrappedPositions(barrier.x, barrier.y, margin)) {
+        context.save(); context.translate(point.x, point.y); context.rotate(barrier.angle);
+        context.fillStyle = barrier.floating ? '#234650' : '#354148';
+        context.strokeStyle = rgba(color, selected ? 1 : 0.85);
+        context.lineWidth = (selected ? 1.8 : 1.1) / this.scale;
+        context.beginPath(); context.rect(-barrier.length / 2, -barrier.width / 2, barrier.length, barrier.width);
+        context.fill(); context.stroke();
+        context.save(); context.clip();
+        context.strokeStyle = rgba(color, 0.16); context.lineWidth = 1 / this.scale;
+        const spacing = Math.max(12, 10 / this.scale);
+        context.beginPath();
+        for (let x = -barrier.length / 2 - barrier.width; x < barrier.length / 2; x += spacing) {
+          context.moveTo(x, barrier.width / 2); context.lineTo(x + barrier.width, -barrier.width / 2);
+        }
+        context.stroke(); context.restore();
+        if (selected) {
+          context.strokeStyle = rgba(color, 0.65); context.lineWidth = 1 / this.scale; context.setLineDash([4 / this.scale, 3 / this.scale]);
+          context.strokeRect(-barrier.length / 2 - 4 / this.scale, -barrier.width / 2 - 4 / this.scale,
+            barrier.length + 8 / this.scale, barrier.width + 8 / this.scale); context.setLineDash([]);
+        }
+        if (barrier.length * this.scale > 65 && barrier.width * this.scale > 12) {
+          context.fillStyle = rgba(color, 0.9); context.font = `500 ${Math.min(10 / this.scale, barrier.width * 0.6)}px ui-monospace, monospace`;
+          context.textAlign = 'center'; context.textBaseline = 'middle';
+          context.fillText(barrier.floating ? 'FLOAT' : 'FIXED', 0, 0, barrier.length - 8 / this.scale);
+        }
+        context.restore();
+      }
+    }
+    context.restore();
+  }
+
+  private drawBackground(): void {
+    const context = this.context;
+    context.drawImage(this.getBackground(), 0, 0, this.worldWidth, this.worldHeight);
+    const left = Math.max(0, -this.offsetX / this.scale), right = Math.min(this.worldWidth, (this.cssWidth - this.offsetX) / this.scale);
+    const top = Math.max(0, -this.offsetY / this.scale), bottom = Math.min(this.worldHeight, (this.cssHeight - this.offsetY) / this.scale);
+    const spacing = 40 * Math.max(1, Math.ceil(12 / (40 * this.scale)));
+    const radius = 0.6 / this.scale;
+    context.fillStyle = 'rgba(128,170,161,0.2)'; context.beginPath();
+    for (let x = Math.ceil((left - 20) / spacing) * spacing + 20; x < right; x += spacing) {
+      for (let y = Math.ceil((top - 20) / spacing) * spacing + 20; y < bottom; y += spacing) {
+        context.moveTo(x + radius, y); context.arc(x, y, radius, 0, Math.PI * 2);
+      }
+    }
+    context.fill(); context.strokeStyle = 'rgba(112,164,154,0.3)'; context.lineWidth = 1 / this.scale;
+    context.strokeRect(0, 0, this.worldWidth, this.worldHeight);
+  }
+
   private getBackground(): HTMLCanvasElement {
     if (this.background) return this.background;
     const background = document.createElement('canvas');
-    background.width = Math.ceil(this.worldWidth);
-    background.height = Math.ceil(this.worldHeight);
+    // A low-resolution gradient avoids allocating a world-sized bitmap on large habitats.
+    const resolution = Math.min(1, 1200 / Math.max(this.worldWidth, this.worldHeight));
+    background.width = Math.max(1, Math.ceil(this.worldWidth * resolution));
+    background.height = Math.max(1, Math.ceil(this.worldHeight * resolution));
     const context = background.getContext('2d')!;
-    const gradient = context.createRadialGradient(this.worldWidth * 0.4, this.worldHeight * 0.4, 0,
-      this.worldWidth * 0.5, this.worldHeight * 0.5, this.worldWidth * 0.7);
-    gradient.addColorStop(0, '#10231f');
-    gradient.addColorStop(0.6, '#0b1a1b');
-    gradient.addColorStop(1, '#091317');
-    context.fillStyle = gradient;
-    context.fillRect(0, 0, background.width, background.height);
-    context.fillStyle = 'rgba(128,170,161,0.18)';
-    context.beginPath();
-    for (let x = 20; x < this.worldWidth; x += 40) {
-      for (let y = 20; y < this.worldHeight; y += 40) {
-        context.moveTo(x + 0.65, y);
-        context.arc(x, y, 0.65, 0, Math.PI * 2);
-      }
-    }
-    context.fill();
-    context.strokeStyle = 'rgba(112,164,154,0.08)';
-    context.lineWidth = 1;
-    context.strokeRect(0.5, 0.5, this.worldWidth - 1, this.worldHeight - 1);
+    const gradient = context.createRadialGradient(background.width * 0.4, background.height * 0.4, 0,
+      background.width * 0.5, background.height * 0.5, background.width * 0.7);
+    gradient.addColorStop(0, '#10231f'); gradient.addColorStop(0.6, '#0b1a1b'); gradient.addColorStop(1, '#091317');
+    context.fillStyle = gradient; context.fillRect(0, 0, background.width, background.height);
     this.background = background;
     return background;
   }
@@ -517,7 +741,9 @@ export class Renderer {
     if (x > this.worldWidth - margin) xs.push(x - this.worldWidth);
     if (y < margin) ys.push(y + this.worldHeight);
     if (y > this.worldHeight - margin) ys.push(y - this.worldHeight);
-    return xs.flatMap((px) => ys.map((py) => ({ x: px, y: py })));
+    const left = -this.offsetX / this.scale - margin, right = (this.cssWidth - this.offsetX) / this.scale + margin;
+    const top = -this.offsetY / this.scale - margin, bottom = (this.cssHeight - this.offsetY) / this.scale + margin;
+    return xs.flatMap((px) => ys.map((py) => ({ x: px, y: py }))).filter(point => point.x >= left && point.x <= right && point.y >= top && point.y <= bottom);
   }
 
   private recordTrails(world: RenderWorldSnapshot): void {
@@ -560,6 +786,13 @@ export class Renderer {
 
   dispose(): void {
     this.observer.disconnect();
+    this.input.abort();
+    cancelAnimationFrame(this.cameraFrame);
+    this.cameraFrame = 0;
+    for (const id of this.pointers.keys()) if (this.canvas.hasPointerCapture(id)) this.canvas.releasePointerCapture(id);
+    this.pointers.clear();
+    this.canvas.style.touchAction = this.originalTouchAction;
+    this.canvas.style.cursor = this.originalCursor;
     this.trails.clear();
     this.sprites.clear();
     this.background = null;

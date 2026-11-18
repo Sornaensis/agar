@@ -20,6 +20,7 @@ export const ENGINE_METHODS = [
   'analyze', 'compile', 'reset', 'resetEmpty', 'saveState', 'restoreState', 'seed', 'addFood',
   'setFoodRate', 'setMutationRate', 'setEnvironment', 'setInitialNutrients', 'addNutrients',
   'addSource', 'removeSource', 'clearSources', 'getMemory', 'getCellEvaluation', 'languageSchema',
+  'setWorldSize', 'updateSource', 'addBarrier', 'updateBarrier', 'removeBarrier', 'clearBarriers',
   'cellBody', 'mutate', 'getGenome', 'getGenomeGraph', 'tick', 'environment', 'renderSnapshot',
   'metricsSnapshot', 'cellSnapshot', 'summary', 'snapshot',
 ] as const;

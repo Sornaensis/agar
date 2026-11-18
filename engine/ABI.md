@@ -2,18 +2,18 @@
 
 ## Cellular extension
 
-ABI 10 accepts an explicit `cellular;` source mode. It includes typed product declarations, gene expression, physical recipes, pool/concentration/built reads, named receptor observations, pure functions, assembly initiation, activity and paid recycling. Existing unmarked programs retain the action/register language documented below. See [cellular language and accounting](../design/cellular.md) for the implemented rules.
+ABI 11 accepts an explicit `cellular;` source mode. It includes typed product declarations, gene expression, physical recipes, pool/concentration/built reads, named receptor observations, pure functions, assembly initiation, activity and paid recycling. Existing unmarked programs retain the action/register language documented below. See [cellular language and accounting](../design/cellular.md) for the implemented rules.
 
 `language_schema_ptr` retains schema version 3. Its additive `cellular.mechanisms` array lists each canonical constructor, typed target, required material roles, effect description and typed `receptorFields` with `requiresValid` flags. `cellular.recipeControls` describes activity, start_when and recycle types/defaults; `cellular.userFunctions` gives numeric-parameter and inlining limits. Top-level `functions` supplies builtin names and arities. Graph/evaluation JSON identifies its mode; cellular roots describe genes, activity, boolean initiation and recycling. `cell_body_ptr` adds material pools, ingredient-level assemblies, lifecycle progress and sampled construction/recovery controls. Compact/full numeric snapshot layouts remain unchanged. Render summaries do not grant legacy family capabilities to mechanisms.
 
-Mutation kinds additionally accept gene silence (4), gene duplication (5), and future placement changes (6). Checkpoint 7 stores the cellular graph, mechanism identities, construction controls and physical state; readers accept versions 3 through 6. Bare family kinds retain their combined capabilities; constructor kinds such as `store(food)` and `digest(tissue)` each grant one explicit operation. The same minimal paid founder core bootstraps both modes.
+Mutation kinds additionally accept gene silence (4), gene duplication (5), and future placement changes (6). Checkpoint 8 stores the cellular graph, mechanism identities, construction controls and physical state; readers also accept versions 3 through 7. Bare family kinds retain their combined capabilities; constructor kinds such as `store(food)` and `digest(tissue)` each grant one explicit operation. The same minimal paid founder core bootstraps both modes.
 
 
 The dependency-free Rust crate owns simulation, genome compilation, mutation, and cell memory. TypeScript loads WASM, renders snapshots, and stores browser-local catalogs/checkpoints. There is no simulation server or JavaScript simulation fallback.
 
 ## Physical bodies and lifecycle
 
-The 1,200 × 760 world is toroidal and advances at a fixed 1/30 second. Programs sample body state, hardware measurements, and old memory before action resolution. Construction changes capabilities on the following tick. Newly captured organic material enters digestive storage before later assimilation.
+The world defaults to 1,200 × 760, supports dimensions up to 4,800 × 3,040, is toroidal and advances at a fixed 1/30 second. Programs sample body state, hardware measurements, and old memory before action resolution. Construction changes capabilities on the following tick. Newly captured organic material enters digestive storage before later assimilation.
 
 Envelope area, material mass, usable energy, digestive contents, and embodied structural energy are distinct ledgers. Radius is `7 × sqrt(body.area)`. Growing the enclosing frame costs minerals and energy; it creates space without creating organelles. Organelle material must come from cell reserves. Internal footprints are limited by body area, and membrane attachment capacity scales with perimeter. Damaged or incomplete structures still occupy space and retain their material.
 
@@ -246,6 +246,12 @@ The module exports `memory`. Pointers/lengths use bytes, except snapshot lengths
 | `nutrient_total() -> f64`, `nutrient_input_total() -> f64` | Current total material / cumulative external input since reset, including initial water, cells, and food |
 | `nutrient_dissolved_total() -> f64`, `nutrient_food_total() -> f64`, `nutrient_cell_total() -> f64` | Current water, food, and cell biomass-plus-reserve components |
 | `add_source(kind, x: f32, y: f32, strength: f32, radius: f32) -> u32` | New ID, or zero for invalid input/capacity; clamp strength/radius |
+| `update_source(id, kind, x, y, strength, radius, angle, length) -> u32` | Update one source without replacing its ID or resetting live fields; all real arguments are f32; 1 success, 0 invalid/missing |
+| `set_world_size(width: f32, height: f32) -> u32` | Resize to multiples of 20; width 400–4800, height 400–3040; preserve material and proportionally remap positions; reject incompatible barriers atomically |
+| `nutrient_removed_total() -> f64` | Cumulative dissolved mineral mass exported by absorbers since reset |
+| `add_barrier(x, y, length, width, angle: f32, floating: u32) -> u32` | Create an oriented rectangular fixed/floating obstacle; ID or 0 on invalid input/capacity |
+| `update_barrier(id, x, y, length, width, angle: f32, floating: u32) -> u32` | Edit one obstacle; 1 success, 0 missing/invalid; float velocities reset on edits |
+| `remove_barrier(id) -> u32`, `clear_barriers()` | Remove one/all barriers without changing material inventories |
 | `remove_source(id) -> u32`, `clear_sources()` | Remove by ID (1 success, 0 missing) / all sources; existing heat persists |
 | `environment_snapshot_ptr()`, `environment_snapshot_len()` | Build/read fields and sources; length in floats |
 | `predation_count()`, `attack_count()` | Predation deaths / contact bite hits since reset |
@@ -381,7 +387,7 @@ The TypeScript `Engine` exposes `renderSnapshot()`, `metricsSnapshot()`, `cellSn
 
 `advance(steps, {metrics?, environment?})` executes a bounded batch of 0–120 fixed ticks and returns `{frame, metrics?, environment?, error?}`. If a tick fails after earlier ticks completed, the response contains the resulting frame and original error; the caller can pause while retaining accurate state. `presentation(options)` returns the same projections without advancing time. A rejected ordinary command does not block subsequent commands.
 
-`captureCheckpoint()` synchronously captures checkpoint bytes and summary inside a single queued worker command, so both describe the same state even when later advances are already queued. Restore transfers a copy of the caller's bytes, preserving the original on either success or failure. `dispose()` terminates the worker and rejects outstanding/future requests. These ownership changes do not change tick duration, physical phase order or the checkpoint model. Local cellular controls and recycling extend checkpoints to version 7.
+`captureCheckpoint()` synchronously captures checkpoint bytes and summary inside a single queued worker command, so both describe the same state even when later advances are already queued. Restore transfers a copy of the caller's bytes, preserving the original on either success or failure. `dispose()` terminates the worker and rejects outstanding/future requests. These ownership changes do not change tick duration, physical phase order or the checkpoint model. Environment dimensions, barriers and removal ledgers extend checkpoints to version 8.
 
 ### Body inspection
 
@@ -405,16 +411,37 @@ The JSON `build` field retains its compatibility spelling and reports expression
 
 ### Environment snapshot
 
-The rendering layout remains `7 + columns × rows × 5 + source_count × 6` floats:
+ABI 11 uses `11 + columns × rows × 5 + source_count × 8 + barrier_count × 10` floats:
 
 ```text
 Header: columns, rows, ambient_temperature, ambient_light,
-        current_strength, source_count, initial_nutrients
+        current_strength, source_count, initial_nutrients,
+        world_width, world_height, barrier_count, nutrient_removed_total
 Each row-major patch: light, temperature, flow_x, flow_y, nutrients
-Each source: id, kind, x, y, strength, radius
+Each source: id, kind, x, y, strength, radius, angle, length
+Each barrier: id, x, y, length, width, angle, floating, vx, vy, reserved_zero
 ```
 
-Patch nutrients are dissolved mass. `initial_nutrients` configures the next reset and does not modify live stock. Source kind 3 is a mineral spring. The organic-cue field is internal simulation state and is persisted as an additional checkpoint field; it does not change this five-channel rendering ABI. Genomes read it through built chemoreceptors using `chemical.organic` and `chemical.organic_bearing`.
+Fields retain physical 20 × 20 patches when the world changes size. Patch nutrients are dissolved mass. `initial_nutrients` configures the next reset and does not modify live stock. Resize splits existing patch amounts by normalized area overlap, preserving total material and the external-input ledger. Temperature and organic-cue intensities are area averages. Cell, particle, emitter and obstacle centers are remapped proportionally; biological dimensions, velocities and individual inventories do not scale. Per-patch incident-light power remains constant, so larger lit habitats have proportionally more total available sunlight. Spatial buckets keep approximately 60-unit physical spacing.
+
+| Source kind | Effect |
+| --- | --- |
+| 0 | Instantaneous local illumination |
+| 1 | Persistent heating/cooling |
+| 2 | Clockwise/counterclockwise vortex |
+| 3 | Mineral spring, total input 1.5 × strength mass/s |
+| 4 | Mineral absorber, requested export 1.5 × strength mass/s, limited to available mass in each affected patch |
+| 5 | Directed Gaussian jet; angle selects direction, length controls longitudinal extent |
+| 6 | Parallel current band; flat longitudinal center with rounded end falloff |
+| 7 | Radial outward/inward current |
+
+At most 64 sources and 64 barriers are supported. Source strength is clamped to 0–1 for light/spring/absorber and −1–1 for heat and flow. Source radius is 20–1000; length is 40–4800; angles are radians normalized to [0, 2π). Zero strength disables a source without changing its identity. Flow superposition is capped at speed 60. Nutrient spring and absorber weights are normalized, so radius changes their spatial distribution without increasing their requested total rate. The material invariant is `current_total + cumulative_removed = cumulative_introduced`. Grid samples of time-independent emitter flow are cached and recomputed after source edits or world resize; moving barrier masks remain independent. The legacy nonzero time-varying global current retains direct evaluation. These derived caches are rebuilt on restore and are not checkpoint data.
+
+Barriers are oriented rectangles with length 20–2400 and width 10–400. Their rotated bounding boxes must fit within the world dimensions (1e-3 unit tolerance accommodates the f32 ABI); invalid create/update and incompatible world shrink return zero without altering state. Fixed barriers stay anchored. Floating barriers follow local prescribed flow with finite response time and separate from other obstacles using periodic rectangle overlap resolution. Cells and organic particles use swept collision detection, preventing thin-wall tunneling; colliding motion slides along obstacle faces. Placing a barrier over an existing organism or particle projects it clear without destroying its inventory. Barriers occlude optical sensing, feeding/predation paths, and field transport across intersected grid edges. Heat and organic interpolation also excludes samples across walls.
+
+Currents remain prescribed velocity fields, not a pressure-solving fluid simulation. Obstacles stop crossing flux and suppress flow inside their solid regions; they do not solve a new incompressible flow field around their shapes. Obstacle transport is resolved at the 20-unit field grid; physical cells and particles use continuous rectangle geometry. Overlapping fixed barriers are allowed as compound walls. Barrier/organism displacement does not attempt fluid-volume displacement.
+
+The organic-cue field is internal simulation state and is persisted as an additional checkpoint field; it does not change this five-channel rendering ABI. Genomes read it through built chemoreceptors using `chemical.organic` and `chemical.organic_bearing`.
 
 ### Memory snapshots
 
@@ -459,7 +486,7 @@ The evaluation buffer is independent of source, analysis, graph, memory, and fie
 
 ### Genome graph
 
-Graph JSON remains version 1 in ABI 10: `{version: 1, nodes: [...], roots: [...]}`. Inspection does not evaluate programs, advance the world, change memory, or register genomes. Invalid IDs clear the graph buffer and report an error.
+Graph JSON remains version 1 in ABI 11: `{version: 1, nodes: [...], roots: [...]}`. Inspection does not evaluate programs, advance the world, change memory, or register genomes. Invalid IDs clear the graph buffer and report an error.
 
 Nodes contain `id`, `kind`, `type`, `label`, `inputs`, `bindings`, and `reachable`. IDs are compiler-array indexes. Inputs preserve operand order and duplicates and precede their consumer's index. Conditional operands are condition, then branch, else branch. Types are `integer`, `scalar`, `boolean`, `string`, and `vec2`. Kinds are `constant`, `sensor`, `register`, `populated`, `reference`, `unary`, `binary`, `conditional`, and `call`. Unused nodes remain present, marked unreachable, so graph counts match the 8,192-node budget.
 
@@ -477,9 +504,9 @@ Constant writes, constant guards, unconditional clears, and omitted output defau
 
 ### Persistent checkpoints
 
-Current checkpoint format is **7**, using the `CELLAR01` magic, a separate version, exact byte length, FNV-1a corruption checksum, and bounded little-endian values. The checksum is not authentication; every decoded value is independently checked. Checkpoints preserve actual frame and organelles, integrity, resource/embodied-energy ledgers, construction progress, protein stocks and their embodied energy, separate gut substrates and particle kinds, memory occupancy and values, sensor tracks and scan controls, sources/fields, deterministic RNG state, counters, and the genome registry with lineage.
+Current checkpoint format is **8**, using the `CELLAR01` magic, a separate version, exact byte length, FNV-1a corruption checksum, and bounded little-endian values. The checksum is not authentication; every decoded value is independently checked. Checkpoints preserve actual frame and organelles, integrity, resource/embodied-energy ledgers, construction progress, protein stocks and their embodied energy, separate gut substrates and particle kinds, memory occupancy and values, sensor tracks and scan controls, sources/fields, deterministic RNG state, counters, and the genome registry with lineage.
 
-Version-1 and version-2 body schemas are explicitly unsupported. They cannot be silently interpreted as paid structures or hardware-gated observations. Existing exports are preserved; create a new simulation with rewritten genomes. Future unknown versions are also rejected. Version-3 checkpoints remain supported. Existing organs, energy, minerals, memory and program source are preserved; formerly unclassified particles and gut contents import as tissue, and protein pools initialize empty. New digestion/expression rules govern subsequent evolution, so continuation is deterministic within the new engine but is not an exact replay of the old engine. Versions 4, 5 and 6 remain supported. Saving writes version 7, including cellular pools, recipe snapshots, ingredient ledgers, sampled construction controls, activity, genetic progress and mechanism kinds. Primitive mechanism tags are rejected before version 6, and recycling/local-control additions are rejected before version 7. Old recipe sources default to allowing new starts and requesting no recycling. Optical coverage corrections and directional primitive interactions change affected trajectories; deterministic continuation is verified within the current engine.
+Version-1 and version-2 body schemas are explicitly unsupported. They cannot be silently interpreted as paid structures or hardware-gated observations. Existing exports are preserved; create a new simulation with rewritten genomes. Future unknown versions are also rejected. Version-3 checkpoints remain supported. Existing organs, energy, minerals, memory and program source are preserved; formerly unclassified particles and gut contents import as tissue, and protein pools initialize empty. New digestion/expression rules govern subsequent evolution, so continuation is deterministic within the new engine but is not an exact replay of the old engine. Versions 4, 5, 6 and 7 remain supported. Saving writes version 8, including cellular pools, recipe snapshots, ingredient ledgers, sampled construction controls, activity, genetic progress, mechanism kinds, world dimensions, emitter directions, floating obstacle state and cumulative mineral removals. Primitive mechanism tags are rejected before version 6, and recycling/local-control additions are rejected before version 7. Old recipe sources default to allowing new starts and requesting no recycling. Optical coverage corrections and directional primitive interactions change affected trajectories; deterministic continuation is verified within the current engine.
 
 Stored programs retain exact expression trees and source. Restore recompiles source and requires its typed graph to match the stored graph. It validates backward references, scopes, register types/addresses, output types, finite physical state, IDs, resource bounds, and complete input consumption before atomically replacing the world. A failed restore leaves the current world unchanged. Save size remains bounded at 128 MiB; writing stops before exceeding the limit and reports allocation failures. Cell and particle counts are bounded by encoded data and available memory, not biological ceilings. Age is validated as finite nonnegative state rather than against a lifespan.
 

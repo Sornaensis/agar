@@ -1591,7 +1591,7 @@ impl Body {
         version: u32,
     ) -> CheckpointResult<Self> {
         ensure(
-            matches!(version, 3 | 4 | 5 | 6 | 7),
+            matches!(version, 3 | 4 | 5 | 6 | 7 | 8),
             "unsupported body checkpoint version",
         )?;
         let area = reader.range(MIN_AREA, MAX_AREA)?;

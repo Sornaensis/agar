@@ -215,6 +215,50 @@ try {
   assert.equal((await failing.captureCheckpoint()).summary.time, partial.frame.time);
   assert.equal((await failing.advance(3)).frame.tick, 5, 'A reported tick failure leaves later RPC usable');
 
+  // Environment commands must use the same ordered real-worker path as ticks
+  // and saved runs. This covers the ABI decoder as well as the Rust behavior.
+  const { engine: habitat } = await fresh();
+  await habitat.setFoodRate(0);
+  await habitat.setEnvironment(0.5, 0, 0);
+  assert.equal(await habitat.setWorldSize(2400, 1520), true);
+  await habitat.setInitialNutrients(0.3);
+  await habitat.resetEmpty(42, 0);
+  const band = await habitat.addSource(6, 1200, 400, 0.6, 120, Math.PI / 2, 1200);
+  const sink = await habitat.addSource(4, 300, 300, 1, 160);
+  const wall = await habitat.addBarrier(800, 760, 500, 40, Math.PI / 4, false);
+  const floater = await habitat.addBarrier(1200, 400, 100, 20, 0, true);
+  assert.ok(band > 0 && sink > 0 && wall > 0 && floater > 0);
+  let environment = await habitat.environment();
+  assert.deepEqual([environment.width, environment.height, environment.columns, environment.rows], [2400, 1520, 120, 76]);
+  assert.equal(environment.sources.find(item => item.id === band).length, 1200);
+  assert.ok(Math.abs(environment.sources.find(item => item.id === band).angle - Math.PI / 2) < 1e-6);
+  assert.equal(environment.barriers.find(item => item.id === floater).floating, true);
+  const introduced = (await habitat.metricsSnapshot()).nutrientInputTotal;
+  const transported = await habitat.advance(30, { metrics: true, environment: true });
+  assert.ok(transported.environment.nutrientRemovedTotal > 0, 'A live absorber removes material');
+  assert.ok(Math.abs(transported.metrics.nutrientTotal + transported.environment.nutrientRemovedTotal - introduced) < 0.001, 'Removal is explicit in the material balance');
+  const moved = transported.environment.barriers.find(item => item.id === floater);
+  assert.ok(Math.hypot(moved.x - 1200, moved.y - 400) > 0.01, 'A floating barrier follows its local current with global current strength zero');
+  assert.equal(await habitat.updateSource(band, 6, 1200, 400, -0.4, 140, 0, 1600), true);
+  assert.equal((await habitat.environment()).sources.find(item => item.id === band).strength < 0, true);
+  const beforeResize = (await habitat.metricsSnapshot()).nutrientTotal;
+  assert.equal(await habitat.setWorldSize(3600, 2280), true);
+  assert.ok(Math.abs((await habitat.metricsSnapshot()).nutrientTotal - beforeResize) < 1e-6, 'Resizing redistributes the existing field without creating material');
+  const settled = await habitat.saveState();
+  assert.equal(await habitat.setWorldSize(3601, 2280), false);
+  assert.equal(await habitat.updateSource(0xffff, 6, 0, 0, 1, 100, 0, 600), false);
+  assert.deepEqual(await habitat.saveState(), settled, 'Invalid geometry commands are atomic');
+  const later = await habitat.advance(12, { metrics: true, environment: true });
+  await habitat.restoreState(settled);
+  assert.deepEqual(await habitat.advance(12, { metrics: true, environment: true }), later, 'Resized worlds, sink ledgers, and moving barriers replay exactly after restore');
+  assert.equal(await habitat.removeSource(sink), true);
+  assert.equal(await habitat.removeBarrier(wall), true);
+  assert.equal(await habitat.updateBarrier(floater, 900, 900, 180, 40, 0, false), true);
+  assert.equal((await habitat.environment()).barriers[0].floating, false);
+  await habitat.clearSources(); await habitat.clearBarriers();
+  environment = await habitat.environment();
+  assert.equal(environment.sources.length + environment.barriers.length, 0);
+
   // A substantial real tick batch runs while the main JS event loop continues.
   await remote.resetEmpty(62, 1500);
   await remote.seed(genome, 256);
@@ -232,7 +276,7 @@ try {
   await assert.rejects(remote.presentation(), /closed/);
   remote.dispose(); // Closing twice is harmless.
 
-  console.log('Worker checks passed: real threaded WASM, ordered commands, compact/full projection parity, aggregate/detail inspection, transferred buffers, atomic checkpoints, restore ownership, recoverable command/partial-tick errors, responsive main loop, and disposal of pending work.');
+  console.log('Worker checks passed: real threaded WASM, ordered commands, compact/full projection parity, aggregate/detail inspection, transferred buffers, atomic checkpoints, restore ownership, recoverable command/partial-tick errors, responsive main loop, environment editing, large worlds, absorber accounting, floating barriers, deterministic replay, and disposal of pending work.');
 } finally {
   for (const engine of engines) engine.dispose();
   for (const adapter of adapters) adapter.terminate();

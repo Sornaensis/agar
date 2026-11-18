@@ -3,11 +3,16 @@
 use crate::simulation::{DT, HEIGHT, WIDTH};
 use std::f64::consts::TAU;
 mod checkpoint;
+#[cfg(test)]
+mod control_tests;
+mod geometry;
 
 pub const COLUMNS: usize = 60;
 pub const ROWS: usize = 38;
 pub const PATCHES: usize = COLUMNS * ROWS;
-pub const MAX_SOURCES: usize = 16;
+pub const MAX_SOURCES: usize = 64;
+pub const MAX_BARRIERS: usize = 64;
+pub const PATCH_SIZE: f64 = 20.0;
 pub const PATCH_AREA: f64 = WIDTH / COLUMNS as f64 * HEIGHT / ROWS as f64;
 pub const DEFAULT_INITIAL_NUTRIENTS: f64 = 0.3;
 const NUTRIENT_DIFFUSION: f64 = 12.0;
@@ -21,6 +26,21 @@ pub struct Source {
     pub y: f64,
     pub strength: f64,
     pub radius: f64,
+    pub angle: f64,
+    pub length: f64,
+}
+
+#[derive(Clone, Debug)]
+pub struct Barrier {
+    pub id: u32,
+    pub x: f64,
+    pub y: f64,
+    pub length: f64,
+    pub width: f64,
+    pub angle: f64,
+    pub floating: bool,
+    pub vx: f64,
+    pub vy: f64,
 }
 
 /// Reusable work buffers, never serialized and never read before initialization.
@@ -37,19 +57,33 @@ struct FieldScratch {
 
 #[derive(Clone)]
 pub struct Environment {
+    pub width: f64,
+    pub height: f64,
+    pub columns: usize,
+    pub rows: usize,
     pub ambient_temperature: f64,
     pub ambient_light: f64,
     pub current_strength: f64,
     /// Mineral mass initially assigned to each 20×20 patch on reset.
     pub initial_nutrients: f64,
     pub sources: Vec<Source>,
+    pub barriers: Vec<Barrier>,
+    pub(crate) blocked_right: Vec<bool>,
+    pub(crate) blocked_down: Vec<bool>,
+    pub(crate) solid_patches: Vec<bool>,
+    /// Time-independent emitter-only flow at patch centers and right/down faces.
+    /// Derived, never serialized. Legacy time-varying ambient flow uses direct evaluation.
+    source_flow: Vec<[(f64, f64); 3]>,
     temperature: Vec<f64>,
     light: Vec<f64>,
     heating: Vec<f64>,
     nutrients: Vec<f64>,
     nutrient_injection: Vec<f64>,
+    nutrient_absorption: Vec<f64>,
     organic: Vec<f64>,
     nutrient_inputs: f64,
+    nutrient_removed: f64,
+    next_barrier_id: u32,
     next_source_id: u32,
     scratch: FieldScratch,
 }
@@ -57,6 +91,17 @@ pub struct Environment {
 impl Default for Environment {
     fn default() -> Self {
         Self {
+            width: WIDTH,
+            height: HEIGHT,
+            columns: COLUMNS,
+            rows: ROWS,
+            barriers: Vec::new(),
+            blocked_right: vec![false; PATCHES],
+            blocked_down: vec![false; PATCHES],
+            solid_patches: vec![false; PATCHES],
+            source_flow: vec![[(0.0, 0.0); 3]; PATCHES],
+            nutrient_removed: 0.0,
+            next_barrier_id: 1,
             ambient_temperature: 0.5,
             ambient_light: 0.0,
             current_strength: 0.0,
@@ -67,6 +112,7 @@ impl Default for Environment {
             heating: vec![0.0; PATCHES],
             nutrients: vec![DEFAULT_INITIAL_NUTRIENTS; PATCHES],
             nutrient_injection: vec![0.0; PATCHES],
+            nutrient_absorption: vec![0.0; PATCHES],
             organic: vec![0.0; PATCHES],
             nutrient_inputs: DEFAULT_INITIAL_NUTRIENTS * PATCHES as f64,
             next_source_id: 1,
@@ -80,7 +126,12 @@ impl Environment {
         self.temperature.fill(self.ambient_temperature);
         self.nutrients.fill(self.initial_nutrients);
         self.organic.fill(0.0);
-        self.nutrient_inputs = self.initial_nutrients * PATCHES as f64;
+        self.nutrient_inputs = self.initial_nutrients * self.patch_count() as f64;
+        self.nutrient_removed = 0.0;
+        for barrier in &mut self.barriers {
+            barrier.vx = 0.0;
+            barrier.vy = 0.0;
+        }
     }
 
     /// This changes the next reset's recipe, never overwrites a live field.
@@ -89,7 +140,7 @@ impl Environment {
     }
 
     pub fn nutrient_at(&self, x: f64, y: f64) -> f64 {
-        sample(&self.nutrients, x, y)
+        self.sample(&self.nutrients, x, y)
     }
     pub fn nutrient_gradient(&self, x: f64, y: f64) -> (f64, f64) {
         (
@@ -100,7 +151,7 @@ impl Environment {
     /// A dimensionless local chemical cue, not an energy or mineral store.
     /// It is emitted by decay/leakage and transported with the water.
     pub fn organic_at(&self, x: f64, y: f64) -> f64 {
-        sample(&self.organic, x, y)
+        self.sample(&self.organic, x, y)
     }
     pub fn organic_gradient(&self, x: f64, y: f64) -> (f64, f64) {
         (
@@ -110,7 +161,7 @@ impl Environment {
     }
     pub fn emit_organic(&mut self, x: f64, y: f64, amount: f64) {
         if amount.is_finite() && amount > 0.0 {
-            let i = Self::patch(x, y);
+            let i = self.patch_index(x, y);
             self.organic[i] = (self.organic[i] + amount).min(1e6);
         }
     }
@@ -118,27 +169,32 @@ impl Environment {
         if self.organic.iter().all(|&v| v == 0.0) {
             return;
         }
-        self.scratch.advected.resize(PATCHES, 0.0);
-        for i in 0..PATCHES {
-            let (x, y) = Self::patch_center(i);
+        self.scratch.advected.resize(self.patch_count(), 0.0);
+        for i in 0..self.patch_count() {
+            let (x, y) = self.patch_position(i);
             let (vx, vy) = self.scratch.patch_flow[i];
-            self.scratch.advected[i] = self.organic_at(x - vx * DT, y - vy * DT);
+            self.scratch.advected[i] =
+                self.sample_transport(&self.organic, i, x - vx * DT, y - vy * DT);
         }
         let advected = &self.scratch.advected;
         let diffusion = 90.0 * DT / PATCH_AREA;
         let retained = (-0.18 * DT).exp();
-        for i in 0..PATCHES {
-            let col = i % COLUMNS;
-            let row = i / COLUMNS;
+        for i in 0..self.patch_count() {
+            let col = i % self.columns;
+            let row = i / self.columns;
             let neighbors = [
-                row * COLUMNS + (col + COLUMNS - 1) % COLUMNS,
-                row * COLUMNS + (col + 1) % COLUMNS,
-                ((row + ROWS - 1) % ROWS) * COLUMNS + col,
-                ((row + 1) % ROWS) * COLUMNS + col,
+                row * self.columns + (col + self.columns - 1) % self.columns,
+                row * self.columns + (col + 1) % self.columns,
+                ((row + self.rows - 1) % self.rows) * self.columns + col,
+                ((row + 1) % self.rows) * self.columns + col,
             ];
             self.organic[i] = ((advected[i]
                 + diffusion
-                    * (neighbors.iter().map(|&j| advected[j]).sum::<f64>() - 4.0 * advected[i]))
+                    * (neighbors
+                        .iter()
+                        .filter(|&&j| !self.edge_blocked(i, j))
+                        .map(|&j| advected[j] - advected[i])
+                        .sum::<f64>()))
                 * retained)
                 .max(0.0);
         }
@@ -172,7 +228,8 @@ impl Environment {
         }
         let x = if x.is_finite() { x } else { 0.0 };
         let y = if y.is_finite() { y } else { 0.0 };
-        self.nutrients[Self::patch(x, y)] += amount;
+        let patch = self.patch_index(x, y);
+        self.nutrients[patch] += amount;
     }
 
     pub fn add_nutrients(&mut self, x: f64, y: f64, amount: f64) -> f64 {
@@ -181,7 +238,7 @@ impl Environment {
         }
         let amount = amount.min(1000.0);
         if x < 0.0 || y < 0.0 || !x.is_finite() || !y.is_finite() {
-            let share = amount / PATCHES as f64;
+            let share = amount / self.patch_count() as f64;
             for balance in &mut self.nutrients {
                 *balance += share;
             }
@@ -205,7 +262,7 @@ impl Environment {
     }
 
     pub fn add_source(&mut self, kind: u32, x: f64, y: f64, strength: f64, radius: f64) -> u32 {
-        if kind > 3
+        if kind > 7
             || self.sources.len() >= MAX_SOURCES
             || !x.is_finite()
             || !y.is_finite()
@@ -222,10 +279,12 @@ impl Environment {
         self.sources.push(Source {
             id,
             kind,
-            x: x.rem_euclid(WIDTH),
-            y: y.rem_euclid(HEIGHT),
-            strength: strength.clamp(if kind == 0 || kind == 3 { 0.0 } else { -1.0 }, 1.0),
-            radius: radius.clamp(40.0, 400.0),
+            x: x.rem_euclid(self.width),
+            y: y.rem_euclid(self.height),
+            strength: strength.clamp(if matches!(kind, 0 | 3 | 4) { 0.0 } else { -1.0 }, 1.0),
+            radius: radius.clamp(20.0, 1000.0),
+            angle: 0.0,
+            length: 600.0,
         });
         self.rebuild_sources();
         id
@@ -248,12 +307,14 @@ impl Environment {
 
     fn rebuild_sources(&mut self) {
         self.nutrient_injection.fill(0.0);
-        for i in 0..PATCHES {
-            let (x, y) = Self::patch_center(i);
+        self.nutrient_absorption.fill(0.0);
+        for i in 0..self.patch_count() {
+            let (x, y) = self.patch_position(i);
             let mut light = self.ambient_light;
             let mut heating = 0.0;
             for source in &self.sources {
-                let d2 = delta(x - source.x, WIDTH).powi(2) + delta(y - source.y, HEIGHT).powi(2);
+                let d2 = delta(x - source.x, self.width).powi(2)
+                    + delta(y - source.y, self.height).powi(2);
                 let weight = (-2.0 * d2 / source.radius.powi(2)).exp();
                 if source.kind == 0 {
                     light += source.strength * weight;
@@ -270,33 +331,81 @@ impl Environment {
         for source in self
             .sources
             .iter()
-            .filter(|source| source.kind == 3 && source.strength > 0.0)
+            .filter(|source| matches!(source.kind, 3 | 4) && source.strength > 0.0)
         {
-            let weights: Vec<f64> = (0..PATCHES)
+            let weights: Vec<f64> = (0..self.patch_count())
                 .map(|i| {
-                    let (x, y) = Self::patch_center(i);
-                    let d2 =
-                        delta(x - source.x, WIDTH).powi(2) + delta(y - source.y, HEIGHT).powi(2);
+                    let (x, y) = self.patch_position(i);
+                    let d2 = delta(x - source.x, self.width).powi(2)
+                        + delta(y - source.y, self.height).powi(2);
                     (-2.0 * d2 / source.radius.powi(2)).exp()
                 })
                 .collect();
             let total: f64 = weights.iter().sum();
-            for (rate, weight) in self.nutrient_injection.iter_mut().zip(weights) {
+            let rates = if source.kind == 4 {
+                &mut self.nutrient_absorption
+            } else {
+                &mut self.nutrient_injection
+            };
+            for (rate, weight) in rates.iter_mut().zip(weights) {
                 *rate += NUTRIENT_SOURCE_RATE * source.strength * weight / total;
             }
         }
+        self.rebuild_flow_samples();
     }
 
-    pub fn patch(x: f64, y: f64) -> usize {
-        let col = (x.rem_euclid(WIDTH) / WIDTH * COLUMNS as f64) as usize;
-        let row = (y.rem_euclid(HEIGHT) / HEIGHT * ROWS as f64) as usize;
-        row.min(ROWS - 1) * COLUMNS + col.min(COLUMNS - 1)
+    fn rebuild_flow_samples(&mut self) {
+        if self.current_strength != 0.0 {
+            self.source_flow.clear();
+            return;
+        }
+        self.source_flow.resize(self.patch_count(), [(0.0, 0.0); 3]);
+        if !self
+            .sources
+            .iter()
+            .any(|source| matches!(source.kind, 2 | 5 | 6 | 7) && source.strength != 0.0)
+        {
+            self.source_flow.fill([(0.0, 0.0); 3]);
+            return;
+        }
+        for i in 0..self.patch_count() {
+            let (x, y) = self.patch_position(i);
+            self.source_flow[i] = [
+                self.raw_flow_at(x, y, 0.0),
+                self.raw_flow_at(x + 10.0, y, 0.0),
+                self.raw_flow_at(x, y + 10.0, 0.0),
+            ];
+        }
     }
 
-    pub fn patch_center(index: usize) -> (f64, f64) {
+    /// Face flows are only consumed for an unblocked corresponding grid edge,
+    /// so testing every obstacle again at the face would duplicate the mask.
+    fn grid_flow(&self, index: usize, face: usize, time: f64) -> (f64, f64) {
+        if face == 0 && self.solid_patches[index] {
+            return (0.0, 0.0);
+        }
+        if self.current_strength == 0.0 {
+            return self.source_flow[index][face];
+        }
+        let (mut x, mut y) = self.patch_position(index);
+        if face == 1 {
+            x += 10.0;
+        } else if face == 2 {
+            y += 10.0;
+        }
+        self.raw_flow_at(x, y, time)
+    }
+
+    pub fn patch_index(&self, x: f64, y: f64) -> usize {
+        let col = (x.rem_euclid(self.width) / self.width * self.columns as f64) as usize;
+        let row = (y.rem_euclid(self.height) / self.height * self.rows as f64) as usize;
+        row.min(self.rows - 1) * self.columns + col.min(self.columns - 1)
+    }
+
+    pub fn patch_position(&self, index: usize) -> (f64, f64) {
         (
-            ((index % COLUMNS) as f64 + 0.5) * WIDTH / COLUMNS as f64,
-            ((index / COLUMNS) as f64 + 0.5) * HEIGHT / ROWS as f64,
+            ((index % self.columns) as f64 + 0.5) * self.width / self.columns as f64,
+            ((index / self.columns) as f64 + 0.5) * self.height / self.rows as f64,
         )
     }
 
@@ -304,10 +413,10 @@ impl Environment {
         self.light[index]
     }
     pub fn light_at(&self, x: f64, y: f64) -> f64 {
-        sample(&self.light, x, y)
+        self.sample(&self.light, x, y)
     }
     pub fn temperature_at(&self, x: f64, y: f64) -> f64 {
-        sample(&self.temperature, x, y)
+        self.sample(&self.temperature, x, y)
     }
 
     pub fn light_gradient(&self, x: f64, y: f64) -> (f64, f64) {
@@ -331,21 +440,64 @@ impl Environment {
     }
 
     pub fn flow_at(&self, x: f64, y: f64, time: f64) -> (f64, f64) {
-        let phase = time * 0.04;
-        let a = TAU * x / WIDTH + phase;
-        let b = TAU * y / HEIGHT - phase;
-        let mut vx = self.current_strength * b.sin() * a.cos();
-        let mut vy = -self.current_strength * HEIGHT / WIDTH * b.cos() * a.sin();
+        if self.solid_at(x, y) {
+            return (0.0, 0.0);
+        }
+        self.raw_flow_at(x, y, time)
+    }
+    fn raw_flow_at(&self, x: f64, y: f64, time: f64) -> (f64, f64) {
+        let (mut vx, mut vy) = if self.current_strength == 0.0 {
+            (0.0, 0.0)
+        } else {
+            let phase = time * 0.04;
+            let a = TAU * x / self.width + phase;
+            let b = TAU * y / self.height - phase;
+            (
+                self.current_strength * b.sin() * a.cos(),
+                -self.current_strength * self.height / self.width * b.cos() * a.sin(),
+            )
+        };
         for source in &self.sources {
-            if source.kind != 2 {
+            if !matches!(source.kind, 2 | 5 | 6 | 7) || source.strength == 0.0 {
                 continue;
             }
-            let dx = delta(x - source.x, WIDTH);
-            let dy = delta(y - source.y, HEIGHT);
-            let weight = source.strength * 60.0 / source.radius
-                * (-2.0 * (dx * dx + dy * dy) / source.radius.powi(2)).exp();
-            vx -= dy * weight;
-            vy += dx * weight;
+            let dx = delta(x - source.x, self.width);
+            let dy = delta(y - source.y, self.height);
+            let along = dx * source.angle.cos() + dy * source.angle.sin();
+            let across = -dx * source.angle.sin() + dy * source.angle.cos();
+            match source.kind {
+                2 | 7 => {
+                    let weight = source.strength * 60.0 / source.radius
+                        * (-2.0 * (dx * dx + dy * dy) / source.radius.powi(2)).exp();
+                    if source.kind == 2 {
+                        vx -= dy * weight;
+                        vy += dx * weight;
+                    } else {
+                        vx += dx * weight;
+                        vy += dy * weight;
+                    }
+                }
+                5 => {
+                    let weight = source.strength
+                        * 60.0
+                        * (-2.0 * (across / source.radius).powi(2)
+                            - 2.0 * (along / (source.length * 0.5)).powi(2))
+                        .exp();
+                    vx += source.angle.cos() * weight;
+                    vy += source.angle.sin() * weight;
+                }
+                6 => {
+                    // Smooth parallel lane. Length controls the flat center;
+                    // radius controls its width and the rounded end falloff.
+                    let end = (along.abs() - source.length * 0.5).max(0.0);
+                    let weight = source.strength
+                        * 60.0
+                        * (-2.0 * (across * across + end * end) / source.radius.powi(2)).exp();
+                    vx += source.angle.cos() * weight;
+                    vy += source.angle.sin() * weight;
+                }
+                _ => {}
+            }
         }
         let speed = vx.hypot(vy);
         if speed > 60.0 {
@@ -356,6 +508,7 @@ impl Environment {
     }
 
     pub fn step(&mut self, time: f64) {
+        self.step_barriers(time);
         self.step_nutrients(time);
         let organic_active = self.organic.iter().any(|&v| v != 0.0);
         let heat_active = !(self.heating.iter().all(|&v| v == 0.0)
@@ -367,10 +520,11 @@ impl Environment {
         // time. Recompute this derived table each step so source/config changes
         // cannot leave stale velocities. Mineral fluxes sample different faces.
         if organic_active || heat_active {
-            self.scratch.patch_flow.resize(PATCHES, (0.0, 0.0));
-            for i in 0..PATCHES {
-                let (x, y) = Self::patch_center(i);
-                self.scratch.patch_flow[i] = self.flow_at(x, y, time);
+            self.scratch
+                .patch_flow
+                .resize(self.patch_count(), (0.0, 0.0));
+            for i in 0..self.patch_count() {
+                self.scratch.patch_flow[i] = self.grid_flow(i, 0, time);
             }
         }
         self.step_organic();
@@ -378,26 +532,30 @@ impl Environment {
         if !heat_active {
             return;
         }
-        self.scratch.advected.resize(PATCHES, 0.0);
-        for i in 0..PATCHES {
-            let (x, y) = Self::patch_center(i);
+        self.scratch.advected.resize(self.patch_count(), 0.0);
+        for i in 0..self.patch_count() {
+            let (x, y) = self.patch_position(i);
             let (vx, vy) = self.scratch.patch_flow[i];
-            self.scratch.advected[i] = self.temperature_at(x - vx * DT, y - vy * DT);
+            self.scratch.advected[i] =
+                self.sample_transport(&self.temperature, i, x - vx * DT, y - vy * DT);
         }
         let advected = &self.scratch.advected;
         // Grid spacing is 20 world units: 60 units²/s gives a stable diffusion
         // coefficient of 0.005 per neighbor at the fixed 1/30 s timestep.
         let diffusion = 60.0 * DT / 400.0;
-        for i in 0..PATCHES {
-            let col = i % COLUMNS;
-            let row = i / COLUMNS;
-            let left = row * COLUMNS + (col + COLUMNS - 1) % COLUMNS;
-            let right = row * COLUMNS + (col + 1) % COLUMNS;
-            let up = (row + ROWS - 1) % ROWS * COLUMNS + col;
-            let down = (row + 1) % ROWS * COLUMNS + col;
+        for i in 0..self.patch_count() {
+            let col = i % self.columns;
+            let row = i / self.columns;
+            let left = row * self.columns + (col + self.columns - 1) % self.columns;
+            let right = row * self.columns + (col + 1) % self.columns;
+            let up = (row + self.rows - 1) % self.rows * self.columns + col;
+            let down = (row + 1) % self.rows * self.columns + col;
             let diffusion_delta = diffusion
-                * (advected[left] + advected[right] + advected[up] + advected[down]
-                    - 4.0 * advected[i]);
+                * ([left, right, up, down]
+                    .iter()
+                    .filter(|&&j| !self.edge_blocked(i, j))
+                    .map(|&j| advected[j] - advected[i])
+                    .sum::<f64>());
             let forcing =
                 (self.heating[i] * 0.35 + (self.ambient_temperature - advected[i]) * 0.08) * DT;
             self.temperature[i] = (advected[i] + diffusion_delta + forcing).clamp(0.0, 1.0);
@@ -409,34 +567,39 @@ impl Environment {
             || self
                 .sources
                 .iter()
-                .any(|source| source.kind == 2 && source.strength != 0.0);
+                .any(|source| matches!(source.kind, 2 | 5 | 6 | 7) && source.strength != 0.0);
         let nonuniform = self.nutrients.windows(2).any(|pair| pair[0] != pair[1]);
         if has_flow || nonuniform {
             // Paired finite-volume fluxes move mass between wrapped neighbors.
             // Semi-Lagrangian interpolation is deliberately reserved for heat.
             self.scratch.transfers.clear();
-            self.scratch.transfers.reserve(PATCHES * 2);
-            self.scratch.outgoing.resize(PATCHES, 0.0);
+            self.scratch.transfers.reserve(self.patch_count() * 2);
+            self.scratch.outgoing.resize(self.patch_count(), 0.0);
             self.scratch.outgoing.fill(0.0);
             let diffusion = NUTRIENT_DIFFUSION * DT / PATCH_AREA;
             let advection = DT / 20.0;
-            for i in 0..PATCHES {
-                let column = i % COLUMNS;
-                let row = i / COLUMNS;
-                let right = row * COLUMNS + (column + 1) % COLUMNS;
-                let down = (row + 1) % ROWS * COLUMNS + column;
-                let (x, y) = Self::patch_center(i);
+            for i in 0..self.patch_count() {
+                let column = i % self.columns;
+                let row = i / self.columns;
+                let right = row * self.columns + (column + 1) % self.columns;
+                let down = (row + 1) % self.rows * self.columns + column;
                 let vx = if has_flow {
-                    self.flow_at(x + 10.0, y, time).0
+                    self.grid_flow(i, 1, time).0
                 } else {
                     0.0
                 };
                 let vy = if has_flow {
-                    self.flow_at(x, y + 10.0, time).1
+                    self.grid_flow(i, 2, time).1
                 } else {
                     0.0
                 };
-                for (neighbor, velocity) in [(right, vx), (down, vy)] {
+                for (neighbor, velocity, blocked) in [
+                    (right, vx, self.blocked_right[i]),
+                    (down, vy, self.blocked_down[i]),
+                ] {
+                    if blocked {
+                        continue;
+                    }
                     let donor = if velocity >= 0.0 {
                         self.nutrients[i]
                     } else {
@@ -455,6 +618,7 @@ impl Environment {
                     }
                 }
             }
+            let patches = self.patch_count();
             let FieldScratch {
                 transfers,
                 outgoing,
@@ -477,7 +641,7 @@ impl Environment {
                     }),
             );
             remaining.clone_from(&self.nutrients);
-            incoming.resize(PATCHES, 0.0);
+            incoming.resize(patches, 0.0);
             incoming.fill(0.0);
             for &(from, to, requested) in transfers.iter() {
                 // Budget against the old donor balance: same-step arrivals
@@ -486,7 +650,7 @@ impl Environment {
                 remaining[from] -= actual;
                 incoming[to] += actual;
             }
-            for i in 0..PATCHES {
+            for i in 0..patches {
                 self.nutrients[i] = remaining[i] + incoming[i];
             }
         }
@@ -497,22 +661,30 @@ impl Environment {
             supplied += amount;
         }
         self.nutrient_inputs += supplied;
+        for (balance, rate) in self.nutrients.iter_mut().zip(&self.nutrient_absorption) {
+            let amount = (rate * DT).min(*balance);
+            *balance -= amount;
+            self.nutrient_removed += amount;
+        }
     }
 
     pub fn snapshot(&self, time: f64, target: &mut Vec<f32>) {
         target.clear();
         target.extend_from_slice(&[
-            COLUMNS as f32,
-            ROWS as f32,
+            self.columns as f32,
+            self.rows as f32,
             self.ambient_temperature as f32,
             self.ambient_light as f32,
             self.current_strength as f32,
             self.sources.len() as f32,
             self.initial_nutrients as f32,
+            self.width as f32,
+            self.height as f32,
+            self.barriers.len() as f32,
+            self.nutrient_removed as f32,
         ]);
-        for i in 0..PATCHES {
-            let (x, y) = Self::patch_center(i);
-            let (vx, vy) = self.flow_at(x, y, time);
+        for i in 0..self.patch_count() {
+            let (vx, vy) = self.grid_flow(i, 0, time);
             target.extend_from_slice(&[
                 self.light[i] as f32,
                 self.temperature[i] as f32,
@@ -529,6 +701,22 @@ impl Environment {
                 source.y as f32,
                 source.strength as f32,
                 source.radius as f32,
+                source.angle as f32,
+                source.length as f32,
+            ]);
+        }
+        for barrier in &self.barriers {
+            target.extend_from_slice(&[
+                barrier.id as f32,
+                barrier.x as f32,
+                barrier.y as f32,
+                barrier.length as f32,
+                barrier.width as f32,
+                barrier.angle as f32,
+                u8::from(barrier.floating) as f32,
+                barrier.vx as f32,
+                barrier.vy as f32,
+                0.0,
             ]);
         }
     }
@@ -545,20 +733,96 @@ fn delta(value: f64, size: f64) -> f64 {
     (value + size * 0.5).rem_euclid(size) - size * 0.5
 }
 
-fn sample(values: &[f64], x: f64, y: f64) -> f64 {
-    let gx = x.rem_euclid(WIDTH) / WIDTH * COLUMNS as f64 - 0.5;
-    let gy = y.rem_euclid(HEIGHT) / HEIGHT * ROWS as f64 - 0.5;
-    let ix = gx.floor() as isize;
-    let iy = gy.floor() as isize;
-    let fx = gx - gx.floor();
-    let fy = gy - gy.floor();
-    let at = |x: isize, y: isize| {
-        values[y.rem_euclid(ROWS as isize) as usize * COLUMNS
-            + x.rem_euclid(COLUMNS as isize) as usize]
-    };
-    let a = at(ix, iy) * (1.0 - fx) + at(ix + 1, iy) * fx;
-    let b = at(ix, iy + 1) * (1.0 - fx) + at(ix + 1, iy + 1) * fx;
-    a * (1.0 - fy) + b * fy
+impl Environment {
+    pub fn patch_count(&self) -> usize {
+        self.columns * self.rows
+    }
+    pub fn nutrient_removed_total(&self) -> f64 {
+        self.nutrient_removed
+    }
+    /// Compatibility helpers for default-sized fixtures. Runtime always uses instance geometry.
+    #[cfg(test)]
+    pub fn patch(x: f64, y: f64) -> usize {
+        let col = (x.rem_euclid(WIDTH) / 20.0) as usize;
+        let row = (y.rem_euclid(HEIGHT) / 20.0) as usize;
+        row.min(ROWS - 1) * COLUMNS + col.min(COLUMNS - 1)
+    }
+    #[cfg(test)]
+    pub fn patch_center(index: usize) -> (f64, f64) {
+        (
+            ((index % COLUMNS) as f64 + 0.5) * 20.0,
+            ((index / COLUMNS) as f64 + 0.5) * 20.0,
+        )
+    }
+    fn edge_blocked(&self, i: usize, j: usize) -> bool {
+        let right = i / self.columns * self.columns + (i % self.columns + 1) % self.columns;
+        let down = (i / self.columns + 1) % self.rows * self.columns + i % self.columns;
+        if j == right {
+            self.blocked_right[i]
+        } else if j == down {
+            self.blocked_down[i]
+        } else if i / self.columns == j / self.columns {
+            self.blocked_right[j]
+        } else {
+            self.blocked_down[j]
+        }
+    }
+    fn sample_transport(&self, values: &[f64], origin: usize, x: f64, y: f64) -> f64 {
+        if self.barriers.is_empty() {
+            return self.sample(values, x, y);
+        }
+        let from = self.patch_position(origin);
+        if delta(x - from.0, self.width).abs() + delta(y - from.1, self.height).abs() < 1e-12 {
+            return values[origin];
+        }
+        if self.segment_blocked(from, (x, y)) {
+            return values[origin];
+        }
+        let gx = x.rem_euclid(self.width) / PATCH_SIZE - 0.5;
+        let gy = y.rem_euclid(self.height) / PATCH_SIZE - 0.5;
+        let ix = gx.floor() as isize;
+        let iy = gy.floor() as isize;
+        let fx = gx - gx.floor();
+        let fy = gy - gy.floor();
+        let mut value = 0.0;
+        let mut total = 0.0;
+        for (dx, dy, weight) in [
+            (0, 0, (1.0 - fx) * (1.0 - fy)),
+            (1, 0, fx * (1.0 - fy)),
+            (0, 1, (1.0 - fx) * fy),
+            (1, 1, fx * fy),
+        ] {
+            if weight <= 0.0 {
+                continue;
+            }
+            let i = (iy + dy).rem_euclid(self.rows as isize) as usize * self.columns
+                + (ix + dx).rem_euclid(self.columns as isize) as usize;
+            if i == origin || !self.segment_blocked(from, self.patch_position(i)) {
+                value += values[i] * weight;
+                total += weight;
+            }
+        }
+        if total > 0.0 {
+            value / total
+        } else {
+            values[origin]
+        }
+    }
+    fn sample(&self, values: &[f64], x: f64, y: f64) -> f64 {
+        let gx = x.rem_euclid(self.width) / PATCH_SIZE - 0.5;
+        let gy = y.rem_euclid(self.height) / PATCH_SIZE - 0.5;
+        let ix = gx.floor() as isize;
+        let iy = gy.floor() as isize;
+        let fx = gx - gx.floor();
+        let fy = gy - gy.floor();
+        let at = |x: isize, y: isize| {
+            values[y.rem_euclid(self.rows as isize) as usize * self.columns
+                + x.rem_euclid(self.columns as isize) as usize]
+        };
+        let a = at(ix, iy) * (1.0 - fx) + at(ix + 1, iy) * fx;
+        let b = at(ix, iy + 1) * (1.0 - fx) + at(ix + 1, iy + 1) * fx;
+        a * (1.0 - fy) + b * fy
+    }
 }
 
 #[cfg(test)]
@@ -651,7 +915,7 @@ mod tests {
 
             let bytes = state(&reused);
             let mut reader = Reader::new(&bytes);
-            let mut fresh = Environment::read_checkpoint(&mut reader).unwrap();
+            let mut fresh = Environment::read_checkpoint(&mut reader, 8).unwrap();
             assert!(reader.finished());
             assert_eq!(state(&fresh), bytes);
 
@@ -676,7 +940,7 @@ mod tests {
         assert!(a.0.hypot(a.1) <= 60.0);
         let mut snapshot = Vec::new();
         env.snapshot(3.0, &mut snapshot);
-        assert_eq!(snapshot.len(), 7 + PATCHES * 5 + 6);
+        assert_eq!(snapshot.len(), 11 + PATCHES * 5 + 8);
         assert!(snapshot.iter().all(|v| v.is_finite()));
     }
 

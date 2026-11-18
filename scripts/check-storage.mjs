@@ -25,8 +25,8 @@ const { BUILTIN_GENOMES: genomes, BUILTIN_ENVIRONMENTS: environments, BUILTIN_SI
 const copy = value => structuredClone(value);
 
 assert.equal(genomes.length, 8);
-assert.equal(environments.length, 3);
-assert.equal(simulations.length, 3);
+assert.equal(environments.length, 4);
+assert.equal(simulations.length, 4);
 for (const genome of genomes) {
   assert.ok(Object.isFrozen(genome));
   assert.throws(() => storage.validateGenomeDocument(genome), /copied/);
@@ -91,11 +91,21 @@ for (const [field, invalid] of [['foodRate', 61], ['foodRate', NaN], ['foodRate'
   assert.throws(() => storage.validateEnvironmentConfig({ ...baseConfig, [field]: invalid }), field);
 }
 const source = { kind: 0, x: 600, y: 380, strength: 0.8, radius: 200 };
-for (const invalid of [{ ...source, kind: 4 }, { ...source, kind: 1.5 }, { ...source, x: 1200 }, { ...source, y: 760 }, { ...source, x: -1 }, { ...source, radius: 39 }, { ...source, radius: 401 }, { ...source, strength: -0.1 }]) {
+for (const invalid of [{ ...source, kind: 8 }, { ...source, kind: 1.5 }, { ...source, x: 1200 }, { ...source, y: 760 }, { ...source, x: -1 }, { ...source, radius: 19 }, { ...source, radius: 1001 }, { ...source, strength: -0.1 }, { ...source, angle: NaN }, { ...source, length: 4801 }]) {
   assert.throws(() => storage.validateEnvironmentConfig({ ...baseConfig, sources: [invalid] }));
 }
-assert.throws(() => storage.validateEnvironmentConfig({ ...baseConfig, sources: Array(17).fill(source) }), /16/);
-for (const kind of [1, 2]) assert.equal(storage.validateEnvironmentConfig({ ...baseConfig, sources: [{ ...source, kind, strength: -1 }] }).sources[0].strength, -1);
+assert.throws(() => storage.validateEnvironmentConfig({ ...baseConfig, sources: Array(65).fill(source) }), /64/);
+for (const kind of [1, 2, 5, 6, 7]) assert.equal(storage.validateEnvironmentConfig({ ...baseConfig, sources: [{ ...source, kind, strength: -1 }] }).sources[0].strength, -1);
+for (const kind of [0, 3, 4]) assert.throws(() => storage.validateEnvironmentConfig({ ...baseConfig, sources: [{ ...source, kind, strength: -1 }] }), /strength/);
+for (const patch of [{ width: 1221 }, { width: 4820 }, { height: 380 }, { height: 3060 }]) assert.throws(() => storage.validateEnvironmentConfig({ ...baseConfig, ...patch }), /World/);
+const barrier = { x: 1700, y: 900, length: 600, width: 40, angle: Math.PI / 4, floating: true };
+const larger = storage.validateEnvironmentConfig({ ...baseConfig, width: 2400, height: 1520, sources: [{ ...source, x: 2000, y: 1200, kind: 6, angle: Math.PI / 2, length: 2000 }], barriers: [barrier] });
+const roundTrip = storage.parseEnvironmentImport(storage.exportEnvironment(storage.newEnvironment('Larger habitat', larger)));
+assert.deepEqual(roundTrip.config, larger, 'Dimensions, source shape, and floating barrier properties survive export/import');
+for (const patch of [{ width: 9 }, { length: 2401 }, { floating: 1 }, { x: 2400 }, { angle: Infinity }]) assert.throws(() => storage.validateEnvironmentConfig({ ...larger, barriers: [{ ...barrier, ...patch }] }));
+assert.throws(() => storage.validateEnvironmentConfig({ ...larger, barriers: Array(65).fill(barrier) }), /64/);
+const legacy = storage.validateEnvironmentConfig({ foodRate: 0, ambientTemperature: 0.5, ambientLight: 0, currentStrength: 0, initialNutrients: 0.3, sources: [source] });
+assert.deepEqual([legacy.width, legacy.height, legacy.barriers.length, legacy.sources[0].angle, legacy.sources[0].length], [1200, 760, 0, 0, 600], 'Previous environment recipes receive explicit geometry defaults');
 
 const summary = { time: 12, population: 22, food: 300, births: 0, deaths: 0, generation: 0 };
 const simulation = {

@@ -1,11 +1,14 @@
 import { MAX_PROGRAM_BYTES, MAX_STATE_BYTES } from './engine';
+import type { EnvironmentBarrier, EnvironmentSource } from './engine';
 
 export interface DocumentBase { id: string; name: string; createdAt: number; updatedAt: number }
 export const GENOME_LANGUAGE_VERSION = 3;
 export interface GenomeDocument extends DocumentBase { source: string; description?: string; languageVersion: number }
 export interface EnvironmentConfig {
+  width: number; height: number;
   foodRate: number; ambientTemperature: number; ambientLight: number; currentStrength: number; initialNutrients: number;
-  sources: Array<{ kind: 0 | 1 | 2 | 3; x: number; y: number; strength: number; radius: number }>;
+  sources: Array<Omit<EnvironmentSource, 'id'>>;
+  barriers: Array<Omit<EnvironmentBarrier, 'id' | 'vx' | 'vy'>>;
 }
 export interface EnvironmentDocument extends DocumentBase { config: EnvironmentConfig; description?: string }
 export interface HistoryPoint { time: number; population: number; food: number; births: number; deaths: number }
@@ -84,8 +87,14 @@ function base(value: Record<string, unknown>, allowBuiltin = false): DocumentBas
 }
 export function validateEnvironmentConfig(value: unknown): EnvironmentConfig {
   const config = object(value, 'Environment');
-  if (!Array.isArray(config.sources) || config.sources.length > 16) throw new Error('An environment can contain at most 16 sources.');
+  const width = number(config.width ?? 1200, 'World width', 400, 4800, true);
+  const height = number(config.height ?? 760, 'World height', 400, 3040, true);
+  if (width % 20 || height % 20) throw new Error('World dimensions must be multiples of 20.');
+  if (!Array.isArray(config.sources) || config.sources.length > 64) throw new Error('An environment can contain at most 64 sources.');
+  const barriers = config.barriers ?? [];
+  if (!Array.isArray(barriers) || barriers.length > 64) throw new Error('An environment can contain at most 64 barriers.');
   return {
+    width, height,
     foodRate: number(config.foodRate, 'External organic input', 0, 60),
     ambientTemperature: number(config.ambientTemperature, 'Temperature', 0, 1),
     ambientLight: number(config.ambientLight, 'Light', 0, 1),
@@ -93,13 +102,32 @@ export function validateEnvironmentConfig(value: unknown): EnvironmentConfig {
     initialNutrients: number(config.initialNutrients, 'Starting nutrients', 0, 5),
     sources: config.sources.map((value, index) => {
       const item = object(value, `Source ${index + 1}`);
-      const kind = number(item.kind, 'Source kind', 0, 3, true) as 0 | 1 | 2 | 3;
+      const kind = number(item.kind, 'Source kind', 0, 7, true) as EnvironmentSource['kind'];
       return {
-        kind, x: number(item.x, 'Source x', 0, 1200 - Number.EPSILON * 1200),
-        y: number(item.y, 'Source y', 0, 760 - Number.EPSILON * 760),
-        strength: number(item.strength, 'Source strength', kind === 0 || kind === 3 ? 0 : -1, 1),
-        radius: number(item.radius, 'Source radius', 40, 400),
+        kind, x: number(item.x, 'Source x', 0, width - Number.EPSILON * width),
+        y: number(item.y, 'Source y', 0, height - Number.EPSILON * height),
+        strength: number(item.strength, 'Source strength', [0, 3, 4].includes(kind) ? 0 : -1, 1),
+        radius: number(item.radius, 'Source radius', 20, 1000),
+        angle: number(item.angle ?? 0, 'Source angle', -Math.PI * 2, Math.PI * 2),
+        length: number(item.length ?? 600, 'Source length', 40, 4800),
       };
+    }),
+    barriers: barriers.map((value, index) => {
+      const item = object(value, `Barrier ${index + 1}`);
+      if (typeof item.floating !== 'boolean') throw new Error('Barrier floating state must be true or false.');
+      const barrier = {
+        x: number(item.x, 'Barrier x', 0, width - Number.EPSILON * width),
+        y: number(item.y, 'Barrier y', 0, height - Number.EPSILON * height),
+        length: number(item.length, 'Barrier length', 20, 2400),
+        width: number(item.width, 'Barrier width', 10, 400),
+        angle: number(item.angle, 'Barrier angle', -Math.PI * 2, Math.PI * 2),
+        floating: item.floating,
+      };
+      const c = Math.abs(Math.cos(barrier.angle)), s = Math.abs(Math.sin(barrier.angle));
+      if (c * barrier.length + s * barrier.width > width + 1e-3 || s * barrier.length + c * barrier.width > height + 1e-3) {
+        throw new Error(`Barrier ${index + 1} is too large for the world at this angle.`);
+      }
+      return barrier;
     }),
   };
 }
