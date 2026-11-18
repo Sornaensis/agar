@@ -1,0 +1,2244 @@
+{
+  "engineWasmSha256": "05e190387136580e0ffe441fa5088493656ce19650381c262b81a9ea18cdbb09",
+  "nativeDurationSeconds": 300,
+  "seed": 7,
+  "mutationRate": 0,
+  "suppliedFoodRate": 0,
+  "candidateSource": "# Shared products supply independently regulated physical recipes.\n# Genes make stock; start_when permits new machines; activity runs built ones.\ncellular;\n\nproduct Wall = membrane();\nproduct Catalyst = enzyme();\nproduct Mount = anchor();\nproduct Rotor = motor();\nproduct Frame = scaffold();\nproduct Carrier = transporter();\nproduct Tail = filament();\nproduct Detector = receptor();\nproduct Pigment = pigment();\nproduct Replicase = replicase();\nproduct Ring = constrictor();\n\n# Tolerate modest wear while repair restores working capacity. The allowance\n# stays below one machine, even when a larger body needs many copies.\nfn missing(installed, required, unit) = installed + 0.000001 < required - min(required * 0.1, unit * 0.2);\nfn enough(installed, required) = installed + 0.000001 >= required * 0.9;\nfn buffered(stock, effort) = if stock < 0.001 then effort else 0;\n\nlet funded = (energy > 10 || gut.energy > 0) && nutrient.stored > 0.001;\nlet expanding = body.area > body.birth_area * 1.6;\nlet powered = enough(built.Gut, 0.06) && enough(built.ExudateEnzyme, 0.02) && enough(built.Capture, 0.03);\nlet equipped = powered && enough(built.LeftMotor, 0.025) && enough(built.RightMotor, 0.025) && enough(built.Vision, 0.02) && enough(built.Touch, 0.01) && enough(built.Piercer, 0.05) && enough(built.TissueEnzyme, 0.08);\nlet surplus = equipped && energy > 55;\nlet firm_contact = sensed.Touch.valid && sensed.Touch.resistance > 0.1;\nlet hungry = energy.fraction < 0.7 && gut.fraction < 0.45;\n# Paired local temperatures select the cooler side before tissue is damaged.\nlet heat_escape = sensed.LeftHeat.valid && sensed.RightHeat.valid\n  && max(sensed.LeftHeat.value, sensed.RightHeat.value) > 0.78;\nlet heat_delta = sensed.RightHeat.value - sensed.LeftHeat.value;\nlet cool_turn = if heat_delta < -0.002 then -0.75 else 0.75;\nlet steer = if heat_escape then cool_turn else if gut.fraction > 0.45 then 0 else if hungry && sensed.Vision.valid then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1) else sin(age * 0.5) * (if equipped then 0.12 else 0.4);\nlet move = if heat_escape then 0.4 else if firm_contact || gut.fraction > 0.45 then 0 else if hungry && sensed.Vision.valid then 0.5 else if hungry && equipped then 0.28 else 0.07;\n\nlet need_Gut = funded && (true) && missing(built.Gut, (if expanding then 0.12 else 0.06), 0.06);\nlet need_ExudateEnzyme = funded && (true) && missing(built.ExudateEnzyme, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Capture = funded && (enough(built.Gut, 0.06)) && missing(built.Capture, (if expanding then 0.06 else 0.03), 0.03);\nlet need_TissueEnzyme = funded && (powered) && missing(built.TissueEnzyme, (if expanding then 0.16 else 0.08), 0.08);\nlet need_WasteEnzyme = funded && (powered && gut.waste.energy > 0) && missing(built.WasteEnzyme, (if expanding then 0.03 else 0.015), 0.015);\nlet need_Translation = funded && (surplus && body.area > 1.2) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Minerals = funded && (powered && (nutrient.stored < 0.15 || surplus)) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);\nlet need_EnergyStore = funded && (surplus) && missing(built.EnergyStore, (if expanding then 0.16 else 0.08), 0.08);\nlet need_MineralStore = funded && (surplus) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);\nlet need_LeftMotor = funded && (powered) && missing(built.LeftMotor, (if expanding then 0.05 else 0.025), 0.025);\nlet need_RightMotor = funded && (powered) && missing(built.RightMotor, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Vision = funded && (powered) && missing(built.Vision, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Touch = funded && (powered) && missing(built.Touch, (if expanding then 0.02 else 0.01), 0.01);\nlet need_Piercer = funded && (powered) && missing(built.Piercer, (if expanding then 0.1 else 0.05), 0.05);\nlet need_Engulfment = funded && (surplus && body.area > 1.2) && missing(built.Engulfment, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Support = funded && (equipped && energy > 65) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);\nlet need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);\n\nlet need_LeftHeat = funded && powered && missing(built.LeftHeat, (if expanding then 0.02 else 0.01), 0.01);\nlet need_RightHeat = funded && powered && missing(built.RightHeat, (if expanding then 0.02 else 0.01), 0.01);\n\ngene supply_Wall: Wall = buffered(pool.Wall, (if need_Gut then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Engulfment then 1 else 0) + (if need_Envelope then 1 else 0));\ngene supply_Catalyst: Catalyst = buffered(pool.Catalyst, (if need_ExudateEnzyme then 1 else 0) + (if need_TissueEnzyme then 1 else 0) + (if need_WasteEnzyme then 1 else 0) + (if need_Translation then 1 else 0) + (if need_Piercer then 0.333333 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0));\ngene supply_Mount: Mount = buffered(pool.Mount, (if need_Capture then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_LeftMotor then 0.5 else 0) + (if need_RightMotor then 0.5 else 0) + (if need_Vision then 0.333333 else 0) + (if need_Touch then 0.333333 else 0) + (if need_Piercer then 0.333333 else 0) + (if need_Engulfment then 0.5 else 0) + (if need_Division then 0.5 else 0) + (if need_LeftHeat then 0.25 else 0) + (if need_RightHeat then 0.25 else 0));\ngene supply_Rotor: Rotor = buffered(pool.Rotor, (if need_Capture then 1 else 0) + (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Engulfment then 1 else 0) + (if need_Division then 1 else 0));\ngene supply_Frame: Frame = buffered(pool.Frame, (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0));\ngene supply_Carrier: Carrier = buffered(pool.Carrier, (if need_Minerals then 1 else 0));\ngene supply_Tail: Tail = buffered(pool.Tail, (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Touch then 0.333333 else 0) + (if need_Piercer then 1 else 0));\ngene supply_Detector: Detector = buffered(pool.Detector, (if need_Vision then 1 else 0) + (if need_Touch then 1 else 0) + (if need_LeftHeat then 1 else 0) + (if need_RightHeat then 1 else 0));\ngene supply_Pigment: Pigment = buffered(pool.Pigment, (if need_Vision then 0.333333 else 0));\ngene supply_Replicase: Replicase = buffered(pool.Replicase, (if need_Replication then 1 else 0));\ngene supply_Ring: Ring = buffered(pool.Ring, (if need_Division then 1 else 0));\n\nassembly Gut: store(food) {\n  Wall: 0.06;\n  start_when: need_Gut;\n  activity: 1;\n}\n\nassembly ExudateEnzyme: digest(exudate) {\n  Catalyst: 0.02;\n  start_when: need_ExudateEnzyme;\n  activity: if gut.exudate.energy > 0 then 1 else 0;\n}\n\nassembly Capture: import(particle) {\n  Mount: 0.01;\n  Rotor: 0.02;\n  start_when: need_Capture;\n  activity: if gut.fraction < 0.7 then 1 else 0;\n}\n\nassembly TissueEnzyme: digest(tissue) {\n  Catalyst: 0.08;\n  start_when: need_TissueEnzyme;\n  activity: if gut.tissue.energy > 0 then 1 else 0;\n}\n\nassembly WasteEnzyme: digest(waste) {\n  Catalyst: 0.015;\n  start_when: need_WasteEnzyme;\n  activity: if gut.waste.energy > 0 then 1 else 0;\n}\n\nassembly Translation: translate() {\n  Frame: 0.02;\n  Catalyst: 0.02;\n  start_when: need_Translation;\n  activity: 1;\n}\n\nassembly Minerals: import(mineral) {\n  Mount: 0.005;\n  Carrier: 0.02;\n  start_when: need_Minerals;\n  activity: if nutrient.fraction < 0.9 then 1 else 0;\n}\n\nassembly EnergyStore: store(energy) {\n  Wall: 0.08;\n  start_when: need_EnergyStore;\n  activity: 1;\n}\n\nassembly MineralStore: store(mineral) {\n  Wall: 0.02;\n  start_when: need_MineralStore;\n  activity: 1;\n}\n\nassembly LeftMotor: propel() {\n  Mount: 0.005;\n  Rotor: 0.01;\n  Tail: 0.01;\n  start_when: need_LeftMotor;\n  activity: clamp(move - steer * 0.5, 0, 1);\n  at: 1.570796;\n  direction: 0;\n}\n\nassembly RightMotor: propel() {\n  Mount: 0.005;\n  Rotor: 0.01;\n  Tail: 0.01;\n  start_when: need_RightMotor;\n  activity: clamp(move + steer * 0.5, 0, 1);\n  at: -1.570796;\n  direction: 0;\n}\n\nassembly Vision: sense(optical) {\n  Mount: 0.004;\n  Detector: 0.012;\n  Pigment: 0.004;\n  start_when: need_Vision;\n  activity: 1;\n}\n\nassembly Touch: sense(contact) {\n  Mount: 0.002;\n  Detector: 0.006;\n  Tail: 0.002;\n  start_when: need_Touch;\n  activity: 1;\n}\n\nassembly Piercer: pierce() {\n  Mount: 0.01;\n  Tail: 0.03;\n  Catalyst: 0.01;\n  start_when: need_Piercer;\n  activity: if !heat_escape && firm_contact && gut.fraction < 0.5 then 0.8 else 0;\n}\n\nassembly Engulfment: engulf() {\n  Mount: 0.005;\n  Rotor: 0.01;\n  Wall: 0.01;\n  start_when: need_Engulfment;\n  activity: if gut.fraction < 0.5 then 1 else 0;\n}\n\nassembly Repair: repair() {\n  Catalyst: 0.025;\n  start_when: need_Repair;\n  activity: 1;\n}\n\nassembly Support: support() {\n  Frame: 0.06;\n  start_when: need_Support;\n  activity: 1;\n}\n\nassembly Envelope: grow() {\n  Wall: 0.015;\n  Catalyst: 0.005;\n  start_when: need_Envelope;\n  activity: if energy > 90 && body.area < body.birth_area * 2 then 0.8 else 0;\n}\n\nassembly Replication: replicate() {\n  Frame: 0.005;\n  Replicase: 0.015;\n  start_when: need_Replication;\n  activity: if energy > 80 then 1 else 0;\n}\n\nassembly Division: constrict() {\n  Mount: 0.004;\n  Rotor: 0.008;\n  Ring: 0.008;\n  start_when: need_Division;\n  activity: if body.area + 0.000001 >= body.birth_area * 2 && energy > 100 then 1 else 0;\n}\n\nassembly LeftHeat: sense(heat) {\n  Mount: 0.002;\n  Detector: 0.008;\n  start_when: need_LeftHeat;\n  activity: 1;\n  at: 1.5707963267948966;\n}\nassembly RightHeat: sense(heat) {\n  Mount: 0.002;\n  Detector: 0.008;\n  start_when: need_RightHeat;\n  activity: 1;\n  at: -1.5707963267948966;\n}\n",
+  "candidateSourceSha256": "6d28a77068143f8da9651c24922e62227eee0e71b2aa979b0ce60ccd0e476214",
+  "heatBorderCases": [
+    {
+      "case": "front",
+      "startupAge": 15.699999999999955,
+      "startupATP": 31.426523442192597,
+      "heatMass": 0.02,
+      "heatEmbodied": 0.4799999999999998,
+      "startTemperature": 0.8293656169890611,
+      "finalTemperature": 0.5307890096414144,
+      "maximumTemperature": 0.8475457388730845,
+      "minimumIntegrity": 1,
+      "initialGut": 30.323999999999995,
+      "firstMotor": 0.8,
+      "x": 401.6184811770795,
+      "y": 438.2930963243341,
+      "angle": 2.050231066499499,
+      "energy": 38.67098069433937,
+      "gut": 0,
+      "readings": "[(true, 0.8300000000000001), (true, 0.8300000000000001)]"
+    },
+    {
+      "case": "left",
+      "startupAge": 15.699999999999955,
+      "startupATP": 31.426523442192597,
+      "heatMass": 0.02,
+      "heatEmbodied": 0.4799999999999998,
+      "startTemperature": 0.8293656169890611,
+      "finalTemperature": 0.5288349943549626,
+      "maximumTemperature": 0.8293656169890611,
+      "minimumIntegrity": 1,
+      "initialGut": 30.323999999999995,
+      "firstMotor": 0.8,
+      "x": 396.99084372304384,
+      "y": 424.8756369358504,
+      "angle": 2.0355115392760106,
+      "energy": 38.922003608111645,
+      "gut": 0,
+      "readings": "[(true, 0.87), (true, 0.79)]"
+    },
+    {
+      "case": "right",
+      "startupAge": 15.699999999999955,
+      "startupATP": 31.426523442192597,
+      "heatMass": 0.02,
+      "heatEmbodied": 0.4799999999999998,
+      "startTemperature": 0.8293656169890611,
+      "finalTemperature": 0.5289725503054298,
+      "maximumTemperature": 0.8293656169890611,
+      "minimumIntegrity": 1,
+      "initialGut": 30.323999999999995,
+      "firstMotor": 0.8,
+      "x": 399.3532825740693,
+      "y": 437.9925157656092,
+      "angle": 1.989856025563776,
+      "energy": 38.92015774263206,
+      "gut": 0,
+      "readings": "[(true, 0.79), (true, 0.87)]"
+    },
+    {
+      "case": "behind",
+      "startupAge": 15.699999999999955,
+      "startupATP": 31.426523442192597,
+      "heatMass": 0.02,
+      "heatEmbodied": 0.4799999999999998,
+      "startTemperature": 0.8293656169890611,
+      "finalTemperature": 0.5291490739900897,
+      "maximumTemperature": 0.8293656169890611,
+      "minimumIntegrity": 1,
+      "initialGut": 30.323999999999995,
+      "firstMotor": 0.8,
+      "x": 398.25325664509853,
+      "y": 431.22154394186043,
+      "angle": 2.0125492823918902,
+      "energy": 38.964283186871974,
+      "gut": 0,
+      "readings": "[(true, 0.8300000000000001), (true, 0.8300000000000001)]"
+    },
+    {
+      "case": "no_sensors",
+      "startupAge": 14.833333333333291,
+      "startupATP": 33.744813738558975,
+      "heatMass": 0,
+      "heatEmbodied": 0,
+      "startTemperature": 0.829365586533355,
+      "finalTemperature": 0.9433594708392379,
+      "maximumTemperature": 1,
+      "minimumIntegrity": 0.43660768369741687,
+      "initialGut": 30.323999999999995,
+      "firstMotor": 0,
+      "x": 517.672040724052,
+      "y": 379.59278008316426,
+      "angle": 2.8965115924521734,
+      "energy": 19.66748976311897,
+      "gut": 1.2223508100946077,
+      "readings": "[(false, 0.0), (false, 0.0)]"
+    },
+    {
+      "case": "baseline",
+      "startupAge": 14.833333333333291,
+      "startupATP": 33.744813738558975,
+      "heatMass": 0,
+      "heatEmbodied": 0,
+      "startTemperature": 0.829365586533355,
+      "finalTemperature": 0.9433594708392379,
+      "maximumTemperature": 1,
+      "minimumIntegrity": 0.43660768369741687,
+      "initialGut": 30.323999999999995,
+      "firstMotor": 0,
+      "x": 517.672040724052,
+      "y": 379.59278008316426,
+      "angle": 2.8965115924521734,
+      "energy": 19.66748976311897,
+      "gut": 1.2223508100946077,
+      "readings": "[]"
+    }
+  ],
+  "baseline": {
+    "final": {
+      "event": "sample",
+      "seconds": 300,
+      "counts": [
+        482,
+        3,
+        4,
+        0
+      ],
+      "maxGeneration": [
+        5,
+        0,
+        1,
+        0
+      ],
+      "descendants": [
+        454,
+        1,
+        2,
+        1
+      ],
+      "attacks": 3521,
+      "predations": 12,
+      "materialDelta": 4.2018655221909285e-10,
+      "wallSeconds": 75.406569077,
+      "consumers": [
+        {
+          "id": 75,
+          "genome": 2,
+          "generation": 0,
+          "parent": 0,
+          "energy": 36.300467515041,
+          "capacity": 240,
+          "gut": [
+            0,
+            0,
+            0
+          ],
+          "area": 1,
+          "supportMass": 0.16,
+          "integrity": 1,
+          "temperature": 0.5000095989778887,
+          "x": 450.0919061212042,
+          "y": 539.25495326547,
+          "angle": 0.4043337148685444,
+          "speed": 8.423168946070579,
+          "upkeep": 0.6124110283620251,
+          "digestion": 0,
+          "growth": 0,
+          "machines": []
+        },
+        {
+          "id": 76,
+          "genome": 2,
+          "generation": 0,
+          "parent": 0,
+          "energy": 34.520983691859755,
+          "capacity": 80,
+          "gut": [
+            3.5735144404061936,
+            0,
+            0
+          ],
+          "area": 1,
+          "supportMass": 0.04,
+          "integrity": 1,
+          "temperature": 0.5000004410238574,
+          "x": 339.2204413074198,
+          "y": 660.9306787985851,
+          "angle": 4.001078213823914,
+          "speed": 3.0802402913301186,
+          "upkeep": 0.494596819537094,
+          "digestion": 2.496,
+          "growth": 0,
+          "machines": []
+        },
+        {
+          "id": 78,
+          "genome": 2,
+          "generation": 0,
+          "parent": 0,
+          "energy": 42.60738526674755,
+          "capacity": 240,
+          "gut": [
+            0,
+            0,
+            0
+          ],
+          "area": 1,
+          "supportMass": 0.16,
+          "integrity": 1,
+          "temperature": 0.5009017590224655,
+          "x": 582.9211436299533,
+          "y": 383.97458800428507,
+          "angle": 6.273768069568886,
+          "speed": 7.746012697345565,
+          "upkeep": 0.6160793923085496,
+          "digestion": 0,
+          "growth": 0,
+          "machines": []
+        }
+      ]
+    },
+    "predatorBirths": [
+      {
+        "event": "birth",
+        "seconds": 145.73333333333332,
+        "lineage": 4,
+        "cell": {
+          "id": 210,
+          "genome": 4,
+          "generation": 1,
+          "parent": 84,
+          "energy": 38.032674288549515,
+          "capacity": 160,
+          "gut": [
+            0,
+            21.942754093146895,
+            0
+          ],
+          "area": 1.0003613788675454,
+          "supportMass": 0.06,
+          "integrity": 1,
+          "temperature": 0.6110770806156469,
+          "x": 814.0640199106025,
+          "y": 401.3997837060278,
+          "angle": 3.880729078762523,
+          "speed": 6.868164999915839,
+          "upkeep": 0.6570335369621652,
+          "digestion": 0,
+          "growth": 0,
+          "machines": [
+            {
+              "name": "Gut",
+              "mass": 0.06,
+              "functionalMass": 0.06,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "ExudateEnzyme",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            },
+            {
+              "name": "Capture",
+              "mass": 0.03,
+              "functionalMass": 0.03,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "TissueEnzyme",
+              "mass": 0.08,
+              "functionalMass": 0.08,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "LeftMotor",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0.5
+            },
+            {
+              "name": "RightMotor",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0.5
+            },
+            {
+              "name": "Vision",
+              "mass": 0.019999999999201344,
+              "functionalMass": 0.019999999999201344,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Touch",
+              "mass": 0.01,
+              "functionalMass": 0.01,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Piercer",
+              "mass": 0.05,
+              "functionalMass": 0.05,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            },
+            {
+              "name": "EnergyStore",
+              "mass": 0.08,
+              "functionalMass": 0.08,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "MineralStore",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Support",
+              "mass": 0.06,
+              "functionalMass": 0.06,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Envelope",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            },
+            {
+              "name": "Replication",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Translation",
+              "mass": 0.04,
+              "functionalMass": 0.04,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Engulfment",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Minerals",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            },
+            {
+              "name": "Division",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            }
+          ]
+        }
+      }
+    ],
+    "predatorDeaths": [
+      {
+        "event": "death",
+        "seconds": 172.5,
+        "attacksDelta": 0,
+        "predationsDelta": 0,
+        "lineage": 4,
+        "lastLive": {
+          "id": 83,
+          "genome": 4,
+          "generation": 0,
+          "parent": 0,
+          "energy": 65.81702400622703,
+          "capacity": 88.31697618779866,
+          "gut": [
+            0,
+            12.764142708217591,
+            0
+          ],
+          "area": 1.6029803769282298,
+          "supportMass": 0.05887798412519911,
+          "integrity": 0.0008585275484344419,
+          "temperature": 0.9815981986456978,
+          "x": 826.8290795691161,
+          "y": 284.0422308536485,
+          "angle": 0.7840475856784151,
+          "speed": 0.6951390150827347,
+          "upkeep": 1.129661724861503,
+          "digestion": 0.8718048690738402,
+          "growth": 0,
+          "machines": [
+            {
+              "name": "Gut",
+              "mass": 0.06,
+              "functionalMass": 0.022079244046949664,
+              "complete": true,
+              "integrity": 0.3679874007824944,
+              "activity": 1
+            },
+            {
+              "name": "ExudateEnzyme",
+              "mass": 0.02,
+              "functionalMass": 0.007359748015649889,
+              "complete": true,
+              "integrity": 0.3679874007824944,
+              "activity": 0
+            },
+            {
+              "name": "Capture",
+              "mass": 0.03,
+              "functionalMass": 0.011039622023474832,
+              "complete": true,
+              "integrity": 0.3679874007824944,
+              "activity": 0
+            },
+            {
+              "name": "TissueEnzyme",
+              "mass": 0.08,
+              "functionalMass": 0.029438992062599555,
+              "complete": true,
+              "integrity": 0.3679874007824944,
+              "activity": 1
+            },
+            {
+              "name": "LeftMotor",
+              "mass": 0.025,
+              "functionalMass": 0.009199685019562361,
+              "complete": true,
+              "integrity": 0.3679874007824944,
+              "activity": 0
+            },
+            {
+              "name": "RightMotor",
+              "mass": 0.025,
+              "functionalMass": 0.009199685019562361,
+              "complete": true,
+              "integrity": 0.3679874007824944,
+              "activity": 0
+            },
+            {
+              "name": "Vision",
+              "mass": 0.019999999999201344,
+              "functionalMass": 0.0073597480153559935,
+              "complete": true,
+              "integrity": 0.3679874007824944,
+              "activity": 1
+            },
+            {
+              "name": "Touch",
+              "mass": 0.01,
+              "functionalMass": 0.0036798740078249443,
+              "complete": true,
+              "integrity": 0.3679874007824944,
+              "activity": 1
+            },
+            {
+              "name": "Piercer",
+              "mass": 0.05,
+              "functionalMass": 0.018399370039124723,
+              "complete": true,
+              "integrity": 0.3679874007824944,
+              "activity": 0
+            },
+            {
+              "name": "Minerals",
+              "mass": 0.025,
+              "functionalMass": 0.009199685019562361,
+              "complete": true,
+              "integrity": 0.3679874007824944,
+              "activity": 0
+            },
+            {
+              "name": "EnergyStore",
+              "mass": 0.08,
+              "functionalMass": 0.029438992062599555,
+              "complete": true,
+              "integrity": 0.3679874007824944,
+              "activity": 1
+            },
+            {
+              "name": "MineralStore",
+              "mass": 0.02,
+              "functionalMass": 0.007359748015649889,
+              "complete": true,
+              "integrity": 0.3679874007824944,
+              "activity": 1
+            },
+            {
+              "name": "Support",
+              "mass": 0.06,
+              "functionalMass": 0.022079244046949664,
+              "complete": true,
+              "integrity": 0.3679874007824944,
+              "activity": 1
+            },
+            {
+              "name": "Support",
+              "mass": 0.06,
+              "functionalMass": 0.022079244046949664,
+              "complete": true,
+              "integrity": 0.3679874007824944,
+              "activity": 1
+            },
+            {
+              "name": "Envelope",
+              "mass": 0.02,
+              "functionalMass": 0.007359748015649889,
+              "complete": true,
+              "integrity": 0.3679874007824944,
+              "activity": 0
+            },
+            {
+              "name": "Replication",
+              "mass": 0.02,
+              "functionalMass": 0.007359748015649889,
+              "complete": true,
+              "integrity": 0.3679874007824944,
+              "activity": 0
+            },
+            {
+              "name": "Translation",
+              "mass": 0.04,
+              "functionalMass": 0.014719496031299777,
+              "complete": true,
+              "integrity": 0.3679874007824944,
+              "activity": 1
+            },
+            {
+              "name": "Engulfment",
+              "mass": 0.025,
+              "functionalMass": 0.009199685019562361,
+              "complete": true,
+              "integrity": 0.3679874007824944,
+              "activity": 0
+            },
+            {
+              "name": "Gut",
+              "mass": 0.03108034281167605,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.3683568348202427,
+              "activity": 1
+            },
+            {
+              "name": "ExudateEnzyme",
+              "mass": 0.013813693358848552,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.36831962712868926,
+              "activity": 0
+            },
+            {
+              "name": "Capture",
+              "mass": 0.03,
+              "functionalMass": 0.011039703895625573,
+              "complete": true,
+              "integrity": 0.3679901298541858,
+              "activity": 0
+            },
+            {
+              "name": "TissueEnzyme",
+              "mass": 0.05525477343539421,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.36831962712868926,
+              "activity": 1
+            },
+            {
+              "name": "Translation",
+              "mass": 0.033813693358848554,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.36812312934713876,
+              "activity": 1
+            },
+            {
+              "name": "Minerals",
+              "mass": 0.025,
+              "functionalMass": 0.009199689267411765,
+              "complete": true,
+              "integrity": 0.3679875706964706,
+              "activity": 0
+            },
+            {
+              "name": "EnergyStore",
+              "mass": 0.04144045708223475,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.36835683482024256,
+              "activity": 1
+            },
+            {
+              "name": "MineralStore",
+              "mass": 0.010360114270558687,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.36835683482024256,
+              "activity": 1
+            },
+            {
+              "name": "LeftMotor",
+              "mass": 0.025,
+              "functionalMass": 0.009199737992793883,
+              "complete": true,
+              "integrity": 0.3679895197117553,
+              "activity": 0
+            },
+            {
+              "name": "RightMotor",
+              "mass": 0.025,
+              "functionalMass": 0.009199737992793883,
+              "complete": true,
+              "integrity": 0.3679895197117553,
+              "activity": 0
+            },
+            {
+              "name": "Vision",
+              "mass": 0.019999989961609926,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.36798756763723495,
+              "activity": 1
+            },
+            {
+              "name": "Touch",
+              "mass": 0.01,
+              "functionalMass": 0.003679878094425606,
+              "complete": true,
+              "integrity": 0.3679878094425606,
+              "activity": 1
+            },
+            {
+              "name": "Piercer",
+              "mass": 0.046906846679424276,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.36803726644297535,
+              "activity": 0
+            },
+            {
+              "name": "Engulfment",
+              "mass": 0.020229726471484754,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.3680905004278102,
+              "activity": 0
+            },
+            {
+              "name": "Envelope",
+              "mass": 0.011298013046939266,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.3683604248287153,
+              "activity": 0
+            },
+            {
+              "name": "Replication",
+              "mass": 0.02,
+              "functionalMass": 0.007359748098910834,
+              "complete": true,
+              "integrity": 0.36798740494554166,
+              "activity": 0
+            },
+            {
+              "name": "Division",
+              "mass": 0.02,
+              "functionalMass": 0.007359780774572367,
+              "complete": true,
+              "integrity": 0.3679890387286183,
+              "activity": 0
+            },
+            {
+              "name": "Repair",
+              "mass": 0.002112746696237822,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.37023721746226174,
+              "activity": 1
+            },
+            {
+              "name": "Division",
+              "mass": 0.003484269747758684,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.37062582107190506,
+              "activity": 0
+            }
+          ]
+        }
+      },
+      {
+        "event": "death",
+        "seconds": 246.86666666666667,
+        "attacksDelta": 0,
+        "predationsDelta": 0,
+        "lineage": 4,
+        "lastLive": {
+          "id": 84,
+          "genome": 4,
+          "generation": 0,
+          "parent": 0,
+          "energy": 48.28087366339701,
+          "capacity": 87.35571443670298,
+          "gut": [
+            0,
+            10.426110364578326,
+            2.1154756103962087
+          ],
+          "area": 1.601182310321485,
+          "supportMass": 0.05823714295780198,
+          "integrity": 0.0011351711725491782,
+          "temperature": 0.9731196763025209,
+          "x": 823.1246732333814,
+          "y": 283.74334737780947,
+          "angle": 3.6714857815332356,
+          "speed": 0.664789512531386,
+          "upkeep": 1.1114058442493446,
+          "digestion": 0.9019840281714668,
+          "growth": 0,
+          "machines": [
+            {
+              "name": "Minerals",
+              "mass": 0.02499999999826785,
+              "functionalMass": 0.009099553586526088,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 0
+            },
+            {
+              "name": "Support",
+              "mass": 0.06,
+              "functionalMass": 0.02183892860917574,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 1
+            },
+            {
+              "name": "Gut",
+              "mass": 0.06,
+              "functionalMass": 0.02183892860917574,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 1
+            },
+            {
+              "name": "ExudateEnzyme",
+              "mass": 0.02,
+              "functionalMass": 0.007279642869725248,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 0
+            },
+            {
+              "name": "Capture",
+              "mass": 0.03,
+              "functionalMass": 0.01091946430458787,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 0
+            },
+            {
+              "name": "TissueEnzyme",
+              "mass": 0.08,
+              "functionalMass": 0.02911857147890099,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 1
+            },
+            {
+              "name": "Translation",
+              "mass": 0.04,
+              "functionalMass": 0.014559285739450496,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 1
+            },
+            {
+              "name": "EnergyStore",
+              "mass": 0.08,
+              "functionalMass": 0.02911857147890099,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 1
+            },
+            {
+              "name": "MineralStore",
+              "mass": 0.02,
+              "functionalMass": 0.007279642869725248,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 1
+            },
+            {
+              "name": "LeftMotor",
+              "mass": 0.025,
+              "functionalMass": 0.009099553587156561,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 0
+            },
+            {
+              "name": "RightMotor",
+              "mass": 0.025,
+              "functionalMass": 0.009099553587156561,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 0
+            },
+            {
+              "name": "Vision",
+              "mass": 0.019999999997103803,
+              "functionalMass": 0.007279642868671084,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 1
+            },
+            {
+              "name": "Touch",
+              "mass": 0.01,
+              "functionalMass": 0.003639821434862624,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 1
+            },
+            {
+              "name": "Piercer",
+              "mass": 0.05,
+              "functionalMass": 0.018199107174313122,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 0
+            },
+            {
+              "name": "Engulfment",
+              "mass": 0.025,
+              "functionalMass": 0.009099553587156561,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 0
+            },
+            {
+              "name": "Envelope",
+              "mass": 0.02,
+              "functionalMass": 0.007279642869725248,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 0
+            },
+            {
+              "name": "Replication",
+              "mass": 0.02,
+              "functionalMass": 0.007279642869725248,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 0
+            },
+            {
+              "name": "Division",
+              "mass": 0.02,
+              "functionalMass": 0.007279642869725248,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 0
+            },
+            {
+              "name": "Support",
+              "mass": 0.06,
+              "functionalMass": 0.02183892860917574,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 1
+            },
+            {
+              "name": "WasteEnzyme",
+              "mass": 0.015,
+              "functionalMass": 0.005459732152293935,
+              "complete": true,
+              "integrity": 0.3639821434862624,
+              "activity": 1
+            },
+            {
+              "name": "Repair",
+              "mass": 0.025,
+              "functionalMass": 0.00912266668305414,
+              "complete": true,
+              "integrity": 0.36490666732216565,
+              "activity": 1
+            },
+            {
+              "name": "Gut",
+              "mass": 0.03165543112225014,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.43975943312569943,
+              "activity": 1
+            },
+            {
+              "name": "ExudateEnzyme",
+              "mass": 0.011325676547948721,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.43905973172361074,
+              "activity": 0
+            },
+            {
+              "name": "Capture",
+              "mass": 0.03,
+              "functionalMass": 0.0127125003982406,
+              "complete": true,
+              "integrity": 0.4237500132746867,
+              "activity": 0
+            },
+            {
+              "name": "TissueEnzyme",
+              "mass": 0.045302706191794884,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.43905973172361074,
+              "activity": 1
+            },
+            {
+              "name": "WasteEnzyme",
+              "mass": 0.008494257410961539,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.4390597317236106,
+              "activity": 1
+            },
+            {
+              "name": "Translation",
+              "mass": 0.018765079250971813,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.4205023454292508,
+              "activity": 1
+            },
+            {
+              "name": "Minerals",
+              "mass": 0.013827318185929052,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.40727039202012083,
+              "activity": 0
+            },
+            {
+              "name": "EnergyStore",
+              "mass": 0.04220724149633352,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.43975943312569943,
+              "activity": 1
+            },
+            {
+              "name": "MineralStore",
+              "mass": 0.01055181037408338,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.43975943312569943,
+              "activity": 1
+            },
+            {
+              "name": "LeftMotor",
+              "mass": 0.016726811847745975,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.420557428917164,
+              "activity": 0
+            },
+            {
+              "name": "RightMotor",
+              "mass": 0.016726811847745975,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.420557428917164,
+              "activity": 0
+            },
+            {
+              "name": "Vision",
+              "mass": 0.013184554106501175,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.4046972291469305,
+              "activity": 1
+            },
+            {
+              "name": "Touch",
+              "mass": 0.0053057087941681385,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.4078468232239826,
+              "activity": 1
+            },
+            {
+              "name": "Piercer",
+              "mass": 0.02084327381721229,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.424439368414129,
+              "activity": 0
+            },
+            {
+              "name": "Engulfment",
+              "mass": 0.02032055784763992,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.4280517876419383,
+              "activity": 0
+            },
+            {
+              "name": "Repair",
+              "mass": 0.014157095684935903,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.43905973172361096,
+              "activity": 1
+            },
+            {
+              "name": "Envelope",
+              "mass": 0.010812255908447064,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.43988632317997994,
+              "activity": 0
+            },
+            {
+              "name": "Replication",
+              "mass": 0.010662434689998782,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.3928551997280241,
+              "activity": 0
+            },
+            {
+              "name": "Division",
+              "mass": 0.02,
+              "functionalMass": 0.008242352816285027,
+              "complete": true,
+              "integrity": 0.41211764081425134,
+              "activity": 0
+            },
+            {
+              "name": "Support",
+              "mass": 0.00021889640762427879,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.401173640514705,
+              "activity": 1
+            },
+            {
+              "name": "Division",
+              "mass": 0.0033410350415011038,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.49029207637929945,
+              "activity": 0
+            }
+          ]
+        }
+      },
+      {
+        "event": "death",
+        "seconds": 276.4,
+        "attacksDelta": 0,
+        "predationsDelta": 0,
+        "lineage": 4,
+        "lastLive": {
+          "id": 210,
+          "genome": 4,
+          "generation": 1,
+          "parent": 84,
+          "energy": 58.88078327991586,
+          "capacity": 58.88078327991586,
+          "gut": [
+            12.440873688940414,
+            0,
+            0
+          ],
+          "area": 1.6059645874815542,
+          "supportMass": 0.044160587459936895,
+          "integrity": 0.0007024554030367848,
+          "temperature": 0.9722970716957503,
+          "x": 837.8541693438302,
+          "y": 292.95318109772217,
+          "angle": 3.915453804420835,
+          "speed": 1.9190225504981566,
+          "upkeep": 1.1395462230873123,
+          "digestion": 0.45983192494187,
+          "growth": 0,
+          "machines": [
+            {
+              "name": "Gut",
+              "mass": 0.06,
+              "functionalMass": 0.022080293729968448,
+              "complete": true,
+              "integrity": 0.3680048954994741,
+              "activity": 1
+            },
+            {
+              "name": "ExudateEnzyme",
+              "mass": 0.02,
+              "functionalMass": 0.0073600979099894825,
+              "complete": true,
+              "integrity": 0.3680048954994741,
+              "activity": 1
+            },
+            {
+              "name": "Capture",
+              "mass": 0.03,
+              "functionalMass": 0.011040146864984224,
+              "complete": true,
+              "integrity": 0.3680048954994741,
+              "activity": 0
+            },
+            {
+              "name": "TissueEnzyme",
+              "mass": 0.08,
+              "functionalMass": 0.02944039163995793,
+              "complete": true,
+              "integrity": 0.3680048954994741,
+              "activity": 0
+            },
+            {
+              "name": "LeftMotor",
+              "mass": 0.025,
+              "functionalMass": 0.009200122387486853,
+              "complete": true,
+              "integrity": 0.3680048954994741,
+              "activity": 0
+            },
+            {
+              "name": "RightMotor",
+              "mass": 0.025,
+              "functionalMass": 0.009200122387486853,
+              "complete": true,
+              "integrity": 0.3680048954994741,
+              "activity": 0
+            },
+            {
+              "name": "Vision",
+              "mass": 0.019999999999201344,
+              "functionalMass": 0.0073600979096955736,
+              "complete": true,
+              "integrity": 0.3680048954994741,
+              "activity": 1
+            },
+            {
+              "name": "Touch",
+              "mass": 0.01,
+              "functionalMass": 0.0036800489549947413,
+              "complete": true,
+              "integrity": 0.3680048954994741,
+              "activity": 1
+            },
+            {
+              "name": "Piercer",
+              "mass": 0.05,
+              "functionalMass": 0.018400244774973706,
+              "complete": true,
+              "integrity": 0.3680048954994741,
+              "activity": 0
+            },
+            {
+              "name": "EnergyStore",
+              "mass": 0.08,
+              "functionalMass": 0.02944039163995793,
+              "complete": true,
+              "integrity": 0.3680048954994741,
+              "activity": 1
+            },
+            {
+              "name": "MineralStore",
+              "mass": 0.02,
+              "functionalMass": 0.0073600979099894825,
+              "complete": true,
+              "integrity": 0.3680048954994741,
+              "activity": 1
+            },
+            {
+              "name": "Support",
+              "mass": 0.06,
+              "functionalMass": 0.022080293729968448,
+              "complete": true,
+              "integrity": 0.3680048954994741,
+              "activity": 1
+            },
+            {
+              "name": "Envelope",
+              "mass": 0.02,
+              "functionalMass": 0.0073600979099894825,
+              "complete": true,
+              "integrity": 0.3680048954994741,
+              "activity": 0
+            },
+            {
+              "name": "Replication",
+              "mass": 0.02,
+              "functionalMass": 0.0073600979099894825,
+              "complete": true,
+              "integrity": 0.3680048954994741,
+              "activity": 0
+            },
+            {
+              "name": "Translation",
+              "mass": 0.04,
+              "functionalMass": 0.014720195819978965,
+              "complete": true,
+              "integrity": 0.3680048954994741,
+              "activity": 1
+            },
+            {
+              "name": "Engulfment",
+              "mass": 0.025,
+              "functionalMass": 0.009200122387486853,
+              "complete": true,
+              "integrity": 0.3680048954994741,
+              "activity": 0
+            },
+            {
+              "name": "Minerals",
+              "mass": 0.025,
+              "functionalMass": 0.009200122387486853,
+              "complete": true,
+              "integrity": 0.3680048954994741,
+              "activity": 0
+            },
+            {
+              "name": "Division",
+              "mass": 0.02,
+              "functionalMass": 0.0073600979099894825,
+              "complete": true,
+              "integrity": 0.3680048954994741,
+              "activity": 0
+            },
+            {
+              "name": "Support",
+              "mass": 0.06,
+              "functionalMass": 0.022080293729968448,
+              "complete": true,
+              "integrity": 0.3680048954994741,
+              "activity": 1
+            },
+            {
+              "name": "Gut",
+              "mass": 0.03235335352081014,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.3786408722251569,
+              "activity": 1
+            },
+            {
+              "name": "ExudateEnzyme",
+              "mass": 0.012951226754254289,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.3777005237796983,
+              "activity": 1
+            },
+            {
+              "name": "Capture",
+              "mass": 0.03,
+              "functionalMass": 0.01110349637775939,
+              "complete": true,
+              "integrity": 0.370116545925313,
+              "activity": 0
+            },
+            {
+              "name": "TissueEnzyme",
+              "mass": 0.051804907017017156,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.3777005237796983,
+              "activity": 0
+            },
+            {
+              "name": "Translation",
+              "mass": 0.03295122675425429,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.3718320731352333,
+              "activity": 1
+            },
+            {
+              "name": "Minerals",
+              "mass": 0.025,
+              "functionalMass": 0.009206920417081713,
+              "complete": true,
+              "integrity": 0.3682768166832685,
+              "activity": 0
+            },
+            {
+              "name": "EnergyStore",
+              "mass": 0.04313780469441348,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.37864087222515624,
+              "activity": 1
+            },
+            {
+              "name": "MineralStore",
+              "mass": 0.01078445117360337,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.37864087222515624,
+              "activity": 1
+            },
+            {
+              "name": "LeftMotor",
+              "mass": 0.025,
+              "functionalMass": 0.009247320008477021,
+              "complete": true,
+              "integrity": 0.36989280033908084,
+              "activity": 0
+            },
+            {
+              "name": "RightMotor",
+              "mass": 0.025,
+              "functionalMass": 0.009247320008477021,
+              "complete": true,
+              "integrity": 0.36989280033908084,
+              "activity": 0
+            },
+            {
+              "name": "Vision",
+              "mass": 0.019999994343255556,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.36827267484915,
+              "activity": 1
+            },
+            {
+              "name": "Touch",
+              "mass": 0.01,
+              "functionalMass": 0.0036858238877112617,
+              "complete": true,
+              "integrity": 0.36858238877112615,
+              "activity": 1
+            },
+            {
+              "name": "Piercer",
+              "mass": 0.04647561337712715,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.3706386137492381,
+              "activity": 0
+            },
+            {
+              "name": "Engulfment",
+              "mass": 0.020458221636206083,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.3724630835470781,
+              "activity": 0
+            },
+            {
+              "name": "Envelope",
+              "mass": 0.0114251391428727,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.3785684722546904,
+              "activity": 0
+            },
+            {
+              "name": "Replication",
+              "mass": 0.02,
+              "functionalMass": 0.007360334070796971,
+              "complete": true,
+              "integrity": 0.36801670353984856,
+              "activity": 0
+            },
+            {
+              "name": "Division",
+              "mass": 0.02,
+              "functionalMass": 0.007385464622467437,
+              "complete": true,
+              "integrity": 0.36927323112337185,
+              "activity": 0
+            },
+            {
+              "name": "Repair",
+              "mass": 0.012625424714186397,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.3853394084203499,
+              "activity": 1
+            },
+            {
+              "name": "Support",
+              "mass": 0.0010565425375185366,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.4090335481082578,
+              "activity": 1
+            },
+            {
+              "name": "Division",
+              "mass": 0.003321784786587739,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.4100314468285421,
+              "activity": 0
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "heatCandidate": {
+    "final": {
+      "event": "sample",
+      "seconds": 300,
+      "counts": [
+        463,
+        4,
+        4,
+        3
+      ],
+      "maxGeneration": [
+        5,
+        1,
+        1,
+        1
+      ],
+      "descendants": [
+        450,
+        1,
+        2,
+        2
+      ],
+      "attacks": 6242,
+      "predations": 18,
+      "materialDelta": 4.197318048682064e-10,
+      "wallSeconds": 89.307234732,
+      "consumers": [
+        {
+          "id": 75,
+          "genome": 2,
+          "generation": 0,
+          "parent": 0,
+          "energy": 31.436204029833036,
+          "capacity": 240,
+          "gut": [
+            0,
+            0,
+            0
+          ],
+          "area": 1,
+          "supportMass": 0.16,
+          "integrity": 1,
+          "temperature": 0.5706192252495477,
+          "x": 760.9224609561977,
+          "y": 377.1621368738331,
+          "angle": 3.9584215358104298,
+          "speed": 6.524430920782404,
+          "upkeep": 0.6064110283620251,
+          "digestion": 0,
+          "growth": 0,
+          "machines": []
+        },
+        {
+          "id": 76,
+          "genome": 2,
+          "generation": 0,
+          "parent": 0,
+          "energy": 54.26279871435523,
+          "capacity": 80,
+          "gut": [
+            0,
+            0,
+            0
+          ],
+          "area": 1,
+          "supportMass": 0.04,
+          "integrity": 1,
+          "temperature": 0.5000006620198644,
+          "x": 299.0054234721704,
+          "y": 665.7638006526616,
+          "angle": 4.0684138781524775,
+          "speed": 11.115497655479322,
+          "upkeep": 0.5123642323934717,
+          "digestion": 0,
+          "growth": 0,
+          "machines": []
+        },
+        {
+          "id": 78,
+          "genome": 2,
+          "generation": 0,
+          "parent": 0,
+          "energy": 53.97056997080456,
+          "capacity": 240,
+          "gut": [
+            9.139095465192572,
+            0,
+            0
+          ],
+          "area": 1,
+          "supportMass": 0.04,
+          "integrity": 1,
+          "temperature": 0.5003045287419655,
+          "x": 555.668857137124,
+          "y": 415.16332792098325,
+          "angle": 4.672263108795327,
+          "speed": 2.1695960684049664,
+          "upkeep": 0.5428681021572512,
+          "digestion": 2.496,
+          "growth": 0,
+          "machines": []
+        },
+        {
+          "id": 83,
+          "genome": 4,
+          "generation": 0,
+          "parent": 0,
+          "energy": 79.22140511341514,
+          "capacity": 240,
+          "gut": [
+            0,
+            0,
+            0
+          ],
+          "area": 1.6053308171180036,
+          "supportMass": 0.16,
+          "integrity": 1,
+          "temperature": 0.7092792902113605,
+          "x": 847.1553741351598,
+          "y": 387.3084073737324,
+          "angle": 2.192189771333755,
+          "speed": 1.677477433198569,
+          "upkeep": 1.1538191159457365,
+          "digestion": 0,
+          "growth": 0,
+          "machines": []
+        },
+        {
+          "id": 195,
+          "genome": 2,
+          "generation": 1,
+          "parent": 77,
+          "energy": 64.17622465740999,
+          "capacity": 160,
+          "gut": [
+            0,
+            0,
+            0
+          ],
+          "area": 1.602268713988257,
+          "supportMass": 0.12,
+          "integrity": 1,
+          "temperature": 0.5000035816425321,
+          "x": 526.0777939856965,
+          "y": 593.5579912776492,
+          "angle": 2.6885406281471633,
+          "speed": 5.099766094792864,
+          "upkeep": 1.0063809803019284,
+          "digestion": 0,
+          "growth": 0,
+          "machines": []
+        },
+        {
+          "id": 345,
+          "genome": 4,
+          "generation": 1,
+          "parent": 84,
+          "energy": 90.02153549321649,
+          "capacity": 152.98314432595524,
+          "gut": [
+            0,
+            31.023509922133208,
+            1.0684797393256362
+          ],
+          "area": 1.0523800680508353,
+          "supportMass": 0.05736867912223321,
+          "integrity": 0.8327611795604386,
+          "temperature": 0.5032019736805543,
+          "x": 596.0006263934216,
+          "y": 71.10235646907199,
+          "angle": 1.4383872566546962,
+          "speed": 2.325525829902471,
+          "upkeep": 0.7253168521576765,
+          "digestion": 2.2619971864622768,
+          "growth": 0,
+          "machines": []
+        },
+        {
+          "id": 367,
+          "genome": 4,
+          "generation": 1,
+          "parent": 83,
+          "energy": 88.34364826811864,
+          "capacity": 160,
+          "gut": [
+            0,
+            0,
+            0
+          ],
+          "area": 1.4578577173751122,
+          "supportMass": 0.12,
+          "integrity": 1,
+          "temperature": 0.7608816352452124,
+          "x": 832.2094523355303,
+          "y": 361.8525709478419,
+          "angle": 1.7106660184199813,
+          "speed": 1.3900318471819424,
+          "upkeep": 0.8440911966388872,
+          "digestion": 0,
+          "growth": 0,
+          "machines": []
+        }
+      ]
+    },
+    "predatorBirths": [
+      {
+        "event": "birth",
+        "seconds": 194.96666666666667,
+        "lineage": 4,
+        "cell": {
+          "id": 345,
+          "genome": 4,
+          "generation": 1,
+          "parent": 84,
+          "energy": 38.002689760467334,
+          "capacity": 160,
+          "gut": [
+            0,
+            0,
+            0
+          ],
+          "area": 1.0010181711280792,
+          "supportMass": 0.06,
+          "integrity": 1,
+          "temperature": 0.500335360750577,
+          "x": 634.0239645760872,
+          "y": 731.6964078906827,
+          "angle": 2.9789425827005496,
+          "speed": 7.06712355254952,
+          "upkeep": 0.6663855817558356,
+          "digestion": 0,
+          "growth": 0,
+          "machines": [
+            {
+              "name": "Gut",
+              "mass": 0.06,
+              "functionalMass": 0.06,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "ExudateEnzyme",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            },
+            {
+              "name": "Capture",
+              "mass": 0.03,
+              "functionalMass": 0.03,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "TissueEnzyme",
+              "mass": 0.08,
+              "functionalMass": 0.08,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            },
+            {
+              "name": "LeftMotor",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0.5
+            },
+            {
+              "name": "RightMotor",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0.5
+            },
+            {
+              "name": "Vision",
+              "mass": 0.019999999999088615,
+              "functionalMass": 0.019999999999088615,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Touch",
+              "mass": 0.01,
+              "functionalMass": 0.01,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Piercer",
+              "mass": 0.05,
+              "functionalMass": 0.05,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            },
+            {
+              "name": "LeftHeat",
+              "mass": 0.01,
+              "functionalMass": 0.01,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "RightHeat",
+              "mass": 0.01,
+              "functionalMass": 0.01,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "EnergyStore",
+              "mass": 0.08,
+              "functionalMass": 0.08,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "MineralStore",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Support",
+              "mass": 0.06,
+              "functionalMass": 0.06,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Envelope",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            },
+            {
+              "name": "Replication",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Translation",
+              "mass": 0.04,
+              "functionalMass": 0.04,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Engulfment",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Minerals",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            },
+            {
+              "name": "Division",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            }
+          ]
+        }
+      },
+      {
+        "event": "birth",
+        "seconds": 214.03333333333333,
+        "lineage": 4,
+        "cell": {
+          "id": 367,
+          "genome": 4,
+          "generation": 1,
+          "parent": 83,
+          "energy": 37.945051821108365,
+          "capacity": 160,
+          "gut": [
+            17.3742036940457,
+            0,
+            0
+          ],
+          "area": 1.000056761267288,
+          "supportMass": 0.06,
+          "integrity": 1,
+          "temperature": 0.6673217038303719,
+          "x": 793.5043479867555,
+          "y": 354.89906498567547,
+          "angle": 2.655124496519273,
+          "speed": 7.343335173434698,
+          "upkeep": 0.6660510730148461,
+          "digestion": 0,
+          "growth": 0,
+          "machines": [
+            {
+              "name": "Gut",
+              "mass": 0.06,
+              "functionalMass": 0.06,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "ExudateEnzyme",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Capture",
+              "mass": 0.03,
+              "functionalMass": 0.03,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "TissueEnzyme",
+              "mass": 0.08,
+              "functionalMass": 0.08,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            },
+            {
+              "name": "LeftMotor",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0.5
+            },
+            {
+              "name": "RightMotor",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0.5
+            },
+            {
+              "name": "Vision",
+              "mass": 0.019999999999088615,
+              "functionalMass": 0.019999999999088615,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Touch",
+              "mass": 0.01,
+              "functionalMass": 0.01,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Piercer",
+              "mass": 0.05,
+              "functionalMass": 0.05,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            },
+            {
+              "name": "LeftHeat",
+              "mass": 0.01,
+              "functionalMass": 0.01,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "RightHeat",
+              "mass": 0.01,
+              "functionalMass": 0.01,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Minerals",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            },
+            {
+              "name": "EnergyStore",
+              "mass": 0.08,
+              "functionalMass": 0.08,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "MineralStore",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Support",
+              "mass": 0.06,
+              "functionalMass": 0.06,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Envelope",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            },
+            {
+              "name": "Replication",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Translation",
+              "mass": 0.04,
+              "functionalMass": 0.04,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Engulfment",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Division",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            }
+          ]
+        }
+      }
+    ],
+    "predatorDeaths": [
+      {
+        "event": "death",
+        "seconds": 220.6,
+        "attacksDelta": 4,
+        "predationsDelta": 1,
+        "lineage": 4,
+        "lastLive": {
+          "id": 84,
+          "genome": 4,
+          "generation": 0,
+          "parent": 0,
+          "energy": 60.65625154293258,
+          "capacity": 88.3431572760453,
+          "gut": [
+            0,
+            1.627456654567375,
+            0
+          ],
+          "area": 1.0010181711280792,
+          "supportMass": 0.036809648865018876,
+          "integrity": 0.0014711260004427644,
+          "temperature": 0.500525411698425,
+          "x": 597.5056306554548,
+          "y": 731.2501132139417,
+          "angle": 4.844827493608262,
+          "speed": 1.4272976536507433,
+          "upkeep": 0.6896871863130373,
+          "digestion": 0.87243066216231,
+          "growth": 0,
+          "machines": [
+            {
+              "name": "Minerals",
+              "mass": 0.02499999999819154,
+              "functionalMass": 0.014220201937005673,
+              "complete": true,
+              "integrity": 0.5688080775213736,
+              "activity": 0
+            },
+            {
+              "name": "Support",
+              "mass": 0.06,
+              "functionalMass": 0.022085789319011322,
+              "complete": true,
+              "integrity": 0.36809648865018874,
+              "activity": 1
+            },
+            {
+              "name": "Gut",
+              "mass": 0.06,
+              "functionalMass": 0.022085789319011322,
+              "complete": true,
+              "integrity": 0.36809648865018874,
+              "activity": 1
+            },
+            {
+              "name": "ExudateEnzyme",
+              "mass": 0.02,
+              "functionalMass": 0.007361929773003775,
+              "complete": true,
+              "integrity": 0.36809648865018874,
+              "activity": 0
+            },
+            {
+              "name": "Capture",
+              "mass": 0.03,
+              "functionalMass": 0.01706424232564121,
+              "complete": true,
+              "integrity": 0.5688080775213736,
+              "activity": 1
+            },
+            {
+              "name": "TissueEnzyme",
+              "mass": 0.08,
+              "functionalMass": 0.0294477190920151,
+              "complete": true,
+              "integrity": 0.36809648865018874,
+              "activity": 1
+            },
+            {
+              "name": "Translation",
+              "mass": 0.04,
+              "functionalMass": 0.01472385954600755,
+              "complete": true,
+              "integrity": 0.36809648865018874,
+              "activity": 1
+            },
+            {
+              "name": "EnergyStore",
+              "mass": 0.08,
+              "functionalMass": 0.0294477190920151,
+              "complete": true,
+              "integrity": 0.36809648865018874,
+              "activity": 1
+            },
+            {
+              "name": "MineralStore",
+              "mass": 0.02,
+              "functionalMass": 0.007361929773003775,
+              "complete": true,
+              "integrity": 0.36809648865018874,
+              "activity": 1
+            },
+            {
+              "name": "LeftMotor",
+              "mass": 0.025,
+              "functionalMass": 0.01275265311493511,
+              "complete": true,
+              "integrity": 0.5101061245974043,
+              "activity": 0
+            },
+            {
+              "name": "RightMotor",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0.09959149905650609
+            },
+            {
+              "name": "Vision",
+              "mass": 0.01999999999717609,
+              "functionalMass": 0.01137616154882121,
+              "complete": true,
+              "integrity": 0.5688080775213736,
+              "activity": 1
+            },
+            {
+              "name": "Touch",
+              "mass": 0.01,
+              "functionalMass": 0.005688080775213737,
+              "complete": true,
+              "integrity": 0.5688080775213736,
+              "activity": 1
+            },
+            {
+              "name": "Piercer",
+              "mass": 0.05,
+              "functionalMass": 0.028440403876068682,
+              "complete": true,
+              "integrity": 0.5688080775213736,
+              "activity": 0.8
+            },
+            {
+              "name": "Engulfment",
+              "mass": 0.025,
+              "functionalMass": 0.014220201938034341,
+              "complete": true,
+              "integrity": 0.5688080775213736,
+              "activity": 1
+            },
+            {
+              "name": "Envelope",
+              "mass": 0.02,
+              "functionalMass": 0.011376161550427474,
+              "complete": true,
+              "integrity": 0.5688080775213736,
+              "activity": 0
+            },
+            {
+              "name": "Replication",
+              "mass": 0.02,
+              "functionalMass": 0.007361929773003775,
+              "complete": true,
+              "integrity": 0.36809648865018874,
+              "activity": 0
+            },
+            {
+              "name": "LeftHeat",
+              "mass": 0.01,
+              "functionalMass": 0.005101062186681562,
+              "complete": true,
+              "integrity": 0.5101062186681562,
+              "activity": 1
+            },
+            {
+              "name": "RightHeat",
+              "mass": 0.01,
+              "functionalMass": 0.01,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Division",
+              "mass": 0.02,
+              "functionalMass": 0.011376161550427474,
+              "complete": true,
+              "integrity": 0.5688080775213736,
+              "activity": 0
+            },
+            {
+              "name": "Repair",
+              "mass": 0.012521727644718051,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.3731499137390858,
+              "activity": 1
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

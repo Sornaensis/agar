@@ -521,7 +521,7 @@ impl ProductIdentity {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct RecipeIdentity {
+pub(crate) struct RecipeIdentity {
     name: String,
     kind: u8,
     at: u64,
@@ -546,7 +546,7 @@ impl RecipeIdentity {
                 (ProductIdentity::new(&program.products[i]), identity_number(mass))).collect(),
         }
     }
-    fn from_recipe(recipe: &Recipe) -> Self {
+    pub(crate) fn from_recipe(recipe: &Recipe) -> Self {
         Self {
             name: recipe.name.clone(), kind: Self::kind(recipe.kind),
             at: identity_number(recipe.at), direction: identity_number(recipe.direction),
@@ -655,7 +655,6 @@ impl AssemblyMeasures {
 
 /// Valid only within one work phase, before anything is built or dismantled.
 struct WorkSnapshot {
-    energy_capacity: f64,
     free_space: f64,
     free_surface: f64,
     support_area: f64,
@@ -670,21 +669,19 @@ struct WorkSnapshot {
 }
 impl Body {
     fn work_snapshot(&self, measures: &mut Vec<AssemblyMeasures>) -> WorkSnapshot {
-        let mut family = [0.0; FAMILY_COUNT];
         let mut organ_space = -0.0;
         let mut organ_surface = -0.0;
         let mut organ_damage = -0.0;
         let mut legacy_core = -0.0;
         for organ in &self.organs {
             let functional = organ.functional_mass();
-            family[organ.kind as usize] += functional;
             if organ.kind == OrganelleKind::Core { legacy_core += functional; }
             organ_space += organ.internal_space();
             organ_surface += organ.surface_space();
             organ_damage += organ.mass * (1.0 - organ.integrity);
         }
         let mut result = WorkSnapshot {
-            energy_capacity: 0.0, free_space: 0.0, free_surface: 0.0, support_area: 0.0,
+            free_space: 0.0, free_surface: 0.0, support_area: 0.0,
             legacy_core, active: [0.0; FAMILY_COUNT], membrane: 0.0, replicator: 0.0,
             constrictor: 0.0, translation: 0.0, recycling: 0.0, damaged: 0.0,
         };
@@ -704,7 +701,6 @@ impl Body {
                 let active = measure.functional * assembly.activity;
                 match assembly.recipe.kind {
                     AssemblyKind::Organelle(kind) => {
-                        family[kind as usize] += measure.functional;
                         result.active[kind as usize] += active;
                         if kind == OrganelleKind::Core { support += measure.functional; }
                     }
@@ -724,16 +720,6 @@ impl Body {
                 }
             }
             cell_space = state.stock_mass() + state.genetic_mass() + assembly_space;
-        }
-        // Keep the legacy grouping and the primitive addition order bit exact.
-        result.energy_capacity = 2000.0 * family[OrganelleKind::Core as usize]
-            + 600.0 * family[OrganelleKind::Reserve as usize];
-        if let Some(state) = &self.cellular {
-            for (assembly, measure) in state.assemblies.iter().zip(measures.iter()) {
-                if assembly.recipe.kind == AssemblyKind::Mechanism(MechanismKind::EnergyStorage) {
-                    result.energy_capacity += 2000.0 * measure.functional;
-                }
-            }
         }
         result.free_space = (INTERNAL_PER_AREA * self.area - (organ_space
             + self.precursor_mass.iter().sum::<f64>() * PROTEIN_INTERNAL_FOOTPRINT + cell_space)).max(0.0);
@@ -1690,7 +1676,10 @@ impl Body {
             }
         }
         let amounts = allocation.allocate(demands, [
-            (*energy - 0.15 * snapshot.energy_capacity).max(0.0),
+            // Energy reserves are an authored regulation decision. Empty
+            // storage must not lock usable energy away from essential work,
+            // such as building the enzyme for an already captured meal.
+            energy.max(0.0),
             minerals.max(0.0),
             snapshot.free_space,
             snapshot.free_surface,

@@ -10,6 +10,59 @@ fn recycling_program() -> CellularProgram {
 }
 
 #[test]
+fn low_energy_construction_depends_on_paid_resources_not_empty_storage_capacity() {
+    let program = CellularProgram {
+        products: vec![product("Protease", ProductKind::Enzyme), product("Wall", ProductKind::Membrane)],
+        assemblies: vec![
+            AssemblyDef { name: "TissueEnzyme".into(), kind: AssemblyKind::Mechanism(MechanismKind::DigestTissue),
+                parts: vec![(0, 0.02)], at: 0.0, direction: 0.0 },
+            AssemblyDef { name: "Battery".into(), kind: AssemblyKind::Mechanism(MechanismKind::EnergyStorage),
+                parts: vec![(1, 0.08)], at: 0.0, direction: 0.0 },
+        ],
+    };
+    program.validate().unwrap();
+    let mut results = Vec::new();
+    for extra_storage in [false, true] {
+        let mut body = stocked(&program, &[0.0, 0.0]);
+        if extra_storage { add_complete(&mut body, &program, 1); }
+        let mut energy = 4.0;
+        let mut minerals = 0.2;
+        assert!(energy < 0.15 * body.capacities().energy, "The former hidden reserve blocked this affordable enzyme");
+        let original_material = body.structural_mass() + minerals;
+        let original_energy = body.embodied_energy() + energy;
+        let mut heat = 0.0;
+        for _ in 0..120 {
+            let state = body.cellular.as_ref().unwrap();
+            let installed: f64 = state.assemblies.iter().filter(|a| a.recipe.name == "TissueEnzyme")
+                .map(AssemblyInstance::mass).sum();
+            let complete = state.assemblies.iter().any(|a| a.recipe.name == "TissueEnzyme" && a.complete());
+            let mut request = controls(&program, 0.0);
+            request.start = vec![!complete, false];
+            request.expression[0] = if installed + state.pools[0].mass + 1e-12 < 0.02 { 1.0 } else { 0.0 };
+            let available = energy;
+            let report = work(&mut body, &program, &request, &mut energy, &mut minerals, 1.0 / 30.0);
+            assert!(report.energy_spent <= available + 1e-12 && energy >= 0.0);
+            heat += report.dissipated_energy;
+            close(original_material, body.structural_mass() + minerals);
+            close(original_energy, body.embodied_energy() + energy + heat);
+        }
+        assert!(body.cellular.as_ref().unwrap().assemblies.iter().any(|a| a.recipe.name == "TissueEnzyme" && a.complete()));
+        close(body.capacities().substrate_digestion[1], 65.0 * 0.02);
+        assert!(energy > 1.0 && energy < 4.0, "The enzyme is paid, with enough energy left to use it");
+        results.push((energy, minerals));
+    }
+    assert_eq!(results[0], results[1], "Adding empty storage neither locks nor grants construction energy");
+
+    let mut body = stocked(&program, &[0.0, 0.0]);
+    let mut energy = 0.0;
+    let mut minerals = 0.2;
+    let report = work(&mut body, &program, &controls(&program, 1.0), &mut energy, &mut minerals, 1.0);
+    assert_eq!(report.energy_spent, 0.0);
+    assert_eq!(report.synthesized_mass, 0.0);
+    assert_eq!(report.constructed_mass, 0.0);
+}
+
+#[test]
 fn initiation_gate_controls_new_commitments_without_freezing_partial_machines() {
     let program = flagellum_program();
     let mut body = stocked(&program, &[0.01, 0.02, 0.05]);
@@ -269,7 +322,6 @@ fn cached_bindings_reused_buffers_and_phase_summaries_preserve_exact_snapshot_va
             assert_eq!(active[i].to_bits(), expected.to_bits());
         }
         let summary = body.work_snapshot(&mut measures);
-        assert_eq!(summary.energy_capacity.to_bits(), body.capacities().energy.to_bits());
         assert_eq!(summary.free_space.to_bits(), body.space().free.to_bits());
         assert_eq!(summary.free_surface.to_bits(), body.surface().free.to_bits());
         assert_eq!(summary.support_area.to_bits(), (body.support_mass() / CORE_MASS_PER_AREA).to_bits());

@@ -9,7 +9,7 @@ const conserved = state => {
 };
 
 // Every authored example must compile, including files users can import directly.
-for (const name of ['solar', 'regulated-motor', 'phototroph', 'forager', 'rememberer', 'separate-digestion', 'local-control']) {
+for (const name of ['solar', 'regulated-motor', 'phototroph', 'forager', 'rememberer', 'predator', 'separate-digestion', 'local-control']) {
   const api = await fresh({ ambientLight: 0.85, initialNutrients: 3 });
   const genome = compile(api, await readFile(new URL(`../examples/${name}.cell`, import.meta.url), 'utf8'));
   if (name === 'solar' || name === 'regulated-motor') {
@@ -93,8 +93,12 @@ for (const preset of PRESETS) {
   assert.ok(made > 0 && made * 0.6 <= 0.022 / 30 + 1e-10, 'All genes share the same paid core budget');
   assert.ok(state.cells[0].energy < 68 && state.cells[0].nutrients < 0.6);
 
+  // This generic WASM fixture supplies exudate. The tissue specialist retains
+  // an exudate pathway, but its smaller allocation deliberately grows more
+  // slowly on this substrate. Its primary tissue-fed cycle is tested natively.
+  const cycleSeconds = preset.name === 'Predator' ? 900 : 150;
   let nextFood = 1, previous;
-  while (!state.births && state.ticks < 150 * 30) {
+  while (!state.births && state.ticks < cycleSeconds * 30) {
     const parent = state.cells.find(cell => cell.id === 1);
     assert.ok(parent, `${preset.name} must survive development in its supplied habitat`);
     if (preset.name !== 'Phototroph' && state.ticks >= nextFood) {
@@ -106,7 +110,7 @@ for (const preset of PRESETS) {
     state = advance(api, steps);
     conserved(state);
   }
-  assert.equal(state.births, 1, `${preset.name} assembles and funds a complete reproductive cycle`);
+  assert.equal(state.births, 1, `${preset.name} assembles and funds a complete reproductive cycle within ${cycleSeconds} seconds in its supplied habitat`);
   assert.equal(state.population, 2);
   assert.ok(previous, 'Observe the actual fission tick');
   const daughter = state.cells.find(cell => cell.generation === 1);
@@ -126,12 +130,25 @@ for (const preset of PRESETS) {
     assert.equal(cell.replication.mass, 0);
     assert.ok(cell.replication.genomeMass > 0, 'Paid copied material is inherited instead of disappearing');
   }
+  if (preset.name === 'Forager' || preset.name === 'Predator') {
+    const essential = ['Gut', 'ExudateEnzyme', 'Capture', 'LeftMotor', 'RightMotor', 'Vision', 'Touch',
+      ...(preset.name === 'Predator' ? ['TissueEnzyme', 'Piercer', 'LeftHeat', 'RightHeat'] : [])];
+    for (const name of essential) {
+      assert.ok(machines.filter(machine => machine.name === name && machine.functionalMass > 0).length >= 2,
+        `${preset.name} paid for duplicate ${name} machinery before division`);
+      for (const cell of inherited) {
+        assert.ok(cell.assemblies.some(machine => machine.name === name && machine.functionalMass > 0),
+          `${preset.name} gives each daughter an existing working ${name}, including each motor orientation`);
+      }
+    }
+  }
   if (preset.name === 'Phototroph') {
     assert.ok(state.photosynthesis > 0);
     assert.equal(state.eaten, 0);
   }
   if (preset.name === 'Forager') assert.equal(state.photosynthesis, 0);
 
+  const firstDivisionSeconds = state.seconds;
   const bytes = save(api), resumed = await fresh();
   assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 7);
   assert.equal(restore(resumed, bytes), 1, error(resumed));
@@ -145,8 +162,9 @@ for (const preset of PRESETS) {
     compile(api, source(api, mutant));
     assert.equal(api.mutate_genome(genome, 17, kind), mutant);
   }
-  cycles.push({ name: preset.name, firstDivisionSeconds: Math.round(state.seconds * 100) / 100 });
+  cycles.push({ name: preset.name, suppliedSubstrate: preset.name === 'Phototroph' ? 'none' : 'exudate',
+    firstDivisionSeconds: Math.round(firstDivisionSeconds * 100) / 100, timeLimitSeconds: cycleSeconds });
 }
 
-console.log('Cellular checks passed: 8 authored genomes, 7 importable examples, local receptor separation, bright/shade motor recycling and regrowth, paid development, frozen inspection, resource conservation, physical fission, gene/placement mutations, and exact v7 continuation.');
-console.log(JSON.stringify({ conditions: 'One founder; 0.85 light; 3 initial minerals per patch; 4 supplied particles/s for non-phototrophs.', cycles }));
+console.log('Cellular checks passed: 8 authored genomes, 8 importable examples, local receptor separation, bright/shade motor recycling and regrowth, paid development, frozen inspection, resource conservation, whole-machine fission with functioning consumer daughters, gene/placement mutations, and exact v7 continuation.');
+console.log(JSON.stringify({ conditions: 'One founder; 0.85 light; 3 initial minerals per patch; 4 supplied exudate particles/s for non-phototrophs. The Predator tissue-funded lifecycle is tested separately in the native engine.', cycles }));

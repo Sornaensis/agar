@@ -1,6 +1,12 @@
 # Simulation performance
 
-## Current cellular execution improvements
+The measurements below record the builds identified in their linked reports.
+Subsequent consumer-development, energy-allocation and division changes alter
+simulation trajectories; the older behavior-equality measurements are historical
+evidence for those optimization steps. Current food-chain validation is described
+in [the ecosystem experiments](experiments/README.md).
+
+## Cellular execution improvements
 
 The checkpoint-7 implementation retains all **seven cellular input/control
 vectors** across ticks: product amounts, built amounts and receptor readings on
@@ -47,7 +53,7 @@ trajectories with older presets would mix performance and behavior changes.
 Raw measurements are in
 [cellular-bindings-benchmark.json](experiments/cellular-bindings-benchmark.json).
 
-### Current migration and unchanged-behavior evidence
+### Local-control migration and unchanged-behavior evidence
 
 The actual compiled WASM imports checkpoint-6 worlds for all eight preserved
 mechanism programs after 40 seconds of paid development. Their source text,

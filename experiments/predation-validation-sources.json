@@ -1,0 +1,16 @@
+{
+  "engineWasmSha256": "8cff1c20df7a0a805bfe01f2e75bfbbb86996e26baf38cfc6419cb0da6b65c6b",
+  "presetsSha256": "6dab30b54d1c66e07bd5e7386a0b6b8f9e3d940cbdadbf3e1a044961d23903fc",
+  "sourceSha256": {
+    "Forager": "a0e7714bf20ad19b37d88215a9d80b207110df1928a77dd5cf72b4b7499f8b34",
+    "Drifter": "554d59e9567be508fd9b103372dffb1a6c6828c5d8e2af8992cd220ccc26d6e4",
+    "Conserver": "1b79f23c7fbfaa5ed7637a4003399098c460218f9365c9302c3608f281a30956",
+    "Giant": "7afb173ea57af73502227e3f84307e15e655c1ca567cbf761bb0add43117f55e",
+    "Rememberer": "f0d4189587707a9fa6924bb16f006232a56f37e507f7b921c9f1d4210fbed1ce",
+    "Phototroph": "1f3762ce80ef1714ec6dfd240cb7570b169277a486d205f97750fea89c08167a",
+    "Predator": "fca517e4a351ab1fc3cb1e18d80fb7649ce1eb0e4fbdcf40df118eb4614319a5",
+    "Mixotroph": "1619cef70594e918fe2b72f11c6edef8aae199925f34ef72a7f0a8edacb2e35d"
+  },
+  "archivedByteIdentical": 24,
+  "unaffectedCurrentSincePreEscapeByteIdentical": 7
+}

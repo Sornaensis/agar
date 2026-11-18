@@ -2,7 +2,32 @@
 
 These are deterministic tests of the simulator, not a biological validation or a guarantee of stable coexistence. Each measurement JSON preserves its engine hash, environment, complete authored genomes, initialization, mutation rate and sampled results.
 
-## Current protein/substrate model — ABI 10
+## Current cellular food chain — ABI 10, checkpoint 7
+
+The mixed-ecosystem regression uses the actual current built-in sources and the
+catalog's unmodified Sunlit pond environment: 72 Phototrophs, 6 Foragers,
+4 Mixotrophs and 2 Predators, with no initial or continuing external organic
+food. Organisms grow their machinery from identical minimal founders.
+
+The current fixtures test staged consumer construction, hunting and tissue
+digestion, recovery from a captured meal at low energy, and navigation around
+producer surfaces. Real thermal-stress fixtures check paid repair, recovery of
+the original machinery without redundant copies, and repair initiation before
+navigation is complete. Native coverage also verifies tissue recovery from a
+newborn that dies during division, whole-recipe inheritance, strictly external
+waste release, and cellular repair/fission affordability independent of empty
+storage. Current Forager fixtures cover tissue-funded reproduction, continued
+search with a waste-filled gut, and paid escape and repair after injury;
+Predator fixtures cover paid paired heat sensing, fed heat escape, repair and
+tissue-funded reproduction. The ten-minute ecosystem gate requires both consumer
+lineages to reproduce and remain alive at the endpoint. It counts distinct
+descendants observed every simulated second; this is not an exact lifetime
+birth counter. Recorded comparisons and their limits are in
+[predation-validation.md](predation-validation.md). The final four runs retain
+reproducing Predators, but each still fails at least one Forager survival or
+reproduction requirement.
+
+## Earlier protein/substrate model — ABI 10
 
 Introduced organisms still share one minimal core. Programs now express paid family-specific proteins, regulate the stock, and assemble organs from it on later ticks. Organic matter distinguishes exudate, tissue and waste with separate gut pools and shared enzyme allocation. There is no five-minute age timer or fixed organic-particle count limit.
 
@@ -56,20 +81,21 @@ The baseline and later ABI 8 measurements differ in program behavior and engine 
 
 ```sh
 npm run test:food-chain
-node scripts/check-preset-navigation.mjs
-npm run test:food-chain -- --measure --duration 300 --output experiments/organelle-rerun.json
-npm run test:food-chain -- --measure --seed 42 --duration 300 --mutation 0.1 --output experiments/organelle-mutation-rerun.json
+npm run test:cellular
+npm run test:ecosystem
+node --no-liftoff scripts/check-ecosystem.mjs --assert --seed 42,7,2026 --duration 600 --output experiments/ecosystem-rerun.json
+node --no-liftoff scripts/check-ecosystem.mjs --assert --seed 42 --duration 600 --mutation 0.1 --output experiments/ecosystem-mutation-rerun.json
 ```
 
-These commands use the current bundled WASM and programs. They do not reproduce the historical ABI 8 runs unless that exact engine and source are restored. Neither correctness gate asserts a desired ecosystem equilibrium.
+These commands use the current bundled WASM and programs. They do not reproduce historical runs unless that exact engine and source are restored. Omit `--assert` to record an experiment without requiring consumer persistence. The regression gate checks a finite observation window, not a desired equilibrium.
 
 A separate native lifecycle test supplies a stationary scavenger with accounted organic particles in darkness. It captures and digests meals, grows a paid body and produces a daughter; the identical unfed control has no births. This verifies the heterotrophic growth pathway independently of the mixed preset's navigation and food availability.
 
-`--duration` accepts positive whole simulated seconds and defaults to 120. Standard sample times are 0, 15, 30, 60, 120 and 180 seconds, filtered to the requested interval; the requested endpoint is always included. Measurements report observed outcomes rather than asserting particular lineage counts.
+`--duration` accepts positive whole simulated seconds and defaults to 600. Standard sample times are 0, 15, 30, 60, 120, 180, 300, 600 and 900 seconds, filtered to the requested interval; the requested endpoint is always included. Reports retain complete sources, WASM hash, configuration, lineage diagnostics and conservation checks. `--assert` requires at least 300 simulated seconds and writes its report before reporting failures.
 
 ## Historical allocation-model experiments — ABI 4–6
 
 - `food-chain-before.json` and `food-chain-after.json` retain the earlier 300-second ABI 4-to-5 comparison.
 - `population-before.json` and `population-after.json` retain the ABI 5-to-6 population-cap and feeding comparison, including a separate mutation-enabled run.
 
-Those files use the former fractional investment bodies and semantic food/prey/threat sensors. Their balance, coefficients and checkpoint compatibility assumptions are obsolete for the organelle model. They remain historical records with their original hashes and source; they are not current regression expectations. Current checkpoint 4 imports physical-organelle checkpoint 3 and explicitly rejects checkpoint 1/2, preserving old saved data rather than silently migrating it.
+Those files use the former fractional investment bodies and semantic food/prey/threat sensors. Their balance, coefficients and checkpoint compatibility assumptions are obsolete for the organelle model. They remain historical records with their original hashes and source; they are not current regression expectations.

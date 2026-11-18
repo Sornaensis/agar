@@ -246,6 +246,28 @@ instances are assigned whole, and copied genetic material becomes inherited
 material. Surplus contents caused by reduced inherited capacity spill into the
 environment. A changed genome cannot reinterpret existing ingredient identities.
 
+Cellular fission requires the actual division cost, without an extra reserve
+proportional to empty energy-storage capacity. Cellular envelope repair follows
+the same affordability rule. Authored activity conditions can require a larger
+reserve. Legacy programs retain their existing reserve rules.
+
+Cellular partitioning prefers to distribute complete functional duplicates of
+each exact recipe between the two cells. Identity includes ingredient definitions,
+amounts and attachment geometry, so opposite motors or altered products remain
+distinct. Core support and physical space take priority; the allocator can fall
+back to the existing load-based packing when necessary. It never copies a lone
+instance or guarantees that a cell which failed to build duplicates will produce
+two independently functioning daughters.
+
+Overflow after partition can exhaust a daughter with no functioning energy
+compartment. If it dies in that same tick, its body and gut material still return
+to the environment through the ordinary death path.
+
+Secreted organic particles are placed just outside the emitter's inclusive
+capture surface, including when a secretion merges with an existing packet.
+This geometric clearance prevents immediate reingestion. It does not prevent
+later capture after the cell and particle move back into contact.
+
 ## Tick and accounting rules
 
 1. Snapshot existing bodies, stocks, capacities and sensed surroundings.
@@ -298,3 +320,10 @@ these sparse costs and reuses work buffers between cells and ticks. It preserves
 the prior weighted completion-fraction sharing, demand order, and starting-stock
 rule. See [performance measurements](../PERFORMANCE.md) for the focused benchmark
 and exact comparison against the earlier dense allocator.
+
+Cellular work can spend the cell's actual usable energy. There is no hidden
+reserve proportional to storage capacity: building an empty energy compartment
+does not make existing energy inaccessible. Programs regulate their own reserve
+through gene expression and initiation conditions, while every accepted operation
+still pays its full energy, mineral and work costs. This matters when a hungry
+cell must synthesize an enzyme for food already in its gut.

@@ -20,8 +20,11 @@
     "test:storage": "node scripts/check-storage.mjs",
     "test:session": "node scripts/check-session.mjs",
     "check:engine": "node scripts/check-engine-artifact.mjs",
-    "test:food-chain": "node scripts/check-food-chain.mjs",
-    "test:navigation": "node scripts/check-preset-navigation.mjs",
+    "test:food-chain": "node scripts/check-cellular-navigation.mjs",
+    "test:food-chain:legacy": "node scripts/check-food-chain.mjs",
+    "test:navigation": "node scripts/check-cellular-navigation.mjs",
+    "test:navigation:legacy": "node scripts/check-preset-navigation.mjs",
+    "test:ecosystem": "node --no-liftoff scripts/check-ecosystem.mjs --assert --duration 600 --seed 42",
     "bench:simulation": "node --no-liftoff scripts/benchmark-simulation.mjs",
     "test:worker": "node scripts/check-worker.mjs",
     "test:cellular": "node scripts/check-cellular.mjs"

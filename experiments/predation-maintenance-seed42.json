@@ -1,0 +1,4975 @@
+{
+  "startedAt": "2026-11-18T08:48:50.034Z",
+  "wasmSha256": "c0195e1da6c513215071daed6dabe9d3df3414fcf10e8f5f900a6da88406bad6",
+  "wasmBytes": 781138,
+  "template": {
+    "id": "builtin:simulation:mixed-ecosystem",
+    "name": "Mixed ecosystem",
+    "description": "Many producers support a few foragers, mixotrophs, and predators. Survival depends on the food chain.",
+    "environmentId": "builtin:environment:sunlit-pond",
+    "seed": 42,
+    "populations": [
+      {
+        "genomeId": "builtin:genome:phototroph",
+        "count": 72
+      },
+      {
+        "genomeId": "builtin:genome:forager",
+        "count": 6
+      },
+      {
+        "genomeId": "builtin:genome:mixotroph",
+        "count": 4
+      },
+      {
+        "genomeId": "builtin:genome:predator",
+        "count": 2
+      }
+    ]
+  },
+  "environment": {
+    "id": "builtin:environment:sunlit-pond",
+    "name": "Sunlit pond",
+    "description": "Light and minerals support producers; organic food comes from living cells and their remains.",
+    "createdAt": 0,
+    "updatedAt": 0,
+    "config": {
+      "foodRate": 0,
+      "ambientTemperature": 0.5,
+      "ambientLight": 0.4,
+      "currentStrength": 3,
+      "initialNutrients": 0.3,
+      "sources": [
+        {
+          "kind": 0,
+          "x": 624,
+          "y": 364.8,
+          "strength": 0.95,
+          "radius": 280
+        },
+        {
+          "kind": 1,
+          "x": 936,
+          "y": 243.2,
+          "strength": 0.35,
+          "radius": 180
+        },
+        {
+          "kind": 2,
+          "x": 240,
+          "y": 478.8,
+          "strength": 0.25,
+          "radius": 260
+        },
+        {
+          "kind": 3,
+          "x": 576,
+          "y": 418,
+          "strength": 0.7,
+          "radius": 220
+        }
+      ]
+    }
+  },
+  "populations": [
+    {
+      "id": "builtin:genome:phototroph",
+      "name": "Phototroph",
+      "source": "# Shared products supply independently regulated physical recipes.\n# Genes make stock; start_when permits new machines; activity runs built ones.\ncellular;\n\nproduct Mount = anchor();\nproduct Pigment = pigment();\nproduct Catalyst = enzyme();\nproduct Frame = scaffold();\nproduct Carrier = transporter();\nproduct Wall = membrane();\nproduct Replicase = replicase();\nproduct Rotor = motor();\nproduct Ring = constrictor();\n\n# Tolerate modest wear while repair restores working capacity. The allowance\n# stays below one machine, even when a larger body needs many copies.\nfn missing(installed, required, unit) = installed + 0.000001 < required - min(required * 0.1, unit * 0.2);\nfn enough(installed, required) = installed + 0.000001 >= required * 0.9;\nfn buffered(stock, effort) = if stock < 0.001 then effort else 0;\n\nlet funded = (energy > 10 || gut.energy > 0) && nutrient.stored > 0.001;\nlet expanding = body.area > body.birth_area * 1.6;\nlet powered = enough(built.Solar, 0.12);\nlet equipped = powered;\nlet surplus = equipped && energy > 55;\n# This stationary producer spends no material on locomotion.\n\nlet need_Solar = funded && (true) && missing(built.Solar, (if expanding then 0.24 else 0.12), 0.12);\nlet need_Translation = funded && (powered) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Minerals = funded && (powered) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);\nlet need_EnergyStore = funded && (powered) && missing(built.EnergyStore, (if expanding then 0.16 else 0.08), 0.08);\nlet need_MineralStore = funded && (powered) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Support = funded && (powered && energy > 45) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);\nlet need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);\n\ngene supply_Mount: Mount = buffered(pool.Mount, (if need_Solar then 0.25 else 0) + (if need_Minerals then 0.25 else 0) + (if need_Division then 0.5 else 0));\ngene supply_Pigment: Pigment = buffered(pool.Pigment, (if need_Solar then 1 else 0));\ngene supply_Catalyst: Catalyst = buffered(pool.Catalyst, (if need_Solar then 0.25 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0));\ngene supply_Frame: Frame = buffered(pool.Frame, (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0));\ngene supply_Carrier: Carrier = buffered(pool.Carrier, (if need_Minerals then 1 else 0));\ngene supply_Wall: Wall = buffered(pool.Wall, (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0));\ngene supply_Replicase: Replicase = buffered(pool.Replicase, (if need_Replication then 1 else 0));\ngene supply_Rotor: Rotor = buffered(pool.Rotor, (if need_Division then 1 else 0));\ngene supply_Ring: Ring = buffered(pool.Ring, (if need_Division then 1 else 0));\n\nassembly Solar: harvest(light) {\n  Mount: 0.02;\n  Pigment: 0.08;\n  Catalyst: 0.02;\n  start_when: need_Solar;\n  activity: 1;\n}\n\nassembly Translation: translate() {\n  Frame: 0.02;\n  Catalyst: 0.02;\n  start_when: need_Translation;\n  activity: 1;\n}\n\nassembly Minerals: import(mineral) {\n  Mount: 0.005;\n  Carrier: 0.02;\n  start_when: need_Minerals;\n  activity: if nutrient.fraction < 0.9 then 1 else 0;\n}\n\nassembly EnergyStore: store(energy) {\n  Wall: 0.08;\n  start_when: need_EnergyStore;\n  activity: 1;\n}\n\nassembly MineralStore: store(mineral) {\n  Wall: 0.02;\n  start_when: need_MineralStore;\n  activity: 1;\n}\n\nassembly Repair: repair() {\n  Catalyst: 0.025;\n  start_when: need_Repair;\n  activity: 1;\n}\n\nassembly Support: support() {\n  Frame: 0.06;\n  start_when: need_Support;\n  activity: 1;\n}\n\nassembly Envelope: grow() {\n  Wall: 0.015;\n  Catalyst: 0.005;\n  start_when: need_Envelope;\n  activity: if energy > 90 && body.area < body.birth_area * 2 then 0.8 else 0;\n}\n\nassembly Replication: replicate() {\n  Frame: 0.005;\n  Replicase: 0.015;\n  start_when: need_Replication;\n  activity: if energy > 80 then 1 else 0;\n}\n\nassembly Division: constrict() {\n  Mount: 0.004;\n  Rotor: 0.008;\n  Ring: 0.008;\n  start_when: need_Division;\n  activity: if body.area + 0.000001 >= body.birth_area * 2 && energy > 100 then 1 else 0;\n}",
+      "description": "Build a light harvester, then regulate the initiation of separate growth and division machinery.",
+      "languageVersion": 3,
+      "createdAt": 0,
+      "updatedAt": 0,
+      "genomeId": "builtin:genome:phototroph",
+      "count": 72
+    },
+    {
+      "id": "builtin:genome:forager",
+      "name": "Forager",
+      "source": "# Shared products supply independently regulated physical recipes.\n# Genes make stock; start_when permits new machines; activity runs built ones.\ncellular;\n\nproduct Wall = membrane();\nproduct Catalyst = enzyme();\nproduct Mount = anchor();\nproduct Rotor = motor();\nproduct Frame = scaffold();\nproduct Carrier = transporter();\nproduct Tail = filament();\nproduct Detector = receptor();\nproduct Pigment = pigment();\nproduct Replicase = replicase();\nproduct Ring = constrictor();\n\n# Tolerate modest wear while repair restores working capacity. The allowance\n# stays below one machine, even when a larger body needs many copies.\nfn missing(installed, required, unit) = installed + 0.000001 < required - min(required * 0.1, unit * 0.2);\nfn enough(installed, required) = installed + 0.000001 >= required * 0.9;\nfn buffered(stock, effort) = if stock < 0.001 then effort else 0;\n\nlet funded = (energy > 10 || gut.energy > 0) && nutrient.stored > 0.001;\nlet expanding = body.area > body.birth_area * 1.6;\nlet powered = enough(built.Gut, 0.06) && enough(built.ExudateEnzyme, 0.04) && enough(built.Capture, 0.03);\nlet equipped = powered && enough(built.LeftMotor, 0.025) && enough(built.RightMotor, 0.025) && enough(built.Vision, 0.02) && enough(built.Touch, 0.01);\nlet surplus = equipped && energy > 55;\n# Read the receptors the genome actually builds.\nlet seen = sensed.Vision.valid;\nlet blocked = sensed.Touch.valid && sensed.Touch.resistance >= 0.12;\nlet obstacle = if sensed.Touch.valid then angle(sensed.Touch.offset) else 0;\nlet escape = if obstacle >= 0 then obstacle - 1.8 else obstacle + 1.8;\nlet seek = gut.fraction < 0.55;\nlet grazing = seen && sensed.Vision.area >= 0.35\n  && length(sensed.Vision.offset) < 7 * sqrt(sensed.Vision.area) + 5;\nlet steer = if blocked then clamp(escape * 2, -1, 1)\n  else if grazing then clamp((angle(sensed.Vision.offset) - 1.4) * 1.8, -1, 1)\n  else if seek && seen then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1)\n  else sin(age * 0.65) * 0.35;\nlet move = if blocked then 0.65 else if gut.fraction > 0.45 then 0\n  else if seek && seen then 0.5\n  else if sensed.Chemistry.valid && sensed.Chemistry.organic > 0.001 then 0.18 else 0.28;\n\nlet need_Gut = funded && (true) && missing(built.Gut, (if expanding then 0.12 else 0.06), 0.06);\nlet need_ExudateEnzyme = funded && (true) && missing(built.ExudateEnzyme, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Capture = funded && (enough(built.Gut, 0.06)) && missing(built.Capture, (if expanding then 0.06 else 0.03), 0.03);\nlet need_TissueEnzyme = funded && (powered && gut.tissue.energy > 0) && missing(built.TissueEnzyme, (if expanding then 0.04 else 0.02), 0.02);\nlet need_WasteEnzyme = funded && (powered && gut.waste.energy > 0) && missing(built.WasteEnzyme, (if expanding then 0.03 else 0.015), 0.015);\nlet need_Translation = funded && (surplus) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Minerals = funded && (powered && (nutrient.stored < 0.15 || surplus)) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);\nlet need_EnergyStore = funded && (surplus) && missing(built.EnergyStore, (if expanding then 0.16 else 0.08), 0.08);\nlet need_MineralStore = funded && (surplus) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);\nlet need_LeftMotor = funded && (powered) && missing(built.LeftMotor, (if expanding then 0.05 else 0.025), 0.025);\nlet need_RightMotor = funded && (powered) && missing(built.RightMotor, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Vision = funded && (powered) && missing(built.Vision, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Touch = funded && (powered) && missing(built.Touch, (if expanding then 0.02 else 0.01), 0.01);\nlet need_Chemistry = funded && (surplus) && missing(built.Chemistry, (if expanding then 0.03 else 0.015), 0.015);\nlet need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Support = funded && (equipped && energy > 65) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);\nlet need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);\n\ngene supply_Wall: Wall = buffered(pool.Wall, (if need_Gut then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0));\ngene supply_Catalyst: Catalyst = buffered(pool.Catalyst, (if need_ExudateEnzyme then 1 else 0) + (if need_TissueEnzyme then 1 else 0) + (if need_WasteEnzyme then 1 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0));\ngene supply_Mount: Mount = buffered(pool.Mount, (if need_Capture then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_LeftMotor then 0.5 else 0) + (if need_RightMotor then 0.5 else 0) + (if need_Vision then 0.333333 else 0) + (if need_Touch then 0.333333 else 0) + (if need_Chemistry then 0.25 else 0) + (if need_Division then 0.5 else 0));\ngene supply_Rotor: Rotor = buffered(pool.Rotor, (if need_Capture then 1 else 0) + (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Division then 1 else 0));\ngene supply_Frame: Frame = buffered(pool.Frame, (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0));\ngene supply_Carrier: Carrier = buffered(pool.Carrier, (if need_Minerals then 1 else 0));\ngene supply_Tail: Tail = buffered(pool.Tail, (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Touch then 0.333333 else 0));\ngene supply_Detector: Detector = buffered(pool.Detector, (if need_Vision then 1 else 0) + (if need_Touch then 1 else 0) + (if need_Chemistry then 1 else 0));\ngene supply_Pigment: Pigment = buffered(pool.Pigment, (if need_Vision then 0.333333 else 0));\ngene supply_Replicase: Replicase = buffered(pool.Replicase, (if need_Replication then 1 else 0));\ngene supply_Ring: Ring = buffered(pool.Ring, (if need_Division then 1 else 0));\n\nassembly Gut: store(food) {\n  Wall: 0.06;\n  start_when: need_Gut;\n  activity: 1;\n}\n\nassembly ExudateEnzyme: digest(exudate) {\n  Catalyst: 0.04;\n  start_when: need_ExudateEnzyme;\n  activity: if gut.exudate.energy > 0 then 1 else 0;\n}\n\nassembly Capture: import(particle) {\n  Mount: 0.01;\n  Rotor: 0.02;\n  start_when: need_Capture;\n  activity: if gut.fraction < 0.7 then 1 else 0;\n}\n\nassembly TissueEnzyme: digest(tissue) {\n  Catalyst: 0.02;\n  start_when: need_TissueEnzyme;\n  activity: if gut.tissue.energy > 0 then 1 else 0;\n}\n\nassembly WasteEnzyme: digest(waste) {\n  Catalyst: 0.015;\n  start_when: need_WasteEnzyme;\n  activity: if gut.waste.energy > 0 then 1 else 0;\n}\n\nassembly Translation: translate() {\n  Frame: 0.02;\n  Catalyst: 0.02;\n  start_when: need_Translation;\n  activity: 1;\n}\n\nassembly Minerals: import(mineral) {\n  Mount: 0.005;\n  Carrier: 0.02;\n  start_when: need_Minerals;\n  activity: if nutrient.fraction < 0.9 then 1 else 0;\n}\n\nassembly EnergyStore: store(energy) {\n  Wall: 0.08;\n  start_when: need_EnergyStore;\n  activity: 1;\n}\n\nassembly MineralStore: store(mineral) {\n  Wall: 0.02;\n  start_when: need_MineralStore;\n  activity: 1;\n}\n\nassembly LeftMotor: propel() {\n  Mount: 0.005;\n  Rotor: 0.01;\n  Tail: 0.01;\n  start_when: need_LeftMotor;\n  activity: if gut.energy > 2 then 0 else clamp(move - steer * 0.5, 0, 1);\n  at: 1.570796;\n  direction: 0;\n}\n\nassembly RightMotor: propel() {\n  Mount: 0.005;\n  Rotor: 0.01;\n  Tail: 0.01;\n  start_when: need_RightMotor;\n  activity: if gut.energy > 2 then 0 else clamp(move + steer * 0.5, 0, 1);\n  at: -1.570796;\n  direction: 0;\n}\n\nassembly Vision: sense(optical) {\n  Mount: 0.004;\n  Detector: 0.012;\n  Pigment: 0.004;\n  start_when: need_Vision;\n  activity: 1;\n}\n\nassembly Touch: sense(contact) {\n  Mount: 0.002;\n  Detector: 0.006;\n  Tail: 0.002;\n  start_when: need_Touch;\n  activity: 1;\n}\n\nassembly Chemistry: sense(chemical) {\n  Mount: 0.003;\n  Detector: 0.012;\n  start_when: need_Chemistry;\n  activity: 1;\n}\n\nassembly Repair: repair() {\n  Catalyst: 0.025;\n  start_when: need_Repair;\n  activity: 1;\n}\n\nassembly Support: support() {\n  Frame: 0.06;\n  start_when: need_Support;\n  activity: 1;\n}\n\nassembly Envelope: grow() {\n  Wall: 0.015;\n  Catalyst: 0.005;\n  start_when: need_Envelope;\n  activity: if energy > 90 && body.area < body.birth_area * 2 then 0.8 else 0;\n}\n\nassembly Replication: replicate() {\n  Frame: 0.005;\n  Replicase: 0.015;\n  start_when: need_Replication;\n  activity: if energy > 80 then 1 else 0;\n}\n\nassembly Division: constrict() {\n  Mount: 0.004;\n  Rotor: 0.008;\n  Ring: 0.008;\n  start_when: need_Division;\n  activity: if body.area + 0.000001 >= body.birth_area * 2 && energy > 100 then 1 else 0;\n}",
+      "description": "Share product stocks between food storage, digestion and motors; navigate using named physical receptors.",
+      "languageVersion": 3,
+      "createdAt": 0,
+      "updatedAt": 0,
+      "genomeId": "builtin:genome:forager",
+      "count": 6
+    },
+    {
+      "id": "builtin:genome:mixotroph",
+      "name": "Mixotroph",
+      "source": "# Shared products supply independently regulated physical recipes.\n# Genes make stock; start_when permits new machines; activity runs built ones.\ncellular;\n\nproduct Mount = anchor();\nproduct Pigment = pigment();\nproduct Catalyst = enzyme();\nproduct Wall = membrane();\nproduct Rotor = motor();\nproduct Frame = scaffold();\nproduct Carrier = transporter();\nproduct Tail = filament();\nproduct Detector = receptor();\nproduct Replicase = replicase();\nproduct Ring = constrictor();\n\n# Tolerate modest wear while repair restores working capacity. The allowance\n# stays below one machine, even when a larger body needs many copies.\nfn missing(installed, required, unit) = installed + 0.000001 < required - min(required * 0.1, unit * 0.2);\nfn enough(installed, required) = installed + 0.000001 >= required * 0.9;\nfn buffered(stock, effort) = if stock < 0.001 then effort else 0;\n\nlet funded = (energy > 10 || gut.energy > 0) && nutrient.stored > 0.001;\nlet expanding = body.area > body.birth_area * 1.6;\nlet powered = enough(built.Solar, 0.08) && enough(built.Gut, 0.06) && enough(built.ExudateEnzyme, 0.04) && enough(built.Capture, 0.03);\nlet equipped = powered;\nlet surplus = equipped && energy > 55;\n# Read the receptors the genome actually builds.\nlet seen = sensed.Vision.valid;\nlet blocked = sensed.Touch.valid && sensed.Touch.resistance >= 0.12;\nlet obstacle = if sensed.Touch.valid then angle(sensed.Touch.offset) else 0;\nlet escape = if obstacle >= 0 then obstacle - 1.8 else obstacle + 1.8;\nlet seek = gut.fraction < 0.55;\nlet grazing = seen && sensed.Vision.area >= 0.35\n  && length(sensed.Vision.offset) < 7 * sqrt(sensed.Vision.area) + 5;\nlet steer = if blocked then clamp(escape * 2, -1, 1)\n  else if grazing then clamp((angle(sensed.Vision.offset) - 1.4) * 1.8, -1, 1)\n  else if seek && seen then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1)\n  else sin(age * 0.65) * 0.35;\nlet move = if blocked then 0.65 else if gut.fraction > 0.45 then 0\n  else if seek && seen then 0.5\n  else if sensed.Chemistry.valid && sensed.Chemistry.organic > 0.001 then 0.18 else 0.28;\n\nlet need_Solar = funded && (true) && missing(built.Solar, (if expanding then 0.16 else 0.08), 0.08);\nlet need_Gut = funded && (true) && missing(built.Gut, (if expanding then 0.12 else 0.06), 0.06);\nlet need_ExudateEnzyme = funded && (true) && missing(built.ExudateEnzyme, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Capture = funded && (enough(built.Gut, 0.06)) && missing(built.Capture, (if expanding then 0.06 else 0.03), 0.03);\nlet need_TissueEnzyme = funded && (powered && gut.tissue.energy > 0) && missing(built.TissueEnzyme, (if expanding then 0.02 else 0.01), 0.01);\nlet need_WasteEnzyme = funded && (powered && gut.waste.energy > 0) && missing(built.WasteEnzyme, (if expanding then 0.02 else 0.01), 0.01);\nlet need_Translation = funded && (powered) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Minerals = funded && (powered && (nutrient.stored < 0.15 || surplus)) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);\nlet need_EnergyStore = funded && (powered) && missing(built.EnergyStore, (if expanding then 0.16 else 0.08), 0.08);\nlet need_MineralStore = funded && (powered) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);\nlet need_LeftMotor = funded && (powered && body.area > 1.2) && missing(built.LeftMotor, (if expanding then 0.05 else 0.025), 0.025);\nlet need_RightMotor = funded && (powered && body.area > 1.2) && missing(built.RightMotor, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Vision = funded && (powered && body.area > 1.2) && missing(built.Vision, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Touch = funded && (powered && body.area > 1.2) && missing(built.Touch, (if expanding then 0.02 else 0.01), 0.01);\nlet need_Chemistry = funded && (surplus) && missing(built.Chemistry, (if expanding then 0.03 else 0.015), 0.015);\nlet need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Support = funded && (equipped && energy > 65) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);\nlet need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);\n\ngene supply_Mount: Mount = buffered(pool.Mount, (if need_Solar then 0.166667 else 0) + (if need_Capture then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_LeftMotor then 0.5 else 0) + (if need_RightMotor then 0.5 else 0) + (if need_Vision then 0.333333 else 0) + (if need_Touch then 0.333333 else 0) + (if need_Chemistry then 0.25 else 0) + (if need_Division then 0.5 else 0));\ngene supply_Pigment: Pigment = buffered(pool.Pigment, (if need_Solar then 1 else 0) + (if need_Vision then 0.333333 else 0));\ngene supply_Catalyst: Catalyst = buffered(pool.Catalyst, (if need_Solar then 0.166667 else 0) + (if need_ExudateEnzyme then 1 else 0) + (if need_TissueEnzyme then 1 else 0) + (if need_WasteEnzyme then 1 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0));\ngene supply_Wall: Wall = buffered(pool.Wall, (if need_Gut then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0));\ngene supply_Rotor: Rotor = buffered(pool.Rotor, (if need_Capture then 1 else 0) + (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Division then 1 else 0));\ngene supply_Frame: Frame = buffered(pool.Frame, (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0));\ngene supply_Carrier: Carrier = buffered(pool.Carrier, (if need_Minerals then 1 else 0));\ngene supply_Tail: Tail = buffered(pool.Tail, (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Touch then 0.333333 else 0));\ngene supply_Detector: Detector = buffered(pool.Detector, (if need_Vision then 1 else 0) + (if need_Touch then 1 else 0) + (if need_Chemistry then 1 else 0));\ngene supply_Replicase: Replicase = buffered(pool.Replicase, (if need_Replication then 1 else 0));\ngene supply_Ring: Ring = buffered(pool.Ring, (if need_Division then 1 else 0));\n\nassembly Solar: harvest(light) {\n  Mount: 0.01;\n  Pigment: 0.06;\n  Catalyst: 0.01;\n  start_when: need_Solar;\n  activity: 1;\n}\n\nassembly Gut: store(food) {\n  Wall: 0.06;\n  start_when: need_Gut;\n  activity: 1;\n}\n\nassembly ExudateEnzyme: digest(exudate) {\n  Catalyst: 0.04;\n  start_when: need_ExudateEnzyme;\n  activity: if gut.exudate.energy > 0 then 1 else 0;\n}\n\nassembly Capture: import(particle) {\n  Mount: 0.01;\n  Rotor: 0.02;\n  start_when: need_Capture;\n  activity: if gut.fraction < 0.7 then 1 else 0;\n}\n\nassembly TissueEnzyme: digest(tissue) {\n  Catalyst: 0.01;\n  start_when: need_TissueEnzyme;\n  activity: if gut.tissue.energy > 0 then 1 else 0;\n}\n\nassembly WasteEnzyme: digest(waste) {\n  Catalyst: 0.01;\n  start_when: need_WasteEnzyme;\n  activity: if gut.waste.energy > 0 then 1 else 0;\n}\n\nassembly Translation: translate() {\n  Frame: 0.02;\n  Catalyst: 0.02;\n  start_when: need_Translation;\n  activity: 1;\n}\n\nassembly Minerals: import(mineral) {\n  Mount: 0.005;\n  Carrier: 0.02;\n  start_when: need_Minerals;\n  activity: if nutrient.fraction < 0.9 then 1 else 0;\n}\n\nassembly EnergyStore: store(energy) {\n  Wall: 0.08;\n  start_when: need_EnergyStore;\n  activity: 1;\n}\n\nassembly MineralStore: store(mineral) {\n  Wall: 0.02;\n  start_when: need_MineralStore;\n  activity: 1;\n}\n\nassembly LeftMotor: propel() {\n  Mount: 0.005;\n  Rotor: 0.01;\n  Tail: 0.01;\n  start_when: need_LeftMotor;\n  activity: if gut.energy > 2 then 0 else clamp(move - steer * 0.5, 0, 1);\n  at: 1.570796;\n  direction: 0;\n}\n\nassembly RightMotor: propel() {\n  Mount: 0.005;\n  Rotor: 0.01;\n  Tail: 0.01;\n  start_when: need_RightMotor;\n  activity: if gut.energy > 2 then 0 else clamp(move + steer * 0.5, 0, 1);\n  at: -1.570796;\n  direction: 0;\n}\n\nassembly Vision: sense(optical) {\n  Mount: 0.004;\n  Detector: 0.012;\n  Pigment: 0.004;\n  start_when: need_Vision;\n  activity: 1;\n}\n\nassembly Touch: sense(contact) {\n  Mount: 0.002;\n  Detector: 0.006;\n  Tail: 0.002;\n  start_when: need_Touch;\n  activity: 1;\n}\n\nassembly Chemistry: sense(chemical) {\n  Mount: 0.003;\n  Detector: 0.012;\n  start_when: need_Chemistry;\n  activity: 1;\n}\n\nassembly Repair: repair() {\n  Catalyst: 0.025;\n  start_when: need_Repair;\n  activity: 1;\n}\n\nassembly Support: support() {\n  Frame: 0.06;\n  start_when: need_Support;\n  activity: 1;\n}\n\nassembly Envelope: grow() {\n  Wall: 0.015;\n  Catalyst: 0.005;\n  start_when: need_Envelope;\n  activity: if energy > 90 && body.area < body.birth_area * 2 then 0.8 else 0;\n}\n\nassembly Replication: replicate() {\n  Frame: 0.005;\n  Replicase: 0.015;\n  start_when: need_Replication;\n  activity: if energy > 80 then 1 else 0;\n}\n\nassembly Division: constrict() {\n  Mount: 0.004;\n  Rotor: 0.008;\n  Ring: 0.008;\n  start_when: need_Division;\n  activity: if body.area + 0.000001 >= body.birth_area * 2 && energy > 100 then 1 else 0;\n}",
+      "description": "Share materials between light harvesting and a separately regulated feeding pathway.",
+      "languageVersion": 3,
+      "createdAt": 0,
+      "updatedAt": 0,
+      "genomeId": "builtin:genome:mixotroph",
+      "count": 4
+    },
+    {
+      "id": "builtin:genome:predator",
+      "name": "Predator",
+      "source": "# Shared products supply independently regulated physical recipes.\n# Genes make stock; start_when permits new machines; activity runs built ones.\ncellular;\n\nproduct Wall = membrane();\nproduct Catalyst = enzyme();\nproduct Mount = anchor();\nproduct Rotor = motor();\nproduct Frame = scaffold();\nproduct Carrier = transporter();\nproduct Tail = filament();\nproduct Detector = receptor();\nproduct Pigment = pigment();\nproduct Replicase = replicase();\nproduct Ring = constrictor();\n\n# Tolerate modest wear while repair restores working capacity. The allowance\n# stays below one machine, even when a larger body needs many copies.\nfn missing(installed, required, unit) = installed + 0.000001 < required - min(required * 0.1, unit * 0.2);\nfn enough(installed, required) = installed + 0.000001 >= required * 0.9;\nfn buffered(stock, effort) = if stock < 0.001 then effort else 0;\n\nlet funded = (energy > 10 || gut.energy > 0) && nutrient.stored > 0.001;\nlet expanding = body.area > body.birth_area * 1.6;\nlet powered = enough(built.Gut, 0.06) && enough(built.ExudateEnzyme, 0.04) && enough(built.Capture, 0.03);\nlet equipped = powered && enough(built.LeftMotor, 0.025) && enough(built.RightMotor, 0.025) && enough(built.Vision, 0.02) && enough(built.Touch, 0.01) && enough(built.Piercer, 0.05) && enough(built.TissueEnzyme, 0.04);\nlet surplus = equipped && energy > 55;\nlet hungry = energy.fraction < 0.7 && gut.fraction < 0.45;\nlet steer = if gut.fraction > 0.45 then 0 else if hungry && sensed.Vision.valid then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1) else sin(age * 0.5) * 0.4;\nlet move = if sensed.Touch.valid || gut.fraction > 0.45 then 0 else if hungry && sensed.Vision.valid then 0.5 else 0.07;\n\nlet need_Gut = funded && (true) && missing(built.Gut, (if expanding then 0.12 else 0.06), 0.06);\nlet need_ExudateEnzyme = funded && (true) && missing(built.ExudateEnzyme, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Capture = funded && (enough(built.Gut, 0.06)) && missing(built.Capture, (if expanding then 0.06 else 0.03), 0.03);\nlet need_TissueEnzyme = funded && (powered) && missing(built.TissueEnzyme, (if expanding then 0.08 else 0.04), 0.04);\nlet need_WasteEnzyme = funded && (powered && gut.waste.energy > 0) && missing(built.WasteEnzyme, (if expanding then 0.03 else 0.015), 0.015);\nlet need_Translation = funded && (surplus) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Minerals = funded && (powered && (nutrient.stored < 0.15 || surplus)) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);\nlet need_EnergyStore = funded && (surplus) && missing(built.EnergyStore, (if expanding then 0.16 else 0.08), 0.08);\nlet need_MineralStore = funded && (surplus) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);\nlet need_LeftMotor = funded && (powered) && missing(built.LeftMotor, (if expanding then 0.05 else 0.025), 0.025);\nlet need_RightMotor = funded && (powered) && missing(built.RightMotor, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Vision = funded && (powered) && missing(built.Vision, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Touch = funded && (powered) && missing(built.Touch, (if expanding then 0.02 else 0.01), 0.01);\nlet need_Piercer = funded && (powered) && missing(built.Piercer, (if expanding then 0.1 else 0.05), 0.05);\nlet need_Engulfment = funded && (surplus && body.area > 1.2) && missing(built.Engulfment, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Support = funded && (equipped && energy > 65) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);\nlet need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);\n\ngene supply_Wall: Wall = buffered(pool.Wall, (if need_Gut then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Engulfment then 1 else 0) + (if need_Envelope then 1 else 0));\ngene supply_Catalyst: Catalyst = buffered(pool.Catalyst, (if need_ExudateEnzyme then 1 else 0) + (if need_TissueEnzyme then 1 else 0) + (if need_WasteEnzyme then 1 else 0) + (if need_Translation then 1 else 0) + (if need_Piercer then 0.333333 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0));\ngene supply_Mount: Mount = buffered(pool.Mount, (if need_Capture then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_LeftMotor then 0.5 else 0) + (if need_RightMotor then 0.5 else 0) + (if need_Vision then 0.333333 else 0) + (if need_Touch then 0.333333 else 0) + (if need_Piercer then 0.333333 else 0) + (if need_Engulfment then 0.5 else 0) + (if need_Division then 0.5 else 0));\ngene supply_Rotor: Rotor = buffered(pool.Rotor, (if need_Capture then 1 else 0) + (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Engulfment then 1 else 0) + (if need_Division then 1 else 0));\ngene supply_Frame: Frame = buffered(pool.Frame, (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0));\ngene supply_Carrier: Carrier = buffered(pool.Carrier, (if need_Minerals then 1 else 0));\ngene supply_Tail: Tail = buffered(pool.Tail, (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Touch then 0.333333 else 0) + (if need_Piercer then 1 else 0));\ngene supply_Detector: Detector = buffered(pool.Detector, (if need_Vision then 1 else 0) + (if need_Touch then 1 else 0));\ngene supply_Pigment: Pigment = buffered(pool.Pigment, (if need_Vision then 0.333333 else 0));\ngene supply_Replicase: Replicase = buffered(pool.Replicase, (if need_Replication then 1 else 0));\ngene supply_Ring: Ring = buffered(pool.Ring, (if need_Division then 1 else 0));\n\nassembly Gut: store(food) {\n  Wall: 0.06;\n  start_when: need_Gut;\n  activity: 1;\n}\n\nassembly ExudateEnzyme: digest(exudate) {\n  Catalyst: 0.04;\n  start_when: need_ExudateEnzyme;\n  activity: if gut.exudate.energy > 0 then 1 else 0;\n}\n\nassembly Capture: import(particle) {\n  Mount: 0.01;\n  Rotor: 0.02;\n  start_when: need_Capture;\n  activity: if gut.fraction < 0.7 then 1 else 0;\n}\n\nassembly TissueEnzyme: digest(tissue) {\n  Catalyst: 0.04;\n  start_when: need_TissueEnzyme;\n  activity: if gut.tissue.energy > 0 then 1 else 0;\n}\n\nassembly WasteEnzyme: digest(waste) {\n  Catalyst: 0.015;\n  start_when: need_WasteEnzyme;\n  activity: if gut.waste.energy > 0 then 1 else 0;\n}\n\nassembly Translation: translate() {\n  Frame: 0.02;\n  Catalyst: 0.02;\n  start_when: need_Translation;\n  activity: 1;\n}\n\nassembly Minerals: import(mineral) {\n  Mount: 0.005;\n  Carrier: 0.02;\n  start_when: need_Minerals;\n  activity: if nutrient.fraction < 0.9 then 1 else 0;\n}\n\nassembly EnergyStore: store(energy) {\n  Wall: 0.08;\n  start_when: need_EnergyStore;\n  activity: 1;\n}\n\nassembly MineralStore: store(mineral) {\n  Wall: 0.02;\n  start_when: need_MineralStore;\n  activity: 1;\n}\n\nassembly LeftMotor: propel() {\n  Mount: 0.005;\n  Rotor: 0.01;\n  Tail: 0.01;\n  start_when: need_LeftMotor;\n  activity: clamp(move - steer * 0.5, 0, 1);\n  at: 1.570796;\n  direction: 0;\n}\n\nassembly RightMotor: propel() {\n  Mount: 0.005;\n  Rotor: 0.01;\n  Tail: 0.01;\n  start_when: need_RightMotor;\n  activity: clamp(move + steer * 0.5, 0, 1);\n  at: -1.570796;\n  direction: 0;\n}\n\nassembly Vision: sense(optical) {\n  Mount: 0.004;\n  Detector: 0.012;\n  Pigment: 0.004;\n  start_when: need_Vision;\n  activity: 1;\n}\n\nassembly Touch: sense(contact) {\n  Mount: 0.002;\n  Detector: 0.006;\n  Tail: 0.002;\n  start_when: need_Touch;\n  activity: 1;\n}\n\nassembly Piercer: pierce() {\n  Mount: 0.01;\n  Tail: 0.03;\n  Catalyst: 0.01;\n  start_when: need_Piercer;\n  activity: if sensed.Touch.valid && gut.fraction < 0.5 then 0.8 else 0;\n}\n\nassembly Engulfment: engulf() {\n  Mount: 0.005;\n  Rotor: 0.01;\n  Wall: 0.01;\n  start_when: need_Engulfment;\n  activity: if gut.fraction < 0.5 then 1 else 0;\n}\n\nassembly Repair: repair() {\n  Catalyst: 0.025;\n  start_when: need_Repair;\n  activity: 1;\n}\n\nassembly Support: support() {\n  Frame: 0.06;\n  start_when: need_Support;\n  activity: 1;\n}\n\nassembly Envelope: grow() {\n  Wall: 0.015;\n  Catalyst: 0.005;\n  start_when: need_Envelope;\n  activity: if energy > 90 && body.area < body.birth_area * 2 then 0.8 else 0;\n}\n\nassembly Replication: replicate() {\n  Frame: 0.005;\n  Replicase: 0.015;\n  start_when: need_Replication;\n  activity: if energy > 80 then 1 else 0;\n}\n\nassembly Division: constrict() {\n  Mount: 0.004;\n  Rotor: 0.008;\n  Ring: 0.008;\n  start_when: need_Division;\n  activity: if body.area + 0.000001 >= body.birth_area * 2 && energy > 100 then 1 else 0;\n}",
+      "description": "Approach visible objects with a named eye, then use a placed piercer and separate engulfment machinery.",
+      "languageVersion": 3,
+      "createdAt": 0,
+      "updatedAt": 0,
+      "genomeId": "builtin:genome:predator",
+      "count": 2
+    }
+  ],
+  "seeds": [
+    42
+  ],
+  "mutationRate": 0,
+  "durationSeconds": 600,
+  "sampleSeconds": [
+    0,
+    15,
+    30,
+    60,
+    120,
+    180,
+    300,
+    600
+  ],
+  "results": [
+    {
+      "seed": 42,
+      "wallSeconds": 447.507482,
+      "samples": [
+        {
+          "seconds": 0,
+          "population": 84,
+          "births": 0,
+          "deaths": 0,
+          "particlesEaten": 0,
+          "attacks": 0,
+          "predations": 0,
+          "mutations": 0,
+          "energy": 6367.2,
+          "energyIntroduced": 8332.8,
+          "photosynthesis": 0,
+          "mineralError": 0,
+          "accounting": {
+            "material": 767.160027179718,
+            "materialIntroduced": 767.160027179718,
+            "materialDelta": 0,
+            "materialTolerance": 1e-07,
+            "energy": 6367.200000000009,
+            "energyIntroduced": 8332.79999999999,
+            "photosynthesis": 0,
+            "energyTolerance": 1e-07,
+            "energyExcess": -1965.5999999999813
+          },
+          "organic": {
+            "exudate": {
+              "count": 0,
+              "energy": 0,
+              "minerals": 0
+            },
+            "tissue": {
+              "count": 0,
+              "energy": 0,
+              "minerals": 0
+            },
+            "waste": {
+              "count": 0,
+              "energy": 0,
+              "minerals": 0
+            }
+          },
+          "lineages": [
+            {
+              "name": "Phototroph",
+              "count": 72,
+              "area": 72,
+              "mass": 71.28,
+              "energy": 4896,
+              "nutrients": 43.2,
+              "gutEnergy": 0,
+              "photosynthesisRate": 0,
+              "digestionRate": 0,
+              "growthRate": 0,
+              "exudationRate": 0,
+              "upkeep": 12.816,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.85,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": []
+            },
+            {
+              "name": "Forager",
+              "count": 6,
+              "area": 6,
+              "mass": 5.94,
+              "energy": 408,
+              "nutrients": 3.6,
+              "gutEnergy": 0,
+              "photosynthesisRate": 0,
+              "digestionRate": 0,
+              "growthRate": 0,
+              "exudationRate": 0,
+              "upkeep": 1.068,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.85,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [],
+              "consumers": [
+                {
+                  "id": 73,
+                  "generation": 0,
+                  "x": 507.45763,
+                  "y": 63.954482,
+                  "angle": 2.676542,
+                  "energy": 68,
+                  "capacity": 80,
+                  "nutrients": 0.6,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 8,
+                  "upkeep": 0.178,
+                  "closestParticle": null,
+                  "closestProducer": 25.94162
+                },
+                {
+                  "id": 74,
+                  "generation": 0,
+                  "x": 28.490553,
+                  "y": 289.537185,
+                  "angle": 1.773084,
+                  "energy": 68,
+                  "capacity": 80,
+                  "nutrients": 0.6,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 8,
+                  "upkeep": 0.178,
+                  "closestParticle": null,
+                  "closestProducer": 120.218885
+                },
+                {
+                  "id": 75,
+                  "generation": 0,
+                  "x": 340.379102,
+                  "y": 46.718833,
+                  "angle": 5.553958,
+                  "energy": 68,
+                  "capacity": 80,
+                  "nutrients": 0.6,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 8,
+                  "upkeep": 0.178,
+                  "closestParticle": null,
+                  "closestProducer": 61.761913
+                },
+                {
+                  "id": 76,
+                  "generation": 0,
+                  "x": 143.923268,
+                  "y": 595.485206,
+                  "angle": 5.759637,
+                  "energy": 68,
+                  "capacity": 80,
+                  "nutrients": 0.6,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 8,
+                  "upkeep": 0.178,
+                  "closestParticle": null,
+                  "closestProducer": 59.649795
+                },
+                {
+                  "id": 77,
+                  "generation": 0,
+                  "x": 136.740443,
+                  "y": 489.011201,
+                  "angle": 5.544874,
+                  "energy": 68,
+                  "capacity": 80,
+                  "nutrients": 0.6,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 8,
+                  "upkeep": 0.178,
+                  "closestParticle": null,
+                  "closestProducer": 68.337677
+                },
+                {
+                  "id": 78,
+                  "generation": 0,
+                  "x": 227.368383,
+                  "y": 315.28191,
+                  "angle": 1.65509,
+                  "energy": 68,
+                  "capacity": 80,
+                  "nutrients": 0.6,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 8,
+                  "upkeep": 0.178,
+                  "closestParticle": null,
+                  "closestProducer": 35.441846
+                }
+              ]
+            },
+            {
+              "name": "Mixotroph",
+              "count": 4,
+              "area": 4,
+              "mass": 3.96,
+              "energy": 272,
+              "nutrients": 2.4,
+              "gutEnergy": 0,
+              "photosynthesisRate": 0,
+              "digestionRate": 0,
+              "growthRate": 0,
+              "exudationRate": 0,
+              "upkeep": 0.712,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.85,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [],
+              "consumers": [
+                {
+                  "id": 79,
+                  "generation": 0,
+                  "x": 195.024209,
+                  "y": 733.353264,
+                  "angle": 0.18409,
+                  "energy": 68,
+                  "capacity": 80,
+                  "nutrients": 0.6,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 8,
+                  "upkeep": 0.178,
+                  "closestParticle": null,
+                  "closestProducer": 47.598941
+                },
+                {
+                  "id": 80,
+                  "generation": 0,
+                  "x": 546.835558,
+                  "y": 751.809601,
+                  "angle": 0.187689,
+                  "energy": 68,
+                  "capacity": 80,
+                  "nutrients": 0.6,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 8,
+                  "upkeep": 0.178,
+                  "closestParticle": null,
+                  "closestProducer": 47.490683
+                },
+                {
+                  "id": 81,
+                  "generation": 0,
+                  "x": 1108.276575,
+                  "y": 6.760813,
+                  "angle": 2.705482,
+                  "energy": 68,
+                  "capacity": 80,
+                  "nutrients": 0.6,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 8,
+                  "upkeep": 0.178,
+                  "closestParticle": null,
+                  "closestProducer": 75.834018
+                },
+                {
+                  "id": 82,
+                  "generation": 0,
+                  "x": 32.219654,
+                  "y": 247.641112,
+                  "angle": 3.892744,
+                  "energy": 68,
+                  "capacity": 80,
+                  "nutrients": 0.6,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 8,
+                  "upkeep": 0.178,
+                  "closestParticle": null,
+                  "closestProducer": 134.318361
+                }
+              ]
+            },
+            {
+              "name": "Predator",
+              "count": 2,
+              "area": 2,
+              "mass": 1.98,
+              "energy": 136,
+              "nutrients": 1.2,
+              "gutEnergy": 0,
+              "photosynthesisRate": 0,
+              "digestionRate": 0,
+              "growthRate": 0,
+              "exudationRate": 0,
+              "upkeep": 0.356,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.85,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [],
+              "consumers": [
+                {
+                  "id": 83,
+                  "generation": 0,
+                  "x": 292.689719,
+                  "y": 674.664787,
+                  "angle": 0.143604,
+                  "energy": 68,
+                  "capacity": 80,
+                  "nutrients": 0.6,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 8,
+                  "upkeep": 0.178,
+                  "closestParticle": null,
+                  "closestProducer": 66.407507
+                },
+                {
+                  "id": 84,
+                  "generation": 0,
+                  "x": 1015.287752,
+                  "y": 148.500814,
+                  "angle": 0.261522,
+                  "energy": 68,
+                  "capacity": 80,
+                  "nutrients": 0.6,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 8,
+                  "upkeep": 0.178,
+                  "closestParticle": null,
+                  "closestProducer": 92.443491
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "seconds": 15,
+          "population": 84,
+          "births": 0,
+          "deaths": 0,
+          "particlesEaten": 268,
+          "attacks": 0,
+          "predations": 0,
+          "mutations": 0,
+          "energy": 6359.477405,
+          "energyIntroduced": 8332.8,
+          "photosynthesis": 2367.409706,
+          "mineralError": 2.2168933355715126e-11,
+          "accounting": {
+            "material": 782.9100269114988,
+            "materialIntroduced": 782.9100269114766,
+            "materialDelta": 2.2168933355715126e-11,
+            "materialTolerance": 1e-07,
+            "energy": 6359.477405366787,
+            "energyIntroduced": 8332.79999999999,
+            "photosynthesis": 2367.4097059446317,
+            "energyTolerance": 1e-07,
+            "energyExcess": -4340.732300577834
+          },
+          "organic": {
+            "exudate": {
+              "count": 71,
+              "energy": 254.483774,
+              "minerals": 0
+            },
+            "tissue": {
+              "count": 0,
+              "energy": 0,
+              "minerals": 0
+            },
+            "waste": {
+              "count": 0,
+              "energy": 0,
+              "minerals": 0
+            }
+          },
+          "lineages": [
+            {
+              "name": "Phototroph",
+              "count": 72,
+              "area": 72,
+              "mass": 71.28,
+              "energy": 4380.285573,
+              "nutrients": 19.457031,
+              "gutEnergy": 0,
+              "photosynthesisRate": 245.049924,
+              "digestionRate": 0,
+              "growthRate": 0,
+              "exudationRate": 50.150361,
+              "upkeep": 23.56626,
+              "expressionRate": 1.402643,
+              "meanEnergyFraction": 0.780395,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Solar",
+                  "kind": "harvest(light)",
+                  "instances": 78,
+                  "complete": 72,
+                  "active": 72,
+                  "mass": 9.015536
+                },
+                {
+                  "name": "Translation",
+                  "kind": "translate()",
+                  "instances": 72,
+                  "complete": 0,
+                  "active": 0,
+                  "mass": 2.777338
+                },
+                {
+                  "name": "Minerals",
+                  "kind": "import(mineral)",
+                  "instances": 72,
+                  "complete": 0,
+                  "active": 0,
+                  "mass": 1.762813
+                },
+                {
+                  "name": "EnergyStore",
+                  "kind": "store(energy)",
+                  "instances": 72,
+                  "complete": 0,
+                  "active": 0,
+                  "mass": 4.423103
+                },
+                {
+                  "name": "MineralStore",
+                  "kind": "store(mineral)",
+                  "instances": 72,
+                  "complete": 0,
+                  "active": 0,
+                  "mass": 1.105776
+                },
+                {
+                  "name": "Support",
+                  "kind": "support()",
+                  "instances": 72,
+                  "complete": 0,
+                  "active": 0,
+                  "mass": 4.029446
+                },
+                {
+                  "name": "Repair",
+                  "kind": "repair()",
+                  "instances": 8,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.189463
+                }
+              ]
+            },
+            {
+              "name": "Forager",
+              "count": 6,
+              "area": 6,
+              "mass": 5.94,
+              "energy": 261.517319,
+              "nutrients": 2.29336,
+              "gutEnergy": 0,
+              "photosynthesisRate": 0,
+              "digestionRate": 0,
+              "growthRate": 0,
+              "exudationRate": 0,
+              "upkeep": 1.797984,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.544828,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Gut",
+                  "kind": "store(food)",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.36
+                },
+                {
+                  "name": "ExudateEnzyme",
+                  "kind": "digest(exudate)",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 0,
+                  "mass": 0.24
+                },
+                {
+                  "name": "Capture",
+                  "kind": "import(particle)",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.18
+                },
+                {
+                  "name": "LeftMotor",
+                  "kind": "propel()",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.15
+                },
+                {
+                  "name": "RightMotor",
+                  "kind": "propel()",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.15
+                },
+                {
+                  "name": "Vision",
+                  "kind": "sense(optical)",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.12
+                },
+                {
+                  "name": "Touch",
+                  "kind": "sense(contact)",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.06
+                }
+              ],
+              "consumers": [
+                {
+                  "id": 73,
+                  "generation": 0,
+                  "x": 440.595561,
+                  "y": 62.97637,
+                  "angle": 3.267691,
+                  "energy": 44.98098,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 11.216849,
+                  "upkeep": 0.299664,
+                  "closestParticle": 11.627496,
+                  "closestProducer": 14
+                },
+                {
+                  "id": 74,
+                  "generation": 0,
+                  "x": 68.280221,
+                  "y": 262.514127,
+                  "angle": 4.979683,
+                  "energy": 42.887436,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 14.992515,
+                  "upkeep": 0.299664,
+                  "closestParticle": 34.223119,
+                  "closestProducer": 121.006265
+                },
+                {
+                  "id": 75,
+                  "generation": 0,
+                  "x": 340.798694,
+                  "y": 37.950096,
+                  "angle": 2.419485,
+                  "energy": 43.040731,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 11.113357,
+                  "upkeep": 0.299664,
+                  "closestParticle": 49.254787,
+                  "closestProducer": 55.381471
+                },
+                {
+                  "id": 76,
+                  "generation": 0,
+                  "x": 58.237169,
+                  "y": 508.648126,
+                  "angle": 4.269559,
+                  "energy": 42.761314,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 14.549838,
+                  "upkeep": 0.299664,
+                  "closestParticle": 21.482877,
+                  "closestProducer": 14
+                },
+                {
+                  "id": 77,
+                  "generation": 0,
+                  "x": 145.153769,
+                  "y": 457.046517,
+                  "angle": 1.556434,
+                  "energy": 43.073706,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 6.919679,
+                  "upkeep": 0.299664,
+                  "closestParticle": 64.48698,
+                  "closestProducer": 55.516877
+                },
+                {
+                  "id": 78,
+                  "generation": 0,
+                  "x": 242.242229,
+                  "y": 339.73343,
+                  "angle": 4.809321,
+                  "energy": 44.773152,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 9.319669,
+                  "upkeep": 0.299664,
+                  "closestParticle": 17.293333,
+                  "closestProducer": 14
+                }
+              ]
+            },
+            {
+              "name": "Mixotroph",
+              "count": 4,
+              "area": 4,
+              "mass": 3.96,
+              "energy": 177.860577,
+              "nutrients": 1.072724,
+              "gutEnergy": 0.007034,
+              "photosynthesisRate": 7.103429,
+              "digestionRate": 0.168811,
+              "growthRate": 0,
+              "exudationRate": 0.852411,
+              "upkeep": 1.312458,
+              "expressionRate": 0.088,
+              "meanEnergyFraction": 0.555814,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0.007034,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Solar",
+                  "kind": "harvest(light)",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.32
+                },
+                {
+                  "name": "Gut",
+                  "kind": "store(food)",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.24
+                },
+                {
+                  "name": "ExudateEnzyme",
+                  "kind": "digest(exudate)",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 1,
+                  "mass": 0.16
+                },
+                {
+                  "name": "Capture",
+                  "kind": "import(particle)",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.12
+                },
+                {
+                  "name": "Translation",
+                  "kind": "translate()",
+                  "instances": 4,
+                  "complete": 0,
+                  "active": 0,
+                  "mass": 0.16
+                },
+                {
+                  "name": "EnergyStore",
+                  "kind": "store(energy)",
+                  "instances": 4,
+                  "complete": 0,
+                  "active": 0,
+                  "mass": 0.244842
+                },
+                {
+                  "name": "MineralStore",
+                  "kind": "store(mineral)",
+                  "instances": 4,
+                  "complete": 0,
+                  "active": 0,
+                  "mass": 0.061211
+                }
+              ],
+              "consumers": [
+                {
+                  "id": 79,
+                  "generation": 0,
+                  "x": 161.22778,
+                  "y": 706.178199,
+                  "angle": 0.18409,
+                  "energy": 44.117847,
+                  "capacity": 80,
+                  "nutrients": 0.268181,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 3.25829,
+                  "upkeep": 0.328114,
+                  "closestParticle": 28.547917,
+                  "closestProducer": 32.774073
+                },
+                {
+                  "id": 80,
+                  "generation": 0,
+                  "x": 564.658971,
+                  "y": 755.350919,
+                  "angle": 0.187689,
+                  "energy": 44.453247,
+                  "capacity": 80,
+                  "nutrients": 0.268181,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 1.670395,
+                  "upkeep": 0.328114,
+                  "closestParticle": 9.651827,
+                  "closestProducer": 40.411893
+                },
+                {
+                  "id": 81,
+                  "generation": 0,
+                  "x": 1095.287634,
+                  "y": 14.121307,
+                  "angle": 2.705482,
+                  "energy": 45.192056,
+                  "capacity": 80,
+                  "nutrients": 0.268181,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0.007034,
+                  "digestionRate": 0.168811,
+                  "speed": 1.366208,
+                  "upkeep": 0.328114,
+                  "closestParticle": 9.5,
+                  "closestProducer": 86.383809
+                },
+                {
+                  "id": 82,
+                  "generation": 0,
+                  "x": 75.986232,
+                  "y": 234.8946,
+                  "angle": 3.892744,
+                  "energy": 44.097428,
+                  "capacity": 80,
+                  "nutrients": 0.268181,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 2.949494,
+                  "upkeep": 0.328114,
+                  "closestParticle": 10.195291,
+                  "closestProducer": 132.253875
+                }
+              ]
+            },
+            {
+              "name": "Predator",
+              "count": 2,
+              "area": 2,
+              "mass": 1.98,
+              "energy": 69.756608,
+              "nutrients": 0.588958,
+              "gutEnergy": 0,
+              "photosynthesisRate": 0,
+              "digestionRate": 0,
+              "growthRate": 0,
+              "exudationRate": 0,
+              "upkeep": 0.722625,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.435979,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Gut",
+                  "kind": "store(food)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.12
+                },
+                {
+                  "name": "ExudateEnzyme",
+                  "kind": "digest(exudate)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 0,
+                  "mass": 0.08
+                },
+                {
+                  "name": "Capture",
+                  "kind": "import(particle)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.06
+                },
+                {
+                  "name": "TissueEnzyme",
+                  "kind": "digest(tissue)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 0,
+                  "mass": 0.08
+                },
+                {
+                  "name": "LeftMotor",
+                  "kind": "propel()",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 0,
+                  "mass": 0.05
+                },
+                {
+                  "name": "RightMotor",
+                  "kind": "propel()",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.05
+                },
+                {
+                  "name": "Vision",
+                  "kind": "sense(optical)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.04
+                },
+                {
+                  "name": "Touch",
+                  "kind": "sense(contact)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.02
+                },
+                {
+                  "name": "Piercer",
+                  "kind": "pierce()",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 0,
+                  "mass": 0.1
+                }
+              ],
+              "consumers": [
+                {
+                  "id": 83,
+                  "generation": 0,
+                  "x": 254.941983,
+                  "y": 671.465308,
+                  "angle": 0.988732,
+                  "energy": 35.62078,
+                  "capacity": 80,
+                  "nutrients": 0.294479,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 1.688739,
+                  "upkeep": 0.361313,
+                  "closestParticle": 71.472179,
+                  "closestProducer": 68.270139
+                },
+                {
+                  "id": 84,
+                  "generation": 0,
+                  "x": 1050.146709,
+                  "y": 158.28627,
+                  "angle": 1.10665,
+                  "energy": 34.135828,
+                  "capacity": 80,
+                  "nutrients": 0.294479,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 4.262594,
+                  "upkeep": 0.361313,
+                  "closestParticle": 107.262776,
+                  "closestProducer": 117.136692
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "seconds": 30,
+          "population": 81,
+          "births": 0,
+          "deaths": 3,
+          "particlesEaten": 1330,
+          "attacks": 165,
+          "predations": 0,
+          "mutations": 0,
+          "energy": 8346.756078,
+          "energyIntroduced": 8332.8,
+          "photosynthesis": 6228.877752,
+          "mineralError": 4.206412995699793e-11,
+          "accounting": {
+            "material": 798.6600266432773,
+            "materialIntroduced": 798.6600266432353,
+            "materialDelta": 4.206412995699793e-11,
+            "materialTolerance": 1e-07,
+            "energy": 8346.756078350392,
+            "energyIntroduced": 8332.79999999999,
+            "photosynthesis": 6228.877752448846,
+            "energyTolerance": 1e-07,
+            "energyExcess": -6214.921674098444
+          },
+          "organic": {
+            "exudate": {
+              "count": 79,
+              "energy": 630.623146,
+              "minerals": 0
+            },
+            "tissue": {
+              "count": 6,
+              "energy": 136.817929,
+              "minerals": 2.927189
+            },
+            "waste": {
+              "count": 0,
+              "energy": 0,
+              "minerals": 0
+            }
+          },
+          "lineages": [
+            {
+              "name": "Phototroph",
+              "count": 69,
+              "area": 73.664533,
+              "mass": 87.320221,
+              "energy": 5700.351221,
+              "nutrients": 26.859866,
+              "gutEnergy": 0,
+              "photosynthesisRate": 242.205561,
+              "digestionRate": 0,
+              "growthRate": 0.64,
+              "exudationRate": 33.908158,
+              "upkeep": 27.508752,
+              "expressionRate": 0.101122,
+              "meanEnergyFraction": 0.383762,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Solar",
+                  "kind": "harvest(light)",
+                  "instances": 73,
+                  "complete": 72,
+                  "active": 72,
+                  "mass": 8.671204
+                },
+                {
+                  "name": "Translation",
+                  "kind": "translate()",
+                  "instances": 70,
+                  "complete": 66,
+                  "active": 66,
+                  "mass": 2.787916
+                },
+                {
+                  "name": "Minerals",
+                  "kind": "import(mineral)",
+                  "instances": 72,
+                  "complete": 69,
+                  "active": 69,
+                  "mass": 1.799898
+                },
+                {
+                  "name": "EnergyStore",
+                  "kind": "store(energy)",
+                  "instances": 70,
+                  "complete": 66,
+                  "active": 66,
+                  "mass": 5.502651
+                },
+                {
+                  "name": "MineralStore",
+                  "kind": "store(mineral)",
+                  "instances": 70,
+                  "complete": 66,
+                  "active": 66,
+                  "mass": 1.375663
+                },
+                {
+                  "name": "Support",
+                  "kind": "support()",
+                  "instances": 136,
+                  "complete": 132,
+                  "active": 132,
+                  "mass": 8.124804
+                },
+                {
+                  "name": "Envelope",
+                  "kind": "grow()",
+                  "instances": 66,
+                  "complete": 66,
+                  "active": 20,
+                  "mass": 1.32
+                },
+                {
+                  "name": "Replication",
+                  "kind": "replicate()",
+                  "instances": 66,
+                  "complete": 66,
+                  "active": 23,
+                  "mass": 1.32
+                },
+                {
+                  "name": "Repair",
+                  "kind": "repair()",
+                  "instances": 10,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.232761
+                }
+              ]
+            },
+            {
+              "name": "Forager",
+              "count": 6,
+              "area": 6,
+              "mass": 5.94,
+              "energy": 231.757245,
+              "nutrients": 2.29336,
+              "gutEnergy": 0.011562,
+              "photosynthesisRate": 0,
+              "digestionRate": 0.277487,
+              "growthRate": 0,
+              "exudationRate": 0,
+              "upkeep": 1.797984,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.482828,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0.011562,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Gut",
+                  "kind": "store(food)",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.36
+                },
+                {
+                  "name": "ExudateEnzyme",
+                  "kind": "digest(exudate)",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 1,
+                  "mass": 0.24
+                },
+                {
+                  "name": "Capture",
+                  "kind": "import(particle)",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.18
+                },
+                {
+                  "name": "LeftMotor",
+                  "kind": "propel()",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.15
+                },
+                {
+                  "name": "RightMotor",
+                  "kind": "propel()",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.15
+                },
+                {
+                  "name": "Vision",
+                  "kind": "sense(optical)",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.12
+                },
+                {
+                  "name": "Touch",
+                  "kind": "sense(contact)",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.06
+                }
+              ],
+              "consumers": [
+                {
+                  "id": 73,
+                  "generation": 0,
+                  "x": 460.836256,
+                  "y": 58.841725,
+                  "angle": 2.528248,
+                  "energy": 39.813726,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0.011562,
+                  "digestionRate": 0.277487,
+                  "speed": 11.26939,
+                  "upkeep": 0.299664,
+                  "closestParticle": 5.443557,
+                  "closestProducer": 14
+                },
+                {
+                  "id": 74,
+                  "generation": 0,
+                  "x": 123.447351,
+                  "y": 198.45964,
+                  "angle": 1.518525,
+                  "energy": 36.129766,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 10.192844,
+                  "upkeep": 0.299664,
+                  "closestParticle": 18.718716,
+                  "closestProducer": 108.17044
+                },
+                {
+                  "id": 75,
+                  "generation": 0,
+                  "x": 291.1169,
+                  "y": 74.012454,
+                  "angle": 3.871387,
+                  "energy": 39.201058,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 10.626419,
+                  "upkeep": 0.299664,
+                  "closestParticle": 17.83294,
+                  "closestProducer": 14
+                },
+                {
+                  "id": 76,
+                  "generation": 0,
+                  "x": 71.300183,
+                  "y": 472.777627,
+                  "angle": 2.917699,
+                  "energy": 38.95918,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 9.77077,
+                  "upkeep": 0.299664,
+                  "closestParticle": 10.945377,
+                  "closestProducer": 14
+                },
+                {
+                  "id": 77,
+                  "generation": 0,
+                  "x": 144.830347,
+                  "y": 490.982544,
+                  "angle": 3.255577,
+                  "energy": 37.810656,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 10.303465,
+                  "upkeep": 0.299664,
+                  "closestParticle": 10.038848,
+                  "closestProducer": 14
+                },
+                {
+                  "id": 78,
+                  "generation": 0,
+                  "x": 284.316005,
+                  "y": 371.113135,
+                  "angle": 4.135928,
+                  "energy": 39.84286,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 9.2166,
+                  "upkeep": 0.299664,
+                  "closestParticle": 11.309951,
+                  "closestProducer": 14
+                }
+              ]
+            },
+            {
+              "name": "Mixotroph",
+              "count": 4,
+              "area": 4,
+              "mass": 4.002,
+              "energy": 222.142221,
+              "nutrients": 0.893258,
+              "gutEnergy": 0.007424,
+              "photosynthesisRate": 7.144,
+              "digestionRate": 0.178156,
+              "growthRate": 0,
+              "exudationRate": 0.85728,
+              "upkeep": 1.41322,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.231398,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0.007424,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Solar",
+                  "kind": "harvest(light)",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.32
+                },
+                {
+                  "name": "Gut",
+                  "kind": "store(food)",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.24
+                },
+                {
+                  "name": "ExudateEnzyme",
+                  "kind": "digest(exudate)",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 1,
+                  "mass": 0.16
+                },
+                {
+                  "name": "Capture",
+                  "kind": "import(particle)",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.12
+                },
+                {
+                  "name": "Translation",
+                  "kind": "translate()",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.16
+                },
+                {
+                  "name": "EnergyStore",
+                  "kind": "store(energy)",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.32
+                },
+                {
+                  "name": "MineralStore",
+                  "kind": "store(mineral)",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.08
+                },
+                {
+                  "name": "Minerals",
+                  "kind": "import(mineral)",
+                  "instances": 4,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.068109
+                },
+                {
+                  "name": "Chemistry",
+                  "kind": "sense(chemical)",
+                  "instances": 4,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.05206
+                }
+              ],
+              "consumers": [
+                {
+                  "id": 79,
+                  "generation": 0,
+                  "x": 128.590666,
+                  "y": 685.987867,
+                  "angle": 0.18409,
+                  "energy": 54.8576,
+                  "capacity": 240,
+                  "nutrients": 0.224426,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 1.739197,
+                  "upkeep": 0.347857,
+                  "closestParticle": 25.275305,
+                  "closestProducer": 24.663745
+                },
+                {
+                  "id": 80,
+                  "generation": 0,
+                  "x": 587.577358,
+                  "y": 8.011222,
+                  "angle": 0.187689,
+                  "energy": 57.383272,
+                  "capacity": 240,
+                  "nutrients": 0.241981,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0.007424,
+                  "digestionRate": 0.178156,
+                  "speed": 1.412213,
+                  "upkeep": 0.359511,
+                  "closestParticle": 9.5,
+                  "closestProducer": 43.401485
+                },
+                {
+                  "id": 81,
+                  "generation": 0,
+                  "x": 1065.390705,
+                  "y": 8.886221,
+                  "angle": 2.705482,
+                  "energy": 54.93395,
+                  "capacity": 240,
+                  "nutrients": 0.209759,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 2.431577,
+                  "upkeep": 0.354694,
+                  "closestParticle": 9.638533,
+                  "closestProducer": 83.25658
+                },
+                {
+                  "id": 82,
+                  "generation": 0,
+                  "x": 111.894847,
+                  "y": 206.367842,
+                  "angle": 3.892744,
+                  "energy": 54.967399,
+                  "capacity": 240,
+                  "nutrients": 0.217092,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 1.407754,
+                  "upkeep": 0.351157,
+                  "closestParticle": 10.62481,
+                  "closestProducer": 122.146326
+                }
+              ]
+            },
+            {
+              "name": "Predator",
+              "count": 2,
+              "area": 2,
+              "mass": 1.98,
+              "energy": 39.984263,
+              "nutrients": 0.495747,
+              "gutEnergy": 0,
+              "photosynthesisRate": 0,
+              "digestionRate": 0,
+              "growthRate": 0,
+              "exudationRate": 0,
+              "upkeep": 0.764521,
+              "expressionRate": 0.018839,
+              "meanEnergyFraction": 0.263014,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Gut",
+                  "kind": "store(food)",
+                  "instances": 3,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.154048
+                },
+                {
+                  "name": "ExudateEnzyme",
+                  "kind": "digest(exudate)",
+                  "instances": 3,
+                  "complete": 2,
+                  "active": 0,
+                  "mass": 0.10169
+                },
+                {
+                  "name": "Capture",
+                  "kind": "import(particle)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.06
+                },
+                {
+                  "name": "TissueEnzyme",
+                  "kind": "digest(tissue)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 0,
+                  "mass": 0.08
+                },
+                {
+                  "name": "LeftMotor",
+                  "kind": "propel()",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 0,
+                  "mass": 0.05
+                },
+                {
+                  "name": "RightMotor",
+                  "kind": "propel()",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 1,
+                  "mass": 0.05
+                },
+                {
+                  "name": "Vision",
+                  "kind": "sense(optical)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.04
+                },
+                {
+                  "name": "Touch",
+                  "kind": "sense(contact)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.02
+                },
+                {
+                  "name": "Piercer",
+                  "kind": "pierce()",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 1,
+                  "mass": 0.1
+                },
+                {
+                  "name": "Repair",
+                  "kind": "repair()",
+                  "instances": 2,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.037802
+                }
+              ],
+              "consumers": [
+                {
+                  "id": 83,
+                  "generation": 0,
+                  "x": 162.817924,
+                  "y": 672.903884,
+                  "angle": 3.223858,
+                  "energy": 26.808342,
+                  "capacity": 80,
+                  "nutrients": 0.294479,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 1.966455,
+                  "upkeep": 0.361313,
+                  "closestParticle": 12.647936,
+                  "closestProducer": 14.337514
+                },
+                {
+                  "id": 84,
+                  "generation": 0,
+                  "x": 1067.390963,
+                  "y": 174.929219,
+                  "angle": 2.865588,
+                  "energy": 13.175921,
+                  "capacity": 69.011627,
+                  "nutrients": 0.201268,
+                  "area": 1,
+                  "integrity": 0.834763,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 1.292219,
+                  "upkeep": 0.403208,
+                  "closestParticle": 93.313652,
+                  "closestProducer": 121.830054
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "seconds": 60,
+          "population": 87,
+          "births": 12,
+          "deaths": 9,
+          "particlesEaten": 3644,
+          "attacks": 525,
+          "predations": 1,
+          "mutations": 0,
+          "energy": 11375.985562,
+          "energyIntroduced": 8332.8,
+          "photosynthesis": 14419.97558,
+          "mineralError": 8.503775461576879e-11,
+          "accounting": {
+            "material": 830.1600261068376,
+            "materialIntroduced": 830.1600261067525,
+            "materialDelta": 8.503775461576879e-11,
+            "materialTolerance": 1e-07,
+            "energy": 11375.985561792018,
+            "energyIntroduced": 8332.79999999999,
+            "photosynthesis": 14419.97557974338,
+            "energyTolerance": 1e-07,
+            "energyExcess": -11376.790017951353
+          },
+          "organic": {
+            "exudate": {
+              "count": 88,
+              "energy": 773.991049,
+              "minerals": 0
+            },
+            "tissue": {
+              "count": 23,
+              "energy": 350.363208,
+              "minerals": 7.263029
+            },
+            "waste": {
+              "count": 1,
+              "energy": 6.036658,
+              "minerals": 0.099522
+            }
+          },
+          "lineages": [
+            {
+              "name": "Phototroph",
+              "count": 76,
+              "area": 109.922408,
+              "mass": 124.130473,
+              "energy": 7904.628804,
+              "nutrients": 41.60079,
+              "gutEnergy": 0,
+              "photosynthesisRate": 306.17596,
+              "digestionRate": 0,
+              "growthRate": 1.641924,
+              "exudationRate": 36.741115,
+              "upkeep": 38.160841,
+              "expressionRate": 0.919392,
+              "meanEnergyFraction": 0.447111,
+              "maxGeneration": 1,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Solar",
+                  "kind": "harvest(light)",
+                  "instances": 104,
+                  "complete": 85,
+                  "active": 85,
+                  "mass": 10.855653
+                },
+                {
+                  "name": "Translation",
+                  "kind": "translate()",
+                  "instances": 104,
+                  "complete": 85,
+                  "active": 85,
+                  "mass": 3.744401
+                },
+                {
+                  "name": "Minerals",
+                  "kind": "import(mineral)",
+                  "instances": 104,
+                  "complete": 86,
+                  "active": 86,
+                  "mass": 2.422861
+                },
+                {
+                  "name": "EnergyStore",
+                  "kind": "store(energy)",
+                  "instances": 104,
+                  "complete": 84,
+                  "active": 84,
+                  "mass": 6.994275
+                },
+                {
+                  "name": "MineralStore",
+                  "kind": "store(mineral)",
+                  "instances": 104,
+                  "complete": 84,
+                  "active": 84,
+                  "mass": 1.748569
+                },
+                {
+                  "name": "Support",
+                  "kind": "support()",
+                  "instances": 154,
+                  "complete": 148,
+                  "active": 148,
+                  "mass": 9.111698
+                },
+                {
+                  "name": "Envelope",
+                  "kind": "grow()",
+                  "instances": 104,
+                  "complete": 84,
+                  "active": 72,
+                  "mass": 1.769703
+                },
+                {
+                  "name": "Replication",
+                  "kind": "replicate()",
+                  "instances": 104,
+                  "complete": 85,
+                  "active": 85,
+                  "mass": 1.958375
+                },
+                {
+                  "name": "Division",
+                  "kind": "constrict()",
+                  "instances": 60,
+                  "complete": 40,
+                  "active": 8,
+                  "mass": 1.076942
+                },
+                {
+                  "name": "Repair",
+                  "kind": "repair()",
+                  "instances": 3,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.060672
+                }
+              ]
+            },
+            {
+              "name": "Forager",
+              "count": 6,
+              "area": 6,
+              "mass": 5.94,
+              "energy": 157.901263,
+              "nutrients": 2.29336,
+              "gutEnergy": 0.007069,
+              "photosynthesisRate": 0,
+              "digestionRate": 0.169651,
+              "growthRate": 0,
+              "exudationRate": 0,
+              "upkeep": 1.797984,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.328961,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0.007069,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Gut",
+                  "kind": "store(food)",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.36
+                },
+                {
+                  "name": "ExudateEnzyme",
+                  "kind": "digest(exudate)",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 1,
+                  "mass": 0.24
+                },
+                {
+                  "name": "Capture",
+                  "kind": "import(particle)",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.18
+                },
+                {
+                  "name": "LeftMotor",
+                  "kind": "propel()",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.15
+                },
+                {
+                  "name": "RightMotor",
+                  "kind": "propel()",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.15
+                },
+                {
+                  "name": "Vision",
+                  "kind": "sense(optical)",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.12
+                },
+                {
+                  "name": "Touch",
+                  "kind": "sense(contact)",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.06
+                }
+              ],
+              "consumers": [
+                {
+                  "id": 73,
+                  "generation": 0,
+                  "x": 457.128093,
+                  "y": 60.60196,
+                  "angle": 5.715196,
+                  "energy": 28.619677,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 11.747574,
+                  "upkeep": 0.299664,
+                  "closestParticle": 26.784157,
+                  "closestProducer": 15.86373
+                },
+                {
+                  "id": 74,
+                  "generation": 0,
+                  "x": 160.447072,
+                  "y": 158.796105,
+                  "angle": 5.896821,
+                  "energy": 19.661158,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0.007069,
+                  "digestionRate": 0.169651,
+                  "speed": 13.293402,
+                  "upkeep": 0.299664,
+                  "closestParticle": 4.859245,
+                  "closestProducer": 123.970491
+                },
+                {
+                  "id": 75,
+                  "generation": 0,
+                  "x": 352.203327,
+                  "y": 50.36446,
+                  "angle": 1.282072,
+                  "energy": 27.082674,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 11.717056,
+                  "upkeep": 0.299664,
+                  "closestParticle": 14.654013,
+                  "closestProducer": 15.784744
+                },
+                {
+                  "id": 76,
+                  "generation": 0,
+                  "x": 46.082068,
+                  "y": 354.178916,
+                  "angle": 0.15671,
+                  "energy": 26.721723,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 12.809754,
+                  "upkeep": 0.299664,
+                  "closestParticle": 21.541861,
+                  "closestProducer": 15.698046
+                },
+                {
+                  "id": 77,
+                  "generation": 0,
+                  "x": 134.857967,
+                  "y": 350.569931,
+                  "angle": 0.724688,
+                  "energy": 27.342825,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 12.752628,
+                  "upkeep": 0.299664,
+                  "closestParticle": 26.931364,
+                  "closestProducer": 15.719052
+                },
+                {
+                  "id": 78,
+                  "generation": 0,
+                  "x": 325.226633,
+                  "y": 434.464544,
+                  "angle": 1.893183,
+                  "energy": 28.473205,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 15.857563,
+                  "upkeep": 0.299664,
+                  "closestParticle": 16.423625,
+                  "closestProducer": 15.866734
+                }
+              ]
+            },
+            {
+              "name": "Mixotroph",
+              "count": 4,
+              "area": 4,
+              "mass": 6.309333,
+              "energy": 287.760393,
+              "nutrients": 2.509088,
+              "gutEnergy": 0.00769,
+              "photosynthesisRate": 7.219777,
+              "digestionRate": 0.184579,
+              "growthRate": 0,
+              "exudationRate": 0.866373,
+              "upkeep": 1.726147,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.29975,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0.00769,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Solar",
+                  "kind": "harvest(light)",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.32
+                },
+                {
+                  "name": "Gut",
+                  "kind": "store(food)",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.24
+                },
+                {
+                  "name": "ExudateEnzyme",
+                  "kind": "digest(exudate)",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 1,
+                  "mass": 0.16
+                },
+                {
+                  "name": "Capture",
+                  "kind": "import(particle)",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.12
+                },
+                {
+                  "name": "Translation",
+                  "kind": "translate()",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.16
+                },
+                {
+                  "name": "EnergyStore",
+                  "kind": "store(energy)",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.32
+                },
+                {
+                  "name": "MineralStore",
+                  "kind": "store(mineral)",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.08
+                },
+                {
+                  "name": "Minerals",
+                  "kind": "import(mineral)",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.1
+                },
+                {
+                  "name": "Chemistry",
+                  "kind": "sense(chemical)",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.06
+                },
+                {
+                  "name": "Support",
+                  "kind": "support()",
+                  "instances": 8,
+                  "complete": 8,
+                  "active": 8,
+                  "mass": 0.48
+                },
+                {
+                  "name": "Envelope",
+                  "kind": "grow()",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 0,
+                  "mass": 0.08
+                },
+                {
+                  "name": "Replication",
+                  "kind": "replicate()",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 1,
+                  "mass": 0.08
+                }
+              ],
+              "consumers": [
+                {
+                  "id": 79,
+                  "generation": 0,
+                  "x": 93.937521,
+                  "y": 668.674492,
+                  "angle": 0.18409,
+                  "energy": 67.380885,
+                  "capacity": 240,
+                  "nutrients": 0.594314,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 2.210821,
+                  "upkeep": 0.430912,
+                  "closestParticle": 16.106272,
+                  "closestProducer": 92.053037
+                },
+                {
+                  "id": 80,
+                  "generation": 0,
+                  "x": 575.958908,
+                  "y": 4.737767,
+                  "angle": 0.187689,
+                  "energy": 80.65105,
+                  "capacity": 240,
+                  "nutrients": 0.678814,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0.00769,
+                  "digestionRate": 0.184579,
+                  "speed": 1.710186,
+                  "upkeep": 0.433412,
+                  "closestParticle": 9.5,
+                  "closestProducer": 34.320196
+                },
+                {
+                  "id": 81,
+                  "generation": 0,
+                  "x": 1014.37989,
+                  "y": 16.742643,
+                  "angle": 2.705482,
+                  "energy": 68.147849,
+                  "capacity": 240,
+                  "nutrients": 0.624314,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 1.220526,
+                  "upkeep": 0.430912,
+                  "closestParticle": 11.076753,
+                  "closestProducer": 86.149404
+                },
+                {
+                  "id": 82,
+                  "generation": 0,
+                  "x": 172.06475,
+                  "y": 166.608246,
+                  "angle": 3.892744,
+                  "energy": 71.580609,
+                  "capacity": 240,
+                  "nutrients": 0.611647,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 5.231372,
+                  "upkeep": 0.430912,
+                  "closestParticle": 9.5,
+                  "closestProducer": 114.601366
+                }
+              ]
+            },
+            {
+              "name": "Predator",
+              "count": 1,
+              "area": 1,
+              "mass": 1.928676,
+              "energy": 31.293184,
+              "nutrients": 0.713751,
+              "gutEnergy": 31.505079,
+              "photosynthesisRate": 0,
+              "digestionRate": 1.183,
+              "growthRate": 0,
+              "exudationRate": 0,
+              "upkeep": 0.361313,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.391165,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 31.505079,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Gut",
+                  "kind": "store(food)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.06
+                },
+                {
+                  "name": "ExudateEnzyme",
+                  "kind": "digest(exudate)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.04
+                },
+                {
+                  "name": "Capture",
+                  "kind": "import(particle)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.03
+                },
+                {
+                  "name": "TissueEnzyme",
+                  "kind": "digest(tissue)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.04
+                },
+                {
+                  "name": "LeftMotor",
+                  "kind": "propel()",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.025
+                },
+                {
+                  "name": "RightMotor",
+                  "kind": "propel()",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.025
+                },
+                {
+                  "name": "Vision",
+                  "kind": "sense(optical)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.02
+                },
+                {
+                  "name": "Touch",
+                  "kind": "sense(contact)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.01
+                },
+                {
+                  "name": "Piercer",
+                  "kind": "pierce()",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.05
+                }
+              ],
+              "consumers": [
+                {
+                  "id": 83,
+                  "generation": 0,
+                  "x": 102.566878,
+                  "y": 648.904393,
+                  "angle": 3.299353,
+                  "energy": 31.293184,
+                  "capacity": 80,
+                  "nutrients": 0.713751,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 31.505079,
+                  "digestionRate": 1.183,
+                  "speed": 3.181709,
+                  "upkeep": 0.361313,
+                  "closestParticle": 9.913082,
+                  "closestProducer": 106.133031
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "seconds": 120,
+          "population": 161,
+          "births": 91,
+          "deaths": 14,
+          "particlesEaten": 9313,
+          "attacks": 1224,
+          "predations": 1,
+          "mutations": 0,
+          "energy": 19977.980724,
+          "energyIntroduced": 8332.8,
+          "photosynthesis": 40348.444184,
+          "mineralError": 1.695070750429295e-10,
+          "accounting": {
+            "material": 893.1600250339566,
+            "materialIntroduced": 893.1600250337871,
+            "materialDelta": 1.695070750429295e-10,
+            "materialTolerance": 1e-07,
+            "energy": 19977.98072426638,
+            "energyIntroduced": 8332.79999999999,
+            "photosynthesis": 40348.44418380149,
+            "energyTolerance": 1e-07,
+            "energyExcess": -28703.263459535097
+          },
+          "organic": {
+            "exudate": {
+              "count": 131,
+              "energy": 1295.46545,
+              "minerals": 0
+            },
+            "tissue": {
+              "count": 45,
+              "energy": 522.652992,
+              "minerals": 9.605683
+            },
+            "waste": {
+              "count": 1,
+              "energy": 4.746222,
+              "minerals": 0.078248
+            }
+          },
+          "lineages": [
+            {
+              "name": "Phototroph",
+              "count": 151,
+              "area": 184.752456,
+              "mass": 238.633685,
+              "energy": 14557.918167,
+              "nutrients": 91.769599,
+              "gutEnergy": 0,
+              "photosynthesisRate": 458.118922,
+              "digestionRate": 0,
+              "growthRate": 2.52488,
+              "exudationRate": 57.251209,
+              "upkeep": 68.764889,
+              "expressionRate": 0.672087,
+              "meanEnergyFraction": 0.520703,
+              "maxGeneration": 2,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Translation",
+                  "kind": "translate()",
+                  "instances": 177,
+                  "complete": 157,
+                  "active": 157,
+                  "mass": 6.736812
+                },
+                {
+                  "name": "Minerals",
+                  "kind": "import(mineral)",
+                  "instances": 177,
+                  "complete": 157,
+                  "active": 115,
+                  "mass": 4.278839
+                },
+                {
+                  "name": "Support",
+                  "kind": "support()",
+                  "instances": 304,
+                  "complete": 299,
+                  "active": 299,
+                  "mass": 18.128865
+                },
+                {
+                  "name": "Solar",
+                  "kind": "harvest(light)",
+                  "instances": 177,
+                  "complete": 156,
+                  "active": 156,
+                  "mass": 19.860639
+                },
+                {
+                  "name": "EnergyStore",
+                  "kind": "store(energy)",
+                  "instances": 176,
+                  "complete": 156,
+                  "active": 156,
+                  "mass": 12.886429
+                },
+                {
+                  "name": "MineralStore",
+                  "kind": "store(mineral)",
+                  "instances": 176,
+                  "complete": 156,
+                  "active": 156,
+                  "mass": 3.221607
+                },
+                {
+                  "name": "Envelope",
+                  "kind": "grow()",
+                  "instances": 177,
+                  "complete": 156,
+                  "active": 95,
+                  "mass": 3.238548
+                },
+                {
+                  "name": "Replication",
+                  "kind": "replicate()",
+                  "instances": 177,
+                  "complete": 156,
+                  "active": 141,
+                  "mass": 3.429001
+                },
+                {
+                  "name": "Division",
+                  "kind": "constrict()",
+                  "instances": 177,
+                  "complete": 157,
+                  "active": 3,
+                  "mass": 3.465582
+                },
+                {
+                  "name": "Repair",
+                  "kind": "repair()",
+                  "instances": 7,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.150022
+                }
+              ]
+            },
+            {
+              "name": "Forager",
+              "count": 5,
+              "area": 5,
+              "mass": 4.95,
+              "energy": 80.489035,
+              "nutrients": 1.911134,
+              "gutEnergy": 11.746915,
+              "photosynthesisRate": 0,
+              "digestionRate": 2.496,
+              "growthRate": 0,
+              "exudationRate": 0,
+              "upkeep": 1.49832,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.201223,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 11.746915,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Gut",
+                  "kind": "store(food)",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.3
+                },
+                {
+                  "name": "ExudateEnzyme",
+                  "kind": "digest(exudate)",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 1,
+                  "mass": 0.2
+                },
+                {
+                  "name": "Capture",
+                  "kind": "import(particle)",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.15
+                },
+                {
+                  "name": "LeftMotor",
+                  "kind": "propel()",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 4,
+                  "mass": 0.125
+                },
+                {
+                  "name": "RightMotor",
+                  "kind": "propel()",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 4,
+                  "mass": 0.125
+                },
+                {
+                  "name": "Vision",
+                  "kind": "sense(optical)",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.1
+                },
+                {
+                  "name": "Touch",
+                  "kind": "sense(contact)",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.05
+                }
+              ],
+              "consumers": [
+                {
+                  "id": 73,
+                  "generation": 0,
+                  "x": 525.765623,
+                  "y": 65.983511,
+                  "angle": 0.557549,
+                  "energy": 11.120223,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 13.02598,
+                  "upkeep": 0.299664,
+                  "closestParticle": 28.645136,
+                  "closestProducer": 14.087349
+                },
+                {
+                  "id": 75,
+                  "generation": 0,
+                  "x": 342.147455,
+                  "y": 25.979987,
+                  "angle": 5.609998,
+                  "energy": 16.59535,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 10.985665,
+                  "upkeep": 0.299664,
+                  "closestParticle": 27.328699,
+                  "closestProducer": 14.439703
+                },
+                {
+                  "id": 76,
+                  "generation": 0,
+                  "x": 229.310555,
+                  "y": 235.889225,
+                  "angle": 1.476707,
+                  "energy": 11.614923,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 11.746915,
+                  "digestionRate": 2.496,
+                  "speed": 2.905819,
+                  "upkeep": 0.299664,
+                  "closestParticle": 11.676571,
+                  "closestProducer": 14.706136
+                },
+                {
+                  "id": 77,
+                  "generation": 0,
+                  "x": 291.814617,
+                  "y": 407.779943,
+                  "angle": 4.358242,
+                  "energy": 19.665366,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 8.277277,
+                  "upkeep": 0.299664,
+                  "closestParticle": 19.763837,
+                  "closestProducer": 14.668917
+                },
+                {
+                  "id": 78,
+                  "generation": 0,
+                  "x": 168.888255,
+                  "y": 579.824289,
+                  "angle": 4.655792,
+                  "energy": 21.493173,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 14.023254,
+                  "upkeep": 0.299664,
+                  "closestParticle": 9.652835,
+                  "closestProducer": 15.410099
+                }
+              ]
+            },
+            {
+              "name": "Mixotroph",
+              "count": 4,
+              "area": 6.029316,
+              "mass": 10.83215,
+              "energy": 300.292492,
+              "nutrients": 5.132646,
+              "gutEnergy": 0.014403,
+              "photosynthesisRate": 6.606658,
+              "digestionRate": 0.345736,
+              "growthRate": 0.032,
+              "exudationRate": 0.792799,
+              "upkeep": 2.741125,
+              "expressionRate": 0.076923,
+              "meanEnergyFraction": 0.331758,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0.014403,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Solar",
+                  "kind": "harvest(light)",
+                  "instances": 7,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.479743
+                },
+                {
+                  "name": "Gut",
+                  "kind": "store(food)",
+                  "instances": 7,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.305293
+                },
+                {
+                  "name": "ExudateEnzyme",
+                  "kind": "digest(exudate)",
+                  "instances": 7,
+                  "complete": 4,
+                  "active": 2,
+                  "mass": 0.231416
+                },
+                {
+                  "name": "Capture",
+                  "kind": "import(particle)",
+                  "instances": 6,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.168445
+                },
+                {
+                  "name": "Translation",
+                  "kind": "translate()",
+                  "instances": 6,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.226146
+                },
+                {
+                  "name": "EnergyStore",
+                  "kind": "store(energy)",
+                  "instances": 6,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.365066
+                },
+                {
+                  "name": "MineralStore",
+                  "kind": "store(mineral)",
+                  "instances": 6,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.091266
+                },
+                {
+                  "name": "Minerals",
+                  "kind": "import(mineral)",
+                  "instances": 6,
+                  "complete": 5,
+                  "active": 1,
+                  "mass": 0.147803
+                },
+                {
+                  "name": "Chemistry",
+                  "kind": "sense(chemical)",
+                  "instances": 6,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.087978
+                },
+                {
+                  "name": "Support",
+                  "kind": "support()",
+                  "instances": 8,
+                  "complete": 8,
+                  "active": 8,
+                  "mass": 0.48
+                },
+                {
+                  "name": "Envelope",
+                  "kind": "grow()",
+                  "instances": 6,
+                  "complete": 4,
+                  "active": 1,
+                  "mass": 0.095453
+                },
+                {
+                  "name": "Replication",
+                  "kind": "replicate()",
+                  "instances": 6,
+                  "complete": 5,
+                  "active": 1,
+                  "mass": 0.119749
+                },
+                {
+                  "name": "LeftMotor",
+                  "kind": "propel()",
+                  "instances": 6,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.143993
+                },
+                {
+                  "name": "RightMotor",
+                  "kind": "propel()",
+                  "instances": 6,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.143993
+                },
+                {
+                  "name": "Vision",
+                  "kind": "sense(optical)",
+                  "instances": 6,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.115387
+                },
+                {
+                  "name": "Touch",
+                  "kind": "sense(contact)",
+                  "instances": 6,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.05875
+                },
+                {
+                  "name": "Division",
+                  "kind": "constrict()",
+                  "instances": 3,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.038963
+                },
+                {
+                  "name": "Repair",
+                  "kind": "repair()",
+                  "instances": 2,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.035477
+                }
+              ],
+              "consumers": [
+                {
+                  "id": 79,
+                  "generation": 0,
+                  "x": 48.797085,
+                  "y": 663.548827,
+                  "angle": 5.025262,
+                  "energy": 89.977297,
+                  "capacity": 240,
+                  "nutrients": 1.350222,
+                  "area": 1.434203,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 4.616811,
+                  "upkeep": 0.568557,
+                  "closestParticle": 21.478169,
+                  "closestProducer": 15.382189
+                },
+                {
+                  "id": 80,
+                  "generation": 0,
+                  "x": 905.028947,
+                  "y": 104.319408,
+                  "angle": 0.664527,
+                  "energy": 61.280469,
+                  "capacity": 238.77195,
+                  "nutrients": 1.3508,
+                  "area": 1.600496,
+                  "integrity": 0.994871,
+                  "gutEnergy": 0.007381,
+                  "digestionRate": 0.177193,
+                  "speed": 9.626491,
+                  "upkeep": 0.81845,
+                  "closestParticle": 11.35575,
+                  "closestProducer": 22.248682
+                },
+                {
+                  "id": 81,
+                  "generation": 0,
+                  "x": 880.344386,
+                  "y": 133.380173,
+                  "angle": 3.593843,
+                  "energy": 78.941475,
+                  "capacity": 195.679019,
+                  "nutrients": 1.222994,
+                  "area": 1.394004,
+                  "integrity": 0.799988,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 6.59973,
+                  "upkeep": 0.618146,
+                  "closestParticle": 15.173099,
+                  "closestProducer": 15.265146
+                },
+                {
+                  "id": 82,
+                  "generation": 0,
+                  "x": 164.544705,
+                  "y": 703.333622,
+                  "angle": 4.144803,
+                  "energy": 70.093251,
+                  "capacity": 240,
+                  "nutrients": 1.208631,
+                  "area": 1.600613,
+                  "integrity": 1,
+                  "gutEnergy": 0.007022,
+                  "digestionRate": 0.168542,
+                  "speed": 6.518761,
+                  "upkeep": 0.735972,
+                  "closestParticle": 11.356074,
+                  "closestProducer": 85.298476
+                }
+              ]
+            },
+            {
+              "name": "Predator",
+              "count": 1,
+              "area": 1,
+              "mass": 1.710072,
+              "energy": 44.270536,
+              "nutrients": 1,
+              "gutEnergy": 0,
+              "photosynthesisRate": 0,
+              "digestionRate": 0,
+              "growthRate": 0,
+              "exudationRate": 0,
+              "upkeep": 0.367793,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.553382,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Gut",
+                  "kind": "store(food)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.06
+                },
+                {
+                  "name": "ExudateEnzyme",
+                  "kind": "digest(exudate)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.04
+                },
+                {
+                  "name": "Capture",
+                  "kind": "import(particle)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.03
+                },
+                {
+                  "name": "TissueEnzyme",
+                  "kind": "digest(tissue)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.04
+                },
+                {
+                  "name": "LeftMotor",
+                  "kind": "propel()",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.025
+                },
+                {
+                  "name": "RightMotor",
+                  "kind": "propel()",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.025
+                },
+                {
+                  "name": "Vision",
+                  "kind": "sense(optical)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.02
+                },
+                {
+                  "name": "Touch",
+                  "kind": "sense(contact)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.01
+                },
+                {
+                  "name": "Piercer",
+                  "kind": "pierce()",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.05
+                },
+                {
+                  "name": "WasteEnzyme",
+                  "kind": "digest(waste)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.015
+                }
+              ],
+              "consumers": [
+                {
+                  "id": 83,
+                  "generation": 0,
+                  "x": 1123.035446,
+                  "y": 533.211177,
+                  "angle": 4.505048,
+                  "energy": 44.270536,
+                  "capacity": 80,
+                  "nutrients": 1,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 0.778449,
+                  "upkeep": 0.367793,
+                  "closestParticle": 12.920922,
+                  "closestProducer": 16.906898
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "seconds": 180,
+          "population": 237,
+          "births": 171,
+          "deaths": 18,
+          "particlesEaten": 15445,
+          "attacks": 1265,
+          "predations": 2,
+          "mutations": 0,
+          "energy": 29470.637641,
+          "energyIntroduced": 8332.8,
+          "photosynthesis": 75695.085886,
+          "mineralError": 2.509068508516066e-10,
+          "accounting": {
+            "material": 956.1600239610725,
+            "materialIntroduced": 956.1600239608216,
+            "materialDelta": 2.509068508516066e-10,
+            "materialTolerance": 1e-07,
+            "energy": 29470.637640708737,
+            "energyIntroduced": 8332.79999999999,
+            "photosynthesis": 75695.08588581771,
+            "energyTolerance": 1e-07,
+            "energyExcess": -54557.24824510896
+          },
+          "organic": {
+            "exudate": {
+              "count": 187,
+              "energy": 1745.813133,
+              "minerals": 0
+            },
+            "tissue": {
+              "count": 56,
+              "energy": 491.961371,
+              "minerals": 9.277394
+            },
+            "waste": {
+              "count": 3,
+              "energy": 21.100249,
+              "minerals": 0.312085
+            }
+          },
+          "lineages": [
+            {
+              "name": "Phototroph",
+              "count": 228,
+              "area": 314.401758,
+              "mass": 400.030846,
+              "energy": 21404.588684,
+              "nutrients": 145.973769,
+              "gutEnergy": 0,
+              "photosynthesisRate": 643.576759,
+              "digestionRate": 0,
+              "growthRate": 1.523256,
+              "exudationRate": 78.584188,
+              "upkeep": 119.053784,
+              "expressionRate": 0.846981,
+              "meanEnergyFraction": 0.442508,
+              "maxGeneration": 3,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Translation",
+                  "kind": "translate()",
+                  "instances": 321,
+                  "complete": 299,
+                  "active": 299,
+                  "mass": 12.448024
+                },
+                {
+                  "name": "Minerals",
+                  "kind": "import(mineral)",
+                  "instances": 321,
+                  "complete": 299,
+                  "active": 187,
+                  "mass": 7.873291
+                },
+                {
+                  "name": "Support",
+                  "kind": "support()",
+                  "instances": 462,
+                  "complete": 451,
+                  "active": 451,
+                  "mass": 27.30024
+                },
+                {
+                  "name": "Solar",
+                  "kind": "harvest(light)",
+                  "instances": 321,
+                  "complete": 300,
+                  "active": 300,
+                  "mass": 37.0696
+                },
+                {
+                  "name": "EnergyStore",
+                  "kind": "store(energy)",
+                  "instances": 321,
+                  "complete": 299,
+                  "active": 299,
+                  "mass": 24.395464
+                },
+                {
+                  "name": "MineralStore",
+                  "kind": "store(mineral)",
+                  "instances": 321,
+                  "complete": 299,
+                  "active": 299,
+                  "mass": 6.098866
+                },
+                {
+                  "name": "Envelope",
+                  "kind": "grow()",
+                  "instances": 317,
+                  "complete": 299,
+                  "active": 63,
+                  "mass": 6.094872
+                },
+                {
+                  "name": "Replication",
+                  "kind": "replicate()",
+                  "instances": 317,
+                  "complete": 299,
+                  "active": 206,
+                  "mass": 6.25763
+                },
+                {
+                  "name": "Division",
+                  "kind": "constrict()",
+                  "instances": 321,
+                  "complete": 300,
+                  "active": 90,
+                  "mass": 6.336876
+                },
+                {
+                  "name": "Repair",
+                  "kind": "repair()",
+                  "instances": 24,
+                  "complete": 18,
+                  "active": 18,
+                  "mass": 0.511596
+                }
+              ]
+            },
+            {
+              "name": "Forager",
+              "count": 5,
+              "area": 5,
+              "mass": 4.95,
+              "energy": 142.83197,
+              "nutrients": 1.911134,
+              "gutEnergy": 1.905298,
+              "photosynthesisRate": 0,
+              "digestionRate": 2.496,
+              "growthRate": 0,
+              "exudationRate": 0,
+              "upkeep": 1.49832,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.35708,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 1.905298,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Gut",
+                  "kind": "store(food)",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.3
+                },
+                {
+                  "name": "ExudateEnzyme",
+                  "kind": "digest(exudate)",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 1,
+                  "mass": 0.2
+                },
+                {
+                  "name": "Capture",
+                  "kind": "import(particle)",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.15
+                },
+                {
+                  "name": "LeftMotor",
+                  "kind": "propel()",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 4,
+                  "mass": 0.125
+                },
+                {
+                  "name": "RightMotor",
+                  "kind": "propel()",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.125
+                },
+                {
+                  "name": "Vision",
+                  "kind": "sense(optical)",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.1
+                },
+                {
+                  "name": "Touch",
+                  "kind": "sense(contact)",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.05
+                }
+              ],
+              "consumers": [
+                {
+                  "id": 73,
+                  "generation": 0,
+                  "x": 451.516161,
+                  "y": 27.312855,
+                  "angle": 5.735804,
+                  "energy": 28.133936,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 12.834277,
+                  "upkeep": 0.299664,
+                  "closestParticle": 31.287066,
+                  "closestProducer": 16.911898
+                },
+                {
+                  "id": 75,
+                  "generation": 0,
+                  "x": 422.218832,
+                  "y": 93.973009,
+                  "angle": 0.711572,
+                  "energy": 28.914502,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 13.223474,
+                  "upkeep": 0.299664,
+                  "closestParticle": 17.649765,
+                  "closestProducer": 25.344697
+                },
+                {
+                  "id": 76,
+                  "generation": 0,
+                  "x": 238.038235,
+                  "y": 252.377106,
+                  "angle": 0.427383,
+                  "energy": 24.277928,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 1.905298,
+                  "digestionRate": 2.496,
+                  "speed": 2.333228,
+                  "upkeep": 0.299664,
+                  "closestParticle": 7.789233,
+                  "closestProducer": 18.461222
+                },
+                {
+                  "id": 77,
+                  "generation": 0,
+                  "x": 162.154682,
+                  "y": 570.83811,
+                  "angle": 5.374304,
+                  "energy": 45.185487,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 5.36629,
+                  "upkeep": 0.299664,
+                  "closestParticle": 28.758262,
+                  "closestProducer": 13.998757
+                },
+                {
+                  "id": 78,
+                  "generation": 0,
+                  "x": 98.409354,
+                  "y": 336.940577,
+                  "angle": 3.106531,
+                  "energy": 16.320116,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 7.044716,
+                  "upkeep": 0.299664,
+                  "closestParticle": 23.686458,
+                  "closestProducer": 14.006311
+                }
+              ]
+            },
+            {
+              "name": "Mixotroph",
+              "count": 3,
+              "area": 4.612431,
+              "mass": 8.399982,
+              "energy": 232.54973,
+              "nutrients": 3.627451,
+              "gutEnergy": 0.017999,
+              "photosynthesisRate": 4.504432,
+              "digestionRate": 0.432123,
+              "growthRate": 0,
+              "exudationRate": 0.540532,
+              "upkeep": 2.303343,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.391295,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0.017999,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Solar",
+                  "kind": "harvest(light)",
+                  "instances": 6,
+                  "complete": 3,
+                  "active": 3,
+                  "mass": 0.477328
+                },
+                {
+                  "name": "Gut",
+                  "kind": "store(food)",
+                  "instances": 6,
+                  "complete": 3,
+                  "active": 3,
+                  "mass": 0.288399
+                },
+                {
+                  "name": "ExudateEnzyme",
+                  "kind": "digest(exudate)",
+                  "instances": 6,
+                  "complete": 3,
+                  "active": 2,
+                  "mass": 0.23504
+                },
+                {
+                  "name": "Capture",
+                  "kind": "import(particle)",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.15
+                },
+                {
+                  "name": "Translation",
+                  "kind": "translate()",
+                  "instances": 5,
+                  "complete": 3,
+                  "active": 3,
+                  "mass": 0.198326
+                },
+                {
+                  "name": "EnergyStore",
+                  "kind": "store(energy)",
+                  "instances": 5,
+                  "complete": 3,
+                  "active": 3,
+                  "mass": 0.304777
+                },
+                {
+                  "name": "MineralStore",
+                  "kind": "store(mineral)",
+                  "instances": 5,
+                  "complete": 3,
+                  "active": 3,
+                  "mass": 0.076194
+                },
+                {
+                  "name": "Minerals",
+                  "kind": "import(mineral)",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 0,
+                  "mass": 0.125
+                },
+                {
+                  "name": "Chemistry",
+                  "kind": "sense(chemical)",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.075
+                },
+                {
+                  "name": "Support",
+                  "kind": "support()",
+                  "instances": 6,
+                  "complete": 6,
+                  "active": 6,
+                  "mass": 0.36
+                },
+                {
+                  "name": "Envelope",
+                  "kind": "grow()",
+                  "instances": 5,
+                  "complete": 3,
+                  "active": 0,
+                  "mass": 0.082244
+                },
+                {
+                  "name": "Replication",
+                  "kind": "replicate()",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 2,
+                  "mass": 0.1
+                },
+                {
+                  "name": "LeftMotor",
+                  "kind": "propel()",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.125
+                },
+                {
+                  "name": "RightMotor",
+                  "kind": "propel()",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 4,
+                  "mass": 0.125
+                },
+                {
+                  "name": "Vision",
+                  "kind": "sense(optical)",
+                  "instances": 5,
+                  "complete": 3,
+                  "active": 3,
+                  "mass": 0.099953
+                },
+                {
+                  "name": "Touch",
+                  "kind": "sense(contact)",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.05
+                },
+                {
+                  "name": "Division",
+                  "kind": "constrict()",
+                  "instances": 4,
+                  "complete": 2,
+                  "active": 0,
+                  "mass": 0.047088
+                },
+                {
+                  "name": "Repair",
+                  "kind": "repair()",
+                  "instances": 2,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.048939
+                }
+              ],
+              "consumers": [
+                {
+                  "id": 79,
+                  "generation": 0,
+                  "x": 965.24902,
+                  "y": 110.069947,
+                  "angle": 1.475785,
+                  "energy": 71.436943,
+                  "capacity": 239.141591,
+                  "nutrients": 1.350332,
+                  "area": 1.602807,
+                  "integrity": 0.996417,
+                  "gutEnergy": 0.011734,
+                  "digestionRate": 0.281726,
+                  "speed": 12.009434,
+                  "upkeep": 0.819215,
+                  "closestParticle": 11.36214,
+                  "closestProducer": 109.459919
+                },
+                {
+                  "id": 81,
+                  "generation": 0,
+                  "x": 945.028771,
+                  "y": 114.811586,
+                  "angle": 5.711608,
+                  "energy": 79.630419,
+                  "capacity": 148.660519,
+                  "nutrients": 0.92679,
+                  "area": 1.409012,
+                  "integrity": 0.4919,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 4.3902,
+                  "upkeep": 0.66593,
+                  "closestParticle": 22.288266,
+                  "closestProducer": 123.10845
+                },
+                {
+                  "id": 82,
+                  "generation": 0,
+                  "x": 1092.655485,
+                  "y": 366.288939,
+                  "angle": 4.234753,
+                  "energy": 81.482368,
+                  "capacity": 240,
+                  "nutrients": 1.35033,
+                  "area": 1.600613,
+                  "integrity": 1,
+                  "gutEnergy": 0.006265,
+                  "digestionRate": 0.150397,
+                  "speed": 10.574265,
+                  "upkeep": 0.818198,
+                  "closestParticle": 11.356074,
+                  "closestProducer": 17.991858
+                }
+              ]
+            },
+            {
+              "name": "Predator",
+              "count": 1,
+              "area": 1,
+              "mass": 2.909431,
+              "energy": 64.934685,
+              "nutrients": 1.5,
+              "gutEnergy": 32.98364,
+              "photosynthesisRate": 0,
+              "digestionRate": 1.183,
+              "growthRate": 0,
+              "exudationRate": 0,
+              "upkeep": 0.467762,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.270561,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 32.98364,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Gut",
+                  "kind": "store(food)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.06
+                },
+                {
+                  "name": "ExudateEnzyme",
+                  "kind": "digest(exudate)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.04
+                },
+                {
+                  "name": "Capture",
+                  "kind": "import(particle)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.03
+                },
+                {
+                  "name": "TissueEnzyme",
+                  "kind": "digest(tissue)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.04
+                },
+                {
+                  "name": "LeftMotor",
+                  "kind": "propel()",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.025
+                },
+                {
+                  "name": "RightMotor",
+                  "kind": "propel()",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.025
+                },
+                {
+                  "name": "Vision",
+                  "kind": "sense(optical)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.02
+                },
+                {
+                  "name": "Touch",
+                  "kind": "sense(contact)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.01
+                },
+                {
+                  "name": "Piercer",
+                  "kind": "pierce()",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.05
+                },
+                {
+                  "name": "WasteEnzyme",
+                  "kind": "digest(waste)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.015
+                },
+                {
+                  "name": "Translation",
+                  "kind": "translate()",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.04
+                },
+                {
+                  "name": "Minerals",
+                  "kind": "import(mineral)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.025
+                },
+                {
+                  "name": "EnergyStore",
+                  "kind": "store(energy)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.08
+                },
+                {
+                  "name": "MineralStore",
+                  "kind": "store(mineral)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.02
+                },
+                {
+                  "name": "Support",
+                  "kind": "support()",
+                  "instances": 1,
+                  "complete": 0,
+                  "active": 0,
+                  "mass": 0.056237
+                }
+              ],
+              "consumers": [
+                {
+                  "id": 83,
+                  "generation": 0,
+                  "x": 1046.645041,
+                  "y": 494.411306,
+                  "angle": 4.783948,
+                  "energy": 64.934685,
+                  "capacity": 240,
+                  "nutrients": 1.5,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 32.98364,
+                  "digestionRate": 1.183,
+                  "speed": 0.22485,
+                  "upkeep": 0.467762,
+                  "closestParticle": 15.365509,
+                  "closestProducer": 104.126294
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "seconds": 300,
+          "population": 395,
+          "births": 368,
+          "deaths": 57,
+          "particlesEaten": 23601,
+          "attacks": 1265,
+          "predations": 2,
+          "mutations": 0,
+          "energy": 47002.39299,
+          "energyIntroduced": 8332.8,
+          "photosynthesis": 163405.137368,
+          "mineralError": 4.170033207628876e-10,
+          "accounting": {
+            "material": 1082.1600218153076,
+            "materialIntroduced": 1082.1600218148906,
+            "materialDelta": 4.170033207628876e-10,
+            "materialTolerance": 1.0821600218148907e-07,
+            "energy": 47002.39299011256,
+            "energyIntroduced": 8332.79999999999,
+            "photosynthesis": 163405.1373682531,
+            "energyTolerance": 1e-07,
+            "energyExcess": -124735.54437814053
+          },
+          "organic": {
+            "exudate": {
+              "count": 319,
+              "energy": 2361.182032,
+              "minerals": 0
+            },
+            "tissue": {
+              "count": 187,
+              "energy": 1962.355014,
+              "minerals": 37.937274
+            },
+            "waste": {
+              "count": 4,
+              "energy": 13.462459,
+              "minerals": 0.19811
+            }
+          },
+          "lineages": [
+            {
+              "name": "Phototroph",
+              "count": 388,
+              "area": 516.864531,
+              "mass": 628.763128,
+              "energy": 33736.067692,
+              "nutrients": 210.400038,
+              "gutEnergy": 0,
+              "photosynthesisRate": 797.664532,
+              "digestionRate": 0,
+              "growthRate": 1.845673,
+              "exudationRate": 100.880979,
+              "upkeep": 196.134174,
+              "expressionRate": 0.842597,
+              "meanEnergyFraction": 0.438567,
+              "maxGeneration": 5,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Translation",
+                  "kind": "translate()",
+                  "instances": 523,
+                  "complete": 492,
+                  "active": 492,
+                  "mass": 20.428452
+                },
+                {
+                  "name": "Minerals",
+                  "kind": "import(mineral)",
+                  "instances": 523,
+                  "complete": 492,
+                  "active": 275,
+                  "mass": 12.854006
+                },
+                {
+                  "name": "Support",
+                  "kind": "support()",
+                  "instances": 784,
+                  "complete": 773,
+                  "active": 773,
+                  "mass": 46.575159
+                },
+                {
+                  "name": "Solar",
+                  "kind": "harvest(light)",
+                  "instances": 526,
+                  "complete": 496,
+                  "active": 496,
+                  "mass": 61.213244
+                },
+                {
+                  "name": "EnergyStore",
+                  "kind": "store(energy)",
+                  "instances": 523,
+                  "complete": 490,
+                  "active": 490,
+                  "mass": 39.999297
+                },
+                {
+                  "name": "MineralStore",
+                  "kind": "store(mineral)",
+                  "instances": 523,
+                  "complete": 490,
+                  "active": 490,
+                  "mass": 9.999824
+                },
+                {
+                  "name": "Envelope",
+                  "kind": "grow()",
+                  "instances": 519,
+                  "complete": 491,
+                  "active": 71,
+                  "mass": 10.027059
+                },
+                {
+                  "name": "Replication",
+                  "kind": "replicate()",
+                  "instances": 519,
+                  "complete": 492,
+                  "active": 312,
+                  "mass": 10.25581
+                },
+                {
+                  "name": "Division",
+                  "kind": "constrict()",
+                  "instances": 519,
+                  "complete": 492,
+                  "active": 121,
+                  "mass": 10.27862
+                },
+                {
+                  "name": "Repair",
+                  "kind": "repair()",
+                  "instances": 30,
+                  "complete": 26,
+                  "active": 26,
+                  "mass": 0.727414
+                }
+              ]
+            },
+            {
+              "name": "Forager",
+              "count": 5,
+              "area": 5.026667,
+              "mass": 6.028339,
+              "energy": 213.981774,
+              "nutrients": 2.356066,
+              "gutEnergy": 0,
+              "photosynthesisRate": 0,
+              "digestionRate": 0,
+              "growthRate": 0,
+              "exudationRate": 0,
+              "upkeep": 1.785927,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.308366,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Gut",
+                  "kind": "store(food)",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.3
+                },
+                {
+                  "name": "ExudateEnzyme",
+                  "kind": "digest(exudate)",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 0,
+                  "mass": 0.2
+                },
+                {
+                  "name": "Capture",
+                  "kind": "import(particle)",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.15
+                },
+                {
+                  "name": "LeftMotor",
+                  "kind": "propel()",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.125
+                },
+                {
+                  "name": "RightMotor",
+                  "kind": "propel()",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.125
+                },
+                {
+                  "name": "Vision",
+                  "kind": "sense(optical)",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.1
+                },
+                {
+                  "name": "Touch",
+                  "kind": "sense(contact)",
+                  "instances": 5,
+                  "complete": 5,
+                  "active": 5,
+                  "mass": 0.05
+                },
+                {
+                  "name": "Translation",
+                  "kind": "translate()",
+                  "instances": 3,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.114098
+                },
+                {
+                  "name": "Minerals",
+                  "kind": "import(mineral)",
+                  "instances": 3,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.071605
+                },
+                {
+                  "name": "EnergyStore",
+                  "kind": "store(energy)",
+                  "instances": 3,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.173321
+                },
+                {
+                  "name": "MineralStore",
+                  "kind": "store(mineral)",
+                  "instances": 3,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.04333
+                },
+                {
+                  "name": "Chemistry",
+                  "kind": "sense(chemical)",
+                  "instances": 3,
+                  "complete": 3,
+                  "active": 3,
+                  "mass": 0.045
+                },
+                {
+                  "name": "Support",
+                  "kind": "support()",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.12
+                },
+                {
+                  "name": "Envelope",
+                  "kind": "grow()",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.02
+                },
+                {
+                  "name": "Replication",
+                  "kind": "replicate()",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.02
+                }
+              ],
+              "consumers": [
+                {
+                  "id": 73,
+                  "generation": 0,
+                  "x": 427.295004,
+                  "y": 258.784166,
+                  "angle": 4.887263,
+                  "energy": 49.58755,
+                  "capacity": 240,
+                  "nutrients": 0.342912,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 10.346122,
+                  "upkeep": 0.382651,
+                  "closestParticle": 16.809262,
+                  "closestProducer": 14.275909
+                },
+                {
+                  "id": 75,
+                  "generation": 0,
+                  "x": 430.735575,
+                  "y": 145.626397,
+                  "angle": 5.135638,
+                  "energy": 4.214891,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 9.138564,
+                  "upkeep": 0.299664,
+                  "closestParticle": 17.700387,
+                  "closestProducer": 14.683245
+                },
+                {
+                  "id": 76,
+                  "generation": 0,
+                  "x": 671.167574,
+                  "y": 455.458751,
+                  "angle": 0.077514,
+                  "energy": 86.365233,
+                  "capacity": 240,
+                  "nutrients": 0.951561,
+                  "area": 1.026667,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 11.432061,
+                  "upkeep": 0.466336,
+                  "closestParticle": 22.624719,
+                  "closestProducer": 14.29255
+                },
+                {
+                  "id": 77,
+                  "generation": 0,
+                  "x": 319.916465,
+                  "y": 370.896633,
+                  "angle": 6.078265,
+                  "energy": 52.883709,
+                  "capacity": 80,
+                  "nutrients": 0.29714,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 15.206881,
+                  "upkeep": 0.337613,
+                  "closestParticle": 11.931622,
+                  "closestProducer": 19.663796
+                },
+                {
+                  "id": 78,
+                  "generation": 0,
+                  "x": 228.995287,
+                  "y": 301.183649,
+                  "angle": 2.486597,
+                  "energy": 20.930391,
+                  "capacity": 80,
+                  "nutrients": 0.382227,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 10.767243,
+                  "upkeep": 0.299664,
+                  "closestParticle": 19.237608,
+                  "closestProducer": 14.005535
+                }
+              ]
+            },
+            {
+              "name": "Mixotroph",
+              "count": 2,
+              "area": 3.009625,
+              "mass": 5.110384,
+              "energy": 73.284121,
+              "nutrients": 1.692883,
+              "gutEnergy": 22.722675,
+              "photosynthesisRate": 1.769293,
+              "digestionRate": 0,
+              "growthRate": 0,
+              "exudationRate": 0.212315,
+              "upkeep": 1.484128,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.237129,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 22.722675,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Solar",
+                  "kind": "harvest(light)",
+                  "instances": 4,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.318165
+                },
+                {
+                  "name": "Gut",
+                  "kind": "store(food)",
+                  "instances": 4,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.204015
+                },
+                {
+                  "name": "ExudateEnzyme",
+                  "kind": "digest(exudate)",
+                  "instances": 4,
+                  "complete": 2,
+                  "active": 0,
+                  "mass": 0.156576
+                },
+                {
+                  "name": "Capture",
+                  "kind": "import(particle)",
+                  "instances": 3,
+                  "complete": 3,
+                  "active": 1,
+                  "mass": 0.09
+                },
+                {
+                  "name": "Translation",
+                  "kind": "translate()",
+                  "instances": 3,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.119094
+                },
+                {
+                  "name": "EnergyStore",
+                  "kind": "store(energy)",
+                  "instances": 3,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.192265
+                },
+                {
+                  "name": "MineralStore",
+                  "kind": "store(mineral)",
+                  "instances": 3,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.048066
+                },
+                {
+                  "name": "Minerals",
+                  "kind": "import(mineral)",
+                  "instances": 3,
+                  "complete": 3,
+                  "active": 0,
+                  "mass": 0.075
+                },
+                {
+                  "name": "Chemistry",
+                  "kind": "sense(chemical)",
+                  "instances": 3,
+                  "complete": 3,
+                  "active": 3,
+                  "mass": 0.045
+                },
+                {
+                  "name": "Support",
+                  "kind": "support()",
+                  "instances": 4,
+                  "complete": 4,
+                  "active": 4,
+                  "mass": 0.24
+                },
+                {
+                  "name": "Envelope",
+                  "kind": "grow()",
+                  "instances": 3,
+                  "complete": 2,
+                  "active": 0,
+                  "mass": 0.051101
+                },
+                {
+                  "name": "Replication",
+                  "kind": "replicate()",
+                  "instances": 3,
+                  "complete": 3,
+                  "active": 0,
+                  "mass": 0.06
+                },
+                {
+                  "name": "LeftMotor",
+                  "kind": "propel()",
+                  "instances": 3,
+                  "complete": 3,
+                  "active": 1,
+                  "mass": 0.075
+                },
+                {
+                  "name": "RightMotor",
+                  "kind": "propel()",
+                  "instances": 3,
+                  "complete": 3,
+                  "active": 1,
+                  "mass": 0.075
+                },
+                {
+                  "name": "Vision",
+                  "kind": "sense(optical)",
+                  "instances": 3,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.059975
+                },
+                {
+                  "name": "Touch",
+                  "kind": "sense(contact)",
+                  "instances": 3,
+                  "complete": 3,
+                  "active": 3,
+                  "mass": 0.03
+                },
+                {
+                  "name": "Repair",
+                  "kind": "repair()",
+                  "instances": 2,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.048939
+                },
+                {
+                  "name": "Division",
+                  "kind": "constrict()",
+                  "instances": 2,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.023404
+                }
+              ],
+              "consumers": [
+                {
+                  "id": 81,
+                  "generation": 0,
+                  "x": 100.246679,
+                  "y": 635.222398,
+                  "angle": 4.312715,
+                  "energy": 55.487526,
+                  "capacity": 174.699789,
+                  "nutrients": 0.9828,
+                  "area": 1.409012,
+                  "integrity": 0.579275,
+                  "gutEnergy": 0,
+                  "digestionRate": 0,
+                  "speed": 8.739916,
+                  "upkeep": 0.66593,
+                  "closestParticle": 18.712765,
+                  "closestProducer": 16.984831
+                },
+                {
+                  "id": 82,
+                  "generation": 0,
+                  "x": 6.603797,
+                  "y": 136.382565,
+                  "angle": 4.234753,
+                  "energy": 17.796595,
+                  "capacity": 113.613377,
+                  "nutrients": 0.710084,
+                  "area": 1.600613,
+                  "integrity": 0.252444,
+                  "gutEnergy": 22.722675,
+                  "digestionRate": 0,
+                  "speed": 2.628236,
+                  "upkeep": 0.818198,
+                  "closestParticle": 11.262039,
+                  "closestProducer": 82.169869
+                }
+              ]
+            },
+            {
+              "name": "Predator",
+              "count": 0,
+              "area": 0,
+              "mass": 0,
+              "energy": 0,
+              "nutrients": 0,
+              "gutEnergy": 0,
+              "photosynthesisRate": 0,
+              "digestionRate": 0,
+              "growthRate": 0,
+              "exudationRate": 0,
+              "upkeep": 0,
+              "expressionRate": 0,
+              "meanEnergyFraction": null,
+              "maxGeneration": null,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [],
+              "consumers": []
+            }
+          ]
+        },
+        {
+          "seconds": 600,
+          "population": 693,
+          "births": 804,
+          "deaths": 195,
+          "particlesEaten": 31733,
+          "attacks": 1265,
+          "predations": 2,
+          "mutations": 0,
+          "energy": 79210.364738,
+          "energyIntroduced": 8332.8,
+          "photosynthesis": 446537.083648,
+          "mineralError": 8.340066415257752e-10,
+          "accounting": {
+            "material": 1397.1600164508973,
+            "materialIntroduced": 1397.1600164500633,
+            "materialDelta": 8.340066415257752e-10,
+            "materialTolerance": 1.3971600164500633e-07,
+            "energy": 79210.36473766238,
+            "energyIntroduced": 8332.79999999999,
+            "photosynthesis": 446537.08364843536,
+            "energyTolerance": 1e-07,
+            "energyExcess": -375659.518910773
+          },
+          "organic": {
+            "exudate": {
+              "count": 740,
+              "energy": 3484.335065,
+              "minerals": 0
+            },
+            "tissue": {
+              "count": 491,
+              "energy": 2888.950956,
+              "minerals": 70.173595
+            },
+            "waste": {
+              "count": 6,
+              "energy": 4.822464,
+              "minerals": 0.088319
+            }
+          },
+          "lineages": [
+            {
+              "name": "Phototroph",
+              "count": 690,
+              "area": 908.207105,
+              "mass": 980.58548,
+              "energy": 57701.908317,
+              "nutrients": 249.005518,
+              "gutEnergy": 0,
+              "photosynthesisRate": 1015.126376,
+              "digestionRate": 0,
+              "growthRate": 1.52649,
+              "exudationRate": 131.181229,
+              "upkeep": 343.053799,
+              "expressionRate": 0.74767,
+              "meanEnergyFraction": 0.439307,
+              "maxGeneration": 7,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Translation",
+                  "kind": "translate()",
+                  "instances": 928,
+                  "complete": 864,
+                  "active": 864,
+                  "mass": 35.806772
+                },
+                {
+                  "name": "Minerals",
+                  "kind": "import(mineral)",
+                  "instances": 928,
+                  "complete": 867,
+                  "active": 516,
+                  "mass": 22.581525
+                },
+                {
+                  "name": "Support",
+                  "kind": "support()",
+                  "instances": 1380,
+                  "complete": 1340,
+                  "active": 1340,
+                  "mass": 81.035484
+                },
+                {
+                  "name": "Solar",
+                  "kind": "harvest(light)",
+                  "instances": 920,
+                  "complete": 860,
+                  "active": 860,
+                  "mass": 106.459584
+                },
+                {
+                  "name": "EnergyStore",
+                  "kind": "store(energy)",
+                  "instances": 937,
+                  "complete": 841,
+                  "active": 841,
+                  "mass": 69.986323
+                },
+                {
+                  "name": "MineralStore",
+                  "kind": "store(mineral)",
+                  "instances": 925,
+                  "complete": 826,
+                  "active": 826,
+                  "mass": 17.256131
+                },
+                {
+                  "name": "Envelope",
+                  "kind": "grow()",
+                  "instances": 912,
+                  "complete": 829,
+                  "active": 156,
+                  "mass": 17.317368
+                },
+                {
+                  "name": "Replication",
+                  "kind": "replicate()",
+                  "instances": 913,
+                  "complete": 869,
+                  "active": 511,
+                  "mass": 17.993108
+                },
+                {
+                  "name": "Division",
+                  "kind": "constrict()",
+                  "instances": 906,
+                  "complete": 864,
+                  "active": 133,
+                  "mass": 17.948977
+                },
+                {
+                  "name": "Repair",
+                  "kind": "repair()",
+                  "instances": 86,
+                  "complete": 80,
+                  "active": 80,
+                  "mass": 2.10048
+                }
+              ]
+            },
+            {
+              "name": "Forager",
+              "count": 1,
+              "area": 1,
+              "mass": 1.963784,
+              "energy": 85.058374,
+              "nutrients": 1.002459,
+              "gutEnergy": 1.410523,
+              "photosynthesisRate": 0,
+              "digestionRate": 2.496,
+              "growthRate": 0,
+              "exudationRate": 0,
+              "upkeep": 0.460795,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.35441,
+              "maxGeneration": 0,
+              "gutByKind": {
+                "exudate": 1.410523,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Gut",
+                  "kind": "store(food)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.06
+                },
+                {
+                  "name": "ExudateEnzyme",
+                  "kind": "digest(exudate)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.04
+                },
+                {
+                  "name": "Capture",
+                  "kind": "import(particle)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.03
+                },
+                {
+                  "name": "LeftMotor",
+                  "kind": "propel()",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.025
+                },
+                {
+                  "name": "RightMotor",
+                  "kind": "propel()",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.025
+                },
+                {
+                  "name": "Vision",
+                  "kind": "sense(optical)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.02
+                },
+                {
+                  "name": "Touch",
+                  "kind": "sense(contact)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.01
+                },
+                {
+                  "name": "Translation",
+                  "kind": "translate()",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.04
+                },
+                {
+                  "name": "Minerals",
+                  "kind": "import(mineral)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.025
+                },
+                {
+                  "name": "EnergyStore",
+                  "kind": "store(energy)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.08
+                },
+                {
+                  "name": "MineralStore",
+                  "kind": "store(mineral)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.02
+                },
+                {
+                  "name": "Chemistry",
+                  "kind": "sense(chemical)",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.015
+                },
+                {
+                  "name": "Support",
+                  "kind": "support()",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.12
+                },
+                {
+                  "name": "Envelope",
+                  "kind": "grow()",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 0,
+                  "mass": 0.02
+                },
+                {
+                  "name": "Replication",
+                  "kind": "replicate()",
+                  "instances": 1,
+                  "complete": 1,
+                  "active": 1,
+                  "mass": 0.02
+                }
+              ],
+              "consumers": [
+                {
+                  "id": 73,
+                  "generation": 0,
+                  "x": 204.202526,
+                  "y": 570.606687,
+                  "angle": 2.52069,
+                  "energy": 85.058374,
+                  "capacity": 240,
+                  "nutrients": 1.002459,
+                  "area": 1,
+                  "integrity": 1,
+                  "gutEnergy": 1.410523,
+                  "digestionRate": 2.496,
+                  "speed": 7.025457,
+                  "upkeep": 0.460795,
+                  "closestParticle": 14.031374,
+                  "closestProducer": 16.741253
+                }
+              ]
+            },
+            {
+              "name": "Mixotroph",
+              "count": 2,
+              "area": 2.001212,
+              "mass": 3.611664,
+              "energy": 146.832189,
+              "nutrients": 1.570149,
+              "gutEnergy": 0.014109,
+              "photosynthesisRate": 3.532101,
+              "digestionRate": 0.378745,
+              "growthRate": 0,
+              "exudationRate": 0.423852,
+              "upkeep": 0.991052,
+              "expressionRate": 0,
+              "meanEnergyFraction": 0.382238,
+              "maxGeneration": 1,
+              "gutByKind": {
+                "exudate": 0.014109,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [
+                {
+                  "name": "Translation",
+                  "kind": "translate()",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.08
+                },
+                {
+                  "name": "Support",
+                  "kind": "support()",
+                  "instances": 4,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.121971
+                },
+                {
+                  "name": "Solar",
+                  "kind": "harvest(light)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.16
+                },
+                {
+                  "name": "Gut",
+                  "kind": "store(food)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.12
+                },
+                {
+                  "name": "ExudateEnzyme",
+                  "kind": "digest(exudate)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.08
+                },
+                {
+                  "name": "Repair",
+                  "kind": "repair()",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.05
+                },
+                {
+                  "name": "Capture",
+                  "kind": "import(particle)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.06
+                },
+                {
+                  "name": "Minerals",
+                  "kind": "import(mineral)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 1,
+                  "mass": 0.05
+                },
+                {
+                  "name": "EnergyStore",
+                  "kind": "store(energy)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.16
+                },
+                {
+                  "name": "MineralStore",
+                  "kind": "store(mineral)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.04
+                },
+                {
+                  "name": "LeftMotor",
+                  "kind": "propel()",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.05
+                },
+                {
+                  "name": "RightMotor",
+                  "kind": "propel()",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.05
+                },
+                {
+                  "name": "Vision",
+                  "kind": "sense(optical)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.04
+                },
+                {
+                  "name": "Touch",
+                  "kind": "sense(contact)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.02
+                },
+                {
+                  "name": "Chemistry",
+                  "kind": "sense(chemical)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.03
+                },
+                {
+                  "name": "Envelope",
+                  "kind": "grow()",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 0,
+                  "mass": 0.04
+                },
+                {
+                  "name": "Replication",
+                  "kind": "replicate()",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 0,
+                  "mass": 0.04
+                },
+                {
+                  "name": "Division",
+                  "kind": "constrict()",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 0,
+                  "mass": 0.04
+                },
+                {
+                  "name": "TissueEnzyme",
+                  "kind": "digest(tissue)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 0,
+                  "mass": 0.02
+                },
+                {
+                  "name": "WasteEnzyme",
+                  "kind": "digest(waste)",
+                  "instances": 2,
+                  "complete": 2,
+                  "active": 2,
+                  "mass": 0.02
+                }
+              ],
+              "consumers": [
+                {
+                  "id": 81,
+                  "generation": 0,
+                  "x": 1037.74568,
+                  "y": 46.231006,
+                  "angle": 2.246329,
+                  "energy": 73.547827,
+                  "capacity": 240,
+                  "nutrients": 1.070149,
+                  "area": 1.000606,
+                  "integrity": 1,
+                  "gutEnergy": 0.007049,
+                  "digestionRate": 0.169182,
+                  "speed": 10.152253,
+                  "upkeep": 0.495526,
+                  "closestParticle": 9.50212,
+                  "closestProducer": 174.508228
+                },
+                {
+                  "id": 885,
+                  "generation": 1,
+                  "x": 999.403982,
+                  "y": 27.201645,
+                  "angle": 3.13342,
+                  "energy": 73.284362,
+                  "capacity": 160,
+                  "nutrients": 0.5,
+                  "area": 1.000606,
+                  "integrity": 1,
+                  "gutEnergy": 0.00706,
+                  "digestionRate": 0.209563,
+                  "speed": 12.192053,
+                  "upkeep": 0.495526,
+                  "closestParticle": 9.50212,
+                  "closestProducer": 155.579024
+                }
+              ]
+            },
+            {
+              "name": "Predator",
+              "count": 0,
+              "area": 0,
+              "mass": 0,
+              "energy": 0,
+              "nutrients": 0,
+              "gutEnergy": 0,
+              "photosynthesisRate": 0,
+              "digestionRate": 0,
+              "growthRate": 0,
+              "exudationRate": 0,
+              "upkeep": 0,
+              "expressionRate": 0,
+              "meanEnergyFraction": null,
+              "maxGeneration": null,
+              "gutByKind": {
+                "exudate": 0,
+                "tissue": 0,
+                "waste": 0
+              },
+              "machinery": [],
+              "consumers": []
+            }
+          ]
+        }
+      ],
+      "observedDescendants": {
+        "Phototroph": 775,
+        "Forager": 0,
+        "Mixotroph": 1,
+        "Predator": 0
+      },
+      "assertions": {
+        "noExternalOrganicFood": true,
+        "foragerSurvives": true,
+        "predatorSurvives": false,
+        "foragerReproduces": false,
+        "predatorReproduces": false,
+        "attacksOccur": true,
+        "predationOccurs": true
+      }
+    }
+  ],
+  "assertConsumers": true
+}

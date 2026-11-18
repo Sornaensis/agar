@@ -1,0 +1,1150 @@
+{
+  "decision": "Not adopted: establishment did not enable Forager reproduction and left insufficient local intake surplus.",
+  "summary": {
+    "provenance": "provenance.json",
+    "trace": "seed42-native.jsonl",
+    "result": "Producer establishment did not induce Forager growth or reproduction within300 consumer-seconds.",
+    "introduction": {
+      "worldSeconds": 90,
+      "counts": [
+        128,
+        6,
+        4,
+        2
+      ],
+      "births": 64,
+      "deaths": 8,
+      "food": {
+        "countByKind": [
+          114,
+          27,
+          0
+        ],
+        "energyByKind": [
+          1272.5765391643226,
+          319.5175910677398,
+          0.0
+        ]
+      },
+      "exudateRate": [
+        66.68183146163328,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "endpoint": {
+      "seconds": 300,
+      "counts": [
+        590,
+        4,
+        5,
+        1
+      ],
+      "maxGeneration": [
+        7,
+        0,
+        1,
+        1
+      ],
+      "descendants": [
+        606,
+        0,
+        4,
+        1
+      ],
+      "attacks": 2520,
+      "predations": 9,
+      "materialDelta": 5.422862159321085e-10,
+      "wallSeconds": 148.386287893,
+      "consumers": [
+        {
+          "id": 138,
+          "genome": 2,
+          "generation": 0,
+          "parent": 0,
+          "energy": 33.98806047413247,
+          "capacity": 240,
+          "gut": [
+            0,
+            0,
+            0
+          ],
+          "area": 1,
+          "supportMass": 0.04,
+          "integrity": 1,
+          "temperature": 0.5000134550931218,
+          "x": 358.89565614513833,
+          "y": 102.17136138810713,
+          "angle": 3.7259922746782377,
+          "speed": 11.468855259014685,
+          "neutralBasalMetabolism": 0.5321203225418936,
+          "digestion": 0,
+          "growth": 0,
+          "machines": []
+        },
+        {
+          "id": 140,
+          "genome": 2,
+          "generation": 0,
+          "parent": 0,
+          "energy": 32.17118990418661,
+          "capacity": 80,
+          "gut": [
+            0,
+            0,
+            0
+          ],
+          "area": 1,
+          "supportMass": 0.04,
+          "integrity": 1,
+          "temperature": 0.5000765594191092,
+          "x": 36.18532560082622,
+          "y": 514.8342708057833,
+          "angle": 2.4818924928670913,
+          "speed": 14.400684100759147,
+          "neutralBasalMetabolism": 0.4907047509665621,
+          "digestion": 0,
+          "growth": 0,
+          "machines": []
+        },
+        {
+          "id": 141,
+          "genome": 2,
+          "generation": 0,
+          "parent": 0,
+          "energy": 16.287508670186384,
+          "capacity": 80,
+          "gut": [
+            0,
+            0,
+            0
+          ],
+          "area": 1,
+          "supportMass": 0.04,
+          "integrity": 1,
+          "temperature": 0.5000344693679601,
+          "x": 137.93375990970483,
+          "y": 432.74566686749586,
+          "angle": 4.625526073049007,
+          "speed": 16.146556350406485,
+          "neutralBasalMetabolism": 0.4496639658382452,
+          "digestion": 0,
+          "growth": 0,
+          "machines": []
+        },
+        {
+          "id": 142,
+          "genome": 2,
+          "generation": 0,
+          "parent": 0,
+          "energy": 24.896913235861327,
+          "capacity": 80,
+          "gut": [
+            0,
+            0,
+            0
+          ],
+          "area": 1,
+          "supportMass": 0.04,
+          "integrity": 1,
+          "temperature": 0.5000481238432387,
+          "x": 529.5066437408215,
+          "y": 698.8329186849428,
+          "angle": 2.8878384408886295,
+          "speed": 5.661352969143275,
+          "neutralBasalMetabolism": 0.5479197697469944,
+          "digestion": 0,
+          "growth": 0,
+          "machines": []
+        },
+        {
+          "id": 467,
+          "genome": 4,
+          "generation": 1,
+          "parent": 147,
+          "energy": 92.43834688496565,
+          "capacity": 160,
+          "gut": [
+            20.168000000000053,
+            10.250666666666774,
+            3.0211908518719897
+          ],
+          "area": 1.6848695869039418,
+          "supportMass": 0.12,
+          "integrity": 1,
+          "temperature": 0.5041283135111186,
+          "x": 718.7136399555598,
+          "y": 469.9720421662491,
+          "angle": 5.585932256291125,
+          "speed": 2.1148738759615657,
+          "neutralBasalMetabolism": 1.195122253379385,
+          "digestion": 3.614,
+          "growth": 0.030293801349553146,
+          "machines": []
+        }
+      ]
+    },
+    "endpointFood": {
+      "countByKind": [
+        464,
+        249,
+        11
+      ],
+      "energyByKind": [
+        2744.617496916299,
+        2065.04974964988,
+        71.3575337934134
+      ]
+    },
+    "consumerBirths": [
+      {
+        "event": "birth",
+        "seconds": 183.5,
+        "lineage": 4,
+        "cell": {
+          "id": 467,
+          "genome": 4,
+          "generation": 1,
+          "parent": 147,
+          "energy": 38.171655720074696,
+          "capacity": 160,
+          "gut": [
+            4.643999999999999,
+            15.645129803233191,
+            0
+          ],
+          "area": 1.0000647671686407,
+          "supportMass": 0.06,
+          "integrity": 1,
+          "temperature": 0.5002264871527481,
+          "x": 501.867858852521,
+          "y": 415.6786471566776,
+          "angle": 1.8031636397321504,
+          "speed": 5.409396105755492,
+          "neutralBasalMetabolism": 0.66615569847684,
+          "digestion": 0,
+          "growth": 0,
+          "machines": [
+            {
+              "name": "Gut",
+              "mass": 0.06,
+              "functionalMass": 0.06,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "ExudateEnzyme",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Capture",
+              "mass": 0.03,
+              "functionalMass": 0.03,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "TissueEnzyme",
+              "mass": 0.08,
+              "functionalMass": 0.08,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "LeftMotor",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0.04994865472114516
+            },
+            {
+              "name": "RightMotor",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            },
+            {
+              "name": "Vision",
+              "mass": 0.019999999999088615,
+              "functionalMass": 0.019999999999088615,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Touch",
+              "mass": 0.01,
+              "functionalMass": 0.01,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Piercer",
+              "mass": 0.05,
+              "functionalMass": 0.05,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0.8
+            },
+            {
+              "name": "LeftHeat",
+              "mass": 0.01,
+              "functionalMass": 0.01,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "RightHeat",
+              "mass": 0.01,
+              "functionalMass": 0.01,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "EnergyStore",
+              "mass": 0.08,
+              "functionalMass": 0.08,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "MineralStore",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Support",
+              "mass": 0.06,
+              "functionalMass": 0.06,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Envelope",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            },
+            {
+              "name": "Replication",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Translation",
+              "mass": 0.04,
+              "functionalMass": 0.04,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Engulfment",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Minerals",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            },
+            {
+              "name": "Division",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            }
+          ]
+        }
+      }
+    ],
+    "consumerDeaths": [
+      {
+        "event": "death",
+        "seconds": 37.4,
+        "lineage": 4,
+        "attacksDelta": 0,
+        "predationsDelta": 0,
+        "lastLive": {
+          "id": 148,
+          "genome": 4,
+          "generation": 0,
+          "parent": 0,
+          "energy": 4.336808689942018e-19,
+          "capacity": 70.9949647482707,
+          "gut": [
+            0,
+            0,
+            0
+          ],
+          "area": 1,
+          "supportMass": 0.03549748237413535,
+          "integrity": 0.7171526957179605,
+          "temperature": 0.7384298771486906,
+          "x": 1107.9315020893496,
+          "y": 302.7218517612722,
+          "angle": 2.5432533938093744,
+          "speed": 1.9038318390962492,
+          "neutralBasalMetabolism": 0.5751128348331292,
+          "digestion": 0,
+          "growth": 0,
+          "machines": [
+            {
+              "name": "Gut",
+              "mass": 0.06,
+              "functionalMass": 0.05454297653698973,
+              "complete": true,
+              "integrity": 0.9090496089498289,
+              "activity": 1
+            },
+            {
+              "name": "ExudateEnzyme",
+              "mass": 0.02,
+              "functionalMass": 0.018065329642746663,
+              "complete": true,
+              "integrity": 0.9032664821373332,
+              "activity": 0
+            },
+            {
+              "name": "Repair",
+              "mass": 0.025,
+              "functionalMass": 0.022613935549433667,
+              "complete": true,
+              "integrity": 0.9045574219773467,
+              "activity": 1
+            },
+            {
+              "name": "Capture",
+              "mass": 0.03,
+              "functionalMass": 0.02862742557799745,
+              "complete": true,
+              "integrity": 0.9542475192665817,
+              "activity": 1
+            },
+            {
+              "name": "ExudateEnzyme",
+              "mass": 0.02,
+              "functionalMass": 0.018998553385667413,
+              "complete": true,
+              "integrity": 0.9499276692833706,
+              "activity": 0
+            },
+            {
+              "name": "Repair",
+              "mass": 0.025,
+              "functionalMass": 0.02380027658472255,
+              "complete": true,
+              "integrity": 0.952011063388902,
+              "activity": 1
+            },
+            {
+              "name": "Gut",
+              "mass": 0.06,
+              "functionalMass": 0.05769210161375619,
+              "complete": true,
+              "integrity": 0.9615350268959365,
+              "activity": 1
+            },
+            {
+              "name": "TissueEnzyme",
+              "mass": 0.041299675659738244,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.9988168070244778,
+              "activity": 0
+            },
+            {
+              "name": "LeftMotor",
+              "mass": 0.02373566125101731,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.996065055372557,
+              "activity": 0.31725930447188133
+            },
+            {
+              "name": "RightMotor",
+              "mass": 0.02373566125101731,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.996065055372557,
+              "activity": 0.6827406955281187
+            },
+            {
+              "name": "Vision",
+              "mass": 0.02,
+              "functionalMass": 0.019957580807961676,
+              "complete": true,
+              "integrity": 0.9978790403980837,
+              "activity": 1
+            },
+            {
+              "name": "Touch",
+              "mass": 0.00974713225020346,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.998331096559599,
+              "activity": 1
+            },
+            {
+              "name": "Piercer",
+              "mass": 0.0413694432105192,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.9983501238209379,
+              "activity": 0
+            },
+            {
+              "name": "LeftHeat",
+              "mass": 0.01,
+              "functionalMass": 0.00998294797946977,
+              "complete": true,
+              "integrity": 0.998294797946977,
+              "activity": 1
+            },
+            {
+              "name": "RightHeat",
+              "mass": 0.01,
+              "functionalMass": 0.00998294797946977,
+              "complete": true,
+              "integrity": 0.998294797946977,
+              "activity": 1
+            },
+            {
+              "name": "Capture",
+              "mass": 0.03,
+              "functionalMass": 0.02987637124860556,
+              "complete": true,
+              "integrity": 0.9958790416201854,
+              "activity": 1
+            },
+            {
+              "name": "Minerals",
+              "mass": 0.005239687317831863,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 1,
+              "activity": 1
+            }
+          ]
+        }
+      },
+      {
+        "event": "death",
+        "seconds": 94.83333333333333,
+        "lineage": 2,
+        "attacksDelta": 0,
+        "predationsDelta": 0,
+        "lastLive": {
+          "id": 139,
+          "genome": 2,
+          "generation": 0,
+          "parent": 0,
+          "energy": 0.004579624184065222,
+          "capacity": 80,
+          "gut": [
+            0,
+            0,
+            0
+          ],
+          "area": 1,
+          "supportMass": 0.04,
+          "integrity": 1,
+          "temperature": 0.7046003666576641,
+          "x": 1084.3893084435551,
+          "y": 120.62785960332934,
+          "angle": 5.519164699350929,
+          "speed": 12.204716498846514,
+          "neutralBasalMetabolism": 0.4496639658382452,
+          "digestion": 0,
+          "growth": 0,
+          "machines": [
+            {
+              "name": "Gut",
+              "mass": 0.06,
+              "functionalMass": 0.06,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "ExudateEnzyme",
+              "mass": 0.04,
+              "functionalMass": 0.04,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            },
+            {
+              "name": "Capture",
+              "mass": 0.03,
+              "functionalMass": 0.03,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "LeftMotor",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0.38910809883387804
+            },
+            {
+              "name": "RightMotor",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0.610891901166122
+            },
+            {
+              "name": "Vision",
+              "mass": 0.02,
+              "functionalMass": 0.02,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Touch",
+              "mass": 0.01,
+              "functionalMass": 0.01,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            }
+          ]
+        }
+      },
+      {
+        "event": "death",
+        "seconds": 108.83333333333333,
+        "lineage": 2,
+        "attacksDelta": 0,
+        "predationsDelta": 0,
+        "lastLive": {
+          "id": 137,
+          "genome": 2,
+          "generation": 0,
+          "parent": 0,
+          "energy": 24.700817489320222,
+          "capacity": 96.15550559557872,
+          "gut": [
+            0,
+            11.410523944353391,
+            0
+          ],
+          "area": 1,
+          "supportMass": 0.01602591759926312,
+          "integrity": 0.0006012375769569614,
+          "temperature": 0.9962226268610108,
+          "x": 986.5204273198023,
+          "y": 341.45667170486587,
+          "angle": 1.4225071836089798,
+          "speed": 2.464561820844615,
+          "neutralBasalMetabolism": 0.6093081381039008,
+          "digestion": 0,
+          "growth": 0,
+          "machines": [
+            {
+              "name": "Gut",
+              "mass": 0.06,
+              "functionalMass": 0.02403887639889468,
+              "complete": true,
+              "integrity": 0.400647939981578,
+              "activity": 1
+            },
+            {
+              "name": "ExudateEnzyme",
+              "mass": 0.04,
+              "functionalMass": 0.01602591759926312,
+              "complete": true,
+              "integrity": 0.400647939981578,
+              "activity": 0
+            },
+            {
+              "name": "Capture",
+              "mass": 0.03,
+              "functionalMass": 0.01201943819944734,
+              "complete": true,
+              "integrity": 0.400647939981578,
+              "activity": 1
+            },
+            {
+              "name": "LeftMotor",
+              "mass": 0.025,
+              "functionalMass": 0.01001619849953945,
+              "complete": true,
+              "integrity": 0.400647939981578,
+              "activity": 0
+            },
+            {
+              "name": "RightMotor",
+              "mass": 0.025,
+              "functionalMass": 0.01001619849953945,
+              "complete": true,
+              "integrity": 0.400647939981578,
+              "activity": 0
+            },
+            {
+              "name": "Vision",
+              "mass": 0.02,
+              "functionalMass": 0.00801295879963156,
+              "complete": true,
+              "integrity": 0.400647939981578,
+              "activity": 1
+            },
+            {
+              "name": "Touch",
+              "mass": 0.01,
+              "functionalMass": 0.00400647939981578,
+              "complete": true,
+              "integrity": 0.400647939981578,
+              "activity": 1
+            },
+            {
+              "name": "Translation",
+              "mass": 0.04,
+              "functionalMass": 0.01602591759926312,
+              "complete": true,
+              "integrity": 0.400647939981578,
+              "activity": 1
+            },
+            {
+              "name": "Minerals",
+              "mass": 0.025,
+              "functionalMass": 0.01001619849953945,
+              "complete": true,
+              "integrity": 0.400647939981578,
+              "activity": 0
+            },
+            {
+              "name": "EnergyStore",
+              "mass": 0.08,
+              "functionalMass": 0.03205183519852624,
+              "complete": true,
+              "integrity": 0.400647939981578,
+              "activity": 1
+            },
+            {
+              "name": "MineralStore",
+              "mass": 0.02,
+              "functionalMass": 0.00801295879963156,
+              "complete": true,
+              "integrity": 0.400647939981578,
+              "activity": 1
+            },
+            {
+              "name": "Chemistry",
+              "mass": 0.015,
+              "functionalMass": 0.00600971909972367,
+              "complete": true,
+              "integrity": 0.400647939981578,
+              "activity": 1
+            },
+            {
+              "name": "Repair",
+              "mass": 0.025,
+              "functionalMass": 0.01006714776103716,
+              "complete": true,
+              "integrity": 0.4026859104414864,
+              "activity": 1
+            },
+            {
+              "name": "Gut",
+              "mass": 0.06,
+              "functionalMass": 0.027269698187742976,
+              "complete": true,
+              "integrity": 0.4544949697957163,
+              "activity": 1
+            },
+            {
+              "name": "ExudateEnzyme",
+              "mass": 0.04,
+              "functionalMass": 0.018206721901161994,
+              "complete": true,
+              "integrity": 0.4551680475290498,
+              "activity": 0
+            },
+            {
+              "name": "Repair",
+              "mass": 0.025,
+              "functionalMass": 0.011439968675059215,
+              "complete": true,
+              "integrity": 0.4575987470023686,
+              "activity": 1
+            },
+            {
+              "name": "Capture",
+              "mass": 0.02626212983765755,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.4873155521318422,
+              "activity": 1
+            },
+            {
+              "name": "ExudateEnzyme",
+              "mass": 0.0013599866731291725,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.9445583886431884,
+              "activity": 0
+            }
+          ]
+        }
+      },
+      {
+        "event": "death",
+        "seconds": 210.3,
+        "lineage": 4,
+        "attacksDelta": 1,
+        "predationsDelta": 1,
+        "lastLive": {
+          "id": 147,
+          "genome": 4,
+          "generation": 0,
+          "parent": 0,
+          "energy": 67.93743333220694,
+          "capacity": 88.38393346305745,
+          "gut": [
+            0,
+            12.761411136701698,
+            0
+          ],
+          "area": 1.0000647671686407,
+          "supportMass": 0.0368266389429406,
+          "integrity": 0.0020267457286009182,
+          "temperature": 0.5000487488080471,
+          "x": 521.0489992604819,
+          "y": 485.1560938020018,
+          "angle": 2.1327290853164977,
+          "speed": 2.3806007161792513,
+          "neutralBasalMetabolism": 0.6890276059083524,
+          "digestion": 0.8732695147370023,
+          "growth": 0,
+          "machines": [
+            {
+              "name": "Minerals",
+              "mass": 0.02499999999819154,
+              "functionalMass": 0.01646485551259752,
+              "complete": true,
+              "integrity": 0.6585942205515425,
+              "activity": 0
+            },
+            {
+              "name": "Support",
+              "mass": 0.06,
+              "functionalMass": 0.022095983365764363,
+              "complete": true,
+              "integrity": 0.36826638942940604,
+              "activity": 1
+            },
+            {
+              "name": "Gut",
+              "mass": 0.06,
+              "functionalMass": 0.022095983365764363,
+              "complete": true,
+              "integrity": 0.36826638942940604,
+              "activity": 1
+            },
+            {
+              "name": "ExudateEnzyme",
+              "mass": 0.02,
+              "functionalMass": 0.007365327788588121,
+              "complete": true,
+              "integrity": 0.36826638942940604,
+              "activity": 0
+            },
+            {
+              "name": "Capture",
+              "mass": 0.03,
+              "functionalMass": 0.019757826616546275,
+              "complete": true,
+              "integrity": 0.6585942205515425,
+              "activity": 0
+            },
+            {
+              "name": "TissueEnzyme",
+              "mass": 0.08,
+              "functionalMass": 0.029461311154352483,
+              "complete": true,
+              "integrity": 0.36826638942940604,
+              "activity": 1
+            },
+            {
+              "name": "Translation",
+              "mass": 0.04,
+              "functionalMass": 0.014730655577176241,
+              "complete": true,
+              "integrity": 0.36826638942940604,
+              "activity": 1
+            },
+            {
+              "name": "EnergyStore",
+              "mass": 0.08,
+              "functionalMass": 0.029461311154352483,
+              "complete": true,
+              "integrity": 0.36826638942940604,
+              "activity": 1
+            },
+            {
+              "name": "MineralStore",
+              "mass": 0.02,
+              "functionalMass": 0.007365327788588121,
+              "complete": true,
+              "integrity": 0.36826638942940604,
+              "activity": 1
+            },
+            {
+              "name": "LeftMotor",
+              "mass": 0.025,
+              "functionalMass": 0.010183880467731053,
+              "complete": true,
+              "integrity": 0.4073552187092421,
+              "activity": 0
+            },
+            {
+              "name": "RightMotor",
+              "mass": 0.025,
+              "functionalMass": 0.025,
+              "complete": true,
+              "integrity": 1,
+              "activity": 0
+            },
+            {
+              "name": "Vision",
+              "mass": 0.019999999997145843,
+              "functionalMass": 0.013171884409151118,
+              "complete": true,
+              "integrity": 0.6585942205515425,
+              "activity": 1
+            },
+            {
+              "name": "Touch",
+              "mass": 0.01,
+              "functionalMass": 0.006585942205515425,
+              "complete": true,
+              "integrity": 0.6585942205515425,
+              "activity": 1
+            },
+            {
+              "name": "Piercer",
+              "mass": 0.05,
+              "functionalMass": 0.03292971102757713,
+              "complete": true,
+              "integrity": 0.6585942205515425,
+              "activity": 0
+            },
+            {
+              "name": "Engulfment",
+              "mass": 0.025,
+              "functionalMass": 0.016464855513788564,
+              "complete": true,
+              "integrity": 0.6585942205515425,
+              "activity": 0
+            },
+            {
+              "name": "Envelope",
+              "mass": 0.02,
+              "functionalMass": 0.01317188441103085,
+              "complete": true,
+              "integrity": 0.6585942205515425,
+              "activity": 0
+            },
+            {
+              "name": "Replication",
+              "mass": 0.02,
+              "functionalMass": 0.007365327788588121,
+              "complete": true,
+              "integrity": 0.36826638942940604,
+              "activity": 0
+            },
+            {
+              "name": "LeftHeat",
+              "mass": 0.01,
+              "functionalMass": 0.0040735527437888285,
+              "complete": true,
+              "integrity": 0.40735527437888286,
+              "activity": 1
+            },
+            {
+              "name": "RightHeat",
+              "mass": 0.01,
+              "functionalMass": 0.01,
+              "complete": true,
+              "integrity": 1,
+              "activity": 1
+            },
+            {
+              "name": "Division",
+              "mass": 0.02,
+              "functionalMass": 0.01317188441103085,
+              "complete": true,
+              "integrity": 0.6585942205515425,
+              "activity": 0
+            },
+            {
+              "name": "Repair",
+              "mass": 0.011516307905865508,
+              "functionalMass": 0,
+              "complete": false,
+              "integrity": 0.37395605018957917,
+              "activity": 1
+            }
+          ]
+        }
+      }
+    ],
+    "foragerBudget": {
+      "integratedDigestionATP": 768.5152144434899,
+      "integratedBasalATP": 691.4729004389715,
+      "livingCellSeconds": 1403.6666666666665,
+      "digestionPerLivingCellSecond": 0.5475054959226953,
+      "basalPerLivingCellSecond": 0.4926190219228009,
+      "marginBeforeMovementAndConstruction": 0.05488647399989438
+    },
+    "foragerMaximumSampledArea": 1,
+    "foragerMaximumSampledATP": 57.281291835434075,
+    "endpointForagerFoodAccess": [
+      {
+        "id": 138,
+        "ATP": 33.98806047413247,
+        "nearestParticleDistance": 36.88780154677804,
+        "nearestParticleRawEnergy": 5.530293819400583,
+        "energyWithin50": 39.96014225983647
+      },
+      {
+        "id": 140,
+        "ATP": 32.17118990418661,
+        "nearestParticleDistance": 18.70107459853874,
+        "nearestParticleRawEnergy": 1.6647352679602663,
+        "energyWithin50": 17.06006139898819
+      },
+      {
+        "id": 141,
+        "ATP": 16.287508670186384,
+        "nearestParticleDistance": 28.5056930880936,
+        "nearestParticleRawEnergy": 0.6349123368291215,
+        "energyWithin50": 18.735162714513358
+      },
+      {
+        "id": 142,
+        "ATP": 24.896913235861327,
+        "nearestParticleDistance": 18.830592542170145,
+        "nearestParticleRawEnergy": 5.740124491262089,
+        "energyWithin50": 10.620601070967858
+      }
+    ]
+  },
+  "provenance": {
+    "startedAt": "2026-11-18T10:22:03.864453+00:00",
+    "seed": 42,
+    "mutationRate": 0,
+    "establishmentSeconds": 90,
+    "consumerSeconds": 300,
+    "foodRate": 0,
+    "initialFood": 0,
+    "description": "72 ordinary Phototroph founders simulate90s normally, then introduce ordinary6 Forager,4 Mixotroph,2 Predator founders; continue300s. No bonus food or copied cell state.",
+    "nativeBinarySha256": "848eab77e2a64a60a466e7acad01150b2ef011b24944fd8804a89b3649c4f015",
+    "engineSources": {
+      "src/body.rs": "24dbf0c61e113597198b7fd07da04cc2c768e3c6094df4811df8caa77a94ef16",
+      "src/body_partition_tests.rs": "d600dac26660a95ad909bc72137b126e0ca669cee8df132027d95c5cf82e0b75",
+      "src/cellular.rs": "2b165f9d9786cf42626005bd38dc79df531211608f3a30423a881d4923156d72",
+      "src/cellular_control_tests.rs": "6d3a3709b4117bba687f6bec637757f4f2fe72cad35c7bfc027d95b600e5fe66",
+      "src/checkpoint.rs": "8377a81843e7c80e373881109c84e62eaab1965cbeb4b3e9e1c53994104e4ec7",
+      "src/environment/checkpoint.rs": "0fd0102efd15fa301dc6b563b9a47ff9d4366b4620fb520e9a72505fbcef5f1d",
+      "src/environment.rs": "5167bea57f03b9b55c3958bf0fdef1fd0a1ea7ac4265eb6ff7d4d6349b92dd7e",
+      "src/genome/cellular.rs": "8b3a8a9c6a48e535fb3bdb394658cf445f577c692f4c14b4e3843221773c895e",
+      "src/genome/checkpoint.rs": "d72104682583e758b8b3aa9f26c4e86feec19610bad52433dc9807100b2bc26b",
+      "src/genome/control_tests.rs": "a35ffc5e41b4357a46656e81fe17a0a1495e8b015b1f206dbfa67f391e06675b",
+      "src/genome/execution.rs": "a1b7108ad195d16330dacc62151bfdc51897dfba116b570364052fd22c0ad25f",
+      "src/genome/functions.rs": "3b05fa2b36d0e031b831fbfc9defe6fc69b46c7f656ed8e7a321b2251ea2de74",
+      "src/genome/source.rs": "ce762f3a31452c9ac88c1ab7f50bead6efdac27bcd60cbb1770708dfff1ad53f",
+      "src/genome.rs": "86fd24eab10da5d4a6b9ed379f22a6c6ba73b158bdfe5031326f86912f1c8118",
+      "src/lib.rs": "059e0e18ef0e352ab66a361f2e32473ba8cb65bbb0539b5d7490803d1069e4f8",
+      "src/material_allocation.rs": "5499f5e990a602653d659483a755c897a43193c2f40a02cf177caf7ccaed674d",
+      "src/simulation/biology_tests.rs": "a73bbe21014158598fdbf25285ade70233156748b6a7a04b25eb6dd5b55a0153",
+      "src/simulation/cellular_tests.rs": "235436e2977fbedaf22d293610b39a562a512abdf680e0cc20e9fbc62e7e7683",
+      "src/simulation/checkpoint.rs": "d96f4114ef7534d7e26701064bdd9da96b3d4404bd74d690d2e7e79c81f0e5da",
+      "src/simulation/foraging_tests.rs": "4dc8d6fa5c3185d7d769431c61d6e7c5a25520c9f479d60717a011260e8267f8",
+      "src/simulation/local_control_tests.rs": "8e50d1ed4556b6ebb66d36460777e83efcc778b5c7debe5fbb2b9fe0dfdd0f13",
+      "src/simulation/mechanism_tests.rs": "caf634487b9acb6e370ab1fcf8e968db0be46313c91fd2ff29a62bab2c87b561",
+      "src/simulation/predation_tests.rs": "f398c81a72418b599c937f2d02f8543b34843d9fbefd0bbee101ce09be7ca02d",
+      "src/simulation/presentation.rs": "d64bd6d9de2b37de360fb15e5859b698fe5a59ce9af2ae5a53edcae04b3bdb30",
+      "src/simulation/receptors.rs": "bfb5c9bea18dbae800b0c82b8eb62b680e02d748cb9178ce82dedc654acbb21a",
+      "src/simulation/sensing_tests.rs": "87b0dceab68435de9208a2ba4fa708fcbf6b3ca8447252d4e02e566c3b7c3eef",
+      "src/simulation/surface.rs": "3623cce861900cd6bf317f77a9b1c177ad843b681dfa0a40aee54d2003f584d3",
+      "src/simulation.rs": "31d84c75de952894a323371dbcb3d2c83c390fceef57ca4045ed8560715c512a"
+    },
+    "wasmForRelatedTestsSha256": "05e190387136580e0ffe441fa5088493656ce19650381c262b81a9ea18cdbb09",
+    "presetsSha256": "fc9a21316030f4cea3ae2e4b63445c1adeaaa0cf5dd4697640c3af938184a437",
+    "populations": [
+      {
+        "name": "Phototroph",
+        "count": 72,
+        "sourceSha256": "1f3762ce80ef1714ec6dfd240cb7570b169277a486d205f97750fea89c08167a",
+        "source": "# Shared products supply independently regulated physical recipes.\n# Genes make stock; start_when permits new machines; activity runs built ones.\ncellular;\n\nproduct Mount = anchor();\nproduct Pigment = pigment();\nproduct Catalyst = enzyme();\nproduct Frame = scaffold();\nproduct Carrier = transporter();\nproduct Wall = membrane();\nproduct Replicase = replicase();\nproduct Rotor = motor();\nproduct Ring = constrictor();\n\n# Tolerate modest wear while repair restores working capacity. The allowance\n# stays below one machine, even when a larger body needs many copies.\nfn missing(installed, required, unit) = installed + 0.000001 < required - min(required * 0.1, unit * 0.2);\nfn enough(installed, required) = installed + 0.000001 >= required * 0.9;\nfn buffered(stock, effort) = if stock < 0.001 then effort else 0;\n\nlet funded = (energy > 10 || gut.energy > 0) && nutrient.stored > 0.001;\nlet expanding = body.area > body.birth_area * 1.6;\nlet powered = enough(built.Solar, 0.12);\nlet equipped = powered;\nlet surplus = equipped && energy > 55;\n# This stationary producer spends no material on locomotion.\n\nlet need_Solar = funded && (true) && missing(built.Solar, (if expanding then 0.24 else 0.12), 0.12);\nlet need_Translation = funded && (powered) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Minerals = funded && (powered) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);\nlet need_EnergyStore = funded && (powered) && missing(built.EnergyStore, (if expanding then 0.16 else 0.08), 0.08);\nlet need_MineralStore = funded && (powered) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Support = funded && (powered && energy > 45) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);\nlet need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);\n\ngene supply_Mount: Mount = buffered(pool.Mount, (if need_Solar then 0.25 else 0) + (if need_Minerals then 0.25 else 0) + (if need_Division then 0.5 else 0));\ngene supply_Pigment: Pigment = buffered(pool.Pigment, (if need_Solar then 1 else 0));\ngene supply_Catalyst: Catalyst = buffered(pool.Catalyst, (if need_Solar then 0.25 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0));\ngene supply_Frame: Frame = buffered(pool.Frame, (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0));\ngene supply_Carrier: Carrier = buffered(pool.Carrier, (if need_Minerals then 1 else 0));\ngene supply_Wall: Wall = buffered(pool.Wall, (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0));\ngene supply_Replicase: Replicase = buffered(pool.Replicase, (if need_Replication then 1 else 0));\ngene supply_Rotor: Rotor = buffered(pool.Rotor, (if need_Division then 1 else 0));\ngene supply_Ring: Ring = buffered(pool.Ring, (if need_Division then 1 else 0));\n\nassembly Solar: harvest(light) {\n  Mount: 0.02;\n  Pigment: 0.08;\n  Catalyst: 0.02;\n  start_when: need_Solar;\n  activity: 1;\n}\n\nassembly Translation: translate() {\n  Frame: 0.02;\n  Catalyst: 0.02;\n  start_when: need_Translation;\n  activity: 1;\n}\n\nassembly Minerals: import(mineral) {\n  Mount: 0.005;\n  Carrier: 0.02;\n  start_when: need_Minerals;\n  activity: if nutrient.fraction < 0.9 then 1 else 0;\n}\n\nassembly EnergyStore: store(energy) {\n  Wall: 0.08;\n  start_when: need_EnergyStore;\n  activity: 1;\n}\n\nassembly MineralStore: store(mineral) {\n  Wall: 0.02;\n  start_when: need_MineralStore;\n  activity: 1;\n}\n\nassembly Repair: repair() {\n  Catalyst: 0.025;\n  start_when: need_Repair;\n  activity: 1;\n}\n\nassembly Support: support() {\n  Frame: 0.06;\n  start_when: need_Support;\n  activity: 1;\n}\n\nassembly Envelope: grow() {\n  Wall: 0.015;\n  Catalyst: 0.005;\n  start_when: need_Envelope;\n  activity: if energy > 90 && body.area < body.birth_area * 2 then 0.8 else 0;\n}\n\nassembly Replication: replicate() {\n  Frame: 0.005;\n  Replicase: 0.015;\n  start_when: need_Replication;\n  activity: if energy > 80 then 1 else 0;\n}\n\nassembly Division: constrict() {\n  Mount: 0.004;\n  Rotor: 0.008;\n  Ring: 0.008;\n  start_when: need_Division;\n  activity: if body.area + 0.000001 >= body.birth_area * 2 && energy > 100 then 1 else 0;\n}"
+      },
+      {
+        "name": "Forager",
+        "count": 6,
+        "sourceSha256": "bc725b210be9a401c626d480d8fac9104ac2736bbf1fc16f49cb2c61621706b6",
+        "source": "# Shared products supply independently regulated physical recipes.\n# Genes make stock; start_when permits new machines; activity runs built ones.\ncellular;\n\nproduct Wall = membrane();\nproduct Catalyst = enzyme();\nproduct Mount = anchor();\nproduct Rotor = motor();\nproduct Frame = scaffold();\nproduct Carrier = transporter();\nproduct Tail = filament();\nproduct Detector = receptor();\nproduct Pigment = pigment();\nproduct Replicase = replicase();\nproduct Ring = constrictor();\n\n# Tolerate modest wear while repair restores working capacity. The allowance\n# stays below one machine, even when a larger body needs many copies.\nfn missing(installed, required, unit) = installed + 0.000001 < required - min(required * 0.1, unit * 0.2);\nfn enough(installed, required) = installed + 0.000001 >= required * 0.9;\nfn buffered(stock, effort) = if stock < 0.001 then effort else 0;\n\nlet funded = (energy > 10 || gut.energy > 0) && nutrient.stored > 0.001;\nlet expanding = body.area > body.birth_area * 1.6;\nlet powered = enough(built.Gut, 0.06) && enough(built.ExudateEnzyme, 0.04) && enough(built.Capture, 0.03);\nlet equipped = powered && enough(built.LeftMotor, 0.025) && enough(built.RightMotor, 0.025) && enough(built.Vision, 0.02) && enough(built.Touch, 0.01);\nlet surplus = equipped && energy > 55;\n# Read the receptors the genome actually builds.\nlet seen = sensed.Vision.valid;\nlet blocked = sensed.Touch.valid && sensed.Touch.resistance >= 0.12;\nlet obstacle = if sensed.Touch.valid then angle(sensed.Touch.offset) else 0;\nlet escape = if obstacle >= 0 then obstacle - 1.8 else obstacle + 1.8;\nlet meal = gut.exudate.energy + gut.tissue.energy;\nlet meal_fraction = if gut.capacity > 0 then meal / gut.capacity else 0;\nlet seek = meal_fraction < 0.55;\nlet grazing = seen && sensed.Vision.area >= 0.35\n  && length(sensed.Vision.offset) < 7 * sqrt(sensed.Vision.area) + 5;\nlet steer = if blocked then clamp(escape * 2, -1, 1)\n  else if grazing then clamp((angle(sensed.Vision.offset) - 1.4) * 1.8, -1, 1)\n  else if seek && seen then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1)\n  else sin(age * 0.65) * 0.35;\nlet move = if blocked then 0.65 else if meal_fraction > 0.45 then 0\n  else if seek && seen then 0.5\n  else if sensed.Chemistry.valid && sensed.Chemistry.organic > 0.001 then 0.18 else 0.28;\n\nlet need_Gut = funded && (true) && missing(built.Gut, (if expanding then 0.12 else 0.06), 0.06);\nlet need_ExudateEnzyme = funded && (true) && missing(built.ExudateEnzyme, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Capture = funded && (enough(built.Gut, 0.06)) && missing(built.Capture, (if expanding then 0.06 else 0.03), 0.03);\nlet need_TissueEnzyme = funded && (powered && gut.tissue.energy > 0) && missing(built.TissueEnzyme, (if expanding then 0.08 else 0.04), 0.04);\nlet need_WasteEnzyme = funded && (powered && gut.waste.energy > 0) && missing(built.WasteEnzyme, (if expanding then 0.03 else 0.015), 0.015);\nlet need_Translation = funded && (surplus) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Minerals = funded && (powered && (nutrient.stored < 0.15 || surplus)) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);\nlet need_EnergyStore = funded && (surplus) && missing(built.EnergyStore, (if expanding then 0.16 else 0.08), 0.08);\nlet need_MineralStore = funded && (surplus) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);\nlet need_LeftMotor = funded && (powered) && missing(built.LeftMotor, (if expanding then 0.05 else 0.025), 0.025);\nlet need_RightMotor = funded && (powered) && missing(built.RightMotor, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Vision = funded && (powered) && missing(built.Vision, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Touch = funded && (powered) && missing(built.Touch, (if expanding then 0.02 else 0.01), 0.01);\nlet need_Chemistry = funded && (surplus) && missing(built.Chemistry, (if expanding then 0.03 else 0.015), 0.015);\nlet need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Support = funded && (equipped && energy > 65) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);\nlet need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);\n\ngene supply_Wall: Wall = buffered(pool.Wall, (if need_Gut then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0));\ngene supply_Catalyst: Catalyst = buffered(pool.Catalyst, (if need_ExudateEnzyme then 1 else 0) + (if need_TissueEnzyme then 1 else 0) + (if need_WasteEnzyme then 1 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0));\ngene supply_Mount: Mount = buffered(pool.Mount, (if need_Capture then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_LeftMotor then 0.5 else 0) + (if need_RightMotor then 0.5 else 0) + (if need_Vision then 0.333333 else 0) + (if need_Touch then 0.333333 else 0) + (if need_Chemistry then 0.25 else 0) + (if need_Division then 0.5 else 0));\ngene supply_Rotor: Rotor = buffered(pool.Rotor, (if need_Capture then 1 else 0) + (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Division then 1 else 0));\ngene supply_Frame: Frame = buffered(pool.Frame, (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0));\ngene supply_Carrier: Carrier = buffered(pool.Carrier, (if need_Minerals then 1 else 0));\ngene supply_Tail: Tail = buffered(pool.Tail, (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Touch then 0.333333 else 0));\ngene supply_Detector: Detector = buffered(pool.Detector, (if need_Vision then 1 else 0) + (if need_Touch then 1 else 0) + (if need_Chemistry then 1 else 0));\ngene supply_Pigment: Pigment = buffered(pool.Pigment, (if need_Vision then 0.333333 else 0));\ngene supply_Replicase: Replicase = buffered(pool.Replicase, (if need_Replication then 1 else 0));\ngene supply_Ring: Ring = buffered(pool.Ring, (if need_Division then 1 else 0));\n\nassembly Gut: store(food) {\n  Wall: 0.06;\n  start_when: need_Gut;\n  activity: 1;\n}\n\nassembly ExudateEnzyme: digest(exudate) {\n  Catalyst: 0.04;\n  start_when: need_ExudateEnzyme;\n  activity: if gut.exudate.energy > 0 then 1 else 0;\n}\n\nassembly Capture: import(particle) {\n  Mount: 0.01;\n  Rotor: 0.02;\n  start_when: need_Capture;\n  activity: if gut.fraction < 0.7 then 1 else 0;\n}\n\nassembly TissueEnzyme: digest(tissue) {\n  Catalyst: 0.04;\n  start_when: need_TissueEnzyme;\n  activity: if gut.tissue.energy > 0 then 1 else 0;\n}\n\nassembly WasteEnzyme: digest(waste) {\n  Catalyst: 0.015;\n  start_when: need_WasteEnzyme;\n  activity: if gut.waste.energy > 0 then 1 else 0;\n}\n\nassembly Translation: translate() {\n  Frame: 0.02;\n  Catalyst: 0.02;\n  start_when: need_Translation;\n  activity: 1;\n}\n\nassembly Minerals: import(mineral) {\n  Mount: 0.005;\n  Carrier: 0.02;\n  start_when: need_Minerals;\n  activity: if nutrient.fraction < 0.9 then 1 else 0;\n}\n\nassembly EnergyStore: store(energy) {\n  Wall: 0.08;\n  start_when: need_EnergyStore;\n  activity: 1;\n}\n\nassembly MineralStore: store(mineral) {\n  Wall: 0.02;\n  start_when: need_MineralStore;\n  activity: 1;\n}\n\nassembly LeftMotor: propel() {\n  Mount: 0.005;\n  Rotor: 0.01;\n  Tail: 0.01;\n  start_when: need_LeftMotor;\n  activity: if meal > 2 then 0 else clamp(move - steer * 0.5, 0, 1);\n  at: 1.570796;\n  direction: 0;\n}\n\nassembly RightMotor: propel() {\n  Mount: 0.005;\n  Rotor: 0.01;\n  Tail: 0.01;\n  start_when: need_RightMotor;\n  activity: if meal > 2 then 0 else clamp(move + steer * 0.5, 0, 1);\n  at: -1.570796;\n  direction: 0;\n}\n\nassembly Vision: sense(optical) {\n  Mount: 0.004;\n  Detector: 0.012;\n  Pigment: 0.004;\n  start_when: need_Vision;\n  activity: 1;\n}\n\nassembly Touch: sense(contact) {\n  Mount: 0.002;\n  Detector: 0.006;\n  Tail: 0.002;\n  start_when: need_Touch;\n  activity: 1;\n}\n\nassembly Chemistry: sense(chemical) {\n  Mount: 0.003;\n  Detector: 0.012;\n  start_when: need_Chemistry;\n  activity: 1;\n}\n\nassembly Repair: repair() {\n  Catalyst: 0.025;\n  start_when: need_Repair;\n  activity: 1;\n}\n\nassembly Support: support() {\n  Frame: 0.06;\n  start_when: need_Support;\n  activity: 1;\n}\n\nassembly Envelope: grow() {\n  Wall: 0.015;\n  Catalyst: 0.005;\n  start_when: need_Envelope;\n  activity: if energy > 90 && body.area < body.birth_area * 2 then 0.8 else 0;\n}\n\nassembly Replication: replicate() {\n  Frame: 0.005;\n  Replicase: 0.015;\n  start_when: need_Replication;\n  activity: if energy > 80 then 1 else 0;\n}\n\nassembly Division: constrict() {\n  Mount: 0.004;\n  Rotor: 0.008;\n  Ring: 0.008;\n  start_when: need_Division;\n  activity: if body.area + 0.000001 >= body.birth_area * 2 && energy > 100 then 1 else 0;\n}"
+      },
+      {
+        "name": "Mixotroph",
+        "count": 4,
+        "sourceSha256": "1619cef70594e918fe2b72f11c6edef8aae199925f34ef72a7f0a8edacb2e35d",
+        "source": "# Shared products supply independently regulated physical recipes.\n# Genes make stock; start_when permits new machines; activity runs built ones.\ncellular;\n\nproduct Mount = anchor();\nproduct Pigment = pigment();\nproduct Catalyst = enzyme();\nproduct Wall = membrane();\nproduct Rotor = motor();\nproduct Frame = scaffold();\nproduct Carrier = transporter();\nproduct Tail = filament();\nproduct Detector = receptor();\nproduct Replicase = replicase();\nproduct Ring = constrictor();\n\n# Tolerate modest wear while repair restores working capacity. The allowance\n# stays below one machine, even when a larger body needs many copies.\nfn missing(installed, required, unit) = installed + 0.000001 < required - min(required * 0.1, unit * 0.2);\nfn enough(installed, required) = installed + 0.000001 >= required * 0.9;\nfn buffered(stock, effort) = if stock < 0.001 then effort else 0;\n\nlet funded = (energy > 10 || gut.energy > 0) && nutrient.stored > 0.001;\nlet expanding = body.area > body.birth_area * 1.6;\nlet powered = enough(built.Solar, 0.08) && enough(built.Gut, 0.06) && enough(built.ExudateEnzyme, 0.04) && enough(built.Capture, 0.03);\nlet equipped = powered;\nlet surplus = equipped && energy > 55;\n# Read the receptors the genome actually builds.\nlet seen = sensed.Vision.valid;\nlet blocked = sensed.Touch.valid && sensed.Touch.resistance >= 0.12;\nlet obstacle = if sensed.Touch.valid then angle(sensed.Touch.offset) else 0;\nlet escape = if obstacle >= 0 then obstacle - 1.8 else obstacle + 1.8;\nlet seek = gut.fraction < 0.55;\nlet grazing = seen && sensed.Vision.area >= 0.35\n  && length(sensed.Vision.offset) < 7 * sqrt(sensed.Vision.area) + 5;\nlet steer = if blocked then clamp(escape * 2, -1, 1)\n  else if grazing then clamp((angle(sensed.Vision.offset) - 1.4) * 1.8, -1, 1)\n  else if seek && seen then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1)\n  else sin(age * 0.65) * 0.35;\nlet move = if blocked then 0.65 else if gut.fraction > 0.45 then 0\n  else if seek && seen then 0.5\n  else if sensed.Chemistry.valid && sensed.Chemistry.organic > 0.001 then 0.18 else 0.28;\n\nlet need_Solar = funded && (true) && missing(built.Solar, (if expanding then 0.16 else 0.08), 0.08);\nlet need_Gut = funded && (true) && missing(built.Gut, (if expanding then 0.12 else 0.06), 0.06);\nlet need_ExudateEnzyme = funded && (true) && missing(built.ExudateEnzyme, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Capture = funded && (enough(built.Gut, 0.06)) && missing(built.Capture, (if expanding then 0.06 else 0.03), 0.03);\nlet need_TissueEnzyme = funded && (powered && gut.tissue.energy > 0) && missing(built.TissueEnzyme, (if expanding then 0.02 else 0.01), 0.01);\nlet need_WasteEnzyme = funded && (powered && gut.waste.energy > 0) && missing(built.WasteEnzyme, (if expanding then 0.02 else 0.01), 0.01);\nlet need_Translation = funded && (powered) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Minerals = funded && (powered && (nutrient.stored < 0.15 || surplus)) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);\nlet need_EnergyStore = funded && (powered) && missing(built.EnergyStore, (if expanding then 0.16 else 0.08), 0.08);\nlet need_MineralStore = funded && (powered) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);\nlet need_LeftMotor = funded && (powered && body.area > 1.2) && missing(built.LeftMotor, (if expanding then 0.05 else 0.025), 0.025);\nlet need_RightMotor = funded && (powered && body.area > 1.2) && missing(built.RightMotor, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Vision = funded && (powered && body.area > 1.2) && missing(built.Vision, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Touch = funded && (powered && body.area > 1.2) && missing(built.Touch, (if expanding then 0.02 else 0.01), 0.01);\nlet need_Chemistry = funded && (surplus) && missing(built.Chemistry, (if expanding then 0.03 else 0.015), 0.015);\nlet need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Support = funded && (equipped && energy > 65) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);\nlet need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);\n\ngene supply_Mount: Mount = buffered(pool.Mount, (if need_Solar then 0.166667 else 0) + (if need_Capture then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_LeftMotor then 0.5 else 0) + (if need_RightMotor then 0.5 else 0) + (if need_Vision then 0.333333 else 0) + (if need_Touch then 0.333333 else 0) + (if need_Chemistry then 0.25 else 0) + (if need_Division then 0.5 else 0));\ngene supply_Pigment: Pigment = buffered(pool.Pigment, (if need_Solar then 1 else 0) + (if need_Vision then 0.333333 else 0));\ngene supply_Catalyst: Catalyst = buffered(pool.Catalyst, (if need_Solar then 0.166667 else 0) + (if need_ExudateEnzyme then 1 else 0) + (if need_TissueEnzyme then 1 else 0) + (if need_WasteEnzyme then 1 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0));\ngene supply_Wall: Wall = buffered(pool.Wall, (if need_Gut then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0));\ngene supply_Rotor: Rotor = buffered(pool.Rotor, (if need_Capture then 1 else 0) + (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Division then 1 else 0));\ngene supply_Frame: Frame = buffered(pool.Frame, (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0));\ngene supply_Carrier: Carrier = buffered(pool.Carrier, (if need_Minerals then 1 else 0));\ngene supply_Tail: Tail = buffered(pool.Tail, (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Touch then 0.333333 else 0));\ngene supply_Detector: Detector = buffered(pool.Detector, (if need_Vision then 1 else 0) + (if need_Touch then 1 else 0) + (if need_Chemistry then 1 else 0));\ngene supply_Replicase: Replicase = buffered(pool.Replicase, (if need_Replication then 1 else 0));\ngene supply_Ring: Ring = buffered(pool.Ring, (if need_Division then 1 else 0));\n\nassembly Solar: harvest(light) {\n  Mount: 0.01;\n  Pigment: 0.06;\n  Catalyst: 0.01;\n  start_when: need_Solar;\n  activity: 1;\n}\n\nassembly Gut: store(food) {\n  Wall: 0.06;\n  start_when: need_Gut;\n  activity: 1;\n}\n\nassembly ExudateEnzyme: digest(exudate) {\n  Catalyst: 0.04;\n  start_when: need_ExudateEnzyme;\n  activity: if gut.exudate.energy > 0 then 1 else 0;\n}\n\nassembly Capture: import(particle) {\n  Mount: 0.01;\n  Rotor: 0.02;\n  start_when: need_Capture;\n  activity: if gut.fraction < 0.7 then 1 else 0;\n}\n\nassembly TissueEnzyme: digest(tissue) {\n  Catalyst: 0.01;\n  start_when: need_TissueEnzyme;\n  activity: if gut.tissue.energy > 0 then 1 else 0;\n}\n\nassembly WasteEnzyme: digest(waste) {\n  Catalyst: 0.01;\n  start_when: need_WasteEnzyme;\n  activity: if gut.waste.energy > 0 then 1 else 0;\n}\n\nassembly Translation: translate() {\n  Frame: 0.02;\n  Catalyst: 0.02;\n  start_when: need_Translation;\n  activity: 1;\n}\n\nassembly Minerals: import(mineral) {\n  Mount: 0.005;\n  Carrier: 0.02;\n  start_when: need_Minerals;\n  activity: if nutrient.fraction < 0.9 then 1 else 0;\n}\n\nassembly EnergyStore: store(energy) {\n  Wall: 0.08;\n  start_when: need_EnergyStore;\n  activity: 1;\n}\n\nassembly MineralStore: store(mineral) {\n  Wall: 0.02;\n  start_when: need_MineralStore;\n  activity: 1;\n}\n\nassembly LeftMotor: propel() {\n  Mount: 0.005;\n  Rotor: 0.01;\n  Tail: 0.01;\n  start_when: need_LeftMotor;\n  activity: if gut.energy > 2 then 0 else clamp(move - steer * 0.5, 0, 1);\n  at: 1.570796;\n  direction: 0;\n}\n\nassembly RightMotor: propel() {\n  Mount: 0.005;\n  Rotor: 0.01;\n  Tail: 0.01;\n  start_when: need_RightMotor;\n  activity: if gut.energy > 2 then 0 else clamp(move + steer * 0.5, 0, 1);\n  at: -1.570796;\n  direction: 0;\n}\n\nassembly Vision: sense(optical) {\n  Mount: 0.004;\n  Detector: 0.012;\n  Pigment: 0.004;\n  start_when: need_Vision;\n  activity: 1;\n}\n\nassembly Touch: sense(contact) {\n  Mount: 0.002;\n  Detector: 0.006;\n  Tail: 0.002;\n  start_when: need_Touch;\n  activity: 1;\n}\n\nassembly Chemistry: sense(chemical) {\n  Mount: 0.003;\n  Detector: 0.012;\n  start_when: need_Chemistry;\n  activity: 1;\n}\n\nassembly Repair: repair() {\n  Catalyst: 0.025;\n  start_when: need_Repair;\n  activity: 1;\n}\n\nassembly Support: support() {\n  Frame: 0.06;\n  start_when: need_Support;\n  activity: 1;\n}\n\nassembly Envelope: grow() {\n  Wall: 0.015;\n  Catalyst: 0.005;\n  start_when: need_Envelope;\n  activity: if energy > 90 && body.area < body.birth_area * 2 then 0.8 else 0;\n}\n\nassembly Replication: replicate() {\n  Frame: 0.005;\n  Replicase: 0.015;\n  start_when: need_Replication;\n  activity: if energy > 80 then 1 else 0;\n}\n\nassembly Division: constrict() {\n  Mount: 0.004;\n  Rotor: 0.008;\n  Ring: 0.008;\n  start_when: need_Division;\n  activity: if body.area + 0.000001 >= body.birth_area * 2 && energy > 100 then 1 else 0;\n}"
+      },
+      {
+        "name": "Predator",
+        "count": 2,
+        "sourceSha256": "1914bc13547eca769781f584e9257630d889d75349d9ff8e51229606dc6a1e28",
+        "source": "# Shared products supply independently regulated physical recipes.\n# Genes make stock; start_when permits new machines; activity runs built ones.\ncellular;\n\nproduct Wall = membrane();\nproduct Catalyst = enzyme();\nproduct Mount = anchor();\nproduct Rotor = motor();\nproduct Frame = scaffold();\nproduct Carrier = transporter();\nproduct Tail = filament();\nproduct Detector = receptor();\nproduct Pigment = pigment();\nproduct Replicase = replicase();\nproduct Ring = constrictor();\n\n# Tolerate modest wear while repair restores working capacity. The allowance\n# stays below one machine, even when a larger body needs many copies.\nfn missing(installed, required, unit) = installed + 0.000001 < required - min(required * 0.1, unit * 0.2);\nfn enough(installed, required) = installed + 0.000001 >= required * 0.9;\nfn buffered(stock, effort) = if stock < 0.001 then effort else 0;\n\nlet funded = (energy > 10 || gut.energy > 0) && nutrient.stored > 0.001;\nlet expanding = body.area > body.birth_area * 1.6;\nlet powered = enough(built.Gut, 0.06) && enough(built.ExudateEnzyme, 0.02) && enough(built.Capture, 0.03);\nlet equipped = powered && enough(built.LeftMotor, 0.025) && enough(built.RightMotor, 0.025) && enough(built.Vision, 0.02) && enough(built.Touch, 0.01) && enough(built.Piercer, 0.05) && enough(built.TissueEnzyme, 0.08);\nlet surplus = equipped && energy > 55;\nlet firm_contact = sensed.Touch.valid && sensed.Touch.resistance > 0.1;\nlet hungry = energy.fraction < 0.7 && gut.fraction < 0.45;\n# Paired local temperatures select the cooler side before tissue is damaged.\nlet heat_escape = sensed.LeftHeat.valid && sensed.RightHeat.valid\n  && max(sensed.LeftHeat.value, sensed.RightHeat.value) > 0.78;\nlet heat_delta = sensed.RightHeat.value - sensed.LeftHeat.value;\nlet cool_turn = if heat_delta < -0.002 then -0.75 else 0.75;\nlet steer = if heat_escape then cool_turn else if gut.fraction > 0.45 then 0 else if hungry && sensed.Vision.valid then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1) else sin(age * 0.5) * (if equipped then 0.12 else 0.4);\nlet move = if heat_escape then 0.4 else if firm_contact || gut.fraction > 0.45 then 0 else if hungry && sensed.Vision.valid then 0.5 else if hungry && equipped then 0.28 else 0.07;\n\nlet need_Gut = funded && (true) && missing(built.Gut, (if expanding then 0.12 else 0.06), 0.06);\nlet need_ExudateEnzyme = funded && (true) && missing(built.ExudateEnzyme, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Capture = funded && (enough(built.Gut, 0.06)) && missing(built.Capture, (if expanding then 0.06 else 0.03), 0.03);\nlet need_TissueEnzyme = funded && (powered) && missing(built.TissueEnzyme, (if expanding then 0.16 else 0.08), 0.08);\nlet need_WasteEnzyme = funded && (powered && gut.waste.energy > 0) && missing(built.WasteEnzyme, (if expanding then 0.03 else 0.015), 0.015);\nlet need_Translation = funded && (surplus && body.area > 1.2) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Minerals = funded && (powered && (nutrient.stored < 0.15 || surplus)) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);\nlet need_EnergyStore = funded && (surplus) && missing(built.EnergyStore, (if expanding then 0.16 else 0.08), 0.08);\nlet need_MineralStore = funded && (surplus) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);\nlet need_LeftMotor = funded && (powered) && missing(built.LeftMotor, (if expanding then 0.05 else 0.025), 0.025);\nlet need_RightMotor = funded && (powered) && missing(built.RightMotor, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Vision = funded && (powered) && missing(built.Vision, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Touch = funded && (powered) && missing(built.Touch, (if expanding then 0.02 else 0.01), 0.01);\nlet need_Piercer = funded && (powered) && missing(built.Piercer, (if expanding then 0.1 else 0.05), 0.05);\nlet need_Engulfment = funded && (surplus && body.area > 1.2) && missing(built.Engulfment, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Support = funded && (equipped && energy > 65) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);\nlet need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);\nlet need_LeftHeat = funded && (powered) && missing(built.LeftHeat, (if expanding then 0.02 else 0.01), 0.01);\nlet need_RightHeat = funded && (powered) && missing(built.RightHeat, (if expanding then 0.02 else 0.01), 0.01);\n\ngene supply_Wall: Wall = buffered(pool.Wall, (if need_Gut then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Engulfment then 1 else 0) + (if need_Envelope then 1 else 0));\ngene supply_Catalyst: Catalyst = buffered(pool.Catalyst, (if need_ExudateEnzyme then 1 else 0) + (if need_TissueEnzyme then 1 else 0) + (if need_WasteEnzyme then 1 else 0) + (if need_Translation then 1 else 0) + (if need_Piercer then 0.333333 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0));\ngene supply_Mount: Mount = buffered(pool.Mount, (if need_Capture then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_LeftMotor then 0.5 else 0) + (if need_RightMotor then 0.5 else 0) + (if need_Vision then 0.333333 else 0) + (if need_Touch then 0.333333 else 0) + (if need_Piercer then 0.333333 else 0) + (if need_Engulfment then 0.5 else 0) + (if need_Division then 0.5 else 0) + (if need_LeftHeat then 0.25 else 0) + (if need_RightHeat then 0.25 else 0));\ngene supply_Rotor: Rotor = buffered(pool.Rotor, (if need_Capture then 1 else 0) + (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Engulfment then 1 else 0) + (if need_Division then 1 else 0));\ngene supply_Frame: Frame = buffered(pool.Frame, (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0));\ngene supply_Carrier: Carrier = buffered(pool.Carrier, (if need_Minerals then 1 else 0));\ngene supply_Tail: Tail = buffered(pool.Tail, (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Touch then 0.333333 else 0) + (if need_Piercer then 1 else 0));\ngene supply_Detector: Detector = buffered(pool.Detector, (if need_Vision then 1 else 0) + (if need_Touch then 1 else 0) + (if need_LeftHeat then 1 else 0) + (if need_RightHeat then 1 else 0));\ngene supply_Pigment: Pigment = buffered(pool.Pigment, (if need_Vision then 0.333333 else 0));\ngene supply_Replicase: Replicase = buffered(pool.Replicase, (if need_Replication then 1 else 0));\ngene supply_Ring: Ring = buffered(pool.Ring, (if need_Division then 1 else 0));\n\nassembly Gut: store(food) {\n  Wall: 0.06;\n  start_when: need_Gut;\n  activity: 1;\n}\n\nassembly ExudateEnzyme: digest(exudate) {\n  Catalyst: 0.02;\n  start_when: need_ExudateEnzyme;\n  activity: if gut.exudate.energy > 0 then 1 else 0;\n}\n\nassembly Capture: import(particle) {\n  Mount: 0.01;\n  Rotor: 0.02;\n  start_when: need_Capture;\n  activity: if gut.fraction < 0.7 then 1 else 0;\n}\n\nassembly TissueEnzyme: digest(tissue) {\n  Catalyst: 0.08;\n  start_when: need_TissueEnzyme;\n  activity: if gut.tissue.energy > 0 then 1 else 0;\n}\n\nassembly WasteEnzyme: digest(waste) {\n  Catalyst: 0.015;\n  start_when: need_WasteEnzyme;\n  activity: if gut.waste.energy > 0 then 1 else 0;\n}\n\nassembly Translation: translate() {\n  Frame: 0.02;\n  Catalyst: 0.02;\n  start_when: need_Translation;\n  activity: 1;\n}\n\nassembly Minerals: import(mineral) {\n  Mount: 0.005;\n  Carrier: 0.02;\n  start_when: need_Minerals;\n  activity: if nutrient.fraction < 0.9 then 1 else 0;\n}\n\nassembly EnergyStore: store(energy) {\n  Wall: 0.08;\n  start_when: need_EnergyStore;\n  activity: 1;\n}\n\nassembly MineralStore: store(mineral) {\n  Wall: 0.02;\n  start_when: need_MineralStore;\n  activity: 1;\n}\n\nassembly LeftMotor: propel() {\n  Mount: 0.005;\n  Rotor: 0.01;\n  Tail: 0.01;\n  start_when: need_LeftMotor;\n  activity: clamp(move - steer * 0.5, 0, 1);\n  at: 1.570796;\n  direction: 0;\n}\n\nassembly RightMotor: propel() {\n  Mount: 0.005;\n  Rotor: 0.01;\n  Tail: 0.01;\n  start_when: need_RightMotor;\n  activity: clamp(move + steer * 0.5, 0, 1);\n  at: -1.570796;\n  direction: 0;\n}\n\nassembly Vision: sense(optical) {\n  Mount: 0.004;\n  Detector: 0.012;\n  Pigment: 0.004;\n  start_when: need_Vision;\n  activity: 1;\n}\n\nassembly Touch: sense(contact) {\n  Mount: 0.002;\n  Detector: 0.006;\n  Tail: 0.002;\n  start_when: need_Touch;\n  activity: 1;\n}\n\nassembly Piercer: pierce() {\n  Mount: 0.01;\n  Tail: 0.03;\n  Catalyst: 0.01;\n  start_when: need_Piercer;\n  activity: if !heat_escape && firm_contact && gut.fraction < 0.5 then 0.8 else 0;\n}\n\nassembly Engulfment: engulf() {\n  Mount: 0.005;\n  Rotor: 0.01;\n  Wall: 0.01;\n  start_when: need_Engulfment;\n  activity: if gut.fraction < 0.5 then 1 else 0;\n}\n\nassembly Repair: repair() {\n  Catalyst: 0.025;\n  start_when: need_Repair;\n  activity: 1;\n}\n\nassembly Support: support() {\n  Frame: 0.06;\n  start_when: need_Support;\n  activity: 1;\n}\n\nassembly Envelope: grow() {\n  Wall: 0.015;\n  Catalyst: 0.005;\n  start_when: need_Envelope;\n  activity: if energy > 90 && body.area < body.birth_area * 2 then 0.8 else 0;\n}\n\nassembly Replication: replicate() {\n  Frame: 0.005;\n  Replicase: 0.015;\n  start_when: need_Replication;\n  activity: if energy > 80 then 1 else 0;\n}\n\nassembly Division: constrict() {\n  Mount: 0.004;\n  Rotor: 0.008;\n  Ring: 0.008;\n  start_when: need_Division;\n  activity: if body.area + 0.000001 >= body.birth_area * 2 && energy > 100 then 1 else 0;\n}\n\nassembly LeftHeat: sense(heat) {\n  Mount: 0.002;\n  Detector: 0.008;\n  start_when: need_LeftHeat;\n  activity: 1;\n  at: 1.5707963267948966;\n}\n\nassembly RightHeat: sense(heat) {\n  Mount: 0.002;\n  Detector: 0.008;\n  start_when: need_RightHeat;\n  activity: 1;\n  at: -1.5707963267948966;\n}"
+      }
+    ],
+    "rateDefinitions": {
+      "neutralBasalMetabolism": ".15*area + body.upkeep; multiply by .5+localTemperature for actual basal rate",
+      "digestionATP": "Usable ATP after substrate assimilation efficiency",
+      "exudateEnergy": "Raw organic energy emitted"
+    },
+    "causalLimits": [
+      "Normal staging also advances producer reproduction, environment temperature and RNG state; consumer starting positions therefore differ from simultaneous seeding.",
+      "One seed and300 consumer-seconds do not establish indefinite coexistence."
+    ]
+  }
+}

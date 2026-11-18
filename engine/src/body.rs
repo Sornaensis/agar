@@ -3,8 +3,12 @@
 //! Minerals are the conserved structural material proxy. Energy spent on growth
 //! is split into recoverable embodied energy and heat; neither targets nor damage
 //! create or erase material. Storage overflow is deliberately handled by World.
-use crate::cellular::{AssemblyKind, CellularState, MechanismKind};
+use crate::cellular::{AssemblyKind, CellularState, MechanismKind, RecipeIdentity};
 use crate::checkpoint::{ensure, Reader, Result as CheckpointResult, Writer};
+
+#[cfg(test)]
+#[path = "body_partition_tests.rs"]
+mod partition_tests;
 
 pub const FAMILY_COUNT: usize = 16;
 pub const BASE_RADIUS: f64 = 7.0;
@@ -1261,6 +1265,14 @@ impl Body {
     /// assembled from products is as essential as the founder's physical core;
     /// incomplete cores cannot support either daughter. No recipe is cloned.
     fn cellular_partition_assignment(&self) -> Option<Vec<(bool, usize, usize)>> {
+        // Distribute already duplicated machinery before balancing the remaining
+        // load. A packing fallback preserves divisions that the old load-only
+        // placement can fit when the identity preference cannot.
+        self.cellular_partition_with_balance(true)
+            .or_else(|| self.cellular_partition_with_balance(false))
+    }
+
+    fn cellular_partition_with_balance(&self, balance_identities: bool) -> Option<Vec<(bool, usize, usize)>> {
         let state = self.cellular.as_ref()?;
         let area = self.area * 0.5;
         if area < MIN_AREA || !self.viable() {
@@ -1273,8 +1285,12 @@ impl Body {
             core: f64,
             inside: f64,
             surface: f64,
+            identity: usize,
+            functional: bool,
         }
         let mut items = Vec::with_capacity(self.organs.len() + state.assemblies.len());
+        let mut identities = std::collections::HashMap::new();
+        let mut functional_copies = vec![[0_usize; 2]; FAMILY_COUNT];
         for (index, organ) in self.organs.iter().enumerate() {
             items.push(Item {
                 cellular: false,
@@ -1287,9 +1303,16 @@ impl Body {
                 },
                 inside: organ.internal_space(),
                 surface: organ.surface_space(),
+                identity: organ.kind as usize,
+                functional: organ.functional_mass() > 0.0,
             });
         }
         for (index, assembly) in state.assemblies.iter().enumerate() {
+            let identity = *identities.entry(RecipeIdentity::from_recipe(&assembly.recipe))
+                .or_insert_with(|| {
+                    functional_copies.push([0; 2]);
+                    functional_copies.len() - 1
+                });
             items.push(Item {
                 cellular: true,
                 index,
@@ -1301,6 +1324,8 @@ impl Body {
                 },
                 inside: assembly.internal_space(),
                 surface: assembly.surface_space(),
+                identity,
+                functional: assembly.functional_mass() > 0.0,
             });
         }
         if items.iter().filter(|item| item.core > 0.0).count() < 2 {
@@ -1334,6 +1359,9 @@ impl Body {
             let load = |side: usize| (used[side][0] / internal).max(used[side][1] / surface);
             let first = if item.core > 0.0 {
                 usize::from(core[1] < core[0])
+            } else if balance_identities && item.functional
+                && functional_copies[item.identity][0] != functional_copies[item.identity][1] {
+                usize::from(functional_copies[item.identity][1] < functional_copies[item.identity][0])
             } else {
                 usize::from(load(1) < load(0))
             };
@@ -1351,6 +1379,9 @@ impl Body {
             used[side][0] += item.inside;
             used[side][1] += item.surface;
             core[side] += item.core;
+            if item.functional {
+                functional_copies[item.identity][side] += 1;
+            }
             assignment.push((item.cellular, item.index, side));
         }
         if core.iter().any(|&mass| mass + EPS < required) {

@@ -25,6 +25,10 @@ mod mechanism_tests;
 mod sensing_tests;
 #[cfg(test)]
 mod local_control_tests;
+#[cfg(test)]
+mod predation_tests;
+#[cfg(test)]
+mod foraging_tests;
 
 pub const WIDTH: f64 = 1200.0;
 pub const HEIGHT: f64 = 760.0;
@@ -41,6 +45,10 @@ pub const MAX_GENOME_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_GENOMES: usize = 2048;
 const FOOD_NUTRIENTS: f64 = 0.25;
 const ORGANIC_PACKET_ENERGY: f64 = 24.0;
+// Secretions begin beyond the inclusive particle-capture contact surface.
+// The small physical gap prevents rounding-dependent immediate reingestion;
+// movement can still bring any cell, including the emitter, back into contact.
+const ORGANIC_RELEASE_CLEARANCE: f64 = 0.05;
 const DIGESTION_SPEED: [f64; 3] = [1.2, 0.7, 0.35];
 const ASSIMILATION_EFFICIENCY: [f64; 3] = [0.8, 0.65, 0.32];
 const MINERAL_ASSIMILATION: [f64; 3] = [1.0, 0.8, 0.5];
@@ -378,10 +386,14 @@ impl Cell {
         (self.body.area / self.birth_area - 1.0).clamp(0.0, 1.0)
     }
     pub fn division_ready(&self) -> bool {
+        // Cellular programs regulate their own replication and constriction.
+        // Empty compartments cannot raise the price of the final paid fission.
+        let reserve = if self.body.cellular.is_some() { 0.0 }
+            else { 0.35 * self.energy_capacity() };
         self.alive()
             && self.cooldown == 0.0
             && self.body.area + 1e-10 >= 2.0 * self.birth_area
-            && self.energy > DIVISION_COST * self.body.area + 0.35 * self.energy_capacity()
+            && self.energy > DIVISION_COST * self.body.area + reserve
             && self.body.can_partition()
     }
     fn receive_nutrients(&mut self, amount: f64) -> f64 {
@@ -1464,10 +1476,12 @@ impl World {
             let output = &outputs[i];
             // Repair the envelope explicitly; organelle repair is handled by the
             // same paid physical body worker below. Both preserve material.
+            let repair_reserve = if cell.body.cellular.is_some() { 0.0 }
+                else { 0.15 * cell.energy_capacity() };
             let repaired = (caps[i].repair * output.repair * DT)
                 .min(1.0 - cell.integrity)
                 .min(
-                    (cell.energy - 0.15 * cell.energy_capacity()).max(0.0)
+                    (cell.energy - repair_reserve).max(0.0)
                         / (20.0 * cell.body.area),
                 );
             cell.energy -= repaired * 20.0 * cell.body.area;
@@ -1572,8 +1586,11 @@ impl World {
         // overflow to the local environment rather than cloning a compartment.
         self.spill_excess_stores_in(phases);
         phases.emissions.clear();
-        for (i, c) in self.cells.iter().enumerate().take(originals) {
-            if c.alive() || phases.consumed[i] {
+        // A newborn can immediately lose all usable energy when its inherited
+        // storage overflows. Return its tissue too; only pre-birth cells could
+        // have been consumed during this tick's predation phase.
+        for (i, c) in self.cells.iter().enumerate() {
+            if c.alive() || phases.consumed.get(i).copied().unwrap_or(false) {
                 continue;
             }
             phases.emissions.push(OrganicEmission::new(
@@ -2206,7 +2223,7 @@ impl World {
                     // moving it tangentially around the envelope instead would
                     // repeatedly shed tiny drops from a translating cell.
                     let to = if delta(from.0 - cx, WIDTH).hypot(delta(from.1 - cy, HEIGHT)) + 1e-9
-                        < radius + 2.5
+                        < radius + 2.5 + ORGANIC_RELEASE_CLEARANCE
                     {
                         outside_envelope((x, y), envelope, (x, y))
                     } else {
@@ -2524,7 +2541,7 @@ impl Observation {
         }
     }
 }
-/// Place a whole organic particle outside its emitter on wrapped geometry.
+/// Place a whole organic particle beyond its emitter's capture reach on wrapped geometry.
 /// The emission point gives the outward direction when a particle is exactly
 /// at the cell center. The same rule handles new and coalescing packets.
 fn outside_envelope(
@@ -2533,9 +2550,10 @@ fn outside_envelope(
     emission: (f64, f64),
 ) -> (f64, f64) {
     let (cx, cy, radius) = envelope;
+    let release_radius = radius + 2.5 + ORGANIC_RELEASE_CLEARANCE;
     let dx = delta(point.0 - cx, WIDTH);
     let dy = delta(point.1 - cy, HEIGHT);
-    if dx.hypot(dy) + 1e-9 >= radius + 2.5 {
+    if dx.hypot(dy) + 1e-9 >= release_radius {
         return point;
     }
     let outward = if dx.hypot(dy) > 1e-12 {
@@ -2544,8 +2562,8 @@ fn outside_envelope(
         delta(emission.1 - cy, HEIGHT).atan2(delta(emission.0 - cx, WIDTH))
     };
     (
-        wrap(cx + outward.cos() * (radius + 2.5), WIDTH),
-        wrap(cy + outward.sin() * (radius + 2.5), HEIGHT),
+        wrap(cx + outward.cos() * release_radius, WIDTH),
+        wrap(cy + outward.sin() * release_radius, HEIGHT),
     )
 }
 fn shared_digestive_work(budget: f64, demands: [f64; 3], weights: [f64; 3]) -> [f64; 3] {

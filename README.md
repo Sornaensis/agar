@@ -64,11 +64,17 @@ The genome is the body plan. An introduced cell has area 1, one core of mass 0.0
 
 Programs must establish an energy source before spending their reserves on further development. The built-ins use actual organelle state to sequence construction, then build duplicates for division. This ordering is part of their visible source and can be edited or mutated. Changing a target changes future construction; it never replaces the living cell's existing organs.
 
+Current consumers build capture, digestion and navigation before optional storage and support. Predators assemble a piercer before attempting growth and devote more enzyme material to tissue digestion. Captured food can trigger construction of its missing enzyme even at low energy, provided the cell can pay the actual costs. Cellular construction, envelope repair and fission use actual available energy; empty storage capacity does not impose an additional reserve. Programs set their own energy thresholds.
+
+Current programs tolerate modest loss of working capacity before requesting replacement machinery. A paid `repair()` mechanism responds to actual damage, including during development. This prevents small injuries from filling a cell with duplicate equipment. The construction tolerance is capped below one recipe unit so larger body goals still require every whole copy.
+
 Each `express.<family>` produces that family’s assembly proteins from minerals and energy. Proteins persist between ticks, occupy internal space, add upkeep and turn over into returned minerals plus heat. Count/size targets assemble organs from matching proteins already present at the start of the tick; expressing a gene cannot create a functional organ immediately. Expression and assembly share finite core throughput, energy and space. Leaving every gene on can fill the cell with unused protein and delay the machinery it needs. Regulate expression using `protein.<family>`, actual organ mass and resource reserves. Allocation uses a common starting snapshot; new space, recovered resources and newly functional machinery are used on following ticks. Lowering a target does not remove anything without explicit recycling. Recycling costs processing energy and returns only accounted material and a fraction of retained structural energy. Capacity loss spills excess contents into the environment instead of silently discarding them.
 
-Division requires doubled birth area, sufficient energy, cooldown and a feasible packing of actual organs with a viable core in each half. Discrete organs are assigned, never cloned. Build duplicate essential capabilities before division if both daughters should inherit them. The retained parent keeps its memory and age; the daughter starts with empty registers and no object tracks. Mutations affect the inherited program, not the inherited body.
+Division requires doubled birth area, sufficient energy, cooldown and a feasible packing of actual organs with a viable core in each half. Discrete organs are assigned, never cloned. Cellular partitioning prefers to distribute functioning copies of each exact recipe between the two cells, subject to core support and space limits. Build duplicate essential capabilities before division if both daughters should inherit them. The retained parent keeps its memory and age; the daughter starts with empty registers and no object tracks. Mutations affect the inherited program, not the inherited body.
 
 There is **no fixed population cap, organic-particle count cap or age-based death timer**. Cells die from physical damage, loss of essential machinery or exhausted energy. Age remains observable; the compatibility signal `lifespan` is zero, meaning no fixed maximum. Resources, mortality, browser memory and execution time constrain practical populations. The former area-4 growth ceiling is gone. A separate geometry bound keeps cell radius at or below 95 world units, one eighth of the shorter world dimension; maximum envelope area is about 184.18. Collision queries use actual radii. These are simulation abstractions, not biological fidelity claims.
+
+Death returns the cell's remaining body and gut contents to the environment. This also applies to a newborn that immediately dies after inheriting insufficient storage.
 
 ## Organic matter and digestion
 
@@ -83,6 +89,8 @@ Organic matter retains its composition through ingestion, gut storage, spills, d
 `digest.exudate`, `digest.tissue` and `digest.waste` allocate the same finite digestive throughput. Their default efforts are 1, 1 and 0.35. They cannot grant digestion without a functioning digestive organ. Read `gut.<kind>.energy` and `.nutrients` to choose which enzymes to prioritize; `feed` still regulates ingestion. Gut composition of an engulfed organism stays intact instead of turning its waste back into fresh tissue. Decay returns minerals to the environment and dissipates energy. Same-kind local merging combines accounted contents; particle counts never trigger deletion or artificial conversion.
 
 Particle appearance differs, but genome sensors continue to report physical properties and local chemical cues rather than an omniscient food/prey category.
+
+New secretions and merged secretion packets are placed just beyond the emitter's capture reach. This prevents immediate reingestion of digestive residue. A cell can still capture its own waste after physically approaching it; there is no ownership immunity.
 
 ## Legacy genome language
 
@@ -122,7 +130,11 @@ Optics exposes `object.offset`, `.area`, `.contrast`, `.pigment` and `.motion`, 
 
 `scan.bearing`, `scan.width` and `scan.target` control the next tick's scan. A remembered token can request reacquisition only within physically detectable objects. The per-cell tracking cache holds at most eight observations and forgets a track after a gap of more than 30 ticks (one simulated second). Eviction can forget it earlier. Tokens never grant remote access or alias a replacement object.
 
-Built-in scavengers use small apparent area as a tentative particle clue and soft contact as a feeding opportunity. They steer around resistant surfaces instead of remaining stopped against them. These heuristics use measured geometry and resistance, not an edible or species signal.
+Current foragers approach optical returns, follow the edge of large nearby objects to encounter released particles, and steer away from resistant contact. The Forager's motors rest while a substantial exudate or tissue meal is being processed; low-yield waste alone does not suppress further search. Capture still respects total gut occupancy. These heuristics use measured geometry and resistance; sensors do not classify objects as food or reveal their species.
+
+The Forager gives injury escape priority over feeding rest and optical attraction. Its own integrity can trigger that response even when an attacker is outside its contact receptor's coverage. Escape uses the existing paid motors and lasts until repair restores integrity.
+
+Predators continue approaching soft particles and stop for resistant contact. Two paid flank thermoreceptors compare local temperatures; escape toward cooler water takes priority over contact, hunting and full-gut rest. This response requires the actual built receptors and does not grant heat protection.
 
 Chemoreception reads local dissolved minerals and an organic-cue field emitted by release, leakage and decay. Cues diffuse, move with currents and decay; they do not point to a chosen meal. Light sensing is separate from photosynthesis, and temperature and currents affect cells even without their sensors.
 
@@ -229,10 +241,12 @@ npm run test:worker
 npm run test:cellular
 npm run test:cellular-ui
 npm run test:food-chain
-node scripts/check-preset-navigation.mjs
+npm run test:ecosystem    # ten simulated minutes of the actual mixed preset
 ```
 
-Tests cover physical accounting and packing, sensor gates, conservative inheritance, safe mutations, checkpoint replay, real WASM interfaces, editor/Rust metadata agreement, graph bounds and persistence failures. Worker tests use real worker threads and WASM to check ordered commands, transferred buffers, atomic checkpoint capture, partial failures, disposal and main-thread responsiveness. Session tests cover related inspector reads on one tick and final-save ordering. The short preset-navigation fixture tests escape from a real resistant contact followed by particle capture and digestion. Ecosystem checks report survival and extinctions across fixed seeds; they do not guarantee permanent coexistence.
+Tests cover physical accounting and packing, sensor gates, conservative inheritance, safe mutations, checkpoint replay, real WASM interfaces, editor/Rust metadata agreement, graph bounds and persistence failures. Worker tests use real worker threads and WASM to check ordered commands, transferred buffers, atomic checkpoint capture, partial failures, disposal and main-thread responsiveness. Session tests cover related inspector reads on one tick and final-save ordering. Current food-chain fixtures grow the authored consumers, exercise resistant-contact navigation and actual prey capture and digestion, and check recovery from a low-energy tissue meal. The mixed-ecosystem regression requires surviving and reproducing Forager and Predator lineages, with no supplied organic food. Recorded runs and limits are in [experiments](experiments/README.md). A passing finite run does not guarantee permanent coexistence. Legacy program fixtures remain available through `test:food-chain:legacy` and `test:navigation:legacy`.
+
+Start a fresh **Mixed ecosystem** to use updated built-in programs. Saved simulations retain their own original genome sources.
 
 An optional browser smoke test is available as `node scripts/check-ui.mjs`. Run
 `npm run build:pages` and serve `docs` on `http://127.0.0.1:4173/` first; it requires

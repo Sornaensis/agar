@@ -1,0 +1,2035 @@
+{
+  "engineWasmSha256": "05e190387136580e0ffe441fa5088493656ce19650381c262b81a9ea18cdbb09",
+  "nativeRunnerSha256": "32c8ebe749321fe43228ebd5089e9cfb77bb3032605344609452343954c1bf5b",
+  "sourceSha256": {
+    "baseline": "17f1d55ab53d77b27674469a61e08b4005cd58414c774933589ab8c7acfc4451",
+    "tissue04": "6b9c9a85ddf069dfc46335585dcc33d4f85f742dd3cad8ad58246a8967e01190",
+    "waste04": "60c2bc2ef0cbdbf6705b0fa96a82027a5b564b0c0d11d354c2259c8e059eaed6",
+    "waste_search": "b8b2189b090f3436cd62aecccc0c3bfe863ab58758cc28ad56bd0a3d788f69cc",
+    "tissue04_meal_search": "bc725b210be9a401c626d480d8fac9104ac2736bbf1fc16f49cb2c61621706b6"
+  },
+  "protocol": {
+    "seed": 42,
+    "temperature": 0.5,
+    "light": {
+      "finiteAndContinuous": 0,
+      "spatialAhead": 0.8
+    },
+    "current": 0,
+    "initialMinerals": 3,
+    "initialFood": 0,
+    "foodRate": 0,
+    "mutation": 0,
+    "organism": "One normal Forager seeded, unchanged paid body development. First accounted food at30s. World.add_food supplies energy and minerals; only substrate and position are set in the controlled fixture. All cell states and sensing remain physical.",
+    "continuous": "Offer accounted Tissue when actual Tissue gut<30 and nearby Tissue<12, checking every.5s; stop at first division or600s.",
+    "spatial": "Finite Waste at cell center and Exudate30px along the actual current heading. Full-gut fixture supplies two Waste particles.",
+    "assertions": "Conserved total mineral and non-created energy checked everytick. No photosynthesis. At division both daughters fit space and retain working Gut/Exudate/Capture/motors/Vision/Touch/Tissue. Full-gut candidate also shows active search above45%Waste, physical Capture paused above70%totalgut, and later real Exudate capture."
+  },
+  "results": {
+    "baseline-tissue-finite.jsonl": [
+      {
+        "tag": "before_meal",
+        "time": 30,
+        "energy": 35.097371228174154,
+        "gut": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.4496639658382452,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 20.200000000000163,
+        "motors": 0.014000000000000004,
+        "tissue_machine": 0,
+        "waste_machine": 0,
+        "space": [
+          0.3272732763970753,
+          0.9
+        ],
+        "births": 0,
+        "x": 595.3181553792518,
+        "y": 421.52682276327744
+      },
+      {
+        "tag": "supply",
+        "time": 30,
+        "raw": 20.013665811158717,
+        "minerals": 0.25
+      },
+      {
+        "tag": "enzyme_ready",
+        "time": 31.133333333333333,
+        "energy": 32.7064116533788,
+        "gut": [
+          0.0,
+          19.94317117299116,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.45839729917157856,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0.02,
+        "waste_machine": 0,
+        "space": [
+          0.3468288319526309,
+          0.9
+        ],
+        "births": 0,
+        "x": 597.9262054844922,
+        "y": 424.69806532090007
+      },
+      {
+        "tag": "sample",
+        "time": 40,
+        "energy": 33.88658893405793,
+        "gut": [
+          0.0,
+          11.874504506324326,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.45839729917157856,
+        "flux": 0.5915,
+        "useful": 5.244633333333321,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0.02,
+        "waste_machine": 0,
+        "space": [
+          0.3468288319526309,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.4858005081132,
+        "y": 425.37938914417606
+      },
+      {
+        "tag": "meal_below_rest_threshold",
+        "time": 50.86666666666667,
+        "energy": 35.33297161639401,
+        "gut": [
+          0.0,
+          1.9858378396577059,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.45839729917157856,
+        "flux": 0.5915,
+        "useful": 11.6722666666668,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0.02,
+        "waste_machine": 0,
+        "space": [
+          0.3468288319526309,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.4858012299602,
+        "y": 425.3793900230464
+      },
+      {
+        "tag": "sample",
+        "time": 60,
+        "energy": 31.669870879737914,
+        "gut": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.45839729917157856,
+        "flux": 0,
+        "useful": 12.963061262444363,
+        "motor_time": 29.40000000000062,
+        "motors": 0.014000000000000002,
+        "tissue_machine": 0.02,
+        "waste_machine": 0,
+        "space": [
+          0.3468288319526309,
+          0.9
+        ],
+        "births": 0,
+        "x": 611.099511565601,
+        "y": 450.32817508426933
+      },
+      {
+        "tag": "end",
+        "time": 118.39999999999999,
+        "dead": true,
+        "useful": 12.963061262444363,
+        "motor_time": 87.76666666666425
+      },
+      {
+        "tag": "summary",
+        "input_raw": 20.013665811158717,
+        "useful": 12.963061262444363,
+        "material_error": 2.3646862246096134e-11,
+        "photosynthesis": 0,
+        "births": 0,
+        "alive": 0,
+        "first_food": 30,
+        "first_capture": 30.03333333333333,
+        "first_machine": 31.133333333333333,
+        "clear": 50.86666666666667
+      }
+    ],
+    "tissue04-tissue-finite.jsonl": [
+      {
+        "tag": "before_meal",
+        "time": 30,
+        "energy": 35.097371228174154,
+        "gut": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.4496639658382452,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 20.200000000000163,
+        "motors": 0.014000000000000004,
+        "tissue_machine": 0,
+        "waste_machine": 0,
+        "space": [
+          0.3272732763970753,
+          0.9
+        ],
+        "births": 0,
+        "x": 595.3181553792518,
+        "y": 421.52682276327744
+      },
+      {
+        "tag": "supply",
+        "time": 30,
+        "raw": 20.013665811158717,
+        "minerals": 0.25
+      },
+      {
+        "tag": "enzyme_ready",
+        "time": 32.2,
+        "energy": 30.341643009639395,
+        "gut": [
+          0.0,
+          19.94317117299116,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.46713063250491194,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0.04,
+        "waste_machine": 0,
+        "space": [
+          0.3663843875081864,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.3758689090934,
+        "y": 425.24554410592197
+      },
+      {
+        "tag": "sample",
+        "time": 40,
+        "energy": 35.925424076101855,
+        "gut": [
+          0.0,
+          5.747171172991235,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.46713063250491194,
+        "flux": 1.183,
+        "useful": 9.22739999999998,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0.04,
+        "waste_machine": 0,
+        "space": [
+          0.3663843875081864,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.4859598466967,
+        "y": 425.37958314370826
+      },
+      {
+        "tag": "meal_below_rest_threshold",
+        "time": 42.06666666666666,
+        "energy": 37.40488743559191,
+        "gut": [
+          0.0,
+          1.9858378396578908,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.46713063250491194,
+        "flux": 1.183,
+        "useful": 11.672266666666639,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0.04,
+        "waste_machine": 0,
+        "space": [
+          0.3663843875081864,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.485960518904,
+        "y": 425.3795839621409
+      },
+      {
+        "tag": "sample",
+        "time": 60,
+        "energy": 28.812072688448758,
+        "gut": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.46713063250491194,
+        "flux": 0,
+        "useful": 12.963061262444263,
+        "motor_time": 38.200000000000394,
+        "motors": 0.014000000000000002,
+        "tissue_machine": 0.04,
+        "waste_machine": 0,
+        "space": [
+          0.3663843875081864,
+          0.9
+        ],
+        "births": 0,
+        "x": 654.019053738985,
+        "y": 436.89565758564424
+      },
+      {
+        "tag": "end",
+        "time": 112.3,
+        "dead": true,
+        "useful": 12.963061262444263,
+        "motor_time": 90.4666666666641
+      },
+      {
+        "tag": "summary",
+        "input_raw": 20.013665811158717,
+        "useful": 12.963061262444263,
+        "material_error": 2.546585164964199e-11,
+        "photosynthesis": 0,
+        "births": 0,
+        "alive": 0,
+        "first_food": 30,
+        "first_capture": 30.03333333333333,
+        "first_machine": 32.2,
+        "clear": 42.06666666666666
+      }
+    ],
+    "baseline-tissue-continuous.jsonl": [
+      {
+        "tag": "before_meal",
+        "time": 30,
+        "energy": 35.097371228174154,
+        "gut": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.4496639658382452,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 20.200000000000163,
+        "motors": 0.014000000000000004,
+        "tissue_machine": 0,
+        "waste_machine": 0,
+        "space": [
+          0.3272732763970753,
+          0.9
+        ],
+        "births": 0,
+        "x": 595.3181553792518,
+        "y": 421.52682276327744
+      },
+      {
+        "tag": "supply",
+        "time": 30,
+        "raw": 20.013665811158717,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 30.5,
+        "raw": 22.358892765361816,
+        "minerals": 0.25
+      },
+      {
+        "tag": "enzyme_ready",
+        "time": 31.133333333333333,
+        "energy": 32.7064116533788,
+        "gut": [
+          0.0,
+          34.8,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.45839729917157856,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0.02,
+        "waste_machine": 0,
+        "space": [
+          0.3468288319526309,
+          0.9
+        ],
+        "births": 0,
+        "x": 597.9325706290725,
+        "y": 424.70581507645187
+      },
+      {
+        "tag": "sample",
+        "time": 40,
+        "energy": 33.88658893405793,
+        "gut": [
+          0.0,
+          33.730240692034556,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.45839729917157856,
+        "flux": 0.5915,
+        "useful": 5.244633333333321,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0.02,
+        "waste_machine": 0,
+        "space": [
+          0.3468288319526309,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.5377805209233,
+        "y": 425.4426763779195
+      },
+      {
+        "tag": "supply",
+        "time": 44.5,
+        "raw": 22.72048981161788,
+        "minerals": 0.25
+      },
+      {
+        "tag": "sample",
+        "time": 60,
+        "energy": 36.5486429506274,
+        "gut": [
+          0.0,
+          34.73024069203551,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.45839729917157856,
+        "flux": 0.5915,
+        "useful": 17.074633333333693,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0.02,
+        "waste_machine": 0,
+        "space": [
+          0.3468288319526309,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.5377822989701,
+        "y": 425.4426785427465
+      },
+      {
+        "tag": "supply",
+        "time": 67,
+        "raw": 20.735321281012148,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 88.5,
+        "raw": 18.06118210963905,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 107,
+        "raw": 22.519829181488603,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 129.5,
+        "raw": 21.42564061190933,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 151.5,
+        "raw": 22.533282240852714,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 174,
+        "raw": 19.640089336317033,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 194,
+        "raw": 23.5036167986691,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 217.5,
+        "raw": 21.895573284476995,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 239.5,
+        "raw": 22.70950755989179,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 262.5,
+        "raw": 23.386037894524634,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 286,
+        "raw": 19.08336236514151,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 305.5,
+        "raw": 23.281072618905455,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 329,
+        "raw": 18.71188255213201,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 348,
+        "raw": 19.981293249875307,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 368.5,
+        "raw": 22.083257866557688,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 391,
+        "raw": 19.021087353117764,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 410.5,
+        "raw": 19.076969283632934,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 430,
+        "raw": 23.264937847852707,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 453.5,
+        "raw": 23.029562360141426,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 476.5,
+        "raw": 22.368508426006883,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 499,
+        "raw": 20.649822439067066,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 520,
+        "raw": 19.649375243112445,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 540,
+        "raw": 19.525372698437423,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 560,
+        "raw": 21.04285289766267,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 581.5,
+        "raw": 20.744778769556433,
+        "minerals": 0.25
+      },
+      {
+        "tag": "end",
+        "time": 600,
+        "energy": 64.97945329612166,
+        "gut": [
+          0.0,
+          32.081055032934295,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.5526618562352206,
+        "flux": 0.5915,
+        "useful": 336.48463333331284,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0.02,
+        "waste_machine": 0,
+        "space": [
+          0.6887703964544714,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.5377822989701,
+        "y": 425.4426785427465
+      },
+      {
+        "tag": "summary",
+        "input_raw": 593.0172646581195,
+        "useful": 336.48463333331284,
+        "material_error": 6.2118488131091e-10,
+        "photosynthesis": 0,
+        "births": 0,
+        "alive": 1,
+        "first_food": 30,
+        "first_capture": 30.03333333333333,
+        "first_machine": 31.133333333333333,
+        "clear": null
+      }
+    ],
+    "tissue04_meal_search-tissue-continuous.jsonl": [
+      {
+        "tag": "before_meal",
+        "time": 30,
+        "energy": 35.097371228174154,
+        "gut": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.4496639658382452,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 20.200000000000163,
+        "motors": 0.014000000000000004,
+        "tissue_machine": 0,
+        "waste_machine": 0,
+        "space": [
+          0.3272732763970753,
+          0.9
+        ],
+        "births": 0,
+        "x": 595.3181553792518,
+        "y": 421.52682276327744
+      },
+      {
+        "tag": "supply",
+        "time": 30,
+        "raw": 20.013665811158717,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 30.5,
+        "raw": 22.358892765361816,
+        "minerals": 0.25
+      },
+      {
+        "tag": "enzyme_ready",
+        "time": 32.2,
+        "energy": 30.341643009639395,
+        "gut": [
+          0.0,
+          34.8,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.46713063250491194,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0.04,
+        "waste_machine": 0,
+        "space": [
+          0.3663843875081864,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.4087930573952,
+        "y": 425.2856302497445
+      },
+      {
+        "tag": "supply",
+        "time": 39,
+        "raw": 22.72048981161788,
+        "minerals": 0.25
+      },
+      {
+        "tag": "sample",
+        "time": 40,
+        "energy": 35.925424076101855,
+        "gut": [
+          0.0,
+          33.703967003805964,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.46713063250491194,
+        "flux": 1.183,
+        "useful": 9.22739999999998,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0.04,
+        "waste_machine": 0,
+        "space": [
+          0.3663843875081864,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.5378411501744,
+        "y": 425.4427501958612
+      },
+      {
+        "tag": "supply",
+        "time": 51,
+        "raw": 20.735321281012148,
+        "minerals": 0.25
+      },
+      {
+        "tag": "sample",
+        "time": 60,
+        "energy": 50.24281142600561,
+        "gut": [
+          0.0,
+          32.95398925060896,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.46713063250491194,
+        "flux": 1.183,
+        "useful": 32.88740000000067,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0.04,
+        "waste_machine": 0,
+        "space": [
+          0.3663843875081864,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.5378430415807,
+        "y": 425.4427524987067
+      },
+      {
+        "tag": "supply",
+        "time": 62,
+        "raw": 18.06118210963905,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 71.5,
+        "raw": 22.519829181488603,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 83.5,
+        "raw": 21.42564061190933,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 94.5,
+        "raw": 22.533282240852714,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 106.5,
+        "raw": 19.640089336317033,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 117,
+        "raw": 23.5036167986691,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 129,
+        "raw": 21.895573284476995,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 140.5,
+        "raw": 22.70950755989179,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 152.5,
+        "raw": 23.386037894524634,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 165,
+        "raw": 19.08336236514151,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 175,
+        "raw": 23.281072618905455,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 187,
+        "raw": 18.71188255213201,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 197,
+        "raw": 19.981293249875307,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 207.5,
+        "raw": 22.083257866557688,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 219,
+        "raw": 19.021087353117764,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 224,
+        "raw": 19.076969283632934,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 229,
+        "raw": 23.264937847852707,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 235.5,
+        "raw": 23.029562360141426,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 241.5,
+        "raw": 22.368508426006883,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 247.5,
+        "raw": 20.649822439067066,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 253,
+        "raw": 19.649375243112445,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 258.5,
+        "raw": 19.525372698437423,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 264,
+        "raw": 21.04285289766267,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 269.5,
+        "raw": 20.744778769556433,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 275.5,
+        "raw": 18.87783160759136,
+        "minerals": 0.25
+      },
+      {
+        "tag": "supply",
+        "time": 280.5,
+        "raw": 22.25963653391227,
+        "minerals": 0.25
+      },
+      {
+        "tag": "division",
+        "time": 281.6333333333333,
+        "energy": 37.95964716073709,
+        "gut": [
+          0.0,
+          23.569817572421638,
+          0.0
+        ],
+        "area": 1.0008000000000292,
+        "upkeep": 0.6170157668127954,
+        "flux": 2.366,
+        "useful": 370.35786666668145,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0.04,
+        "waste_machine": 0,
+        "space": [
+          0.8082796113546714,
+          0.9007200000000263
+        ],
+        "births": 1,
+        "x": 605.0616058780838,
+        "y": 422.1607716765207
+      },
+      {
+        "tag": "end",
+        "time": 281.6333333333333,
+        "energy": 37.95964716073709,
+        "gut": [
+          0.0,
+          23.569817572421638,
+          0.0
+        ],
+        "area": 1.0008000000000292,
+        "upkeep": 0.6170157668127954,
+        "flux": 2.366,
+        "useful": 370.35786666668145,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0.04,
+        "waste_machine": 0,
+        "space": [
+          0.8082796113546714,
+          0.9007200000000263
+        ],
+        "births": 1,
+        "x": 605.0616058780838,
+        "y": 422.1607716765207
+      },
+      {
+        "tag": "summary",
+        "input_raw": 634.1547327996232,
+        "useful": 370.35786666668145,
+        "material_error": 2.837623469531536e-10,
+        "photosynthesis": 0,
+        "births": 1,
+        "alive": 2,
+        "first_food": 30,
+        "first_capture": 30.03333333333333,
+        "first_machine": 32.2,
+        "clear": null
+      }
+    ],
+    "baseline-waste-finite.jsonl": [
+      {
+        "tag": "before_meal",
+        "time": 30,
+        "energy": 35.097371228174154,
+        "gut": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.4496639658382452,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 20.200000000000163,
+        "motors": 0.014000000000000004,
+        "tissue_machine": 0,
+        "waste_machine": 0,
+        "space": [
+          0.3272732763970753,
+          0.9
+        ],
+        "births": 0,
+        "x": 595.3181553792518,
+        "y": 421.52682276327744
+      },
+      {
+        "tag": "supply",
+        "time": 30,
+        "raw": 20.013665811158717,
+        "minerals": 0.25
+      },
+      {
+        "tag": "enzyme_ready",
+        "time": 30.866666666666667,
+        "energy": 33.296137147646995,
+        "gut": [
+          0.0,
+          0.0,
+          19.978339020971784
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 597.6455420278213,
+        "y": 424.35634909527073
+      },
+      {
+        "tag": "sample",
+        "time": 40,
+        "energy": 30.12674292632397,
+        "gut": [
+          0.0,
+          0.0,
+          16.861589020971504
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0.1092,
+        "useful": 0.9973599999999954,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.4858816102574,
+        "y": 425.37948788848155
+      },
+      {
+        "tag": "sample",
+        "time": 60,
+        "energy": 23.18646360955995,
+        "gut": [
+          0.0,
+          0.0,
+          10.036589020971823
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0.1092,
+        "useful": 3.1813599999999758,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.4858823340088,
+        "y": 425.37948876966965
+      },
+      {
+        "tag": "meal_below_rest_threshold",
+        "time": 83.56666666666666,
+        "energy": 15.008501147973014,
+        "gut": [
+          0.0,
+          0.0,
+          1.9944640209718865
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0.1092,
+        "useful": 5.754839999999881,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.4858823340088,
+        "y": 425.37948876966965
+      },
+      {
+        "tag": "end",
+        "time": 112.53333333333333,
+        "dead": true,
+        "useful": 6.393068486710863,
+        "motor_time": 49.19999999999977
+      },
+      {
+        "tag": "summary",
+        "input_raw": 20.013665811158717,
+        "useful": 6.393068486710863,
+        "material_error": 3.001332515850663e-11,
+        "photosynthesis": 0,
+        "births": 0,
+        "alive": 0,
+        "first_food": 30,
+        "first_capture": 30.03333333333333,
+        "first_machine": 30.866666666666667,
+        "clear": 83.56666666666666
+      }
+    ],
+    "waste04-waste-finite.jsonl": [
+      {
+        "tag": "before_meal",
+        "time": 30,
+        "energy": 35.097371228174154,
+        "gut": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.4496639658382452,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 20.200000000000163,
+        "motors": 0.014000000000000004,
+        "tissue_machine": 0,
+        "waste_machine": 0,
+        "space": [
+          0.3272732763970753,
+          0.9
+        ],
+        "births": 0,
+        "x": 595.3181553792518,
+        "y": 421.52682276327744
+      },
+      {
+        "tag": "supply",
+        "time": 30,
+        "raw": 20.013665811158717,
+        "minerals": 0.25
+      },
+      {
+        "tag": "enzyme_ready",
+        "time": 32.2,
+        "energy": 30.341643009639395,
+        "gut": [
+          0.0,
+          0.0,
+          19.978339020971784
+        ],
+        "area": 1,
+        "upkeep": 0.46713063250491194,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0,
+        "waste_machine": 0.04,
+        "space": [
+          0.3663843875081864,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.3760035762331,
+        "y": 425.24570806722744
+      },
+      {
+        "tag": "sample",
+        "time": 40,
+        "energy": 28.969384076101388,
+        "gut": [
+          0.0,
+          0.0,
+          12.880339020971606
+        ],
+        "area": 1,
+        "upkeep": 0.46713063250491194,
+        "flux": 0.2912,
+        "useful": 2.271360000000009,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0,
+        "waste_machine": 0.04,
+        "space": [
+          0.3663843875081864,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.4861221571671,
+        "y": 425.3797807616012
+      },
+      {
+        "tag": "meal_below_rest_threshold",
+        "time": 51.96666666666667,
+        "energy": 26.864080840459746,
+        "gut": [
+          0.0,
+          0.0,
+          1.9906723543049931
+        ],
+        "area": 1,
+        "upkeep": 0.46713063250491194,
+        "flux": 0.2912,
+        "useful": 5.756053333333293,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0,
+        "waste_machine": 0.04,
+        "space": [
+          0.3663843875081864,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.4861228456862,
+        "y": 425.37978159989507
+      },
+      {
+        "tag": "sample",
+        "time": 60,
+        "energy": 23.07367991271479,
+        "gut": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.46713063250491194,
+        "flux": 0,
+        "useful": 6.393068486710868,
+        "motor_time": 28.300000000000566,
+        "motors": 0.014000000000000002,
+        "tissue_machine": 0,
+        "waste_machine": 0.04,
+        "space": [
+          0.3663843875081864,
+          0.9
+        ],
+        "births": 0,
+        "x": 618.2281001383601,
+        "y": 423.8427496216733
+      },
+      {
+        "tag": "end",
+        "time": 101.86666666666666,
+        "dead": true,
+        "useful": 6.393068486710868,
+        "motor_time": 70.13333333333192
+      },
+      {
+        "tag": "summary",
+        "input_raw": 20.013665811158717,
+        "useful": 6.393068486710868,
+        "material_error": 1.9099388737231493e-11,
+        "photosynthesis": 0,
+        "births": 0,
+        "alive": 0,
+        "first_food": 30,
+        "first_capture": 30.03333333333333,
+        "first_machine": 32.2,
+        "clear": 51.96666666666667
+      }
+    ],
+    "baseline-waste-lit-ahead.jsonl": [
+      {
+        "tag": "before_meal",
+        "time": 30,
+        "energy": 35.097371228174154,
+        "gut": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.4496639658382452,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 20.200000000000163,
+        "motors": 0.014000000000000004,
+        "tissue_machine": 0,
+        "waste_machine": 0,
+        "space": [
+          0.3272732763970753,
+          0.9
+        ],
+        "births": 0,
+        "x": 595.3181553792518,
+        "y": 421.52682276327744
+      },
+      {
+        "tag": "supply",
+        "time": 30,
+        "raw": 20.013665811158717,
+        "minerals": 0.25
+      },
+      {
+        "tag": "exudate_ahead",
+        "raw": 22.358892765361816,
+        "distance": 30
+      },
+      {
+        "tag": "enzyme_ready",
+        "time": 30.866666666666667,
+        "energy": 33.29173714764699,
+        "gut": [
+          0.0,
+          0.0,
+          19.978339020971784
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 597.8089761069245,
+        "y": 424.60336400119934
+      },
+      {
+        "tag": "sample",
+        "time": 40,
+        "energy": 30.122342926323967,
+        "gut": [
+          0.0,
+          0.0,
+          16.861589020971504
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0.1092,
+        "useful": 0.9973599999999954,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.7103651464078,
+        "y": 425.71866881409096
+      },
+      {
+        "tag": "sample",
+        "time": 60,
+        "energy": 23.182063609559947,
+        "gut": [
+          0.0,
+          0.0,
+          10.036589020971823
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0.1092,
+        "useful": 3.1813599999999758,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.7103659227377,
+        "y": 425.71866977465845
+      },
+      {
+        "tag": "meal_below_rest_threshold",
+        "time": 83.56666666666666,
+        "energy": 15.00410114797301,
+        "gut": [
+          0.0,
+          0.0,
+          1.9944640209718865
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0.1092,
+        "useful": 5.754839999999881,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.7103659227377,
+        "y": 425.71866977465845
+      },
+      {
+        "tag": "exudate_captured",
+        "time": 85.36666666666666,
+        "energy": 14.109476009464206,
+        "gut": [
+          1.2,
+          0.0,
+          1.3802140209718912
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0.1092,
+        "useful": 5.947759999999874,
+        "motor_time": 22.033333333333587,
+        "motors": 0.025,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 606.2960848512745,
+        "y": 438.97301291804865
+      },
+      {
+        "tag": "end",
+        "time": 116,
+        "dead": true,
+        "useful": 8.34479521379414,
+        "motor_time": 52.133333333332935
+      },
+      {
+        "tag": "summary",
+        "input_raw": 42.37255857652053,
+        "useful": 8.34479521379414,
+        "material_error": 2.2737367544323206e-11,
+        "photosynthesis": 0,
+        "births": 0,
+        "alive": 0,
+        "first_food": 30,
+        "first_capture": 30.03333333333333,
+        "first_machine": 30.866666666666667,
+        "clear": 83.56666666666666
+      }
+    ],
+    "waste_search-waste-lit-ahead.jsonl": [
+      {
+        "tag": "before_meal",
+        "time": 30,
+        "energy": 35.097371228174154,
+        "gut": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.4496639658382452,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 20.200000000000163,
+        "motors": 0.014000000000000004,
+        "tissue_machine": 0,
+        "waste_machine": 0,
+        "space": [
+          0.3272732763970753,
+          0.9
+        ],
+        "births": 0,
+        "x": 595.3181553792518,
+        "y": 421.52682276327744
+      },
+      {
+        "tag": "supply",
+        "time": 30,
+        "raw": 20.013665811158717,
+        "minerals": 0.25
+      },
+      {
+        "tag": "exudate_ahead",
+        "raw": 22.358892765361816,
+        "distance": 30
+      },
+      {
+        "tag": "enzyme_ready",
+        "time": 30.866666666666667,
+        "energy": 33.17173714764699,
+        "gut": [
+          0.0,
+          0.0,
+          19.978339020971784
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 21.066666666666872,
+        "motors": 0.025,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 600.1054453486673,
+        "y": 428.45267806848824
+      },
+      {
+        "tag": "exudate_captured",
+        "time": 31.933333333333334,
+        "energy": 32.6415889174195,
+        "gut": [
+          1.2,
+          0.0,
+          19.61433902097175
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0.1092,
+        "useful": 0.11284000000000004,
+        "motor_time": 22.100000000000257,
+        "motors": 0.025,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 606.4367696723104,
+        "y": 439.01266423527335
+      },
+      {
+        "tag": "sample",
+        "time": 40,
+        "energy": 45.950016148597165,
+        "gut": [
+          0.0,
+          0.0,
+          16.861589020971504
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0.1092,
+        "useful": 17.292033222273297,
+        "motor_time": 24.3333333333337,
+        "motors": 0.014000000000000004,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 616.0464423194106,
+        "y": 454.1557701178273
+      },
+      {
+        "tag": "sample",
+        "time": 60,
+        "energy": 37.329736831828534,
+        "gut": [
+          0.0,
+          0.0,
+          10.036589020971823
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0.1092,
+        "useful": 19.47603322227375,
+        "motor_time": 44.33333333333338,
+        "motors": 0.014000000000000002,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 574.3049052446662,
+        "y": 521.5259595772743
+      },
+      {
+        "tag": "meal_below_rest_threshold",
+        "time": 83.56666666666666,
+        "energy": 27.172174370238558,
+        "gut": [
+          0.0,
+          0.0,
+          1.9944640209718865
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0.1092,
+        "useful": 22.049513222274282,
+        "motor_time": 67.89999999999871,
+        "motors": 0.014000000000000004,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 512.6063836760039,
+        "y": 590.9867950477568
+      },
+      {
+        "tag": "end",
+        "time": 135.06666666666666,
+        "dead": true,
+        "useful": 22.68774170898542,
+        "motor_time": 119.36666666666245
+      },
+      {
+        "tag": "summary",
+        "input_raw": 42.37255857652053,
+        "useful": 22.68774170898542,
+        "material_error": 3.183231456205249e-11,
+        "photosynthesis": 0,
+        "births": 0,
+        "alive": 0,
+        "first_food": 30,
+        "first_capture": 30.03333333333333,
+        "first_machine": 30.866666666666667,
+        "clear": 83.56666666666666
+      }
+    ],
+    "baseline-waste-ahead_full.jsonl": [
+      {
+        "tag": "before_meal",
+        "time": 30,
+        "energy": 35.097371228174154,
+        "gut": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.4496639658382452,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 20.200000000000163,
+        "motors": 0.014000000000000004,
+        "tissue_machine": 0,
+        "waste_machine": 0,
+        "space": [
+          0.3272732763970753,
+          0.9
+        ],
+        "births": 0,
+        "x": 595.3181553792518,
+        "y": 421.52682276327744
+      },
+      {
+        "tag": "supply",
+        "time": 30,
+        "raw": 20.013665811158717,
+        "minerals": 0.25
+      },
+      {
+        "tag": "additional_waste",
+        "raw": 22.358892765361816
+      },
+      {
+        "tag": "exudate_ahead",
+        "raw": 22.72048981161788,
+        "distance": 30
+      },
+      {
+        "tag": "enzyme_ready",
+        "time": 30.866666666666667,
+        "energy": 33.29173714764699,
+        "gut": [
+          0.0,
+          0.0,
+          31.19999999999999
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 597.8104476629283,
+        "y": 424.6051847838154
+      },
+      {
+        "tag": "gut_physically_full",
+        "time": 30.966666666666665,
+        "energy": 33.25703575106315,
+        "gut": [
+          0.0,
+          0.0,
+          34.765874999999994
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0.1092,
+        "useful": 0.00728,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 597.9394378587231,
+        "y": 424.7647866647837
+      },
+      {
+        "tag": "sample",
+        "time": 40,
+        "energy": 30.122342926323967,
+        "gut": [
+          0.0,
+          0.0,
+          34.08324999999972
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0.1092,
+        "useful": 0.9973599999999954,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.7655614664355,
+        "y": 425.78696421006686
+      },
+      {
+        "tag": "sample",
+        "time": 60,
+        "energy": 23.182063609559947,
+        "gut": [
+          0.0,
+          0.0,
+          31.767906463112418
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0.1092,
+        "useful": 3.1813599999999758,
+        "motor_time": 20.266666666666833,
+        "motors": 0,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.7655631774928,
+        "y": 425.78696632718766
+      },
+      {
+        "tag": "end",
+        "time": 126.8,
+        "dead": true,
+        "useful": 10.47228000000031,
+        "motor_time": 20.266666666666833
+      },
+      {
+        "tag": "summary",
+        "input_raw": 65.09304838813841,
+        "useful": 10.47228000000031,
+        "material_error": 2.9103830456733704e-11,
+        "photosynthesis": 0,
+        "births": 0,
+        "alive": 0,
+        "first_food": 30,
+        "first_capture": 30.03333333333333,
+        "first_machine": 30.866666666666667,
+        "clear": null
+      }
+    ],
+    "tissue04_meal_search-waste-ahead_full.jsonl": [
+      {
+        "tag": "before_meal",
+        "time": 30,
+        "energy": 35.097371228174154,
+        "gut": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "area": 1,
+        "upkeep": 0.4496639658382452,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 20.200000000000163,
+        "motors": 0.014000000000000004,
+        "tissue_machine": 0,
+        "waste_machine": 0,
+        "space": [
+          0.3272732763970753,
+          0.9
+        ],
+        "births": 0,
+        "x": 595.3181553792518,
+        "y": 421.52682276327744
+      },
+      {
+        "tag": "supply",
+        "time": 30,
+        "raw": 20.013665811158717,
+        "minerals": 0.25
+      },
+      {
+        "tag": "additional_waste",
+        "raw": 22.358892765361816
+      },
+      {
+        "tag": "exudate_ahead",
+        "raw": 22.72048981161788,
+        "distance": 30
+      },
+      {
+        "tag": "search_while_waste_full",
+        "time": 30.633333333333333,
+        "energy": 33.677628655286384,
+        "gut": [
+          0.0,
+          0.0,
+          22.799999999999994
+        ],
+        "area": 1,
+        "upkeep": 0.4546456035056855,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 20.800000000000193,
+        "motors": 0.025,
+        "tissue_machine": 0,
+        "waste_machine": 0,
+        "space": [
+          0.33827327639707533,
+          0.9
+        ],
+        "births": 0,
+        "x": 598.7460609973037,
+        "y": 426.3342610279818
+      },
+      {
+        "tag": "enzyme_ready",
+        "time": 30.866666666666667,
+        "energy": 33.17173714764699,
+        "gut": [
+          0.0,
+          0.0,
+          31.19999999999999
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0,
+        "useful": 0,
+        "motor_time": 21.066666666666872,
+        "motors": 0.025,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 600.1002932454222,
+        "y": 428.443093851413
+      },
+      {
+        "tag": "exudate_captured",
+        "time": 31.966666666666665,
+        "energy": 32.62502178522489,
+        "gut": [
+          1.2,
+          0.0,
+          33.22462499999996
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0.1092,
+        "useful": 0.11648000000000004,
+        "motor_time": 22.133333333333592,
+        "motors": 0.025,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 606.456892988527,
+        "y": 439.03082525178434
+      },
+      {
+        "tag": "gut_physically_full",
+        "time": 32,
+        "energy": 32.691654653030284,
+        "gut": [
+          1.0959999999999999,
+          0.0,
+          33.21324999999996
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 2.6052,
+        "useful": 0.12012000000000005,
+        "motor_time": 22.166666666666927,
+        "motors": 0.025,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 606.6467940637765,
+        "y": 439.3607859771005
+      },
+      {
+        "tag": "sample",
+        "time": 40,
+        "energy": 35.735742926323574,
+        "gut": [
+          0.0,
+          0.0,
+          30.483249999999714
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0.1092,
+        "useful": 7.717359999999961,
+        "motor_time": 30.166666666667325,
+        "motors": 0.025,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 620.8399111258025,
+        "y": 457.01137948654053
+      },
+      {
+        "tag": "sample",
+        "time": 60,
+        "energy": 33.93291210301106,
+        "gut": [
+          0.0,
+          0.0,
+          29.658249999999107
+        ],
+        "area": 1,
+        "upkeep": 0.45621396583824525,
+        "flux": 0.1092,
+        "useful": 16.76460849345552,
+        "motor_time": 48.0666666666665,
+        "motors": 0.014000000000000002,
+        "tissue_machine": 0,
+        "waste_machine": 0.015,
+        "space": [
+          0.34193994306374204,
+          0.9
+        ],
+        "births": 0,
+        "x": 539.7044779756463,
+        "y": 398.79687379423234
+      },
+      {
+        "tag": "end",
+        "time": 138.73333333333332,
+        "dead": true,
+        "useful": 25.3586484934573,
+        "motor_time": 126.76666666666203
+      },
+      {
+        "tag": "summary",
+        "input_raw": 65.09304838813841,
+        "useful": 25.3586484934573,
+        "material_error": 3.183231456205249e-11,
+        "photosynthesis": 0,
+        "births": 0,
+        "alive": 0,
+        "first_food": 30,
+        "first_capture": 30.03333333333333,
+        "first_machine": 30.866666666666667,
+        "clear": null
+      }
+    ]
+  }
+}

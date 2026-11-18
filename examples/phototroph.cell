@@ -12,27 +12,33 @@ product Replicase = replicase();
 product Rotor = motor();
 product Ring = constrictor();
 
-fn missing(installed, required) = installed + 0.000001 < required;
+# Tolerate modest wear while repair restores working capacity. The allowance
+# stays below one machine, even when a larger body needs many copies.
+fn missing(installed, required, unit) = installed + 0.000001 < required - min(required * 0.1, unit * 0.2);
+fn enough(installed, required) = installed + 0.000001 >= required * 0.9;
 fn buffered(stock, effort) = if stock < 0.001 then effort else 0;
 
-let funded = energy > 10 && nutrient.stored > 0.001;
+let funded = (energy > 10 || gut.energy > 0) && nutrient.stored > 0.001;
 let expanding = body.area > body.birth_area * 1.6;
-let powered = built.Solar + 0.000001 >= 0.12;
+let powered = enough(built.Solar, 0.12);
+let equipped = powered;
+let surplus = equipped && energy > 55;
 # This stationary producer spends no material on locomotion.
 
-let need_Solar = funded && (true) && missing(built.Solar, (if expanding then 0.24 else 0.12));
-let need_Translation = funded && (powered) && missing(built.Translation, (if expanding then 0.08 else 0.04));
-let need_Minerals = funded && (powered) && missing(built.Minerals, (if expanding then 0.05 else 0.025));
-let need_EnergyStore = funded && (powered) && missing(built.EnergyStore, (if expanding then 0.16 else 0.08));
-let need_MineralStore = funded && (powered) && missing(built.MineralStore, (if expanding then 0.04 else 0.02));
-let need_Support = funded && (powered && energy > 45) && missing(built.Support, max(0.12, body.birth_area * 0.12));
-let need_Envelope = funded && (built.Support + 0.000001 >= 0.12) && missing(built.Envelope, (if expanding then 0.04 else 0.02));
-let need_Replication = funded && (built.Support + 0.000001 >= 0.12) && missing(built.Replication, (if expanding then 0.04 else 0.02));
-let need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02));
+let need_Solar = funded && (true) && missing(built.Solar, (if expanding then 0.24 else 0.12), 0.12);
+let need_Translation = funded && (powered) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);
+let need_Minerals = funded && (powered) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);
+let need_EnergyStore = funded && (powered) && missing(built.EnergyStore, (if expanding then 0.16 else 0.08), 0.08);
+let need_MineralStore = funded && (powered) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);
+let need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);
+let need_Support = funded && (powered && energy > 45) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);
+let need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);
+let need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);
+let need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);
 
 gene supply_Mount: Mount = buffered(pool.Mount, (if need_Solar then 0.25 else 0) + (if need_Minerals then 0.25 else 0) + (if need_Division then 0.5 else 0));
 gene supply_Pigment: Pigment = buffered(pool.Pigment, (if need_Solar then 1 else 0));
-gene supply_Catalyst: Catalyst = buffered(pool.Catalyst, (if need_Solar then 0.25 else 0) + (if need_Translation then 1 else 0) + (if need_Envelope then 0.333333 else 0));
+gene supply_Catalyst: Catalyst = buffered(pool.Catalyst, (if need_Solar then 0.25 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0));
 gene supply_Frame: Frame = buffered(pool.Frame, (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0));
 gene supply_Carrier: Carrier = buffered(pool.Carrier, (if need_Minerals then 1 else 0));
 gene supply_Wall: Wall = buffered(pool.Wall, (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0));
@@ -71,6 +77,12 @@ assembly EnergyStore: store(energy) {
 assembly MineralStore: store(mineral) {
   Wall: 0.02;
   start_when: need_MineralStore;
+  activity: 1;
+}
+
+assembly Repair: repair() {
+  Catalyst: 0.025;
+  start_when: need_Repair;
   activity: 1;
 }
 
