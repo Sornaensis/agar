@@ -14,8 +14,8 @@ function button(text: string, className = 'secondary-button'): HTMLButtonElement
   const node = element('button', className, text); node.type = 'button'; return node;
 }
 const short = (text: string, count: number): string => text.length > count ? text.slice(0, count - 1) + '…' : text;
-const kindName = (kind: NetworkNode['kind'],label=''): string => kind === 'input' ? label.startsWith('pool.')?'product stock':label.startsWith('built.')?'functional machinery':'input signal'
-  : kind === 'operation' ? 'builtin' : kind === 'register' ? 'register' : label.startsWith('gene.')?'gene expression':label.startsWith('activity.')?'machine activity':'action';
+const kindName = (kind: NetworkNode['kind'],label=''): string => kind === 'input' ? label.startsWith('pool.')?'product stock':label.startsWith('concentration.')?'concentration':label.startsWith('sensed.')?'receptor reading':label.startsWith('built.')?'functional machinery':'input signal'
+  : kind === 'operation' ? 'builtin' : kind === 'register' ? 'register' : label.startsWith('gene.')?'gene expression':label.startsWith('activity.')?'machine activity':label.startsWith('start_when.')?'assembly initiation':label.startsWith('recycle.')?'disassembly':'action';
 const order = { register: 0, output: 1, input: 2, operation: 3 };
 const displayName = (node: NetworkNode): string => node.kind === 'operation' && node.bindings.length ? node.label + ' · ' + node.bindings[0] : node.label;
 interface Point { x: number; y: number }
@@ -189,9 +189,9 @@ export class GenomeVisualizer {
     this.heading.textContent=title;
     const count=(kind:NetworkNode['kind']):number=>this.network!.nodes.filter(node=>node.kind===kind).length;
     this.summary.textContent=([['input','inputs'],['operation','builtins'],['register','registers']] as const)
-      .filter(([kind])=>count(kind)>0).map(([kind,label])=>count(kind)+' '+label).join(' · ')||(graph.mode==='cellular'?'Constant expression & activity':'Constant actions');
-    this.search.placeholder=graph.mode==='cellular'?'Product, gene, activity…':'Signal, builtin, register…';
-    this.search.setAttribute('aria-label',graph.mode==='cellular'?'Find a product stock, gene, or assembly activity':'Find a signal, builtin, or register');
+      .filter(([kind])=>count(kind)>0).map(([kind,label])=>count(kind)+' '+label).join(' · ')||(graph.mode==='cellular'?'Constant expression & controls':'Constant actions');
+    this.search.placeholder=graph.mode==='cellular'?'Receptor, product, gene…':'Signal, builtin, register…';
+    this.search.setAttribute('aria-label',graph.mode==='cellular'?'Find a receptor, product stock, gene or assembly control':'Find a signal, builtin, or register');
     this.summary.title=this.network.expressionCount.toLocaleString()+' / 8,192 expressions; '+this.network.constantCount+' literal nodes and '+this.network.aliasCount+' aliases folded into labels; '+this.network.unusedCount+' unused expressions omitted.';
     for(const [kind,item] of this.legendItems)item.hidden=!this.network.edges.some(edge=>edge.kind===kind);
     this.memoryNote.hidden=count('register')===0;this.legend.hidden=!this.network.edges.length&&this.memoryNote.hidden;
@@ -207,7 +207,7 @@ export class GenomeVisualizer {
     const pages=Math.max(1,Math.ceil(matching.length/PAGE_SIZE));this.page=Math.max(0,Math.min(this.page,pages-1));
     const visible=matching.slice(this.page*PAGE_SIZE,(this.page+1)*PAGE_SIZE);this.nodeList.replaceChildren();let kind='';
     for(const node of visible){
-      if(kind!==node.kind){kind=node.kind;this.nodeList.append(element('h3','graph-list-group',node.kind==='input'?'Inputs':node.kind==='operation'?'Builtins':node.kind==='register'?'Registers':this.graph?.mode==='cellular'?'Genes & activity':'Actions'));}
+      if(kind!==node.kind){kind=node.kind;this.nodeList.append(element('h3','graph-list-group',node.kind==='input'?'Inputs':node.kind==='operation'?'Builtins':node.kind==='register'?'Registers':this.graph?.mode==='cellular'?'Genes & controls':'Actions'));}
       const control=button('','graph-list-node graph-kind-'+node.kind+(node.id===this.selected?' active':''));
       control.dataset.networkId=node.id;control.setAttribute('aria-pressed',String(node.id===this.selected));control.append(element('span','',displayName(node)));
       const meta=node.implicit?'default '+node.constants.map(value=>value.value).join(', '):node.kind==='output'&&node.constants.length&&!this.network!.edges.some(edge=>edge.to===node.id)
@@ -271,7 +271,7 @@ export class GenomeVisualizer {
     if(slice.nodes.some(node=>node.kind==='input'||node.kind==='register'))caption(slice.nodes.some(node=>node.kind==='register')?'INPUTS & MEMORY':'INPUTS',26);
     const operations=slice.nodes.filter(node=>node.kind==='operation'),outputs=slice.nodes.filter(node=>node.kind==='output');
     if(operations.length)caption('BUILTINS',Math.min(...operations.map(node=>layout.points.get(node.id)!.x)));
-    if(outputs.length)caption(this.graph?.mode==='cellular'?'EXPRESSION & ACTIVITY':'ACTIONS',Math.min(...outputs.map(node=>layout.points.get(node.id)!.x)));
+    if(outputs.length)caption(this.graph?.mode==='cellular'?'EXPRESSION & CONTROLS':'ACTIONS',Math.min(...outputs.map(node=>layout.points.get(node.id)!.x)));
     drawing.append(captions);
     const edges=svg('g',{class:'graph-edges','aria-hidden':'true'}),temporal=slice.edges.filter(edge=>edge.temporal);let temporalIndex=0;
     for(const edge of slice.edges){
@@ -390,9 +390,11 @@ export class GenomeVisualizer {
     header.append(element('h3','',node.label),element('span','graph-detail-type',kindName(node.kind,node.label)+' · '+node.type));
     const info=element('p');
     info.textContent=node.kind==='register'?'Reads the previous tick. Writes and clears apply next tick; clear wins. Empty reads do not populate memory.'
-      :node.kind==='input'?node.label.startsWith('pool.')?'Available physical product mass at the start of this tick.':node.label.startsWith('built.')?'Functional mass of complete matching assemblies, reduced by damage.':'Input value sampled at the start of this tick.'
+      :node.kind==='input'?node.label.startsWith('pool.')?'Available physical product mass at the start of this tick.':node.label.startsWith('concentration.')?'Free product mass divided by the current envelope area.':node.label.startsWith('sensed.')?'A measurement from this named receptor, using its physical placement, damage and previous activity.':node.label.startsWith('built.')?'Functional mass of complete matching assemblies, reduced by damage.':'Input value sampled at the start of this tick.'
         :node.kind==='output'?node.label.startsWith('gene.')?'Requested product synthesis effort. Genes share finite core work, minerals, energy and internal space.'
           :node.label.startsWith('activity.')?'Activity of this physical assembly. Missing or incomplete machinery cannot produce the requested effect.'
+            :node.label.startsWith('start_when.')?'Whether another instance may start. Existing partial machinery continues paid installation when this becomes false.'
+              :node.label.startsWith('recycle.')?'Requested dismantling effort. Built recycling machinery, available energy and shared work limit actual material recovery.'
             :(node.implicit?'Default value for an omitted action. ':'')+'Action request; energy and physical limits apply.'
           :node.label==='populated'||node.label.startsWith('populated(')?'Checks previous register occupancy, including stored zero, false, or empty text.'
             :'Pure operation, recomputed from its inputs each tick.';

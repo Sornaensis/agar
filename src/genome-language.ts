@@ -49,6 +49,8 @@ export const BUILTIN_FUNCTIONS: readonly GenomeSymbol[] = Object.freeze([
   fn('atan2', 'y: number, x: number', 'scalar', 'Angle in radians from the x axis to (x, y). Returns zero when both inputs are zero.'),
   fn('lerp', 'a: number, b: number, amount: number', 'scalar', 'Computes a + (b - a) × amount. Amount is not clamped, so values outside 0–1 extrapolate.'),
   fn('noise', 'seed: number, phase: number', 'scalar', 'Deterministic smooth noise in -1–1. The same seed and phase always give the same result; use time or age as a changing phase.'),
+  fn('activate', 'concentration: number, threshold: number', 'scalar', 'Saturating activation: c / (c + k), with c and k clamped to nonnegative values. Returns zero when both are zero.'),
+  fn('repress', 'concentration: number, threshold: number', 'scalar', 'Saturating repression: 1 - activate(concentration, threshold). Returns one when both arguments are zero. Creates no persistent state.'),
   fn('identity', 'value: T', 'T', 'Returns the same value and primitive type. Accepts an integer, scalar, boolean, string, or vector.'),
   fn('populated', 'register: address', 'boolean', 'Tests whether a register is occupied at the start of the tick. Accepts a literal register address, not a value expression. Stored zero, false, and empty strings are still populated.'),
 ]);
@@ -195,6 +197,9 @@ export const CELLULAR_KEYWORDS: readonly GenomeSymbol[] = Object.freeze([
   { ...symbol('product', 'keyword', 'declaration', 'product Name = motor();', 'Names a typed material product. Product roles determine which physical recipes it can satisfy.'), insertText: 'product ' },
   { ...symbol('gene', 'keyword', 'expression', 'gene drive: Motor = expression;', 'Allocates synthesis effort to a named product. Effort is bounded to 0–1; actual production shares finite translation work, minerals, energy and space.'), insertText: 'gene ' },
   { ...symbol('assembly', 'keyword', 'recipe', 'assembly Swim: propel() { components; }', 'Names a physical recipe. Its product masses determine composition; stocks from the start of the tick are consumed as components are installed.'), insertText: 'assembly ' },
+  { ...symbol('fn', 'keyword', 'declaration', 'fn response(value, threshold) = expression;', 'Defines a pure function with numeric arguments. Calls expand into the bounded expression graph; recursive calls and mutable state are unavailable.'), insertText: 'fn ' },
+  { ...symbol('start_when', 'keyword', 'boolean', 'start_when: condition;', 'Allows another instance of this recipe to start when true; defaults to true. Existing incomplete instances continue paid installation when this becomes false.'), insertText: 'start_when: ' },
+  { ...symbol('recycle', 'keyword', 'scalar', 'recycle: expression;', 'Requests paid disassembly of machinery with this recipe name, bounded to 0–1; defaults to zero. Requires a built, active recycle() mechanism. Recovered ingredients keep their original identities and become available on a later tick.'), insertText: 'recycle: ' },
   { ...symbol('activity', 'keyword', 'scalar', 'activity: expression;', 'Controls the activity of this assembly, bounded to 0–1. Activity does not create missing components or substitute for a finished machine.'), insertText: 'activity: ' },
   { ...symbol('at', 'keyword', 'radians', 'at: 0;', 'Body-relative attachment angle in radians. Placement and force direction determine a motor’s force and torque.'), insertText: 'at: 0;' },
   { ...symbol('direction', 'keyword', 'radians', 'direction: 0;', 'Body-relative force direction in radians. An off-center force can rotate the body as well as translate it.'), insertText: 'direction: 0;' },
@@ -220,6 +225,7 @@ export interface CellularDeclarations {
   products: { name: string; role: string; from: number; to: number }[];
   genes: { name: string; product: string; from: number; to: number }[];
   assemblies: { name: string; kind: string; from: number; to: number }[];
+  functions: { name: string; parameters: string[]; from: number; to: number; end: number }[];
 }
 let declarationCache:{source:string;value:CellularDeclarations}|undefined;
 
@@ -227,7 +233,7 @@ let declarationCache:{source:string;value:CellularDeclarations}|undefined;
 export function cellularDeclarations(source: string): CellularDeclarations {
   if (declarationCache?.source===source) return declarationCache.value;
   const tokens = tokenizeGenome(source).filter(token => token.kind !== 'comment');
-  const result: CellularDeclarations = { products: [], genes: [], assemblies: [] };
+  const result: CellularDeclarations = { products: [], genes: [], assemblies: [], functions: [] };
   for (let index = 0; index + 3 < tokens.length; index++) {
     const declaration = tokens[index].text, name = tokens[index + 1];
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name.text)) continue;
@@ -242,6 +248,14 @@ export function cellularDeclarations(source: string): CellularDeclarations {
       }
       result.assemblies.push({ name: name.text, kind, from: name.from, to: name.to });
     }
+    if (declaration === 'fn' && tokens[index + 2].text === '(') {
+      const close = tokens.findIndex((token, i) => i > index + 2 && [')', ';', '='].includes(token.text));
+      if (close > index + 2 && tokens[close].text === ')') {
+        const parameters = tokens.slice(index + 3, close).filter(token => token.text !== ',').map(token => token.text);
+        const end = tokens.find((token, i) => i > close && token.text === ';')?.to ?? source.length + 1;
+        result.functions.push({ name: name.text, parameters, from: name.from, to: name.to, end });
+      }
+    }
   }
   declarationCache={source,value:result};
   return result;
@@ -251,13 +265,38 @@ export function isCellularSource(source: string): boolean {
   return /^(?:\s|#[^\r\n]*(?:\r?\n|$))*cellular\s*;/.test(source);
 }
 
+export interface ReceptorFieldSymbol { name: string; type: PrimitiveType; description: string }
+const measured = (name: string, type: PrimitiveType, description: string): ReceptorFieldSymbol => ({ name, type, description });
+const receptorFlags = [
+  measured('available', 'boolean', 'A matching complete, functioning receptor is active.'),
+  measured('valid', 'boolean', 'This receptor has a usable measurement in the current snapshot.'),
+] as const;
+/** Named readings are restricted to fields supported by the declared receptor. */
+export const CELLULAR_RECEPTOR_FIELDS: Readonly<Record<string, readonly ReceptorFieldSymbol[]>> = Object.freeze({
+  'sense(light)': [...receptorFlags, measured('level', 'scalar', 'Brightness at the receptor attachment point, from 0 to 1.')],
+  'sense(heat)': [...receptorFlags, measured('value', 'scalar', 'Temperature at the receptor attachment point, from 0 to 1.')],
+  'sense(chemical)': [...receptorFlags, measured('mineral', 'scalar', 'Dissolved mineral concentration at this receptor.'), measured('organic', 'scalar', 'Organic cue concentration at this receptor, without a supplied gradient or food identity.')],
+  'sense(contact)': [...receptorFlags, measured('offset', 'vec2', 'Measured body-relative displacement to a contacting surface.'), measured('pressure', 'scalar', 'Measured contact pressure.'), measured('resistance', 'scalar', 'Measured resistance of the contacting surface.'), measured('flow', 'vec2', 'Relative water flow at the receptor, in body coordinates.'), measured('speed', 'scalar', 'Magnitude of the measured relative flow.'), measured('bearing', 'scalar', 'Body-relative direction of the measured flow, in radians.')],
+  'sense(optical)': [...receptorFlags, measured('offset', 'vec2', 'Body-relative displacement to an object visible through this receptor.'), measured('area', 'scalar', 'Measured apparent area of the visible object.'), measured('contrast', 'scalar', 'Measured optical contrast.'), measured('pigment', 'scalar', 'Measured visible surface appearance.'), measured('motion', 'vec2', 'Measured relative motion in body coordinates.')],
+});
+
+function declaredFunctionSymbol(item: CellularDeclarations['functions'][number]): GenomeSymbol {
+  return symbol(item.name, 'function', 'T', `${item.name}(${item.parameters.map(name => `${name}: number`).join(', ')})`,
+    'Pure expression function declared in this program. Numeric arguments are evaluated from the same snapshot; calls create no persistent state.');
+}
+
 export function cellularDynamicSymbols(source: string): GenomeSymbol[] {
   const declarations = cellularDeclarations(source);
   return [
     ...declarations.products.map(item => symbol(`pool.${item.name}`, 'signal', 'scalar', `pool.${item.name}: scalar`,
       `Available ${item.role} product mass before this tick. Stock persists, occupies space and is shared by all recipes that name ${item.name}. Regulator stocks decay according to their half-life.`)),
+    ...declarations.products.map(item => symbol(`concentration.${item.name}`, 'signal', 'scalar', `concentration.${item.name}: scalar`,
+      `Available ${item.role} product mass divided by current envelope area. Growth dilutes this value; synthesis, decay and inheritance change the underlying physical stock.`)),
     ...declarations.assemblies.map(item => symbol(`built.${item.name}`, 'signal', 'scalar', `built.${item.name}: scalar`,
       `Functional material in complete ${item.name} assemblies, reduced by damage. Incomplete assemblies contribute zero; their installed components are shown in the Body inspector.`)),
+    ...declarations.assemblies.flatMap(item => (CELLULAR_RECEPTOR_FIELDS[item.kind] ?? []).map(field =>
+      symbol(`sensed.${item.name}.${field.name}`, 'signal', field.type, `sensed.${item.name}.${field.name}: ${field.type}`,
+        `${field.description} Sampling uses existing machinery and the activity stored from the preceding tick. ${item.kind==='sense(contact)' && ['flow','speed','bearing'].includes(field.name) ? `Check sensed.${item.name}.available; flow is measurable even without contact.` : `Invalid measurements are zero; check sensed.${item.name}.valid.`}`))),
   ];
 }
 
@@ -269,6 +308,8 @@ export function lookupCellularSymbol(name: string, source: string): GenomeSymbol
   if (product) return symbol(name, 'binding', `${product.role} product`, `${name}: ${product.role}`, `Physical product declared by this genome. Use pool.${name} to read its available mass, or name it in an assembly recipe with a positive material amount.`);
   const gene = declarations.genes.find(item => item.name === name);
   if (gene) return symbol(name, 'binding', 'gene', `gene ${name}: ${gene.product}`, `Expression effort for ${gene.product}. The Body inspector compares requested expression with actual material synthesized.`);
+  const declaredFunction = declarations.functions.find(item => item.name === name);
+  if (declaredFunction) return declaredFunctionSymbol(declaredFunction);
   const assembly = declarations.assemblies.find(item => item.name === name);
   if (assembly) return symbol(name, 'binding', `${assembly.kind} assembly`, `${name}: ${assembly.kind}`, `Physical recipe with its own composition, activity and placement. Use built.${name} to read the functional mass in completed machinery, after damage.`);
   return cellularSymbolByName.get(name) ?? CELLULAR_MECHANISMS.find(item=>item.name===name) ?? mechanismConstructorByName.get(name) ?? CELLULAR_ASSEMBLY_KINDS.find(item => item.name === name);
@@ -374,7 +415,12 @@ export function tokenizeGenome(source: string): GenomeToken[] {
       else if (known) {
         kind = known.category as 'keyword' | 'signal' | 'function' | 'output';
         if (known.category === 'signal' || known.category === 'output') type = known.type as PrimitiveType;
-      } else if (/^(pool|built)\.[A-Za-z_][A-Za-z0-9_]*$/.test(name)) { kind = 'signal'; type = 'scalar'; }
+      } else if (/^(pool|built|concentration)\.[A-Za-z_][A-Za-z0-9_]*$/.test(name)) { kind = 'signal'; type = 'scalar'; }
+      else if (/^sensed\.[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_]+$/.test(name)) {
+        kind = 'signal';
+        type = name.endsWith('.valid') || name.endsWith('.available') ? 'boolean' : /\.(offset|flow|motion)$/.test(name) ? 'vec2' : 'scalar';
+      }
+      else if (/^\s*\(/.test(source.slice(pos))) kind = 'function';
       else kind = 'identifier';
     } else if (['==', '!=', '<=', '>=', '&&', '||'].includes(source.slice(pos, pos + 2))) {
       pos += 2; kind = 'operator';
@@ -461,7 +507,7 @@ export interface GenomeCompletionContext {
   expected?: PrimitiveType | 'number' | 'register' | 'vec2 | string';
 }
 
-const numericFunctions = new Set(['sin', 'cos', 'abs', 'min', 'max', 'clamp', 'int', 'float', 'vec', 'sqrt', 'sign', 'atan2', 'lerp', 'noise']);
+const numericFunctions = new Set(['sin', 'cos', 'abs', 'min', 'max', 'clamp', 'int', 'float', 'vec', 'sqrt', 'sign', 'atan2', 'lerp', 'noise', 'activate', 'repress']);
 const vectorFunctions = new Set(['dot', 'normalize', 'angle', 'x', 'y']);
 
 function cellularCompletionContext(source: string, position: number): GenomeCompletionContext {
@@ -472,7 +518,7 @@ function cellularCompletionContext(source: string, position: number): GenomeComp
   const preceding = all.filter(token => token.kind !== 'comment' && token.from < position);
   const last = preceding.at(-1);
   if (last && last.to >= position && identifierKinds.has(last.kind)
-    && !['cellular', 'product', 'gene', 'assembly', 'if', 'then', 'else', 'activity', 'at', 'direction'].includes(last.text)) preceding.pop();
+    && !['cellular', 'product', 'gene', 'assembly', 'fn', 'if', 'then', 'else', 'activity', 'start_when', 'recycle', 'at', 'direction'].includes(last.text)) preceding.pop();
   const braces: number[] = [];
   for (let index = 0; index < preceding.length; index++) {
     if (preceding[index].text === '{') braces.push(index);
@@ -483,8 +529,8 @@ function cellularCompletionContext(source: string, position: number): GenomeComp
   const tokens = preceding.slice(start);
   if (braces.length) {
     if (!tokens.length || !tokens.some(token => token.text === ':')) return { kind: 'component' };
-    if (tokens[0].text !== 'activity') return { kind: 'none' };
-    const expression = `thrust = ${source.slice(tokens.find(token=>token.text===':')!.to,position)}`;
+    if (!['activity', 'start_when', 'recycle'].includes(tokens[0].text)) return { kind: 'none' };
+    const expression = `${tokens[0].text === 'start_when' ? 'divide' : 'thrust'} = ${source.slice(tokens.find(token=>token.text===':')!.to,position)}`;
     return genomeCompletionContext(expression,expression.length);
   }
   if (!tokens.length) return { kind: 'statement' };
@@ -501,7 +547,7 @@ function cellularCompletionContext(source: string, position: number): GenomeComp
     if (open>=0) return tokens.some(token=>token.text===')') ? {kind:'none'} : {kind:'mechanism-target',mechanismConstructor:tokens[open-1]?.text};
     return {kind:'assembly-kind'};
   }
-  if (tokens[0].text === 'let') return { kind: assignment ? 'expression' : 'none' };
+  if (tokens[0].text === 'let' || tokens[0].text === 'fn') return { kind: assignment ? 'expression' : 'none' };
   return { kind: 'statement' };
 }
 
@@ -582,7 +628,7 @@ export function genomeCompletions(source: string, position: number, prefix = '',
         const product = lookupCellularSymbol(item.name, source)!;
         add(context.kind === 'component' ? { ...product, insertText: `${item.name}: ` } : product);
       });
-      if (context.kind === 'component') CELLULAR_KEYWORDS.filter(item => ['activity', 'at', 'direction'].includes(item.name)).forEach(add);
+      if (context.kind === 'component') CELLULAR_KEYWORDS.filter(item => ['activity', 'start_when', 'recycle', 'at', 'direction'].includes(item.name)).forEach(add);
     }
     return [...available.values()];
   }
@@ -592,7 +638,7 @@ export function genomeCompletions(source: string, position: number, prefix = '',
   }
   if (context.kind === 'statement') {
     if (cellular) {
-      CELLULAR_KEYWORDS.filter(item => ['product', 'gene', 'assembly'].includes(item.name)).forEach(add);
+      CELLULAR_KEYWORDS.filter(item => ['product', 'gene', 'assembly', 'fn'].includes(item.name)).forEach(add);
       add({ ...lookupGenomeSymbol('let')!, insertText: 'let ' });
       return [...available.values()];
     }
@@ -605,6 +651,12 @@ export function genomeCompletions(source: string, position: number, prefix = '',
     ? [...CELLULAR_READ_SIGNALS, ...cellularDynamicSymbols(source), ...BUILTIN_FUNCTIONS.filter(item => item.name !== 'populated')]
     : [...BUILTIN_SIGNALS, ...BUILTIN_FUNCTIONS, ...registers]).forEach(add);
   bindings.forEach(binding => add(lookupGenomeSymbol(binding.name, [binding])!));
+  if (cellular) {
+    const functions = cellularDeclarations(source).functions;
+    functions.filter(item => item.end <= position).forEach(item => add(declaredFunctionSymbol(item)));
+    const current = functions.find(item => item.from < position && position < item.end);
+    current?.parameters.forEach(name => add(symbol(name, 'binding', 'scalar', `${name}: scalar`, 'Numeric argument of this pure function.')));
+  }
   for (const name of ['if', 'true', 'false']) add(lookupGenomeSymbol(name)!);
   const expected = context.expected;
   const accepts = (item: GenomeSymbol): boolean => {
@@ -649,6 +701,9 @@ export function genomeSymbolDocumentation(item: GenomeSymbol): GenomeSymbolDocum
       product:'product Rotor = motor();\nproduct Memory = regulator(8);',
       gene:'product Rotor = motor();\ngene drive: Rotor = if pool.Rotor < 0.01 then 0.5 else 0;',
       assembly:'product Anchor = anchor();\nproduct Rotor = motor();\nproduct Tail = filament();\nassembly Swim: propel() {\n  Anchor: 0.005;\n  Rotor: 0.01;\n  Tail: 0.025;\n  activity: 0.6;\n  at: 1.570796;\n  direction: 0;\n}',
+      fn:'fn response(value, threshold) = activate(value, threshold);\nlet response_now = response(energy.fraction, 0.4);',
+      start_when:'start_when: concentration.GrowthSignal > 0.01;',
+      recycle:'recycle: if concentration.Brake > 0.02 then 0.5 else 0;',
       activity:'activity: if energy.fraction > 0.3 then 0.6 else 0;',
       at:'at: 1.570796;\ndirection: 0;',
       direction:'at: -1.570796;\ndirection: 0;',
@@ -680,7 +735,9 @@ export function genomeSymbolDocumentation(item: GenomeSymbol): GenomeSymbolDocum
     const group = item.name.split('.')[0];
     const sensed = ['light', 'heat', 'chemical', 'flow', 'contact', 'object'].includes(group);
     return { example: `let observed = ${item.name};`, notes: ['Read-only input, sampled consistently for this evaluation.',
-      sensed ? `Check ${group}.available and ${group}.valid before using a measurement. Missing/invalid numbers and vectors are zero; tokens are empty.`
+      group === 'sensed' ? `Check ${item.name.split('.').slice(0,2).join('.')}.available and .valid. The receptor’s physical placement, damage and stored activity determine its observation.`
+        : group === 'concentration' ? 'Concentration is free product mass divided by envelope area; it has no separate storage or state.'
+        : sensed ? `Check ${group}.available and ${group}.valid before using a measurement. Missing/invalid numbers and vectors are zero; tokens are empty.`
         : 'Core self-signals remain available without external sensing hardware. Local bindings can combine them with pure expressions.'] };
   }
   return { example: item.example ?? item.signature, notes: [] };

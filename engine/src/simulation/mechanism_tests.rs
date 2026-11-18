@@ -35,7 +35,7 @@ fn close(actual: f64, expected: f64) {
 /// are deducted from the universal founder's reserves. Reclaim its old core
 /// ledger into free stores, leaving no bundled bootstrap capabilities. A test
 /// may explicitly request an old family to exercise mixed-program compatibility.
-fn equipped(extra: &str) -> (World, Vec<Genome>) {
+pub(super) fn equipped(extra: &str) -> (World, Vec<Genome>) {
     let source = format!("{BASE}{extra}");
     let program = Program::compile(&source).unwrap();
     let definition = program.cellular().unwrap();
@@ -468,7 +468,7 @@ fn mechanism_checkpoints_resume_exactly_and_reject_unknown_body_tags_atomically(
     original.world = world;
     original.genomes = genomes;
     let bytes = crate::checkpoint::save(&original).unwrap();
-    assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 6);
+    assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 7);
     let mut restored = crate::checkpoint::restore(&bytes).unwrap();
     assert_eq!(crate::checkpoint::save(&restored).unwrap(), bytes);
     for _ in 0..120 {
@@ -484,15 +484,17 @@ fn mechanism_checkpoints_resume_exactly_and_reject_unknown_body_tags_atomically(
         .write_checkpoint(&mut body_writer);
     assert!(Body::read_checkpoint_version(&mut Reader::new(&body_writer.0), 5).is_err());
     assert_eq!(
-        Body::read_checkpoint_version(&mut Reader::new(&body_writer.0), 6).unwrap(),
+        Body::read_checkpoint_version(&mut Reader::new(&body_writer.0), 7).unwrap(),
         restored.world.cells[0].body
     );
 
     let mut corrupted = before.clone();
     let name = b"Hydrolase";
+    let mut recipe_header = name.to_vec();
+    recipe_header.push(19 + MechanismKind::DigestTissue as u8);
     let position = corrupted
-        .windows(name.len())
-        .rposition(|window| window == name)
+        .windows(recipe_header.len())
+        .rposition(|window| window == recipe_header)
         .unwrap()
         + name.len();
     assert_eq!(corrupted[position], 19 + MechanismKind::DigestTissue as u8);

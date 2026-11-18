@@ -739,7 +739,7 @@ kbd { padding: 2px 5px; border: 1px solid #505455; border-radius: 4px; font-size
 .cellular-totals strong { display: block; color: #d7e8dc; font: 17px var(--mono); }
 .cellular-totals strong small { color: #7d9588; font-size: 11px; }
 .cellular-totals span { display: block; margin-top: 6px; color: #91a99a; font-size: 9px; line-height: 1.5; }
-.cellular-work { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 7px; padding: 11px; border: 1px solid #34443a; border-radius: 7px; background: #18251e; }
+.cellular-work { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 7px; padding: 11px; border: 1px solid #34443a; border-radius: 7px; background: #18251e; }
 .cellular-work span { color: #8ea595; font-size: 9px; }
 .cellular-work strong { display: block; margin-top: 5px; color: #bed3c5; font: 11px var(--mono); }
 .cellular-work > small { grid-column: 1 / -1; color: #738e7d; font-size: 8px; }

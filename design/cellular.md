@@ -4,7 +4,7 @@ Start a source file with `cellular;` to use products, genes and assembly recipes
 The primary built-in genomes use this mode. Existing programs without the marker
 keep the previous action/register language and physical bodies.
 
-## Three declarations
+## Declarations and controls
 
 ```text
 cellular;
@@ -32,10 +32,15 @@ assembly Swimmer: propel() {
 | `gene name: Product = expression;` | Requested synthesis effort. Genes share paid translation capacity, energy, minerals and space. |
 | `assembly Name: operation(target) { ... }` | A physical recipe for one mechanism. Each ingredient specifies actual mass per complete machine. |
 | `pool.Name` | Uninstalled mass of the named product in the cell. |
+| `concentration.Name` | Uninstalled product mass divided by current envelope area. Growth dilutes this value. |
 | `built.Name` | Functional mass of completed machines matching that recipe, reduced by damage. Unfinished machines contribute zero. |
+| `sensed.Name.field` | A measurement from the named, physically built receptor. Available fields depend on its mechanism. |
+| `start_when` | Boolean permission to start another instance; defaults to true. Existing incomplete instances continue paid installation. |
 | `activity` | Fast 0–1 regulation of existing complete machinery; omission means 1. |
+| `recycle` | Requested 0–1 disassembly effort for physical instances with this recipe name; defaults to zero and needs active recycling machinery. |
 | `at`, `direction` | Body-relative attachment angle and force/viewing direction in radians. |
 | `let` | A pure expression recomputed from the current snapshot. |
+| `fn name(args) = expression;` | A pure function with up to eight numeric parameters. Calls expand into the bounded expression graph. |
 
 Products can be `scaffold`, `anchor`, `motor`, `filament`, `pigment`, `enzyme`,
 `membrane`, `transporter`, `receptor`, `regulator`, `replicase` or `constrictor`.
@@ -44,7 +49,7 @@ Each required role must supply at least 10% of recipe mass. A propulsion mechani
 cannot be manufactured from scaffold alone. Products of the same role can have
 different names, allowing independent expression and allocation.
 
-Recipes automatically consume available compatible stock. There is no desired
+Recipes consume compatible stock after their initiation condition permits a new instance. There is no desired
 organelle count, invisible inventory or instantaneous body replacement. Regulate
 gene expression to limit inventory and construction. Small stock buffers reduce overshoot: material already made can keep assembling after a gene turns off. Multiple recipes using the
 same named product compete for that stock. Partly installed machines occupy space
@@ -87,6 +92,7 @@ building another enzyme does not grant storage or capture.
 | `grow()` | Paid envelope growth, limited by existing structural support. |
 | `replicate()` | Paid genome copying. |
 | `constrict()` | Paid constriction after replication and feasible geometry. |
+| `recycle()` | Paid disassembly work for instances selected by recipe recycling expressions. |
 
 Constructor targets are typed identifiers, not strings or expressions. For example,
 `digest(light)` and `store(tissue)` are compile errors. Recipe material roles and
@@ -111,7 +117,7 @@ founder core and finite reserves to bootstrap construction; subsequent support,
 translation and storage are explicitly assembled. Daughters can survive entirely
 on the new support machinery and inherit actual storage and translation machines.
 
-## Physical memory and sensing
+## Physical memory and pure functions
 
 ```text
 product Brake = regulator(8);
@@ -122,10 +128,87 @@ gene conserve: Brake =
 `regulator(8)` has an eight-second half-life. Synthesis costs real material and
 energy; decay returns its material and dissipates retained energy. Use its stock
 in an activity expression, for example `clamp(1 - pool.Brake / 0.02, 0, 1)`.
-The stock persists through ticks and is partitioned at division. For a
-concentration-like signal, divide stock by `body.area`; `pool` itself reports mass.
+The stock persists through ticks and is partitioned at division. Read
+`concentration.Brake` for mass per envelope area; `pool` itself reports mass.
 Other declared products are stable while uninstalled, and still occupy space and
 incur upkeep.
+
+`concentration.Brake` directly reads `pool.Brake / body.area`. For a smooth
+response, `activate(c, k)` computes `max(c, 0) / (max(c, 0) + max(k, 0))`, with a
+zero result when the denominator is zero. `repress(c, k)` is `1 - activate(c, k)`.
+These helpers have no state or implicit synthesis. For example:
+
+```text
+fn brake_response(amount, threshold) = repress(amount, threshold);
+let motor_activity = brake_response(concentration.Brake, 0.02);
+```
+
+Functions accept zero to eight numeric arguments, promoted to scalars. Their
+result type is inferred; a function can return a boolean, scalar or another
+supported expression type. Define a function before calling it. Its references
+to preceding `let` bindings are lexical; calls cannot change those references.
+Functions are nonrecursive, at most 64 may be declared, and inlined bodies count
+toward the ordinary expression-node and nesting limits.
+
+## Receptors with local readings
+
+Each `sensed.Recipe.field` reads the named recipe's physical receptors at their
+body-relative attachment point. Light, heat and chemical receptors report local
+field values, without a supplied gradient direction. Optical receptors use their
+declared viewing direction, light, range and occlusion. Contact receptors report
+nearby surfaces and relative flow at their attachment point.
+
+| Mechanism | Named fields in addition to `available` and `valid` |
+| --- | --- |
+| `sense(light)` | `level` (`light` is an alias) |
+| `sense(heat)` | `value` |
+| `sense(chemical)` | `mineral`, `organic` |
+| `sense(contact)` | `offset`, `pressure`, `resistance`, `flow`, `speed`, `bearing` |
+| `sense(optical)` | `offset`, `area`, `contrast`, `pigment`, `motion` |
+
+Offsets, flow and motion are vectors in body coordinates; observation offsets
+start at the receptor's position. Absent or inactive receptors report
+`available = false`. A missing optical/contact return reports `valid = false`
+and zero observation values. Contact receptors still measure flow when no
+surface is touching: guard `flow`, `speed` and `bearing` with `available`.
+Other measurements require `valid`.
+
+Matching instances of a recipe share its exact attachment and direction. Their
+functional mass, multiplied by stored activity, is summed to determine sampling
+quality and range; they do not duplicate a reading or select separate targets.
+Different named recipes are sampled independently. Optical selection ranks
+visible contrast, distance and angular offset; contact selects the closest
+surface gap to the receptor. Only channels used by the program are sampled.
+
+```text
+let difference = sensed.LeftEye.level - sensed.RightEye.level;
+```
+
+Two motors can react differently to this difference. The full
+[local-control.cell](../examples/local-control.cell) example compares two light
+receptors, builds a decaying brake in shade, dismantles motors and permits their
+regrowth when the brake concentration falls. Existing whole-cell sensor names
+remain available for earlier sources.
+
+## Construction control and material recovery
+
+`start_when` controls initiation separately from expression and activity. It is
+sampled with the other program expressions. If false, no additional instance
+starts; previously started instances still consume paid installation work.
+Several recipes can therefore share a named product while choosing independently
+when to begin construction. The default is true for compatibility.
+
+An active, complete `recycle()` mechanism supplies finite disassembly throughput.
+A recipe's `recycle` expression requests dismantling of instances with that
+recipe name, including inherited instances of earlier definitions. Recovery
+always uses each instance's actual ingredient identities. Positive disassembly
+requests suppress installation into the same instance during that tick.
+
+Recycling costs energy and shared work. It preserves accounted material and
+retained energy without refunding usable energy. Recovered stocks and freed room
+cannot fund another operation in the same tick. Incomplete machinery can also
+be dismantled. The Body inspector shows new-start permission, requested recycling
+and achieved material recovery, separately from activity.
 
 Cellular expressions can read internal energy, body geometry, stored minerals,
 gut contents, age, speed and integrity. External light, heat, chemical, flow,
@@ -141,6 +224,12 @@ from its attachment point. Forces add; torques use the cross product of the leve
 arm and force. Opposing motors can cancel movement while still spending energy.
 Changing activity preserves the built motor; changing future expression does not
 erase it.
+
+Primitive piercers act from their attachment point along their declared
+direction. Primitive shields protect their local surface sector, and contact
+damage is localized around the struck surface. Whole-cell environmental stress
+continues to affect the body. Existing family organs retain their compatibility
+interaction rules.
 
 Growth and reproduction use three explicit mechanisms:
 
@@ -180,16 +269,20 @@ The Program inspector and graph expose gene/activity expressions and pool/built
 dependencies. Inspection does not commit a tick.
 
 Constant, expression and reference mutations remain source preserving. Cellular
-programs additionally support silencing one gene (kind 4) and duplicating one gene
-(kind 5). Normal mutation may select these operations. Product identities and
-physical recipe definitions are fixed by these mutation operations; inherited
-machinery survives a regulatory mutation unchanged.
+programs additionally support silencing one gene (kind 4), duplicating one gene
+(kind 5), and changing a future recipe's attachment or direction (kind 6).
+Normal mutation may select these operations. Placement mutations change future
+construction; inherited machinery retains its actual recipe and ingredient
+identities. A same-named recycling request can dismantle that earlier machinery
+without reinterpreting its components.
 
-Checkpoint format 6 retains mechanism identities as well as pools, unfinished
-ingredients, assembly identities, activities and genetic progress. Formats 3, 4
-and 5 remain readable. Old cellular family sources retain their existing semantics;
-v5 saves continue with the same physics. The WASM ABI remains 10 and the language
-schema remains 3, with an additive `cellular.mechanisms` catalog.
+Checkpoint format 7 retains mechanism identities as well as pools, unfinished
+ingredients, assembly identities, activities and genetic progress. Formats 3, 4,
+5 and 6 remain readable. Existing sources default to unrestricted initiation and
+zero recycling. Corrected optical coverage and directional primitive interactions
+can change affected trajectories. Save/restore replay is deterministic within the
+current engine. The WASM ABI remains 10 and language schema remains 3, with
+additive receptor-field, recipe-control and pure-function metadata.
 
 This is a coarse cellular language: named aggregate material pools and discrete
 machines implementing a fixed set of small physical operations. There is no
@@ -198,7 +291,7 @@ chemistry or multicellular adhesion yet.
 
 ## Material allocation
 
-Synthesis, installation, repair and cell-cycle work share five common resources:
+Synthesis, installation, disassembly, repair and cell-cycle work share five common resources:
 energy, minerals, internal space, surface space and translation work. An ingredient
 installation additionally consumes one product pool. The allocator stores just
 these sparse costs and reuses work buffers between cells and ticks. It preserves

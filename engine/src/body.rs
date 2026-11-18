@@ -21,8 +21,8 @@ pub const CORE_MASS_PER_AREA: f64 = 0.04;
 pub const FOUNDER_AREA: f64 = 1.0;
 pub const FOUNDER_ENERGY_FRACTION: f64 = 0.85;
 pub const FOUNDER_MINERAL_FRACTION: f64 = 0.6;
-const INTERNAL_PER_AREA: f64 = 0.9;
-const SURFACE_PER_RADIUS: f64 = 0.9;
+pub(crate) const INTERNAL_PER_AREA: f64 = 0.9;
+pub(crate) const SURFACE_PER_RADIUS: f64 = 0.9;
 const RECYCLE_ENERGY_PER_MASS: f64 = 8.0;
 const REPAIR_ENERGY_PER_MASS: f64 = 60.0;
 const MAINTENANCE_RESERVE_FRACTION: f64 = 0.15;
@@ -864,6 +864,47 @@ impl Body {
         }
     }
 
+    /// Legacy cortex protects the whole body. A primitive shield covers its
+    /// attachment-facing hemisphere, with strongest protection directly ahead.
+    pub fn protection_at(&self, contact_angle: f64, legacy_defend: f64) -> f64 {
+        let legacy = (6.0 * self.functional_mass(OrganelleKind::Cortex) / self.area.sqrt())
+            .clamp(0.0, 0.8) * (0.5 + 0.5 * effort(legacy_defend));
+        let mut protection = legacy;
+        if let Some(state) = &self.cellular {
+            for assembly in &state.assemblies {
+                if assembly.recipe.kind != AssemblyKind::Mechanism(MechanismKind::Shield) { continue; }
+                let facing = (contact_angle - assembly.recipe.at).cos().max(0.0);
+                protection += 6.0 * assembly.functional_mass() / self.area.sqrt()
+                    * facing * (0.5 + 0.5 * assembly.activity);
+            }
+        }
+        protection.clamp(0.0, 0.8)
+    }
+
+    /// Apply one already-resolved set of simultaneous contacts. Internal
+    /// structure and old family machinery retain uniform damage semantics;
+    /// new surface mechanisms are hit according to their physical placement.
+    /// Neither the attribution nor resulting damage can erase material.
+    pub fn damage_attributed(&mut self, total: f64, hits: &[(f64, f64)]) {
+        let retained = 1.0 - effort(total);
+        for organ in &mut self.organs { organ.integrity *= retained; }
+        if let Some(state) = &mut self.cellular {
+            for assembly in &mut state.assemblies {
+                let local = matches!(assembly.recipe.kind, AssemblyKind::Mechanism(_))
+                    && assembly.recipe.kind.surface_footprint() > 0.0;
+                let multiplier = if local {
+                    let fraction = hits.iter().map(|&(angle, fraction)| {
+                        if angle.is_finite() {
+                            nonnegative(fraction) * (angle - assembly.recipe.at).cos().max(0.0)
+                        } else { 0.0 }
+                    }).sum::<f64>();
+                    1.0 - effort(fraction)
+                } else { retained };
+                assembly.integrity *= multiplier;
+            }
+        }
+    }
+
     /// Translate family-specific proteins, assemble organs, recycle, grow and
     /// repair from one starting snapshot. These demands share finite core work,
     /// energy, material and room. Assembly additionally requires its family's
@@ -1512,14 +1553,14 @@ impl Body {
     }
     #[cfg(test)]
     pub(crate) fn read_checkpoint(reader: &mut Reader<'_>) -> CheckpointResult<Self> {
-        Self::read_checkpoint_version(reader, 6)
+        Self::read_checkpoint_version(reader, 7)
     }
     pub(crate) fn read_checkpoint_version(
         reader: &mut Reader<'_>,
         version: u32,
     ) -> CheckpointResult<Self> {
         ensure(
-            matches!(version, 3 | 4 | 5 | 6),
+            matches!(version, 3 | 4 | 5 | 6 | 7),
             "unsupported body checkpoint version",
         )?;
         let area = reader.range(MIN_AREA, MAX_AREA)?;

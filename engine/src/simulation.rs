@@ -5,22 +5,26 @@ use crate::body::BodyFixture;
 use crate::body::{
     Body, BodyCapacities, BodyControls, FounderBudget, OrganelleKind as Kind, FAMILY_COUNT,
 };
-use crate::cellular::CellularWorkScratch;
+use crate::cellular::{AssemblyKind, CellularWorkScratch, MechanismKind};
 use crate::environment::{Environment, COLUMNS as FIELD_COLUMNS, PATCHES, ROWS as FIELD_ROWS};
 use crate::genome::{
-    EvalScratch, Inputs, MutationKind, OrganelleInput, Outputs, Program, Registers,
+    EvalScratch, Inputs, MutationKind, OrganelleInput, Outputs, Program, ReceptorInput, Registers,
 };
 use std::f64::consts::{PI, TAU};
 use std::fmt::Write;
 use std::rc::Rc;
 mod checkpoint;
 mod presentation;
+mod receptors;
+mod surface;
 #[cfg(test)]
 mod cellular_tests;
 #[cfg(test)]
 mod mechanism_tests;
 #[cfg(test)]
 mod sensing_tests;
+#[cfg(test)]
+mod local_control_tests;
 
 pub const WIDTH: f64 = 1200.0;
 pub const HEIGHT: f64 = 760.0;
@@ -112,6 +116,7 @@ pub fn mutate_registered(
         MutationKind::Reference => 3,
         MutationKind::GeneSilence => 4,
         MutationKind::GeneDuplicate => 5,
+        MutationKind::Geometry => 6,
     };
     if mutation_kind == 0 || mutation.source == parent.source {
         return MutationResult {
@@ -517,6 +522,19 @@ struct ObservationWorkspace {
     geometry: CellGeometry,
     cell_grid: Grid,
     food_grid: Grid,
+    receptor_masses: Vec<f64>,
+    max_radius: f64,
+}
+
+#[derive(Clone, Copy)]
+struct AttackEvent {
+    victim: usize,
+    attacker: usize,
+    damage: f64,
+    /// Only legacy piercing machinery can extract living reserves.
+    extraction: f64,
+    /// Contact direction relative to the victim's body.
+    angle: f64,
 }
 
 #[derive(Default)]
@@ -536,8 +554,11 @@ struct PhaseWorkspace {
     targets: Vec<Option<usize>>,
     consumed: Vec<bool>,
     order: Vec<usize>,
-    events: Vec<(usize, usize, f64)>,
+    events: Vec<AttackEvent>,
+    primitive_hits: Vec<(usize, usize, f64, f64)>,
     damage: Vec<f64>,
+    hit_ranges: Vec<(usize, usize)>,
+    hits: Vec<(f64, f64)>,
     removed: Vec<(f64, f64)>,
     meals: Vec<(f64, f64)>,
     requests: Vec<f64>,
@@ -845,6 +866,8 @@ impl World {
             geometry,
             cell_grid,
             food_grid,
+            max_radius: maximum_radius,
+            ..
         } = workspace;
         cell_grid.clear();
         food_grid.clear();
@@ -860,6 +883,7 @@ impl World {
                 food_grid.insert(f.x, f.y, i);
             }
         }
+        *maximum_radius = max_radius;
         // The geometry columns stay immutable throughout observation. Worlds
         // without physical sensors skip this spatial snapshot entirely.
         let count = if selected.is_some() {
@@ -867,8 +891,9 @@ impl World {
         } else {
             self.cells.len()
         };
-        result.clear();
+        result.resize_with(count, Inputs::default);
         tracks.resize_with(count, Tracking::default);
+        let mut output_index = 0;
         for (index, cell) in self.cells.iter().enumerate() {
             if selected.is_some_and(|which| which != index) {
                 continue;
@@ -876,7 +901,14 @@ impl World {
             let caps = &capacities[index];
             let space = cell.body.space();
             let surface = cell.body.surface();
+            // Preserve nested cellular buffers when resetting the scalar snapshot.
+            let products = std::mem::take(&mut result[output_index].products);
+            let assemblies = std::mem::take(&mut result[output_index].assemblies);
+            let receptors = std::mem::take(&mut result[output_index].receptors);
             let mut input = Inputs {
+                products,
+                assemblies,
+                receptors,
                 energy: cell.energy,
                 energy_fraction: fraction(cell.energy, caps.energy),
                 energy_capacity: caps.energy,
@@ -920,6 +952,9 @@ impl World {
                 exudation_rate: cell.exudation_rate,
                 ..Inputs::default()
             };
+            input.products.clear();
+            input.assemblies.clear();
+            input.receptors.clear();
             for (i, family) in cell.body.family_summaries().iter().enumerate() {
                 input.organelle[i] = OrganelleInput {
                     count: family.count.min(i32::MAX as u32) as i32,
@@ -1007,7 +1042,7 @@ impl World {
                 };
             }
             input.object_available = caps.optical_sensing > 0.0;
-            let tracking = &mut tracks[result.len()];
+            let tracking = &mut tracks[output_index];
             tracking.entries.clone_from(&cell.tracking.entries);
             tracking.next_serial = cell.tracking.next_serial;
             tracking
@@ -1019,7 +1054,15 @@ impl World {
                 .organs
                 .iter()
                 .filter(|o| o.kind == Kind::Optical && o.functional_mass() > 0.0)
-                .count();
+                .count()
+                + cell.body.cellular.as_ref().map_or(0, |state| {
+                    state.assemblies.iter().filter(|assembly| {
+                        matches!(assembly.recipe.kind,
+                            AssemblyKind::Organelle(Kind::Optical)
+                            | AssemblyKind::Mechanism(MechanismKind::SenseOptical))
+                            && assembly.functional_mass() * assembly.activity > 0.0
+                    }).count()
+                });
             let width = cell.scan_width.min(units as f64 * PI * 0.65).min(TAU);
             let mut object: Option<(Observation, f64)> = None;
             let mut contact: Option<Observation> = None;
@@ -1145,7 +1188,8 @@ impl World {
                         .map(|v| measure(v, caps.optical_sensing, 0.03));
                 }
             }
-            result.push(input);
+            result[output_index] = input;
+            output_index += 1;
         }
     }
     /// Center-ray occlusion on the same wrapped geometry as sensing/collision.
@@ -1284,28 +1328,24 @@ impl World {
         // Phase 1: one immutable observation/capability snapshot. Memory and
         // tracking commit only after every cell has observed that same world.
         self.observations_into(None, caps, observations);
-        for (cell, input) in self.cells.iter().zip(observations.inputs.iter_mut()) {
-            if let Some(program) = genomes[(cell.genome_id - 1) as usize].program.cellular() {
-                (input.products, input.assemblies) = cell.body.cellular_inputs(program);
+        for (index, (cell, input)) in self.cells.iter().zip(observations.inputs.iter_mut()).enumerate() {
+            let program = &genomes[(cell.genome_id - 1) as usize].program;
+            if let Some(definition) = program.cellular() {
+                cell.body.cellular_inputs_into(definition, &mut input.products, &mut input.assemblies);
+                self.receptor_inputs_into(index, program, input, caps,
+                    &observations.geometry, &observations.cell_grid, &observations.food_grid,
+                    observations.max_radius, &mut observations.receptor_masses);
             }
         }
         let inputs = &observations.inputs;
         let scratch = &mut self.eval_scratch;
-        outputs.clear();
-        outputs.extend(
-            self.cells
-                .iter_mut()
-                .zip(inputs)
-                .zip(observations.tracking.iter_mut())
-                .map(|((c, input), tracks)| {
-                    std::mem::swap(&mut c.tracking, tracks);
-                    genomes[(c.genome_id - 1) as usize].program.evaluate_cell(
-                        input,
-                        &mut c.memory,
-                        scratch,
-                    )
-                }),
-        );
+        outputs.resize_with(self.cells.len(), Outputs::default);
+        for (((cell, input), tracks), output) in self.cells.iter_mut()
+            .zip(inputs).zip(observations.tracking.iter_mut()).zip(outputs.iter_mut()) {
+            std::mem::swap(&mut cell.tracking, tracks);
+            genomes[(cell.genome_id - 1) as usize].program.evaluate_cell_into(
+                input, &mut cell.memory, scratch, output);
+        }
         // Regulation acts on existing machinery only. Construction is a later
         // phase, so a newly synthesized part cannot propel, sense or divide now.
         motors.clear();
@@ -1862,7 +1902,16 @@ impl World {
                 continue;
             }
             let [x, y] = geometry.positions[i];
-            let reach = 0.75 + 12.0 * caps[i].piercing.sqrt();
+            // Each primitive weapon has its own attachment/reach query. Its
+            // material cannot extend a legacy weapon on another body surface.
+            let has_primitive = self.cells[i].body.cellular.as_ref().is_some_and(|state|
+                state.assemblies.iter().any(|assembly| assembly.recipe.kind
+                    == AssemblyKind::Mechanism(MechanismKind::Pierce)));
+            let legacy_piercing = if has_primitive {
+                self.cells[i].body.functional_mass(Kind::Piercer)
+            } else { caps[i].piercing };
+            if caps[i].phagocytosis == 0.0 && legacy_piercing == 0.0 { continue; }
+            let reach = 0.75 + 12.0 * legacy_piercing.sqrt();
             let mut target = None;
             let mut best = f64::INFINITY;
             for j in grid.nearby_radius(x, y, geometry.radii[i] + max_radius + reach) {
@@ -1894,12 +1943,16 @@ impl World {
         workspace: &mut PhaseWorkspace,
     ) {
         self.physical_targets(caps, workspace);
+        self.primitive_piercing_targets(outputs, workspace);
         let PhaseWorkspace {
             targets,
             consumed,
             order,
             events,
             damage,
+            primitive_hits,
+            hit_ranges,
+            hits,
             removed,
             meals,
             requests,
@@ -1973,46 +2026,82 @@ impl World {
             if !self.cells[j].alive() {
                 continue;
             }
-            let protection = (caps[j].protection * (0.5 + 0.5 * outputs[j].defend)).min(0.9);
+            let contact_angle = relative_angle(delta(self.cells[i].y - self.cells[j].y, HEIGHT)
+                .atan2(delta(self.cells[i].x - self.cells[j].x, WIDTH)) - self.cells[j].angle);
+            let protection = self.contact_protection(j, contact_angle,
+                self.legacy_shield_effort(j, &outputs[j]), caps);
+            let has_primitive = self.cells[i].body.cellular.as_ref().is_some_and(|state|
+                state.assemblies.iter().any(|assembly| assembly.recipe.kind
+                    == AssemblyKind::Mechanism(MechanismKind::Pierce)));
+            let power = if has_primitive {
+                if outputs[i].cellular.is_some() {
+                    self.cells[i].body.cellular.as_ref().map_or(0.0, |state|
+                        state.assemblies.iter().filter(|assembly|
+                            assembly.recipe.kind == AssemblyKind::Organelle(Kind::Piercer))
+                            .map(|assembly| assembly.functional_mass() * assembly.activity).sum())
+                } else {
+                    self.cells[i].body.functional_mass(Kind::Piercer) * outputs[i].bite
+                }
+            } else { caps[i].piercing * outputs[i].bite };
             let inflicted = 0.12
-                * (caps[i].piercing / 0.06)
-                * outputs[i].bite
+                * (if has_primitive { power / 0.06 } else { caps[i].piercing / 0.06 })
+                * (if has_primitive { 1.0 } else { outputs[i].bite })
                 * (self.cells[i].mass() / self.cells[j].mass()).min(2.0)
                 * (1.0 - protection)
                 * DT;
             if inflicted > 0.0 {
-                events.push((j, i, inflicted));
+                events.push(AttackEvent { victim: j, attacker: i, damage: inflicted,
+                    extraction: if has_primitive { 1.0 } else { caps[i].bite_extraction_fraction },
+                    angle: contact_angle });
                 self.attacks += 1;
             }
         }
-        events.sort_by_key(|&(j, i, _)| (self.cells[j].id, self.cells[i].id));
+        for &(attacker, victim, power, angle) in primitive_hits.iter() {
+            if !self.cells[attacker].alive() || !self.cells[victim].alive() { continue; }
+            let protection = self.contact_protection(victim, angle,
+                self.legacy_shield_effort(victim, &outputs[victim]), caps);
+            let inflicted = 0.12 * (power / 0.06)
+                * (self.cells[attacker].mass() / self.cells[victim].mass()).min(2.0)
+                * (1.0 - protection) * DT;
+            if inflicted > 0.0 {
+                events.push(AttackEvent { victim, attacker, damage: inflicted, extraction: 0.0, angle });
+                self.attacks += 1;
+            }
+        }
+        events.sort_by_key(|event| (self.cells[event.victim].id, self.cells[event.attacker].id));
         damage.resize(self.cells.len(), 0.0);
         damage.fill(0.0);
+        hit_ranges.resize(self.cells.len(), (0, 0));
+        hit_ranges.fill((0, 0));
+        hits.clear();
         removed.resize(self.cells.len(), (0.0, 0.0));
         removed.fill((0.0, 0.0));
         meals.resize(self.cells.len(), (0.0, 0.0));
         meals.fill((0.0, 0.0));
         let mut start = 0;
         while start < events.len() {
-            let victim = events[start].0;
+            let victim = events[start].victim;
             let mut end = start + 1;
-            while end < events.len() && events[end].0 == victim {
+            while end < events.len() && events[end].victim == victim {
                 end += 1;
             }
             let group = &events[start..end];
-            let total: f64 = group.iter().map(|e| e.2).sum();
+            let total: f64 = group.iter().map(|event| event.damage).sum();
             let actual = total.min(self.cells[victim].integrity);
             damage[victim] = actual;
             let fraction = if total > 0.0 { actual / total } else { 0.0 };
+            hit_ranges[victim] = (hits.len(), hits.len() + group.len());
+            hits.extend(group.iter().map(|event| (event.angle, event.damage * fraction)));
             let victim_cell = &self.cells[victim];
             requests.clear();
-            requests.extend(group.iter().map(|&(_, attacker, inflicted)| {
+            requests.extend(group.iter().map(|event| {
+                let attacker = event.attacker;
                 let raw = 80.0
-                    * inflicted
+                    * event.damage
                     * fraction
                     * victim_cell.body.structural_mass()
                     * outputs[attacker].feed
-                    * caps[attacker].bite_extraction_fraction;
+                    * event.extraction;
                 let minerals = if victim_cell.energy > 0.0 {
                     victim_cell.nutrient_stored * raw / victim_cell.energy
                 } else {
@@ -2028,11 +2117,12 @@ impl World {
             } else {
                 0.0
             };
-            for ((_, attacker, _), request) in group.iter().zip(requests.iter()) {
+            for (event, request) in group.iter().zip(requests.iter()) {
+                let attacker = event.attacker;
                 let energy = request * scale;
                 let minerals = energy * mineral_ratio;
-                meals[*attacker].0 += energy;
-                meals[*attacker].1 += minerals;
+                meals[attacker].0 += energy;
+                meals[attacker].1 += minerals;
                 removed[victim].0 += energy;
                 removed[victim].1 += minerals;
             }
@@ -2046,7 +2136,8 @@ impl World {
             c.nutrient_stored = (c.nutrient_stored - removed[i].1).max(0.0);
             c.ingest(OrganicKind::Tissue, meals[i].0, meals[i].1);
             c.integrity = (c.integrity - damage[i]).max(0.0);
-            c.body.damage(damage[i]);
+            let (from, to) = hit_ranges[i];
+            c.body.damage_attributed(damage[i], &hits[from..to]);
             if damage[i] > 0.0 {
                 self.environment.emit_organic(c.x, c.y, damage[i] * 2.0);
                 if !c.alive() {

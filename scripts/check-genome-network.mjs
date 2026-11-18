@@ -19,7 +19,7 @@ const networkUrl = await moduleUrl('../src/genome-network.ts');
 const { buildGenomeNetwork, networkSlice } = await import(networkUrl);
 // Import the real layout function without constructing the DOM-facing class.
 const { layoutNetwork } = await import(await moduleUrl('../src/genome-visualizer.ts', { './genome-network': networkUrl }));
-const { PRESETS, CELLULAR_FAMILY_PRESETS, LEGACY_PRESETS } = await import(await moduleUrl('../src/presets.ts'));
+const { PRESETS, MECHANISM_PRESETS_V6, CELLULAR_FAMILY_PRESETS, LEGACY_PRESETS } = await import(await moduleUrl('../src/presets.ts'));
 const { instance } = await WebAssembly.instantiate(await readFile(new URL('../engine/pkg/agar_engine.wasm', import.meta.url)), {});
 const api = instance.exports;
 const decode = (pointer, length) => new TextDecoder().decode(new Uint8Array(api.memory.buffer, pointer, length));
@@ -46,7 +46,7 @@ function project(source) {
   assert.equal(JSON.stringify(graph), before, 'Projection does not mutate its compiler graph');
   validate(network,graph.roots.filter(root=>root.kind==='output').length);
   if(graph.mode==='cellular') {
-    assert.ok(network.nodes.filter(node=>node.kind==='output').every(node=>/^(gene|activity)\./.test(node.label)));
+    assert.ok(network.nodes.filter(node=>node.kind==='output').every(node=>/^(gene|activity|start_when|recycle)\./.test(node.label)));
     assert.ok(!network.nodes.some(node=>node.kind==='register'),'Cellular state is physical product stock');
   }
   assert.equal(network.expressionCount, graph.nodes.length);
@@ -156,7 +156,7 @@ assertSlice(self, networkSlice(self, 'register:rf001', 1), 1);
 assertSlice(mixed, networkSlice(mixed, null, 0), 0);
 assert.deepEqual(networkSlice(mixed, 'missing'), { nodes: [], edges: [], total: 0, omitted: 0, frontier: [] });
 
-for (const preset of [...PRESETS,...CELLULAR_FAMILY_PRESETS,...LEGACY_PRESETS]) {
+for (const preset of [...PRESETS,...MECHANISM_PRESETS_V6,...CELLULAR_FAMILY_PRESETS,...LEGACY_PRESETS]) {
   const network = project(preset.source).network;
   const slice = networkSlice(network, null);
   assertSlice(network, slice, 112);
@@ -235,4 +235,4 @@ assert.ok(inlineUses.every(value => value.bindings === sharedAliases), 'All uses
 assert.equal([...new Set(inlineUses.map(value => value.bindings))].reduce((sum, aliases) => sum + aliases.length, 0), 6000, 'Stored aliases do not multiply with consumer count');
 assertSlice(fanOutNetwork, networkSlice(fanOutNetwork, null), 112);
 
-console.log(`Genome network checks passed: ${PRESETS.length + CELLULAR_FAMILY_PRESETS.length + LEGACY_PRESETS.length} mechanism/cellular-family/legacy preset layouts, ${variants} typed variants, builtin/alias projection, all primitive registers, read/write/clear timing, exact ports, literal defaults, 8192-node chains, 10071 roots, linear alias metadata, and bounded bidirectional navigation.`);
+console.log(`Genome network checks passed: ${PRESETS.length + MECHANISM_PRESETS_V6.length + CELLULAR_FAMILY_PRESETS.length + LEGACY_PRESETS.length} local-control/mechanism/cellular-family/legacy preset layouts, ${variants} typed variants, builtin/alias projection, all primitive registers, read/write/clear timing, exact ports, literal defaults, 8192-node chains, 10071 roots, linear alias metadata, and bounded bidirectional navigation.`);

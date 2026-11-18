@@ -14,6 +14,7 @@ pub(super) struct ExecutionPlan {
     pub(super) output_roots: [Option<usize>; OUTPUT_COUNT],
     pub(super) writes: Box<[WriteRule]>,
     pub(super) extra_roots: Box<[usize]>,
+    pub(super) receptor_reads: Box<[(usize, ReceptorField)]>,
     /// All heap storage owned by the plan, including newly folded strings.
     /// Strings shared with the authored graph are already charged there.
     pub(super) allocated_bytes: usize,
@@ -36,7 +37,13 @@ impl ExecutionPlan {
             let (children, count) = node.op.children();
             let is_constant = !matches!(
                 node.op,
-                Op::Sensor(_) | Op::Pool(_) | Op::Built(_) | Op::Register(_) | Op::Populated(_)
+                Op::Sensor(_)
+                    | Op::Pool(_)
+                    | Op::Concentration(_)
+                    | Op::Built(_)
+                    | Op::Receptor(_, _)
+                    | Op::Register(_)
+                    | Op::Populated(_)
             ) && children[..count].iter().all(|&child| constant[child]);
             values.push(if is_constant {
                 evaluate_operation(&node.op, node.ty, &inputs, &memory, &values)
@@ -88,7 +95,9 @@ impl ExecutionPlan {
                 match &node.op {
                     Op::Sensor(sensor) => Op::Sensor(*sensor),
                     Op::Pool(index) => Op::Pool(*index),
+                    Op::Concentration(index) => Op::Concentration(*index),
                     Op::Built(index) => Op::Built(*index),
+                    Op::Receptor(index, field) => Op::Receptor(*index, *field),
                     Op::Register(key) => Op::Register(*key),
                     Op::Populated(key) => Op::Populated(*key),
                     Op::Negate(child) => Op::Negate(slot(*child)),
@@ -127,6 +136,18 @@ impl ExecutionPlan {
             }
         }
         let nodes = executable.into_boxed_slice();
+        let receptor_reads: Box<[_]> = nodes
+            .iter()
+            .filter_map(|node| {
+                if let Op::Receptor(index, field) = node.op {
+                    Some((index, field))
+                } else {
+                    None
+                }
+            })
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
         let mut extra_string_bytes = 0;
         for node in &nodes {
             if let Op::Constant(Value::Text(text)) = &node.op {
@@ -139,12 +160,14 @@ impl ExecutionPlan {
             + nodes.len() * std::mem::size_of::<ExecutableNode>()
             + writes.len() * std::mem::size_of::<WriteRule>()
             + extra_roots.len() * std::mem::size_of::<usize>()
+            + receptor_reads.len() * std::mem::size_of::<(usize, ReceptorField)>()
             + extra_string_bytes;
         Box::new(Self {
             nodes,
             output_roots,
             writes,
             extra_roots,
+            receptor_reads,
             allocated_bytes,
         })
     }

@@ -47,7 +47,7 @@ assert.equal(language.isCellularSource('let x="cellular;";'),false);
 assert.equal(language.tokenizeGenome(source).some(token=>token.kind==='invalid'),false);
 assert.deepEqual(names(language.cellularDeclarations(source).products),['Anchor','Rotor','Tail','Memory']);
 assert.deepEqual(names(language.cellularDeclarations(source+'\n# product Hidden = motor();').products),['Anchor','Rotor','Tail','Memory']);
-assert.deepEqual(names(complete('cellular;\n')),['product','gene','assembly','let']);
+assert.deepEqual(names(complete('cellular;\n')),['product','gene','assembly','fn','let']);
 assert.deepEqual(names(complete('cellular; product X = ')),[...language.CELLULAR_PRODUCT_ROLES]);
 assert.deepEqual(names(complete(source+'\ngene new_gene: ')),['Anchor','Rotor','Tail','Memory']);
 assert.ok(names(complete(source+'\nassembly Other: ')).includes('replicator'),'Legacy recipe remains available');
@@ -60,7 +60,7 @@ assert.equal(language.cellularDeclarations('cellular; assembly Vessel: store( fo
 assert.ok(names(complete(source+'\nassembly Other: flagellum {\n')).includes('Rotor'));
 assert.ok(complete(source+'\nassembly Other: flagellum {\n').find(item=>item.name==='Rotor').insertText.endsWith(': '));
 const expressions = complete(source+'\nlet next = ');
-for (const name of ['pool.Memory','built.Swim','energy','light.valid']) assert.ok(names(expressions).includes(name),`Cellular expression offers ${name}`);
+for (const name of ['pool.Memory','concentration.Memory','built.Swim','energy','light.valid','activate','repress']) assert.ok(names(expressions).includes(name),`Cellular expression offers ${name}`);
 for (const name of ['thrust','divide','grow','id','time','protein.flagellum','organelle.core.count','body.division_ready','rf001','populated']) assert.ok(!names(expressions).includes(name),`Cellular completion excludes ${name}`);
 assert.ok(names(complete(source+'\ngene sensed: Rotor = if ')).includes('light.valid'),'A numeric gene can use boolean sensor conditions');
 assert.deepEqual(complete(source+'\n# pool.'),[]);
@@ -80,6 +80,7 @@ for (const mechanism of MECHANISM_CATALOG) {
   assert.deepEqual(actual.requiredRoles,mechanism.roles,`${mechanism.kind} documents authoritative material roles`);
   assert.equal(actual.constructor,mechanism.constructor);
   assert.equal(actual.target,mechanism.target);
+  assert.deepEqual(actual.receptorFields.map(({name,type})=>({name,type})),(language.CELLULAR_RECEPTOR_FIELDS[mechanism.kind]??[]).map(({name,type})=>({name,type})),`${mechanism.kind} only offers its own typed readings`);
   const symbol=language.CELLULAR_MECHANISMS.find(item=>item.name===mechanism.kind);
   engine.compile('cellular;\n'+language.genomeSymbolDocumentation(symbol).example);
 }
@@ -88,7 +89,7 @@ engine.resetEmpty(42,0); engine.seed(genome,1);
 const id = engine.snapshot().cells[0].id;
 const evaluation = engine.getCellEvaluation(id);
 assert.equal(evaluation.mode,'cellular');
-assert.ok(evaluation.outputs.every(output=>output.name.startsWith('gene.')||output.name.startsWith('activity.')));
+assert.ok(evaluation.outputs.every(output=>/^(gene|activity|start_when|recycle)\./.test(output.name)));
 assert.equal(evaluation.outputs.find(output=>output.name==='gene.drive').value,1);
 assert.ok(evaluation.signals.some(signal=>signal.name==='pool.Memory'&&signal.value===0));
 assert.equal(evaluation.writes.length,0);
@@ -111,6 +112,7 @@ assert.ok(html.includes('Waiting for')&&html.includes('Assembling'));
 assert.ok(html.includes('t½ 8s')&&html.includes('90°'));
 assert.ok(html.includes('propel()')&&html.includes('Propulsion'));
 assert.ok(html.includes('Translation work'));
+assert.ok(html.includes('New starts')&&html.includes('Recycle request')&&html.includes('Recycling'));
 assert.ok(html.includes('data-kind="cellular-products" open'));
 const untrusted = structuredClone(body); untrusted.cellular.assemblies[0].bottleneck='<svg onload=alert(1)>';
 assert.ok(renderCellularBody(untrusted).includes('&lt;svg onload=alert(1)&gt;'));
@@ -122,7 +124,57 @@ for (const change of [
   value=>{value.cellular.assemblies.push(structuredClone(value.cellular.assemblies[0]));},
   value=>{value.cellular.replication.progress=2;},
   value=>{value.cellular.recipes[0].kind='digest(unknown)';},
+  value=>{value.cellular.recipes[0].startAllowed=1;},
+  value=>{value.cellular.recipes[0].recycleRequested=2;},
+  value=>{value.cellular.recipes[0].recycleRate=-1;},
 ]) { const invalid=structuredClone(body);change(invalid);assert.throws(()=>validateBodyInspection(invalid,id)); }
 assert.equal(renderCellularBody({...body,cellular:null}),'');
 
-console.log('Cellular UI checks passed: schema parity, contextual declarations and stock completion, typed live values, physical inventory validation and escaped composition/bottleneck rendering.');
+const controlled = `cellular;
+product Mount = anchor(); product Detector = receptor(); product Pigment = pigment();
+product Rotor = motor(); product Tail = filament(); product Brake = regulator(8);
+fn calm(value, threshold) = repress(value, threshold);
+gene braking: Brake = if sensed.Eye.valid && sensed.Eye.level < 0.3 then 0.2 else 0;
+assembly Eye: sense(light) { Mount: 0.002; Detector: 0.006; Pigment: 0.002; }
+assembly Swim: propel() { Mount: 0.005; Rotor: 0.01; Tail: 0.01;
+  start_when: concentration.Brake < 0.001;
+  activity: calm(concentration.Brake, 0.02);
+  recycle: activate(concentration.Brake, 0.005);
+}`;
+assert.deepEqual(language.cellularDeclarations(controlled).functions.map(fn=>[fn.name,...fn.parameters]),[['calm','value','threshold']]);
+assert.ok(language.tokenizeGenome(controlled).some(token=>token.text==='calm'&&token.kind==='function'));
+assert.equal(language.lookupCellularSymbol('sensed.Eye.valid',controlled).type,'boolean');
+assert.equal(language.lookupCellularSymbol('sensed.Eye.level',controlled).type,'scalar');
+assert.equal(language.lookupCellularSymbol('sensed.Eye.organic',controlled),undefined);
+assert.ok(names(complete(controlled+'\nlet measurement = sensed.Eye.','sensed.Eye.')).includes('sensed.Eye.level'));
+assert.ok(!names(complete(controlled+'\nlet measurement = sensed.Eye.','sensed.Eye.')).includes('sensed.Eye.organic'));
+assert.ok(names(complete(controlled+'\nassembly Other: propel() {\n')).includes('start_when'));
+assert.ok(names(complete(controlled+'\nassembly Other: propel() {\n')).includes('recycle'));
+assert.equal(language.genomeCompletionContext(controlled+'\nassembly Other: propel() { start_when: ',(controlled+'\nassembly Other: propel() { start_when: ').length).expected,'boolean');
+assert.ok(names(complete(controlled+'\nlet response = ')).includes('calm'));
+assert.ok(names(complete('cellular; fn sample(value, threshold) = ')).includes('value'));
+assert.ok(!names(complete('cellular; fn sample(value, threshold) = ')).includes('sample'));
+assert.ok(!names(complete(controlled+'\nlet outside = ')).includes('threshold'));
+assert.equal(schema.cellular.userFunctions.recursive,false);
+assert.equal(schema.cellular.userFunctions.maxParameters,8);
+assert.equal(schema.cellular.recipeControls.find(item=>item.name==='start_when').type,'boolean');
+const controlGenome=engine.compile(controlled);
+engine.resetEmpty(52,0); engine.seed(controlGenome,1);
+const controlId=engine.snapshot().cells[0].id;
+const controlEvaluation=engine.getCellEvaluation(controlId);
+assert.equal(controlEvaluation.outputs.find(item=>item.name==='start_when.Swim').value,true);
+assert.equal(controlEvaluation.outputs.find(item=>item.name==='activity.Swim').value,1);
+assert.equal(controlEvaluation.outputs.find(item=>item.name==='recycle.Swim').value,0);
+assert.equal(controlEvaluation.signals.find(item=>item.name==='sensed.Eye.valid').value,false);
+assert.equal(controlEvaluation.signals.find(item=>item.name==='sensed.Eye.level').value,0);
+assert.ok(controlEvaluation.expressions.some((item,index)=>item.id!==index),'Authored function calls retain graph IDs after ambiguous inline internals are omitted');
+assert.ok(controlEvaluation.expressions.some(item=>controlled.slice(item.from,item.to)==='calm(concentration.Brake, 0.02)'&&item.value===1),'Function call has one actual value at its invocation');
+const repeatedId=structuredClone(controlEvaluation);
+repeatedId.expressions[1].id=repeatedId.expressions[0].id;
+assert.throws(()=>validateGenomeEvaluation(repeatedId,controlId));
+const badControl=structuredClone(controlEvaluation);
+badControl.outputs.find(item=>item.name==='start_when.Swim').type='scalar';
+badControl.outputs.find(item=>item.name==='start_when.Swim').value=1;
+assert.throws(()=>validateGenomeEvaluation(badControl,controlId));
+
+console.log('Cellular UI checks passed: mechanism/receptor schema parity, typed local readings and concentrations, pure function scope, initiation/recycling controls, live values, physical inventory validation and escaped rendering.');

@@ -1,0 +1,87 @@
+# Light receptors steer two motors. Shade expresses a decaying brake;
+# paid recycling reclaims the motors, and brighter conditions permit regrowth.
+cellular;
+
+product Mount = anchor();
+product Pigment = pigment();
+product Catalyst = enzyme();
+product Detector = receptor();
+product Rotor = motor();
+product Tail = filament();
+product Brake = regulator(6);
+
+fn missing(installed, required) = installed + 0.000001 < required;
+fn buffered(stock, effort) = if stock < 0.001 then effort else 0;
+
+let powered = !missing(built.Solar, 0.04);
+let eyes = sensed.LeftEye.valid && sensed.RightEye.valid;
+let brightness = (sensed.LeftEye.level + sensed.RightEye.level) / 2;
+let difference = 2 * (sensed.LeftEye.level - sensed.RightEye.level);
+let resting = concentration.Brake > 0.001;
+let need_solar = missing(built.Solar, 0.04);
+let need_left_eye = powered && missing(built.LeftEye, 0.01);
+let need_right_eye = powered && missing(built.RightEye, 0.01);
+let need_eyes = need_left_eye || need_right_eye;
+let need_left_motor = powered && !resting && missing(built.LeftMotor, 0.025);
+let need_right_motor = powered && !resting && missing(built.RightMotor, 0.025);
+let need_motors = need_left_motor || need_right_motor;
+let need_recycler = powered && missing(built.Recycler, 0.02);
+
+gene mounts: Mount = buffered(pool.Mount, if need_solar || need_eyes || need_motors then 0.5 else 0);
+gene pigments: Pigment = buffered(pool.Pigment, if need_solar || need_eyes then 1 else 0);
+gene catalysts: Catalyst = buffered(pool.Catalyst, if need_solar || need_recycler then 0.5 else 0);
+gene detectors: Detector = buffered(pool.Detector, if need_eyes then 1 else 0);
+gene rotors: Rotor = buffered(pool.Rotor, if need_motors then 1 else 0);
+gene filaments: Tail = buffered(pool.Tail, if need_motors then 1 else 0);
+gene braking: Brake = if eyes && brightness < 0.3 && concentration.Brake < 0.02 then 0.15 else 0;
+
+assembly Solar: harvest(light) {
+  Mount: 0.005;
+  Pigment: 0.03;
+  Catalyst: 0.005;
+  start_when: need_solar;
+}
+
+assembly LeftEye: sense(light) {
+  Mount: 0.002;
+  Detector: 0.006;
+  Pigment: 0.002;
+  start_when: need_left_eye;
+  at: 1.5707963267948966;
+}
+
+assembly RightEye: sense(light) {
+  Mount: 0.002;
+  Detector: 0.006;
+  Pigment: 0.002;
+  start_when: need_right_eye;
+  at: -1.5707963267948966;
+}
+
+assembly LeftMotor: propel() {
+  Mount: 0.005;
+  Rotor: 0.01;
+  Tail: 0.01;
+  start_when: need_left_motor;
+  activity: clamp(0.12 - difference, 0, 0.3) * repress(concentration.Brake, 0.005);
+  recycle: if resting then activate(concentration.Brake, 0.005) else 0;
+  at: 1.5707963267948966;
+  direction: 0;
+}
+
+assembly RightMotor: propel() {
+  Mount: 0.005;
+  Rotor: 0.01;
+  Tail: 0.01;
+  start_when: need_right_motor;
+  activity: clamp(0.12 + difference, 0, 0.3) * repress(concentration.Brake, 0.005);
+  recycle: if resting then activate(concentration.Brake, 0.005) else 0;
+  at: -1.5707963267948966;
+  direction: 0;
+}
+
+assembly Recycler: recycle() {
+  Catalyst: 0.02;
+  start_when: need_recycler;
+  activity: 1;
+}

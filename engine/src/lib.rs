@@ -88,6 +88,7 @@ impl Engine {
             3 => MutationKind::Reference,
             4 => MutationKind::GeneSilence,
             5 => MutationKind::GeneDuplicate,
+            6 => MutationKind::Geometry,
             _ => {
                 self.error = "Unknown mutation kind. Use 0 (any), 1 (constant), 2 (expression), 3 (reference), 4 (silence gene), or 5 (duplicate gene).".into();
                 return 0;
@@ -385,20 +386,12 @@ pub extern "C" fn cell_evaluation_ptr(cell_id: u32) -> *const u8 {
         let mut engine = engine.borrow_mut();
         engine.evaluation_buffer.clear();
         engine.error.clear();
-        let Some(mut inputs) = engine.world.sense_cell(cell_id) else {
+        let Some(cell) = engine.world.cells.iter().find(|cell| cell.id == cell_id) else {
             engine.error = "This organism is no longer alive.".into();
             return std::ptr::null();
         };
-        let cell = engine
-            .world
-            .cells
-            .iter()
-            .find(|cell| cell.id == cell_id)
-            .unwrap();
         let genome = &engine.genomes[(cell.genome_id - 1) as usize];
-        if let Some(program) = genome.program.cellular() {
-            (inputs.products, inputs.assemblies) = cell.body.cellular_inputs(program);
-        }
+        let inputs = engine.world.sense_program(cell_id, &genome.program).unwrap();
         match Program::evaluation_json(
             &genome.source,
             &inputs,

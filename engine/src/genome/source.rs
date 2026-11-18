@@ -7,6 +7,7 @@ pub(super) struct NodeLocation {
     pub from: usize,
     pub to: usize,
     pub head: Location,
+    pub authored: bool,
 }
 
 struct ParsedSource {
@@ -15,6 +16,7 @@ struct ParsedSource {
     bindings: Vec<Location>,
     writes: Vec<Location>,
     genes: Vec<cellular::GeneLocation>,
+    geometry: Vec<cellular::GeometryLocation>,
 }
 
 impl ParsedSource {
@@ -30,6 +32,7 @@ impl ParsedSource {
             bindings: parser.binding_locations,
             writes: parser.write_locations,
             genes: parser.gene_locations,
+            geometry: parser.geometry_locations,
         })
     }
 }
@@ -73,6 +76,11 @@ fn expression_changes(program: &Program, index: usize) -> Vec<ExpressionChange> 
                 .map(|&i| program.nodes[i].ty)
                 .collect::<Vec<_>>();
             for function in Function::ALL {
+                if program.cellular.is_none()
+                    && matches!(function, Function::Activate | Function::Repress)
+                {
+                    continue;
+                }
                 if function != current
                     && function.arity() == current.arity()
                     && function.ty(&types) == Some(node.ty)
@@ -107,7 +115,7 @@ impl Program {
         let reachable = program.reachable();
         let mut candidates = Vec::new();
         for (index, node) in program.nodes.iter().enumerate() {
-            if !reachable[index] {
+            if !reachable[index] || !parsed.nodes[index].authored {
                 continue;
             }
             if matches!(requested, MutationKind::Any | MutationKind::Constant)
@@ -126,7 +134,9 @@ impl Program {
                     Op::Reference(_)
                         | Op::Sensor(_)
                         | Op::Pool(_)
+                        | Op::Concentration(_)
                         | Op::Built(_)
+                        | Op::Receptor(_, _)
                         | Op::Register(_)
                         | Op::Populated(_)
                 )
@@ -145,12 +155,22 @@ impl Program {
                     candidates.push((index, MutationKind::GeneDuplicate));
                 }
             }
+            if matches!(requested, MutationKind::Any | MutationKind::Geometry) {
+                for (index, assembly) in cellular.definition.assemblies.iter().enumerate() {
+                    if assembly.kind.surface_footprint() > 0.0 {
+                        candidates.push((index, MutationKind::Geometry));
+                    }
+                }
+            }
         }
         if candidates.is_empty() {
             return None;
         }
         let mut rng = MutationRng::new(seed);
         let (index, kind) = candidates[rng.index(candidates.len())];
+        if kind == MutationKind::Geometry {
+            return Self::mutate_geometry(source, &parsed, index, &mut rng);
+        }
         if matches!(
             kind,
             MutationKind::GeneSilence | MutationKind::GeneDuplicate
@@ -227,9 +247,18 @@ impl Program {
                         Op::Pool(index) => {
                             format!("pool.{}", program.cellular().unwrap().products[*index].name)
                         }
+                        Op::Concentration(index) => format!(
+                            "concentration.{}",
+                            program.cellular().unwrap().products[*index].name
+                        ),
                         Op::Built(index) => format!(
                             "built.{}",
                             program.cellular().unwrap().assemblies[*index].name
+                        ),
+                        Op::Receptor(index, field) => format!(
+                            "sensed.{}.{}",
+                            program.cellular().unwrap().assemblies[*index].name,
+                            field.name()
                         ),
                         Op::Register(register) => register.name(),
                         Op::Populated(register) => format!("populated({})", register.name()),
@@ -243,7 +272,10 @@ impl Program {
                     (location.from, location.to, replacement)
                 }
             }
-            MutationKind::Any | MutationKind::GeneSilence | MutationKind::GeneDuplicate => {
+            MutationKind::Any
+            | MutationKind::GeneSilence
+            | MutationKind::GeneDuplicate
+            | MutationKind::Geometry => {
                 unreachable!()
             }
         };
@@ -282,6 +314,56 @@ impl Program {
             program: compiled,
             source: patched,
             kind,
+        })
+    }
+
+    fn mutate_geometry(
+        source: &str,
+        parsed: &ParsedSource,
+        index: usize,
+        rng: &mut MutationRng,
+    ) -> Option<Mutation> {
+        let assembly = &parsed.program.cellular()?.assemblies[index];
+        let location = parsed.geometry[index];
+        let direction = rng.next() & 1 != 0;
+        let (field, previous, span) = if direction {
+            ("direction", assembly.direction, location.direction)
+        } else {
+            ("at", assembly.at, location.at)
+        };
+        let signed = if rng.next() & 1 == 0 { -1.0 } else { 1.0 };
+        let delta = signed * (0.05 + (rng.next() % 4501) as f64 / 10000.0);
+        let changed = (previous + delta + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
+            - std::f64::consts::PI;
+        let (from, to, replacement) = if let Some(span) = span {
+            // Preserve comments embedded between a minus sign and its literal.
+            if source[span.from..span.to].contains('#') {
+                return None;
+            }
+            (span.from, span.to, Value::Scalar(changed).source())
+        } else {
+            (
+                location.close.from,
+                location.close.from,
+                format!("{field}: {};\n", Value::Scalar(changed).source()),
+            )
+        };
+        let length = source
+            .len()
+            .checked_sub(to - from)?
+            .checked_add(replacement.len())?;
+        if length > MAX_SOURCE_BYTES {
+            return None;
+        }
+        let mut patched = String::with_capacity(length);
+        patched.push_str(&source[..from]);
+        patched.push_str(&replacement);
+        patched.push_str(&source[to..]);
+        let program = Self::compile(&patched).ok()?;
+        Some(Mutation {
+            program,
+            source: patched,
+            kind: MutationKind::Geometry,
         })
     }
 
@@ -361,8 +443,14 @@ impl Program {
             "{{\"version\":1,\"mode\":{},\"cellId\":{cell_id},\"genomeId\":{genome_id},\"time\":{},\"tick\":{tick},\"semantics\":\"current-snapshot\",\"source\":{},\"expressions\":[",
             quote(program.mode()), inputs.time, quote(source),
         );
-        for (index, node) in program.nodes.iter().enumerate() {
-            if index > 0 {
+        for (visible, (index, node)) in program
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| parsed.nodes[*index].authored)
+            .enumerate()
+        {
+            if visible > 0 {
                 json.push(',');
             }
             let location = parsed.nodes[index];
@@ -415,6 +503,25 @@ impl Program {
             );
             signals.extend(
                 cellular
+                    .products
+                    .iter()
+                    .enumerate()
+                    .map(|(index, product)| {
+                        (
+                            format!("concentration.{}", product.name),
+                            Type::Number,
+                            evaluate_operation(
+                                &Op::Concentration(index),
+                                Type::Number,
+                                inputs,
+                                memory,
+                                &[],
+                            ),
+                        )
+                    }),
+            );
+            signals.extend(
+                cellular
                     .assemblies
                     .iter()
                     .enumerate()
@@ -432,6 +539,23 @@ impl Program {
                         )
                     }),
             );
+            signals.extend(program.receptor_reads().iter().map(|&(index, field)| {
+                (
+                    format!(
+                        "sensed.{}.{}",
+                        cellular.assemblies[index].name,
+                        field.name()
+                    ),
+                    field.ty(),
+                    evaluate_operation(
+                        &Op::Receptor(index, field),
+                        field.ty(),
+                        inputs,
+                        memory,
+                        &[],
+                    ),
+                )
+            }));
         }
         for (index, (name, ty, value)) in signals.iter().enumerate() {
             if index > 0 {
@@ -475,7 +599,21 @@ impl Program {
                 if index > 0 {
                     json.push(',');
                 }
-                let value = root.map_or(1.0, |root| values[root].number().clamp(0.0, 1.0));
+                let boolean = name.starts_with("start_when.");
+                let ty = if boolean { "boolean" } else { "scalar" };
+                let value = if boolean {
+                    Value::Boolean(root.is_none_or(|root| values[root].boolean()))
+                } else {
+                    Value::Scalar(root.map_or(
+                        if name.starts_with("recycle.") {
+                            0.0
+                        } else {
+                            1.0
+                        },
+                        |root| values[root].number().clamp(0.0, 1.0),
+                    ))
+                }
+                .json();
                 let offsets = root.map_or_else(
                     || "\"from\":null,\"to\":null".to_string(),
                     |root| {
@@ -484,7 +622,7 @@ impl Program {
                     },
                 );
                 json.push_str(&format!(
-                    "{{\"name\":{},\"type\":\"scalar\",\"value\":{value},{offsets}}}",
+                    "{{\"name\":{},\"type\":\"{ty}\",\"value\":{value},{offsets}}}",
                     quote(name)
                 ));
             }

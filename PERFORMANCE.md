@@ -1,9 +1,84 @@
 # Simulation performance
 
-## Current material allocation improvement
+## Current cellular execution improvements
 
-Cellular work now stores **five common costs and one optional product stock** per
-request. Previously every synthesis, ingredient installation, repair or lifecycle
+The checkpoint-7 implementation retains all **seven cellular input/control
+vectors** across ticks: product amounts, built amounts and receptor readings on
+input; gene expression, activity, initiation gates and recycling effort on
+output. Reusing the outer tick workspace no longer discards these nested
+allocations. Every vector is resized and reset when a cell or its program changes,
+while all expressions continue to read the same immutable observation snapshot.
+
+Derived identity tables bind program products to physical pools, recipe instances
+to current definitions, and installed ingredients to stock. Identity includes the
+complete product or recipe definition; a shared name cannot retype existing
+material or take control of an inherited machine. Recycling deliberately uses a
+separate name selector and still recovers each instance's original ingredients.
+The tables rebuild when definitions or physical record structure change and are
+excluded from checkpoints and biological equality.
+
+A work-phase snapshot computes each machine's completion and mass once, then
+reuses them for active capacities, storage, space, support, construction, repair
+and recycling. Action preparation similarly replaces one body scan per legacy
+family with one ordered traversal. These snapshots are local to a phase and are
+never reused across construction, damage or division. The original floating-point
+accumulation order is retained. Exact comparisons cover mixed legacy/cellular
+bodies and non-unit cell areas.
+
+### Measured input-projection cost
+
+| Products / recipes / physical instances | Previous identity scans | Cached bindings and reused outputs | Speedup | Heap allocations per projection |
+| --- | ---: | ---: | ---: | ---: |
+| 16 / 16 / 64 | 4.759 µs | 0.575 µs | 8.28× | 2 → 0 |
+| 64 / 64 / 256 | 90.479 µs | 2.657 µs | 34.05× | 2 → 0 |
+
+These are **native release microbenchmarks of cellular input projection only**.
+They compare the previous product/recipe scans with `cellular_inputs_into` on
+identical stocks and complete/partial machinery. Results are medians of seven
+20,000-call samples, alternating measurement order. The benchmark asserts
+bit-exact projected values before timing. Allocation counts are measured
+separately with warmed identity caches and output buffers.
+
+The numbers do **not** establish a whole-simulation, gene-evaluation, WASM or
+browser speedup. Creating physical records, rebuilding identity tables and other
+engine paths can still allocate. New local sensing and directional interactions
+also change the work performed by current programs, so comparing their new
+trajectories with older presets would mix performance and behavior changes.
+Raw measurements are in
+[cellular-bindings-benchmark.json](experiments/cellular-bindings-benchmark.json).
+
+### Current migration and unchanged-behavior evidence
+
+The actual compiled WASM imports checkpoint-6 worlds for all eight preserved
+mechanism programs after 40 seconds of paid development. Their source text,
+immediate world/environment bytes and physical body state match exactly; only
+new control-report diagnostic fields are omitted from body comparison. Each
+upgraded checkpoint restores and continues for 60 ticks with byte-exact
+checkpoint-7 replay.
+
+A separate, unchanged Phototroph program matches the old engine in **91 sampled
+world/environment/body states over 90 seconds, including one division**. Its
+source has no optical receptors or directional surface interactions. Old/new
+future equality is deliberately not asserted for optical programs: the previous
+engine's zero-width optical bug is now fixed. Results and both WASM hashes are in
+[local-control-migration.json](experiments/local-control-migration.json).
+
+Reproduce with:
+
+```sh
+cargo run --release --manifest-path engine/Cargo.toml --example cellular-bindings -- 20000
+node scripts/check-local-control-migration.mjs --baseline /path/to/cellular-v6/engine/pkg/agar_engine.wasm --output experiments/local-control-migration.json
+```
+
+The migration script also checks the old checkout's `src/presets.ts` to verify
+that every preserved source is byte-identical. Implementations are in
+[cellular.rs](engine/src/cellular.rs), [genome/cellular.rs](engine/src/genome/cellular.rs)
+and [simulation.rs](engine/src/simulation.rs).
+
+## Earlier material allocation improvement (checkpoint 6)
+
+The preceding pass introduced **five common costs and one optional product stock**
+per cellular work request. Previously every synthesis, ingredient installation, repair or lifecycle
 request allocated a vector containing all five common resources and every product
 pool, even when almost all entries were zero. The allocator now visits just the
 common costs and the one stock consumed by an installation operation. It preserves
@@ -43,7 +118,7 @@ asserts bit-exact results before timing. Raw measurements are in
 Four targeted native tests check missing-ingredient independence, fair completion
 fractions, resource bounds, scratch reuse across different cells, and bit-exact
 agreement with the prior dense solver across 192 workloads with 0–1,024 pools.
-The separate actual-WASM compatibility check uses the eight preserved cellular
+That pass's actual-WASM compatibility check used the eight preserved cellular
 family sources, comparing complete world/environment bytes and body inspection,
 then imports a v5 save into v6 and checks its future and current-format replay.
 Save files themselves are not compared across differing format versions. The
@@ -65,9 +140,8 @@ The new solver is in [material_allocation.rs](engine/src/material_allocation.rs)
 its cellular integration in [cellular.rs](engine/src/cellular.rs), and its
 reproducible benchmark in
 [material-allocation.rs](engine/examples/material-allocation.rs).
-Product/recipe identity matching still scans named definitions. Cached blueprint
-indices and reusable gene-input/control vectors remain separate profiling
-candidates; this change does not claim to optimize them.
+The v5→v6 comparison above is historical and requires the corresponding v6 source
+checkout; the current migration script and v7 evidence are documented above.
 
 ## Historical architecture measurements
 
@@ -235,10 +309,9 @@ and `dynamic-fields`. Without it, the four ordinary workloads run. Without
 
 ## Next performance work
 
-Profile phase time and candidate/allocation counts before another broad rewrite.
-The remaining concrete candidates are organ construction's repeated family scans
-and resource-allocation loop, arbitrary-position particle flow sampling, and
-optical candidate/occlusion work as local density rises. Keep their accumulation,
-arbitration and torus semantics explicit. The producer and particle results show
-why these workloads need their own measurements: cheaper presentation, dormant
-graph execution and a worker do not automatically make every physical tick faster.
+Profile current phase time and candidate/allocation counts before another broad
+rewrite. Concrete remaining candidates are arbitrary-position particle flow
+sampling and optical candidate/occlusion work as local density rises. Measure
+named receptor workloads explicitly, since these now sample actual attachment
+locations. Keep accumulation, arbitration and torus semantics exact; microbenchmarks
+of cached inputs or allocation do not establish whole-world tick performance.

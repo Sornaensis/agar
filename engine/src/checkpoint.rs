@@ -8,7 +8,7 @@ use crate::{
 
 pub(crate) const MAX_STATE_BYTES: usize = 128 * 1024 * 1024;
 const MAGIC: &[u8; 8] = b"CELLAR01";
-const VERSION: u32 = 6;
+const VERSION: u32 = 7;
 pub(crate) type Result<T> = std::result::Result<T, String>;
 
 pub(crate) fn ensure(ok: bool, message: &str) -> Result<()> {
@@ -212,8 +212,8 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
     let mut r = Reader::new(bytes);
     ensure(r.take(8)? == MAGIC, "unknown save format")?;
     let version = r.u32()?;
-    if !matches!(version, 3 | 4 | 5 | VERSION) {
-        return Err(format!("Unsupported simulation version {version}. Agar supports physical-organelle saves 3 and 4, cellular saves 5, and mechanism saves 6. The saved simulation is preserved."));
+    if !matches!(version, 3 | 4 | 5 | 6 | VERSION) {
+        return Err(format!("Unsupported simulation version {version}. Agar supports simulation saves 3 through 7. The saved simulation is preserved."));
     }
     ensure(r.u32()? as usize == bytes.len(), "incorrect save length")?;
     ensure(r.u32()? == checksum(&bytes[20..]), "checksum mismatch")?;
@@ -224,7 +224,7 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
         let kind = r.u32()?;
         ensure(
             parent as usize <= index
-                && kind <= if version >= 5 { 5 } else { 3 }
+                && kind <= if version >= 7 { 6 } else if version >= 5 { 5 } else { 3 }
                 && ((parent == 0) == (kind == 0)),
             "invalid genome lineage",
         )?;
@@ -251,12 +251,16 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
             // produced before derived execution plans existed. Validate that
             // budget before adding the current runtime-only plan storage.
             let derived_bytes = genome.program.derived_execution_bytes();
+            let added_controls = if version < 7 {
+                genome.program.cellular_control_overhead_bytes()
+            } else { 0 };
             ensure(
-                saved_bytes >= genome.bytes - derived_bytes,
+                saved_bytes >= genome.bytes.saturating_sub(derived_bytes).saturating_sub(added_controls),
                 "invalid genome budget",
             )?;
             genome.bytes = saved_bytes
                 .checked_add(derived_bytes)
+                .and_then(|bytes| bytes.checked_add(added_controls))
                 .ok_or("Invalid simulation save: genome budget overflow.")?;
         }
         genomes.push(genome);
@@ -439,7 +443,7 @@ mod tests {
         let bytes = include_bytes!("../fixtures/execution-plan-v4.bin");
         let mut restored = restore(bytes).unwrap();
         let migrated_bytes = save(&restored).unwrap();
-        assert_eq!(u32::from_le_bytes(migrated_bytes[8..12].try_into().unwrap()), 6);
+        assert_eq!(u32::from_le_bytes(migrated_bytes[8..12].try_into().unwrap()), 7);
         assert_eq!(save(&restore(&migrated_bytes).unwrap()).unwrap(), migrated_bytes);
         let saved_budget = u32::from_le_bytes(bytes[32..36].try_into().unwrap()) as usize;
         let genome = &restored.genomes[0];
@@ -506,7 +510,7 @@ mod tests {
         let mut live = live_engine();
         let before = save(&live).unwrap();
         assert!(!live.restore_state(bytes));
-        assert!(live.error.contains("physical-organelle saves 3 and 4"));
+        assert!(live.error.contains("simulation saves 3 through 7"));
         assert_eq!(save(&live).unwrap(), before);
         let mut version2 = before.clone();
         version2[8..12].copy_from_slice(&2u32.to_le_bytes());

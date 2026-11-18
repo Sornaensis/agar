@@ -229,6 +229,7 @@ const functionCases = [
   ['dot(vec(1, 2), vec(3, 4))', 'scalar'], ['normalize(vec(0, 0))', 'vec2'], ['angle(vec(1, 0))', 'scalar'],
   ['x(vec(1, 0))', 'scalar'], ['y(vec(1, 0))', 'scalar'], ['sqrt(1)', 'scalar'], ['sign(1)', 'scalar'],
   ['atan2(0, 1)', 'scalar'], ['lerp(1, 2, 3)', 'scalar'], ['noise(1, 0.5)', 'scalar'],
+  ['activate(1, 2)', 'scalar'], ['repress(1, 2)', 'scalar'],
   ['identity(1)', 'integer'], ['identity(1.0)', 'scalar'], ['identity(true)', 'boolean'], ['identity("x")', 'string'], ['identity(vec(1, 2))', 'vec2'],
   ...REGISTER_FAMILIES.map(item => [`populated(${item.prefix}001)`, 'boolean']),
 ];

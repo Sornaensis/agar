@@ -147,9 +147,18 @@ impl Program {
                     w.u8(10);
                     w.count(*index);
                 }
+                Op::Concentration(index) => {
+                    w.u8(12);
+                    w.count(*index);
+                }
                 Op::Built(index) => {
                     w.u8(11);
                     w.count(*index);
+                }
+                Op::Receptor(index, field) => {
+                    w.u8(13);
+                    w.count(*index);
+                    w.u8(*field as u8);
                 }
                 Op::Register(register) => {
                     w.u8(2);
@@ -216,12 +225,18 @@ impl Program {
             for root in &cellular.activity {
                 w.option(*root);
             }
+            for root in &cellular.start {
+                w.option(*root);
+            }
+            for root in &cellular.recycle {
+                w.option(*root);
+            }
         }
     }
 
     #[cfg(test)]
     pub(crate) fn read_checkpoint(r: &mut Reader<'_>) -> Result<Self> {
-        Self::read_checkpoint_version(r, 6)
+        Self::read_checkpoint_version(r, 7)
     }
 
     pub(crate) fn read_checkpoint_version(r: &mut Reader<'_>, version: u32) -> Result<Self> {
@@ -260,6 +275,10 @@ impl Program {
                 ensure(
                     version >= 6 || !matches!(kind, AssemblyKind::Mechanism(_)),
                     "mechanism assemblies need checkpoint version 6",
+                )?;
+                ensure(
+                    version >= 7 || kind.name() != "recycle()",
+                    "recycling needs checkpoint version 7",
                 )?;
                 let count = r.count(cellular::MAX_PRODUCTS)?;
                 let mut parts = Vec::with_capacity(count);
@@ -315,7 +334,8 @@ impl Program {
                 ),
                 8 => Op::Choose(r.index(index)?, r.index(index)?, r.index(index)?),
                 9 => {
-                    let function = Function::ALL[r.index(Function::ALL.len())?];
+                    let function = Function::ALL
+                        [r.index(if version < 7 { 21 } else { Function::ALL.len() })?];
                     let mut args = [0; 3];
                     for (i, arg) in args.iter_mut().enumerate() {
                         *arg = if i < function.arity() {
@@ -332,13 +352,30 @@ impl Program {
                 11 if cellular.is_some() => {
                     Op::Built(r.index(cellular.as_ref().unwrap().assemblies.len())?)
                 }
+                12 if version >= 7 && cellular.is_some() => {
+                    Op::Concentration(r.index(cellular.as_ref().unwrap().products.len())?)
+                }
+                13 if version >= 7 && cellular.is_some() => {
+                    let definition = cellular.as_ref().unwrap();
+                    let index = r.index(definition.assemblies.len())?;
+                    let field = ReceptorField::ALL
+                        .get(r.u8()? as usize)
+                        .copied()
+                        .ok_or("Invalid simulation save: unknown receptor field.")?;
+                    ensure(
+                        ReceptorField::for_kind(definition.assemblies[index].kind).contains(&field),
+                        "receptor does not supply that measurement",
+                    )?;
+                    Op::Receptor(index, field)
+                }
                 _ => return Err("Invalid simulation save: unknown expression operation.".into()),
             };
             let child_type = |child: usize| nodes[child].ty;
             let actual_type = match &op {
                 Op::Constant(value) => Some(value.ty()),
                 Op::Sensor(sensor) => Some(sensor.ty()),
-                Op::Pool(_) | Op::Built(_) => Some(Type::Number),
+                Op::Pool(_) | Op::Concentration(_) | Op::Built(_) => Some(Type::Number),
+                Op::Receptor(_, field) => Some(field.ty()),
                 Op::Register(register) => Some(register.ty),
                 Op::Populated(_) => Some(Type::Bool),
                 Op::Reference(child) => Some(child_type(*child)),
@@ -502,6 +539,28 @@ impl Program {
                 }
                 activity.push(root);
             }
+            let mut start = vec![None; definition.assemblies.len()];
+            let mut recycle = vec![None; definition.assemblies.len()];
+            if version >= 7 {
+                for slot in &mut start {
+                    *slot = r.option(nodes.len())?;
+                    if let Some(root) = *slot {
+                        ensure(
+                            nodes[root].ty == Type::Bool,
+                            "assembly start condition is not boolean",
+                        )?;
+                    }
+                }
+                for slot in &mut recycle {
+                    *slot = r.option(nodes.len())?;
+                    if let Some(root) = *slot {
+                        ensure(
+                            nodes[root].ty.numeric(),
+                            "assembly recycling is not numeric",
+                        )?;
+                    }
+                }
+            }
             return Ok(Self::from_cellular(
                 nodes,
                 bindings,
@@ -509,6 +568,8 @@ impl Program {
                     definition,
                     genes,
                     activity,
+                    start,
+                    recycle,
                 },
             ));
         }

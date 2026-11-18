@@ -21,6 +21,8 @@ pub(super) struct CellularGraph {
     pub definition: CellularProgram,
     pub genes: Vec<GeneRoot>,
     pub activity: Vec<Option<usize>>,
+    pub start: Vec<Option<usize>>,
+    pub recycle: Vec<Option<usize>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -30,12 +32,21 @@ pub(super) struct GeneLocation {
     pub expression: Location,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct GeometryLocation {
+    pub close: Location,
+    pub at: Option<Location>,
+    pub direction: Option<Location>,
+}
+
 impl CellularGraph {
     pub(super) fn roots(&self) -> Vec<usize> {
         self.genes
             .iter()
             .map(|gene| gene.root)
             .chain(self.activity.iter().flatten().copied())
+            .chain(self.start.iter().flatten().copied())
+            .chain(self.recycle.iter().flatten().copied())
             .collect()
     }
 
@@ -45,6 +56,8 @@ impl CellularGraph {
             + self.definition.assemblies.capacity() * std::mem::size_of::<AssemblyDef>()
             + self.genes.capacity() * std::mem::size_of::<GeneRoot>()
             + self.activity.capacity() * std::mem::size_of::<Option<usize>>()
+            + self.start.capacity() * std::mem::size_of::<Option<usize>>()
+            + self.recycle.capacity() * std::mem::size_of::<Option<usize>>()
             + self
                 .definition
                 .products
@@ -63,29 +76,56 @@ impl CellularGraph {
     }
 
     pub(super) fn controls(&self, roots: &[usize], values: &[Value]) -> CellularControls {
-        let mut expression = vec![0.0; self.definition.products.len()];
+        let mut result = CellularControls::default();
+        self.controls_into(roots, values, &mut result);
+        result
+    }
+
+    pub(super) fn controls_into(
+        &self,
+        roots: &[usize],
+        values: &[Value],
+        result: &mut CellularControls,
+    ) {
+        result
+            .expression
+            .resize(self.definition.products.len(), 0.0);
+        result.expression.fill(0.0);
         for (gene, &root) in self.genes.iter().zip(roots) {
             // Each gene has a bounded effort, while gene duplication changes
             // its share of the cell's finite synthesis budget.
-            expression[gene.product] += values[root].number().clamp(0.0, 1.0);
+            result.expression[gene.product] += values[root].number().clamp(0.0, 1.0);
         }
         let mut next = self.genes.len();
-        let activity = self
-            .activity
-            .iter()
-            .map(|root| {
-                if root.is_some() {
-                    let result = values[roots[next]].number().clamp(0.0, 1.0);
-                    next += 1;
-                    result
-                } else {
-                    1.0
-                }
-            })
-            .collect();
-        CellularControls {
-            expression,
-            activity,
+        result.activity.clear();
+        for root in &self.activity {
+            result.activity.push(if root.is_some() {
+                let value = values[roots[next]].number().clamp(0.0, 1.0);
+                next += 1;
+                value
+            } else {
+                1.0
+            });
+        }
+        result.start.clear();
+        for root in &self.start {
+            result.start.push(if root.is_some() {
+                let value = values[roots[next]].boolean();
+                next += 1;
+                value
+            } else {
+                true
+            });
+        }
+        result.recycle.clear();
+        for root in &self.recycle {
+            result.recycle.push(if root.is_some() {
+                let value = values[roots[next]].number().clamp(0.0, 1.0);
+                next += 1;
+                value
+            } else {
+                0.0
+            });
         }
     }
 
@@ -100,14 +140,30 @@ impl CellularGraph {
                     .zip(&self.activity)
                     .map(|(assembly, root)| (format!("activity.{}", assembly.name), *root)),
             )
+            .chain(
+                self.definition
+                    .assemblies
+                    .iter()
+                    .zip(&self.start)
+                    .map(|(assembly, root)| (format!("start_when.{}", assembly.name), *root)),
+            )
+            .chain(
+                self.definition
+                    .assemblies
+                    .iter()
+                    .zip(&self.recycle)
+                    .map(|(assembly, root)| (format!("recycle.{}", assembly.name), *root)),
+            )
             .collect()
     }
 
     pub(super) fn graph_roots_json(&self) -> String {
         self.named_roots().iter().map(|(name, root)| {
             let value = root.map_or_else(|| "null".to_string(), |i| i.to_string());
-            let default = if root.is_some() { "null" } else { "\"1\"" };
-            format!("{{\"id\":{},\"kind\":\"output\",\"name\":{},\"type\":\"scalar\",\"value\":{value},\"guard\":null,\"default\":{default}}}",
+            let ty = if name.starts_with("start_when.") { "boolean" } else { "scalar" };
+            let default = if root.is_some() { "null" } else if name.starts_with("start_when.") { "\"true\"" }
+                else if name.starts_with("recycle.") { "\"0\"" } else { "\"1\"" };
+            format!("{{\"id\":{},\"kind\":\"output\",\"name\":{},\"type\":\"{ty}\",\"value\":{value},\"guard\":null,\"default\":{default}}}",
                 quote(&format!("output:{name}")), quote(name))
         }).collect::<Vec<_>>().join(",")
     }
@@ -136,6 +192,19 @@ impl Sensor {
 }
 
 impl Program {
+    /// Additive v7 authored metadata, used only to migrate earlier registry
+    /// memory budgets. The old source and physical recipes retain their meaning.
+    pub(crate) fn cellular_control_overhead_bytes(&self) -> usize {
+        self.cellular.as_ref().map_or(0, |graph| {
+            2 * std::mem::size_of::<Vec<Option<usize>>>()
+                + (graph.start.capacity() + graph.recycle.capacity())
+                    * std::mem::size_of::<Option<usize>>()
+        })
+    }
+
+    pub fn receptor_reads(&self) -> &[(usize, ReceptorField)] {
+        &self.execution.receptor_reads
+    }
     pub fn cellular(&self) -> Option<&CellularProgram> {
         self.cellular.as_ref().map(|graph| &graph.definition)
     }
@@ -173,6 +242,19 @@ impl Program {
             }
         } else {
             Self::outputs_for(&self.execution.output_roots, values)
+        }
+    }
+
+    pub(super) fn evaluated_outputs_into(&self, values: &[Value], output: &mut Outputs) {
+        if let Some(cellular) = &self.cellular {
+            let mut controls = output.cellular.take().unwrap_or_default();
+            cellular.controls_into(&self.execution.extra_roots, values, &mut controls);
+            *output = Outputs {
+                cellular: Some(controls),
+                ..Outputs::default()
+            };
+        } else {
+            *output = Self::outputs_for(&self.execution.output_roots, values);
         }
     }
 }
@@ -352,6 +434,8 @@ impl Parser {
         let mut products = Vec::new();
         let mut assemblies = Vec::new();
         let mut activity = Vec::new();
+        let mut start = Vec::new();
+        let mut recycle = Vec::new();
         let mut assembly_locations = Vec::new();
         let mut genes = Vec::new();
         let mut gene_names = HashSet::new();
@@ -360,7 +444,7 @@ impl Parser {
             let Kind::Name(keyword) = &declaration.kind else {
                 return Err(declaration
                     .location
-                    .error("expected product, gene, assembly, or let declaration."));
+                    .error("expected product, gene, assembly, fn, or let declaration."));
             };
             match keyword.as_str() {
                 "product" => {
@@ -415,6 +499,8 @@ impl Parser {
                     let mut parts = Vec::new();
                     let mut fields = HashSet::new();
                     let (mut at, mut direction, mut active) = (0.0, 0.0, None);
+                    let (mut start_root, mut recycle_root) = (None, None);
+                    let (mut at_location, mut direction_location) = (None, None);
                     while !matches!(self.peek().kind, Kind::RightBrace | Kind::End) {
                         let field = self.take();
                         let Kind::Name(field_name) = &field.kind else { return Err(field.location.error("expected a product name, activity, at, or direction.")); };
@@ -426,10 +512,23 @@ impl Parser {
                                 self.assignable(root, Type::Number, field.location)?;
                                 active = Some(root);
                             }
+                            "start_when" => {
+                                let root = self.expression(0, 0)?;
+                                self.require(root, Type::Bool, field.location)?;
+                                start_root = Some(root);
+                            }
+                            "recycle" => {
+                                let root = self.expression(0, 0)?;
+                                self.assignable(root, Type::Number, field.location)?;
+                                recycle_root = Some(root);
+                            }
                             "at" | "direction" => {
+                                let value_start = self.peek().location;
                                 let value = self.material_number()?;
+                                let value_span = value_start.through(self.tokens[self.position - 1].location.to);
                                 if value.abs() > MAX_SIGNAL { return Err(field.location.error("assembly angles exceed the numeric limit.")); }
-                                if field_name == "at" { at = value; } else { direction = value; }
+                                if field_name == "at" { at = value; at_location = Some(value_span); }
+                                else { direction = value; direction_location = Some(value_span); }
                             }
                             _ => {
                                 let product = self.product_names.get(field_name).copied().ok_or_else(|| field.location.error(format!("unknown recipe product '{field_name}'.")))?;
@@ -442,16 +541,21 @@ impl Parser {
                         }
                         self.expect(Kind::Semicolon, "';' after assembly field")?;
                     }
+                    let close = self.peek().location;
                     self.expect(Kind::RightBrace, "'}' after assembly recipe")?;
                     if self.peek().kind == Kind::Semicolon { self.take(); }
                     if self.assembly_names.get(&name) != Some(&assemblies.len()) { return Err(location.error("assembly declaration order is invalid.")); }
                     assemblies.push(AssemblyDef { name, kind, parts, at, direction });
                     assembly_locations.push(location);
                     activity.push(active);
+                    start.push(start_root);
+                    recycle.push(recycle_root);
+                    self.geometry_locations.push(GeometryLocation { close, at: at_location, direction: direction_location });
                 }
+                "fn" => self.function_declaration(declaration.location)?,
                 "let" => {
                     let (name, location) = self.declaration_name("signal")?;
-                    if self.bindings.contains_key(&name) { return Err(location.error(format!("signal '{name}' is already defined; bindings are immutable."))); }
+                    if self.bindings.contains_key(&name) || self.functions.contains_key(&name) { return Err(location.error(format!("signal '{name}' is already defined; bindings are immutable."))); }
                     self.expect(Kind::Assign, "'=' after signal name")?;
                     let node = self.expression(0, 0)?;
                     self.expect(Kind::Semicolon, "';' after signal expression")?;
@@ -466,6 +570,15 @@ impl Parser {
             products,
             assemblies,
         };
+        for &(index, field, location) in &self.receptor_references {
+            if !ReceptorField::for_kind(definition.assemblies[index].kind).contains(&field) {
+                return Err(location.error(format!(
+                    "assembly '{}' does not measure '{}'.",
+                    definition.assemblies[index].name,
+                    field.name()
+                )));
+            }
+        }
         for (assembly, location) in definition.assemblies.iter().zip(assembly_locations) {
             // Report recipe failures at their declaration, not at end-of-file.
             let single = CellularProgram {
@@ -484,6 +597,8 @@ impl Parser {
                 definition,
                 genes,
                 activity,
+                start,
+                recycle,
             },
         ))
     }
@@ -527,8 +642,12 @@ pub(super) fn schema_json() -> String {
                 .map(|role| quote(role.name()))
                 .collect::<Vec<_>>()
                 .join(",");
+            let fields = ReceptorField::for_kind(AssemblyKind::Mechanism(*kind)).iter().map(|field| {
+                format!("{{\"name\":{},\"type\":{},\"requiresValid\":{}}}", quote(field.name()), quote(field.ty().label()),
+                    !matches!(field, ReceptorField::Available | ReceptorField::Valid | ReceptorField::Flow | ReceptorField::Speed | ReceptorField::Bearing))
+            }).collect::<Vec<_>>().join(",");
             format!(
-                "{{\"name\":{},\"constructor\":{},\"target\":{},\"requiredRoles\":[{roles}],\"description\":{}}}",
+                "{{\"name\":{},\"constructor\":{},\"target\":{},\"requiredRoles\":[{roles}],\"description\":{},\"receptorFields\":[{fields}]}}",
                 quote(kind.name()),
                 quote(kind.constructor()),
                 kind.target().map_or_else(|| "null".into(), quote),
@@ -583,7 +702,7 @@ pub(super) fn schema_json() -> String {
         })
         .collect::<Vec<_>>()
         .join(",");
-    format!("{{\"marker\":\"cellular;\",\"products\":[{products}],\"assemblies\":[{assemblies}],\"mechanisms\":[{mechanisms}],\"reads\":[{reads}],\"maxProducts\":{MAX_PRODUCTS},\"maxAssemblies\":{MAX_ASSEMBLIES},\"maxGenes\":{MAX_GENES}}}")
+    format!("{{\"marker\":\"cellular;\",\"products\":[{products}],\"assemblies\":[{assemblies}],\"mechanisms\":[{mechanisms}],\"reads\":[{reads}],\"maxProducts\":{MAX_PRODUCTS},\"maxAssemblies\":{MAX_ASSEMBLIES},\"maxGenes\":{MAX_GENES},\"recipeControls\":[{{\"name\":\"activity\",\"type\":\"scalar\",\"default\":1}},{{\"name\":\"start_when\",\"type\":\"boolean\",\"default\":true}},{{\"name\":\"recycle\",\"type\":\"scalar\",\"default\":0}}],\"concentration\":\"pool mass / body.area\",\"userFunctions\":{{\"keyword\":\"fn\",\"maxParameters\":8,\"parameterType\":\"scalar\",\"maxFunctions\":64,\"recursive\":false}}}}")
 }
 
 #[cfg(test)]
@@ -862,7 +981,15 @@ assembly Swim: flagellum {
         let original = Program::compile(SWIMMER).unwrap();
         let mut source = SWIMMER.to_string();
         for seed in 1..=120 {
-            let Some(mutation) = Program::mutate_source(&source, seed, MutationKind::Any) else {
+            let kinds = [
+                MutationKind::Constant,
+                MutationKind::Expression,
+                MutationKind::Reference,
+                MutationKind::GeneSilence,
+                MutationKind::GeneDuplicate,
+            ];
+            let kind = kinds[seed as usize % kinds.len()];
+            let Some(mutation) = Program::mutate_source(&source, seed, kind) else {
                 continue;
             };
             assert_eq!(mutation.program.cellular(), original.cellular());
@@ -872,7 +999,7 @@ assembly Swim: flagellum {
                 .iter()
                 .any(|node| matches!(node.op, Op::Register(_) | Op::Populated(_))));
             assert!(mutation.program.writes.is_empty());
-            let again = Program::mutate_source(&source, seed, MutationKind::Any).unwrap();
+            let again = Program::mutate_source(&source, seed, kind).unwrap();
             assert_eq!(mutation.source, again.source);
             let output = mutation.program.evaluate(&inputs()).cellular.unwrap();
             assert!(output.expression.iter().all(|v| v.is_finite() && *v >= 0.0));
@@ -1044,7 +1171,8 @@ assembly Digest: digest(tissue) { Catalyst: 0.04; activity: if gut.tissue.energy
         let mut writer = Writer::new();
         program.write_checkpoint(&mut writer);
         assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 5).is_err());
-        let restored = Program::read_checkpoint_version(&mut Reader::new(&writer.0), 6).unwrap();
+        assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 6).is_err());
+        let restored = Program::read_checkpoint_version(&mut Reader::new(&writer.0), 7).unwrap();
         assert_eq!(program.cellular(), restored.cellular());
         assert_eq!(program.evaluate(&inputs()), restored.evaluate(&inputs()));
         assert!(restored.checkpoint_source_matches(&program, &source, true));
@@ -1058,12 +1186,21 @@ assembly Digest: digest(tissue) { Catalyst: 0.04; activity: if gut.tissue.energy
     }
 
     #[test]
-    fn mechanism_mutations_keep_targets_and_physical_recipes_exact() {
+    fn regulatory_mutations_keep_targets_and_physical_recipes_exact() {
         let source = all_mechanisms_source();
         let original = Program::compile(&source).unwrap();
         let mut mutated = source;
         for seed in 1..=40 {
-            let Some(result) = Program::mutate_source(&mutated, seed, MutationKind::Any) else {
+            let kinds = [
+                MutationKind::Constant,
+                MutationKind::Expression,
+                MutationKind::Reference,
+                MutationKind::GeneSilence,
+                MutationKind::GeneDuplicate,
+            ];
+            let Some(result) =
+                Program::mutate_source(&mutated, seed, kinds[seed as usize % kinds.len()])
+            else {
                 continue;
             };
             assert_eq!(result.program.cellular(), original.cellular());

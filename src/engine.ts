@@ -10,7 +10,7 @@ export const MECHANISM_KINDS = [
   'support()', 'translate()', 'store(energy)', 'store(mineral)', 'store(food)', 'harvest(light)',
   'import(mineral)', 'import(particle)', 'engulf()', 'digest(exudate)', 'digest(tissue)', 'digest(waste)',
   'propel()', 'pierce()', 'shield()', 'repair()', 'sense(light)', 'sense(heat)', 'sense(chemical)',
-  'sense(contact)', 'sense(optical)', 'grow()', 'replicate()', 'constrict()',
+  'sense(contact)', 'sense(optical)', 'grow()', 'replicate()', 'constrict()', 'recycle()',
 ] as const;
 export type MechanismKind = typeof MECHANISM_KINDS[number];
 export type CellularAssemblyKind = OrganelleKind | 'membrane' | 'replicator' | 'constrictor' | MechanismKind;
@@ -21,6 +21,7 @@ export interface CellularProduct {
 export interface CellularRecipe {
   name:string;kind:CellularAssemblyKind;requiredMass:number;at:number;direction:number;
   components:{name:string;role:ProductRole;requiredMass:number}[];
+  startAllowed?:boolean;recycleRequested?:number;recycleRate?:number;
 }
 export interface CellularAssembly extends CellularRecipe {
   id:number;mass:number;functionalMass:number;complete:boolean;integrity:number;activity:number;
@@ -56,6 +57,9 @@ export function validateBodyInspection(value: unknown, expectedCellId: number): 
     const name=(n:unknown):boolean=>typeof n==='string' && /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(n);
     const recipe=(r:CellularRecipe):boolean=>Boolean(r) && name(r.name) && (kind(r.kind)||['membrane','replicator','constrictor'].includes(r.kind)||MECHANISM_KINDS.includes(r.kind as MechanismKind))
       && finite(r.requiredMass) && angle(r.at) && angle(r.direction) && Array.isArray(r.components) && r.components.length<=64
+      && (r.startAllowed===undefined || typeof r.startAllowed==='boolean')
+      && (r.recycleRequested===undefined || finite(r.recycleRequested) && r.recycleRequested<=1)
+      && (r.recycleRate===undefined || finite(r.recycleRate))
       && r.components.every(part=>part && name(part.name) && roles.has(part.role) && finite(part.requiredMass));
     if (!Array.isArray(cellular.products) || cellular.products.length>1024
       || !cellular.products.every(p=>p && name(p.name) && roles.has(p.role) && typeof p.current==='boolean'
@@ -73,9 +77,12 @@ export function validateBodyInspection(value: unknown, expectedCellId: number): 
 }
 export interface LanguageSchema {
   version:3; signals:{name:string;type:GenomeValueType}[]; outputs:{name:string;type:GenomeValueType;required:boolean;default:GenomeValue}[];
+  functions?:{name:string;arity:number}[];
   maxNodes:number;maxSourceBytes:number;registersPerType:number;
   cellular?: { marker:'cellular;'; products:{name:string;arguments:string[]}[]; assemblies:{name:string;requiredRoles:string[]}[];
-    mechanisms?:{name:string;constructor:string;target:string|null;requiredRoles:string[];description:string}[];
+    mechanisms?:{name:string;constructor:string;target:string|null;requiredRoles:string[];description:string;receptorFields?:{name:string;type:GenomeValueType;requiresValid:boolean}[]}[];
+    recipeControls?:{name:string;type:GenomeValueType;default:GenomeValue}[];
+    concentration?:string;userFunctions?:{keyword:'fn';maxParameters:number;parameterType:'scalar';maxFunctions:number;recursive:false};
     reads:{name:string;type:GenomeValueType}[];maxProducts:number;maxAssemblies:number;maxGenes:number };
 }
 export interface Cell {
@@ -159,8 +166,8 @@ export function validateGenomeEvaluation(value: unknown, expectedCellId?: number
     || new TextEncoder().encode(trace.source).length > MAX_PROGRAM_BYTES
     || !Array.isArray(trace.expressions) || (!cellular && !trace.expressions.length) || trace.expressions.length > 8192
     || !Array.isArray(trace.bindings) || trace.bindings.length > 8192
-    || !Array.isArray(trace.signals) || (cellular ? trace.signals.length > READ_SIGNAL_COUNT + 128 : trace.signals.length !== READ_SIGNAL_COUNT)
-    || !Array.isArray(trace.outputs) || (cellular ? trace.outputs.length > 320 : trace.outputs.length !== WRITE_SIGNAL_COUNT)
+    || !Array.isArray(trace.signals) || (cellular ? trace.signals.length > READ_SIGNAL_COUNT + 64 * 3 + 64 * 9 : trace.signals.length !== READ_SIGNAL_COUNT)
+    || !Array.isArray(trace.outputs) || (cellular ? trace.outputs.length > 256 + 64 * 3 : trace.outputs.length !== WRITE_SIGNAL_COUNT)
     || !Array.isArray(trace.writes) || trace.writes.length > (cellular ? 0 : 9990)) return fail();
   const range = (from: number, to: number): boolean => Number.isInteger(from) && Number.isInteger(to)
     && from >= 0 && to > from && to <= trace.source.length;
@@ -176,9 +183,13 @@ export function validateGenomeEvaluation(value: unknown, expectedCellId?: number
     }
   };
   const named = (item: GenomeSignalEvaluation): boolean => Boolean(item) && typeof item.name === 'string' && item.name.length > 0 && typed(item.type, item.value);
-  for (let id = 0; id < trace.expressions.length; id++) {
-    const expression = trace.expressions[id];
-    if (!expression || expression.id !== id || !range(expression.from, expression.to) || !typed(expression.type, expression.value)) return fail();
+  let previousExpressionId = -1;
+  for (const expression of trace.expressions) {
+    // Inlined function internals have graph IDs but no unambiguous authored
+    // source value. Their invocation result remains inspectable, leaving gaps.
+    if (!expression || !Number.isInteger(expression.id) || expression.id <= previousExpressionId || expression.id >= 8192
+      || !range(expression.from, expression.to) || !typed(expression.type, expression.value)) return fail();
+    previousExpressionId = expression.id;
   }
   for (const binding of trace.bindings) {
     if (!named(binding) || !range(binding.from, binding.to) || trace.source.slice(binding.from, binding.to) !== binding.name) return fail();
@@ -187,7 +198,8 @@ export function validateGenomeEvaluation(value: unknown, expectedCellId?: number
   const outputNames = new Set<string>();
   for (const output of trace.outputs) {
     if (!named(output) || outputNames.has(output.name)
-      || (cellular && (!/^(gene|activity)\.[A-Za-z_][A-Za-z0-9_]*$/.test(output.name) || output.type !== 'scalar'))
+      || (cellular && (!/^(gene|activity|start_when|recycle)\.[A-Za-z_][A-Za-z0-9_]*$/.test(output.name)
+        || output.type !== (output.name.startsWith('start_when.') ? 'boolean' : 'scalar')))
       || !((output.from === null && output.to === null)
         || (typeof output.from === 'number' && typeof output.to === 'number' && range(output.from, output.to)))) return fail();
     outputNames.add(output.name);
@@ -254,7 +266,7 @@ const READ_SIGNAL_COUNT = 169;
 const WRITE_SIGNAL_COUNT = 81;
 const CELL_STRIDE = 158;
 const FOOD_STRIDE = 5;
-export type MutationKind = 0 | 1 | 2 | 3 | 4 | 5;
+export type MutationKind = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 export interface GenomeRecord { source: string; parentId: number; mutationKind: MutationKind }
 export interface MutationResult { id: number; changed: boolean; reason: string }
 export interface WorldSnapshot {

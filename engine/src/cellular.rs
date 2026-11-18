@@ -6,10 +6,12 @@
 use crate::body::{
     Body, OrganelleKind, OrganelleSummary, WorkReport, CORE_MASS_PER_AREA, EMBODIED_FRACTION,
     FAMILY_COUNT, MAX_AREA, MIN_FUNCTIONAL_INTEGRITY, SCAFFOLD_ENERGY_PER_MASS,
-    SCAFFOLD_MASS_PER_AREA,
+    SCAFFOLD_MASS_PER_AREA, INTERNAL_PER_AREA, SURFACE_PER_RADIUS, PROTEIN_INTERNAL_FOOTPRINT,
 };
 use crate::checkpoint::{ensure, Reader, Result as CheckpointResult, Writer};
 use crate::material_allocation::{AllocationScratch, MaterialDemand};
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 pub const MAX_PRODUCTS: usize = 64;
 pub const MAX_ASSEMBLIES: usize = 64;
@@ -18,6 +20,8 @@ const MAX_INSTANCES: usize = 32768;
 const EPS: f64 = 1e-12;
 const TRANSLATION_WORK: f64 = 0.6;
 const INSTALLATION_WORK: f64 = 0.4;
+const RECYCLE_RATE: f64 = 0.8;
+const RECYCLE_ENERGY: f64 = 20.0;
 const REPLICA_MASS_PER_AREA: f64 = 0.01;
 const REPLICA_ENERGY_PER_MASS: f64 = 80.0;
 
@@ -95,23 +99,23 @@ pub enum MechanismKind {
     LightHarvest, MineralImport, ParticleCapture, Engulf,
     DigestExudate, DigestTissue, DigestWaste, Propulsion, Pierce, Shield,
     Repair, SenseLight, SenseHeat, SenseChemical, SenseContact, SenseOptical,
-    Grow, Replicate, Constrict,
+    Grow, Replicate, Constrict, Recycle,
 }
 impl MechanismKind {
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 25] = [
         Self::Support, Self::Translation, Self::EnergyStorage, Self::MineralStorage,
         Self::FoodStorage, Self::LightHarvest, Self::MineralImport, Self::ParticleCapture,
         Self::Engulf, Self::DigestExudate, Self::DigestTissue, Self::DigestWaste,
         Self::Propulsion, Self::Pierce, Self::Shield, Self::Repair, Self::SenseLight,
         Self::SenseHeat, Self::SenseChemical, Self::SenseContact, Self::SenseOptical,
-        Self::Grow, Self::Replicate, Self::Constrict,
+        Self::Grow, Self::Replicate, Self::Constrict, Self::Recycle,
     ];
     pub fn name(self) -> &'static str {
         ["support()", "translate()", "store(energy)", "store(mineral)", "store(food)",
          "harvest(light)", "import(mineral)", "import(particle)", "engulf()",
          "digest(exudate)", "digest(tissue)", "digest(waste)", "propel()", "pierce()",
          "shield()", "repair()", "sense(light)", "sense(heat)", "sense(chemical)",
-         "sense(contact)", "sense(optical)", "grow()", "replicate()", "constrict()"]
+         "sense(contact)", "sense(optical)", "grow()", "replicate()", "constrict()", "recycle()"]
             [self as usize]
     }
     pub fn from_name(name: &str) -> Option<Self> {
@@ -148,7 +152,8 @@ impl MechanismKind {
          "Detects visible objects in its viewing direction, subject to occlusion.",
          "Pays for additional envelope area; structural support must already exist.",
          "Pays for a material-bearing genome copy over time.",
-         "Performs paid constriction after replication and feasible division geometry."]
+         "Performs paid constriction after replication and feasible division geometry.",
+         "Dismantles selected machinery over time, recovering original ingredients with paid work."]
             [self as usize]
     }
     pub fn required_roles(self) -> &'static [ProductKind] {
@@ -161,7 +166,7 @@ impl MechanismKind {
             Self::MineralImport => &[Anchor, Transporter],
             Self::ParticleCapture => &[Anchor, Motor],
             Self::Engulf => &[Anchor, Motor, Membrane],
-            Self::DigestExudate | Self::DigestTissue | Self::DigestWaste | Self::Repair => &[Enzyme],
+            Self::DigestExudate | Self::DigestTissue | Self::DigestWaste | Self::Repair | Self::Recycle => &[Enzyme],
             Self::Propulsion => &[Anchor, Motor, Filament],
             Self::Pierce => &[Anchor, Filament, Enzyme],
             Self::SenseLight | Self::SenseOptical => &[Anchor, Receptor, Pigment],
@@ -175,17 +180,17 @@ impl MechanismKind {
     pub fn minimum_mass(self) -> f64 {
         [0.04, 0.02, 0.02, 0.02, 0.04, 0.04, 0.015, 0.015, 0.025,
          0.01, 0.01, 0.01, 0.025, 0.025, 0.02, 0.025, 0.01, 0.01,
-         0.015, 0.01, 0.02, 0.02, 0.02, 0.02][self as usize]
+         0.015, 0.01, 0.02, 0.02, 0.02, 0.02, 0.02][self as usize]
     }
     fn internal_footprint(self) -> f64 {
         [1.0, 1.0, 2.4, 2.4, 2.5, 1.35, 0.7, 0.8, 0.8,
          1.0, 1.0, 1.0, 0.65, 0.8, 0.35, 1.0, 0.8, 0.8,
-         1.0, 0.7, 1.3, 1.0, 1.0, 1.0][self as usize]
+         1.0, 0.7, 1.3, 1.0, 1.0, 1.0, 1.0][self as usize]
     }
     fn surface_footprint(self) -> f64 {
         [0.0, 0.0, 0.0, 0.0, 0.0, 0.55, 1.8, 2.2, 2.2,
          0.0, 0.0, 0.0, 1.5, 2.0, 3.0, 0.0, 1.2, 1.1,
-         1.5, 1.1, 2.0, 1.5, 0.0, 1.5][self as usize]
+         1.5, 1.1, 2.0, 1.5, 0.0, 1.5, 0.0][self as usize]
     }
 }
 
@@ -394,6 +399,10 @@ fn valid_name(name: &str) -> bool {
 pub struct CellularControls {
     pub expression: Vec<f64>,
     pub activity: Vec<f64>,
+    /// Initiation gates never suspend already installed ingredients.
+    pub start: Vec<bool>,
+    /// Paid disassembly effort, selecting physical recipes by declaration name.
+    pub recycle: Vec<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -439,6 +448,7 @@ impl Recipe {
     pub fn required_mass(&self) -> f64 {
         self.parts.iter().map(|p| p.required_mass).sum()
     }
+    #[cfg(test)]
     fn matches(&self, program: &CellularProgram, def: &AssemblyDef) -> bool {
         self.name == def.name
             && self.kind == def.kind
@@ -496,6 +506,244 @@ impl AssemblyInstance {
     }
 }
 
+/// A definition identity compares every physical attribute. Names remain labels;
+/// a renamed or changed product cannot commandeer previously synthesized matter.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct ProductIdentity(String, u8, u64);
+fn identity_number(value: f64) -> u64 {
+    // The physical definitions use numeric equality, where +0 and -0 are equal.
+    if value == 0.0 { 0 } else { value.to_bits() }
+}
+impl ProductIdentity {
+    fn new(product: &ProductDef) -> Self {
+        Self(product.name.clone(), product.kind as u8, identity_number(product.half_life))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct RecipeIdentity {
+    name: String,
+    kind: u8,
+    at: u64,
+    direction: u64,
+    parts: Vec<(ProductIdentity, u64)>,
+}
+impl RecipeIdentity {
+    fn kind(kind: AssemblyKind) -> u8 {
+        match kind {
+            AssemblyKind::Organelle(kind) => kind as u8,
+            AssemblyKind::Membrane => 16,
+            AssemblyKind::Replicator => 17,
+            AssemblyKind::Constrictor => 18,
+            AssemblyKind::Mechanism(kind) => 19 + kind as u8,
+        }
+    }
+    fn from_definition(program: &CellularProgram, def: &AssemblyDef) -> Self {
+        Self {
+            name: def.name.clone(), kind: Self::kind(def.kind),
+            at: identity_number(def.at), direction: identity_number(def.direction),
+            parts: def.parts.iter().map(|&(i, mass)|
+                (ProductIdentity::new(&program.products[i]), identity_number(mass))).collect(),
+        }
+    }
+    fn from_recipe(recipe: &Recipe) -> Self {
+        Self {
+            name: recipe.name.clone(), kind: Self::kind(recipe.kind),
+            at: identity_number(recipe.at), direction: identity_number(recipe.direction),
+            parts: recipe.parts.iter().map(|p|
+                (ProductIdentity::new(&p.product), identity_number(p.required_mass))).collect(),
+        }
+    }
+}
+
+/// These tables bind immutable physical identities to the current program.
+/// Mass, damage, completion and activity are deliberately not cached here.
+#[derive(Debug, Default)]
+struct BindingCache {
+    program: Option<CellularProgram>,
+    pool_count: usize,
+    instance_count: usize,
+    next_id: u32,
+    product_pool: Vec<Option<usize>>,
+    pool_current: Vec<bool>,
+    instance_definition: Vec<Option<usize>>,
+    instance_selector: Vec<Option<usize>>,
+    ingredient_pool: Vec<Vec<Option<usize>>>,
+    definition_instances: Vec<Vec<usize>>,
+}
+impl BindingCache {
+    fn ensure(&mut self, program: &CellularProgram, pools: &[ProductPool], assemblies: &[AssemblyInstance], next_id: u32) {
+        if self.program.as_ref() == Some(program)
+            && self.pool_count == pools.len()
+            && self.instance_count == assemblies.len()
+            && self.next_id == next_id
+        { return; }
+        if let Some(cached) = &mut self.program { cached.clone_from(program); }
+        else { self.program = Some(program.clone()); }
+        self.pool_count = pools.len();
+        self.instance_count = assemblies.len();
+        self.next_id = next_id;
+        let stocks: HashMap<_, _> = pools.iter().enumerate()
+            .map(|(i, p)| (ProductIdentity::new(&p.product), i)).collect();
+        let recipes: HashMap<_, _> = program.assemblies.iter().enumerate()
+            .map(|(i, d)| (RecipeIdentity::from_definition(program, d), i)).collect();
+        let selectors: HashMap<_, _> = program.assemblies.iter().enumerate()
+            .map(|(i, d)| (d.name.as_str(), i)).collect();
+        self.product_pool.clear();
+        self.product_pool.extend(program.products.iter().map(|p| stocks.get(&ProductIdentity::new(p)).copied()));
+        self.pool_current.resize(pools.len(), false);
+        self.pool_current.fill(false);
+        for &pool in self.product_pool.iter().flatten() { self.pool_current[pool] = true; }
+        self.instance_definition.clear();
+        self.instance_selector.clear();
+        self.ingredient_pool.resize_with(assemblies.len(), Vec::new);
+        self.definition_instances.resize_with(program.assemblies.len(), Vec::new);
+        for instances in &mut self.definition_instances { instances.clear(); }
+        for (i, assembly) in assemblies.iter().enumerate() {
+            let definition = recipes.get(&RecipeIdentity::from_recipe(&assembly.recipe)).copied();
+            self.instance_definition.push(definition);
+            self.instance_selector.push(selectors.get(assembly.recipe.name.as_str()).copied());
+            if let Some(definition) = definition { self.definition_instances[definition].push(i); }
+            let ingredients = &mut self.ingredient_pool[i];
+            ingredients.clear();
+            ingredients.extend(assembly.recipe.parts.iter().map(|p| stocks.get(&ProductIdentity::new(&p.product)).copied()));
+        }
+    }
+    fn invalidate(&mut self) {
+        self.next_id = 0;
+    }
+}
+
+/// Derived lookup state is never checkpointed, compared or inherited as biology.
+#[derive(Debug, Default)]
+pub struct DerivedBindings(RefCell<BindingCache>);
+impl Clone for DerivedBindings {
+    fn clone(&self) -> Self { Self::default() }
+}
+impl PartialEq for DerivedBindings {
+    fn eq(&self, _other: &Self) -> bool { true }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RecipeControlReport {
+    pub name: String,
+    pub start_allowed: bool,
+    pub recycle_requested: f64,
+    /// Actual mass dismantled per second during the last work phase.
+    pub recycle_rate: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct AssemblyMeasures {
+    mass: f64,
+    functional: f64,
+    complete: bool,
+}
+impl AssemblyMeasures {
+    fn of(assembly: &AssemblyInstance) -> Self {
+        let mut mass = -0.0;
+        let mut complete = true;
+        for (ingredient, part) in assembly.ingredients.iter().zip(&assembly.recipe.parts) {
+            mass += ingredient.mass;
+            complete &= ingredient.mass + EPS >= part.required_mass;
+        }
+        Self { mass, complete, functional: if complete && assembly.integrity >= MIN_FUNCTIONAL_INTEGRITY {
+            mass * assembly.integrity
+        } else { 0.0 } }
+    }
+}
+
+/// Valid only within one work phase, before anything is built or dismantled.
+struct WorkSnapshot {
+    energy_capacity: f64,
+    free_space: f64,
+    free_surface: f64,
+    support_area: f64,
+    legacy_core: f64,
+    active: [f64; FAMILY_COUNT],
+    membrane: f64,
+    replicator: f64,
+    constrictor: f64,
+    translation: f64,
+    recycling: f64,
+    damaged: f64,
+}
+impl Body {
+    fn work_snapshot(&self, measures: &mut Vec<AssemblyMeasures>) -> WorkSnapshot {
+        let mut family = [0.0; FAMILY_COUNT];
+        let mut organ_space = -0.0;
+        let mut organ_surface = -0.0;
+        let mut organ_damage = -0.0;
+        let mut legacy_core = -0.0;
+        for organ in &self.organs {
+            let functional = organ.functional_mass();
+            family[organ.kind as usize] += functional;
+            if organ.kind == OrganelleKind::Core { legacy_core += functional; }
+            organ_space += organ.internal_space();
+            organ_surface += organ.surface_space();
+            organ_damage += organ.mass * (1.0 - organ.integrity);
+        }
+        let mut result = WorkSnapshot {
+            energy_capacity: 0.0, free_space: 0.0, free_surface: 0.0, support_area: 0.0,
+            legacy_core, active: [0.0; FAMILY_COUNT], membrane: 0.0, replicator: 0.0,
+            constrictor: 0.0, translation: 0.0, recycling: 0.0, damaged: 0.0,
+        };
+        measures.clear();
+        let mut assembly_space = -0.0;
+        let mut assembly_surface = -0.0;
+        let mut assembly_damage = -0.0;
+        let mut support = legacy_core;
+        let mut primitive_support = -0.0;
+        let mut cell_space = 0.0;
+        if let Some(state) = &self.cellular {
+            measures.extend(state.assemblies.iter().map(AssemblyMeasures::of));
+            for (assembly, measure) in state.assemblies.iter().zip(measures.iter()) {
+                assembly_space += measure.mass * assembly.recipe.kind.internal_footprint();
+                assembly_surface += measure.mass * assembly.recipe.kind.surface_footprint();
+                assembly_damage += measure.mass * (1.0 - assembly.integrity);
+                let active = measure.functional * assembly.activity;
+                match assembly.recipe.kind {
+                    AssemblyKind::Organelle(kind) => {
+                        family[kind as usize] += measure.functional;
+                        result.active[kind as usize] += active;
+                        if kind == OrganelleKind::Core { support += measure.functional; }
+                    }
+                    AssemblyKind::Membrane => result.membrane += active,
+                    AssemblyKind::Replicator => result.replicator += active,
+                    AssemblyKind::Constrictor => result.constrictor += active,
+                    AssemblyKind::Mechanism(kind) => match kind {
+                        MechanismKind::Support => primitive_support += measure.functional,
+                        MechanismKind::Translation => result.translation += active,
+                        MechanismKind::Grow => result.membrane += active,
+                        MechanismKind::Replicate => result.replicator += active,
+                        MechanismKind::Constrict => result.constrictor += active,
+                        MechanismKind::Repair => result.active[OrganelleKind::Repair as usize] += active,
+                        MechanismKind::Recycle => result.recycling += active,
+                        _ => {},
+                    },
+                }
+            }
+            cell_space = state.stock_mass() + state.genetic_mass() + assembly_space;
+        }
+        // Keep the legacy grouping and the primitive addition order bit exact.
+        result.energy_capacity = 2000.0 * family[OrganelleKind::Core as usize]
+            + 600.0 * family[OrganelleKind::Reserve as usize];
+        if let Some(state) = &self.cellular {
+            for (assembly, measure) in state.assemblies.iter().zip(measures.iter()) {
+                if assembly.recipe.kind == AssemblyKind::Mechanism(MechanismKind::EnergyStorage) {
+                    result.energy_capacity += 2000.0 * measure.functional;
+                }
+            }
+        }
+        result.free_space = (INTERNAL_PER_AREA * self.area - (organ_space
+            + self.precursor_mass.iter().sum::<f64>() * PROTEIN_INTERNAL_FOOTPRINT + cell_space)).max(0.0);
+        result.free_surface = (SURFACE_PER_RADIUS * self.area.sqrt() - (organ_surface + assembly_surface)).max(0.0);
+        result.support_area = (support + primitive_support) / CORE_MASS_PER_AREA;
+        result.damaged = organ_damage + assembly_damage;
+        result
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct CellularState {
     pub pools: Vec<ProductPool>,
@@ -507,6 +755,8 @@ pub struct CellularState {
     pub replica_mass: f64,
     pub replica_energy: f64,
     pub constriction: f64,
+    pub control_reports: Vec<RecipeControlReport>,
+    pub bindings: DerivedBindings,
 }
 impl Default for CellularState {
     fn default() -> Self {
@@ -519,6 +769,8 @@ impl Default for CellularState {
             replica_mass: 0.0,
             replica_energy: 0.0,
             constriction: 0.0,
+            control_reports: Vec::new(),
+            bindings: DerivedBindings::default(),
         }
     }
 }
@@ -581,7 +833,7 @@ impl CellularState {
                 SenseChemical => cap.chemical_sensing += active,
                 SenseContact => cap.mechanical_sensing += active,
                 SenseOptical => cap.optical_sensing += active,
-                Support | Grow | Replicate | Constrict => {},
+                Support | Grow | Replicate | Constrict | Recycle => {},
             }
         }
         cap.optical_range = if cap.optical_sensing > 0.0 {
@@ -701,6 +953,10 @@ impl CellularState {
             replica_mass: 0.0,
             replica_energy: 0.0,
             constriction: 0.0,
+            control_reports: self.control_reports.iter().map(|report| RecipeControlReport {
+                recycle_rate: 0.0, ..report.clone()
+            }).collect(),
+            bindings: DerivedBindings::default(),
         }
     }
     pub(crate) fn validate(&self) -> CheckpointResult<()> {
@@ -796,6 +1052,14 @@ impl CellularState {
             self.constriction.is_finite() && (0.0..=1.0).contains(&self.constriction),
             "invalid constriction progress",
         )?;
+        ensure(self.control_reports.len() <= MAX_ASSEMBLIES, "too many recipe control reports")?;
+        let mut names = std::collections::HashSet::new();
+        for report in &self.control_reports {
+            ensure(valid_name(&report.name) && names.insert(&report.name)
+                && report.recycle_requested.is_finite() && (0.0..=1.0).contains(&report.recycle_requested)
+                && report.recycle_rate.is_finite() && report.recycle_rate >= 0.0,
+                "invalid recipe control report")?;
+        }
         Ok(())
     }
     pub(crate) fn write_checkpoint(&self, writer: &mut Writer) {
@@ -848,6 +1112,13 @@ impl CellularState {
                 writer.f64(ingredient.embodied_energy);
             }
         }
+        writer.count(self.control_reports.len());
+        for report in &self.control_reports {
+            writer.text(&report.name);
+            writer.u8(u8::from(report.start_allowed));
+            writer.f64(report.recycle_requested);
+            writer.f64(report.recycle_rate);
+        }
     }
     pub(crate) fn read_checkpoint_version(reader: &mut Reader<'_>, version: u32) -> CheckpointResult<Self> {
         let mut state = Self {
@@ -878,6 +1149,7 @@ impl CellularState {
                 17 => AssemblyKind::Replicator,
                 18 => AssemblyKind::Constrictor,
                 value @ 19..=42 if version >= 6 => AssemblyKind::Mechanism(MechanismKind::ALL[(value - 19) as usize]),
+                43 if version >= 7 => AssemblyKind::Mechanism(MechanismKind::Recycle),
                 value => AssemblyKind::Organelle(
                     OrganelleKind::from_index(value as usize)
                         .ok_or("Invalid simulation save: unknown assembly family.")?,
@@ -913,6 +1185,21 @@ impl CellularState {
                 integrity,
                 activity,
             });
+        }
+        if version >= 7 {
+            let count = reader.count(MAX_ASSEMBLIES)?;
+            for _ in 0..count {
+                let name = reader.text(128)?;
+                let start_allowed = match reader.u8()? {
+                    0 => false, 1 => true,
+                    _ => return Err("Invalid simulation save: invalid assembly initiation flag.".into()),
+                };
+                state.control_reports.push(RecipeControlReport {
+                    name, start_allowed,
+                    recycle_requested: reader.f64()?,
+                    recycle_rate: reader.f64()?,
+                });
+            }
         }
         state.validate()?;
         Ok(state)
@@ -971,31 +1258,57 @@ fn effort(value: f64) -> f64 {
 impl Body {
     /// Gene inputs are a read-only snapshot, including no material from this tick.
     pub fn cellular_inputs(&self, program: &CellularProgram) -> (Vec<f64>, Vec<f64>) {
-        let products = program
-            .products
-            .iter()
-            .map(|def| {
-                self.cellular
-                    .as_ref()
-                    .and_then(|state| state.pools.iter().find(|pool| &pool.product == def))
-                    .map_or(0.0, |pool| pool.mass)
-            })
-            .collect();
-        let assemblies = program
-            .assemblies
-            .iter()
-            .map(|def| {
-                self.cellular.as_ref().map_or(0.0, |state| {
-                    state
-                        .assemblies
-                        .iter()
-                        .filter(|a| a.recipe.matches(program, def))
-                        .map(AssemblyInstance::functional_mass)
-                        .sum()
-                })
-            })
-            .collect();
+        let mut products = Vec::new();
+        let mut assemblies = Vec::new();
+        self.cellular_inputs_into(program, &mut products, &mut assemblies);
         (products, assemblies)
+    }
+
+    /// Retain the caller's buffers and resolve immutable physical identities only
+    /// when the program or its material records change. Derived tables never enter
+    /// checkpoints, so even first-time inspection leaves canonical state intact.
+    pub fn cellular_inputs_into(&self, program: &CellularProgram, products: &mut Vec<f64>, assemblies: &mut Vec<f64>) {
+        products.resize(program.products.len(), 0.0);
+        products.fill(0.0);
+        assemblies.resize(program.assemblies.len(), 0.0);
+        assemblies.fill(0.0);
+        let Some(state) = &self.cellular else { return; };
+        let mut bindings = state.bindings.0.borrow_mut();
+        bindings.ensure(program, &state.pools, &state.assemblies, state.next_assembly_id);
+        for (value, pool) in products.iter_mut().zip(&bindings.product_pool) {
+            if let Some(pool) = pool { *value = state.pools[*pool].mass; }
+        }
+        // Iterator Sum uses negative zero as the identity. Keep that exact old
+        // convention, as well as physical-instance order within every recipe.
+        assemblies.fill(-0.0);
+        for (assembly, definition) in state.assemblies.iter().zip(&bindings.instance_definition) {
+            if let Some(definition) = definition {
+                assemblies[*definition] += assembly.functional_mass();
+            }
+        }
+    }
+
+    /// Stored activity belongs to the preceding snapshot, making these values
+    /// suitable for both tick observation and immutable player inspection.
+    pub fn active_recipe_masses_into(&self, program: &CellularProgram, masses: &mut Vec<f64>) {
+        masses.resize(program.assemblies.len(), 0.0);
+        masses.fill(0.0);
+        let Some(state) = &self.cellular else { return; };
+        let mut bindings = state.bindings.0.borrow_mut();
+        bindings.ensure(program, &state.pools, &state.assemblies, state.next_assembly_id);
+        for (assembly, definition) in state.assemblies.iter().zip(&bindings.instance_definition) {
+            if let Some(definition) = definition {
+                masses[*definition] += assembly.functional_mass() * assembly.activity;
+            }
+        }
+    }
+
+    pub fn active_recipe_mass(&self, program: &CellularProgram, definition: usize) -> f64 {
+        let Some(state) = &self.cellular else { return 0.0; };
+        let mut bindings = state.bindings.0.borrow_mut();
+        bindings.ensure(program, &state.pools, &state.assemblies, state.next_assembly_id);
+        bindings.definition_instances.get(definition).map_or(0.0, |indices| indices.iter()
+            .map(|&i| state.assemblies[i].functional_mass() * state.assemblies[i].activity).sum())
     }
 
     /// Freeze activities of already installed machines before any construction.
@@ -1005,35 +1318,39 @@ impl Body {
         program: &CellularProgram,
         controls: &CellularControls,
     ) -> CellularActions {
-        let mut total = [0.0; FAMILY_COUNT];
-        for kind in OrganelleKind::ALL {
-            total[kind as usize] = self.functional_mass(kind);
+        // One phase-local pass replaces a complete body scan per legacy family.
+        // Preserve each family's original summation order, including its Sum identity.
+        let mut total = [-0.0; FAMILY_COUNT];
+        for organ in &self.organs {
+            total[organ.kind as usize] += organ.functional_mass();
         }
         let radius = self.radius();
         let area = self.area;
         let state = self.cellular.get_or_insert_with(CellularState::default);
         let mut active = [0.0; FAMILY_COUNT];
-        let mut mechanism_total = [0.0; 24];
-        let mut mechanism_active = [0.0; 24];
+        let mut mechanism_total = [0.0; 25];
+        let mut mechanism_active = [0.0; 25];
         let mut actions = CellularActions {
             scan_width: std::f64::consts::TAU,
             digest: [1.0; 3],
             ..CellularActions::default()
         };
         let mut optical_direction = [0.0; 2];
-        for assembly in &mut state.assemblies {
-            assembly.activity = program
-                .assemblies
-                .iter()
-                .position(|def| assembly.recipe.matches(program, def))
-                .map_or(0.0, |index| {
-                    effort(controls.activity.get(index).copied().unwrap_or(0.0))
-                });
-            let mass = assembly.functional_mass() * assembly.activity;
+        let mut bindings = state.bindings.0.borrow_mut();
+        bindings.ensure(program, &state.pools, &state.assemblies, state.next_assembly_id);
+        for (index, assembly) in state.assemblies.iter_mut().enumerate() {
+            assembly.activity = bindings.instance_definition[index].map_or(0.0, |definition| {
+                effort(controls.activity.get(definition).copied().unwrap_or(0.0))
+            });
+            let functional = assembly.functional_mass();
+            let mass = functional * assembly.activity;
             match assembly.recipe.kind {
-                AssemblyKind::Organelle(kind) => active[kind as usize] += mass,
+                AssemblyKind::Organelle(kind) => {
+                    total[kind as usize] += functional;
+                    active[kind as usize] += mass;
+                }
                 AssemblyKind::Mechanism(kind) => {
-                    mechanism_total[kind as usize] += assembly.functional_mass();
+                    mechanism_total[kind as usize] += functional;
                     mechanism_active[kind as usize] += mass;
                 }
                 _ => {},
@@ -1130,67 +1447,40 @@ impl Body {
         if !dt.is_finite() || dt <= 0.0 || !energy.is_finite() || !minerals.is_finite() {
             return report;
         }
-        let cap = self.capacities();
-        let space = self.space().free;
-        let surface = self.surface().free;
-        let core_area = self.support_mass() / CORE_MASS_PER_AREA;
+        let snapshot = self.work_snapshot(&mut scratch.measures);
         let mut state = self.cellular.take().unwrap_or_default();
-        let mut active = [0.0; FAMILY_COUNT];
-        let mut membrane = 0.0;
-        let mut replicator = 0.0;
-        let mut constrictor = 0.0;
-        let mut translation = 0.0;
-        for assembly in &state.assemblies {
-            let mass = assembly.functional_mass() * assembly.activity;
-            match assembly.recipe.kind {
-                AssemblyKind::Organelle(kind) => active[kind as usize] += mass,
-                AssemblyKind::Membrane => membrane += mass,
-                AssemblyKind::Replicator => replicator += mass,
-                AssemblyKind::Constrictor => constrictor += mass,
-                AssemblyKind::Mechanism(kind) => match kind {
-                    MechanismKind::Translation => translation += mass,
-                    MechanismKind::Grow => membrane += mass,
-                    MechanismKind::Replicate => replicator += mass,
-                    MechanismKind::Constrict => constrictor += mass,
-                    MechanismKind::Repair => active[OrganelleKind::Repair as usize] += mass,
-                    _ => {},
-                },
-            }
-        }
-        let core_work = 0.55
-            * (self
-                .organs
-                .iter()
-                .filter(|o| o.kind == OrganelleKind::Core)
-                .map(|o| o.functional_mass())
-                .sum::<f64>()
-                + active[OrganelleKind::Core as usize] + translation)
-            * dt;
-        let CellularWorkScratch { current_pools, stock, density, demands, allocation } = scratch;
+        let active = snapshot.active;
+        let membrane = snapshot.membrane;
+        let replicator = snapshot.replicator;
+        let constrictor = snapshot.constrictor;
+        let recycling = snapshot.recycling;
+        let core_work = 0.55 * (snapshot.legacy_core + active[OrganelleKind::Core as usize]
+            + snapshot.translation) * dt;
+        let CellularWorkScratch { current_pools, stock, density, demands, recycle_requests, measures, allocation } = scratch;
         current_pools.clear();
         stock.clear();
         density.clear();
         demands.clear();
-        for product in &program.products {
-            let index = state
-                .pools
-                .iter()
-                .position(|p| &p.product == product)
-                .or_else(|| {
-                    if state.pools.len() >= MAX_POOLS {
-                        None
-                    } else {
-                        state.pools.push(ProductPool {
-                            product: product.clone(),
-                            mass: 0.0,
-                            embodied_energy: 0.0,
-                            expression_requested: 0.0,
-                            expression_rate: 0.0,
-                        });
-                        Some(state.pools.len() - 1)
-                    }
+        recycle_requests.clear();
+        let mut bindings = state.bindings.0.borrow_mut();
+        bindings.ensure(program, &state.pools, &state.assemblies, state.next_assembly_id);
+        current_pools.extend_from_slice(&bindings.product_pool);
+        for (product, index) in program.products.iter().zip(current_pools.iter_mut()) {
+            if index.is_none() && state.pools.len() < MAX_POOLS {
+                *index = Some(state.pools.len());
+                state.pools.push(ProductPool {
+                    product: product.clone(), mass: 0.0, embodied_energy: 0.0,
+                    expression_requested: 0.0, expression_rate: 0.0,
                 });
-            current_pools.push(index);
+            }
+        }
+        bindings.ensure(program, &state.pools, &state.assemblies, state.next_assembly_id);
+        state.control_reports.resize_with(program.assemblies.len(), RecipeControlReport::default);
+        for (index, (report, recipe)) in state.control_reports.iter_mut().zip(&program.assemblies).enumerate() {
+            report.name.clone_from(&recipe.name);
+            report.start_allowed = controls.start.get(index).copied().unwrap_or(true);
+            report.recycle_requested = effort(controls.recycle.get(index).copied().unwrap_or(0.0));
+            report.recycle_rate = 0.0;
         }
         for pool in &mut state.pools {
             pool.expression_requested = 0.0;
@@ -1251,10 +1541,8 @@ impl Body {
         }
         let mut pending_ids = 0_u32;
         for (definition, def) in program.assemblies.iter().enumerate() {
-            if state
-                .assemblies
-                .iter()
-                .any(|a| !a.complete() && a.recipe.matches(program, def))
+            if !controls.start.get(definition).copied().unwrap_or(true)
+                || bindings.definition_instances[definition].iter().any(|&i| !measures[i].complete)
             {
                 continue;
             }
@@ -1285,9 +1573,31 @@ impl Body {
                 integrity: 1.0,
                 activity: effort(controls.activity.get(definition).copied().unwrap_or(0.0)),
             });
+            measures.push(AssemblyMeasures::default());
         }
+        bindings.ensure(program, &state.pools, &state.assemblies, state.next_assembly_id);
+        recycle_requests.extend(state.assemblies.iter().enumerate().map(|(index, _assembly)| {
+            let requested = bindings.instance_selector[index].map_or(0.0, |definition|
+                state.control_reports[definition].recycle_requested);
+            if measures[index].mass > 0.0 { requested } else { 0.0 }
+        }));
+        // Effort requests a share of finite enzyme throughput, not a fraction
+        // of remaining mass. A partially dismantled object therefore finishes
+        // in finite time even when its effort is below one.
+        let recycle_work = RECYCLE_RATE * recycling * dt
+            / recycle_requests.iter().sum::<f64>().max(1.0);
         for (index, assembly) in state.assemblies.iter().enumerate() {
-            if assembly.complete() {
+            // A teardown request never competes to install into the same object.
+            // This also prevents freshly recovered ingredients funding this tick.
+            if recycle_requests[index] > 0.0 {
+                let amount = (recycle_requests[index] * recycle_work).min(measures[index].mass);
+                if amount > 0.0 {
+                    demands.push(CellDemand::new(CellOperation::RecycleAssembly(index), amount,
+                        [RECYCLE_ENERGY, 0.0, (1.0 - assembly.recipe.kind.internal_footprint()).max(0.0), 0.0, INSTALLATION_WORK]));
+                }
+                continue;
+            }
+            if measures[index].complete {
                 continue;
             }
             for (part, recipe) in assembly.recipe.parts.iter().enumerate() {
@@ -1295,7 +1605,7 @@ impl Body {
                 if needed <= EPS {
                     continue;
                 }
-                let Some(pool) = state.pools.iter().position(|p| p.product == recipe.product)
+                let Some(pool) = bindings.ingredient_pool[index][part]
                 else {
                     continue;
                 };
@@ -1322,7 +1632,7 @@ impl Body {
         } else {
             self.area
         };
-        let growth = (2.0 * membrane * dt).min((max_area.min(core_area) - self.area).max(0.0));
+        let growth = (2.0 * membrane * dt).min((max_area.min(snapshot.support_area) - self.area).max(0.0));
         if growth > EPS {
             demands.push(CellDemand::new(
                 CellOperation::Grow,
@@ -1352,16 +1662,7 @@ impl Body {
                 ));
             }
         }
-        let damaged = self
-            .organs
-            .iter()
-            .map(|o| o.mass * (1.0 - o.integrity))
-            .sum::<f64>()
-            + state
-                .assemblies
-                .iter()
-                .map(|a| a.mass() * (1.0 - a.integrity))
-                .sum::<f64>();
+        let damaged = snapshot.damaged;
         if damaged > EPS {
             let repair = (0.08 * active[OrganelleKind::Repair as usize] * dt / damaged).min(1.0);
             if repair > 0.0 {
@@ -1376,7 +1677,8 @@ impl Body {
                     }
                 }
                 for (index, assembly) in state.assemblies.iter().enumerate() {
-                    let amount = assembly.mass() * (1.0 - assembly.integrity) * repair;
+                    if recycle_requests[index] > 0.0 { continue; }
+                    let amount = measures[index].mass * (1.0 - assembly.integrity) * repair;
                     if amount > EPS {
                         demands.push(CellDemand::new(
                             CellOperation::RepairAssembly(index),
@@ -1388,10 +1690,10 @@ impl Body {
             }
         }
         let amounts = allocation.allocate(demands, [
-            (*energy - 0.15 * cap.energy).max(0.0),
+            (*energy - 0.15 * snapshot.energy_capacity).max(0.0),
             minerals.max(0.0),
-            space,
-            surface,
+            snapshot.free_space,
+            snapshot.free_surface,
             core_work,
         ], stock);
         for (demand, &amount) in demands.iter().zip(amounts) {
@@ -1454,8 +1756,56 @@ impl Body {
                     report.repaired_mass += amount;
                     report.dissipated_energy += spent;
                 }
+                CellOperation::RecycleAssembly(index) => {
+                    let assembly = &mut state.assemblies[index];
+                    let fraction = (amount / measures[index].mass).min(1.0);
+                    let mut recovered = 0.0;
+                    for (part_index, (ingredient, part)) in assembly.ingredients.iter_mut()
+                        .zip(&assembly.recipe.parts).enumerate()
+                    {
+                        let mass = ingredient.mass * fraction;
+                        let embodied = ingredient.embodied_energy * fraction;
+                        ingredient.mass = (ingredient.mass - mass).max(0.0);
+                        ingredient.embodied_energy = (ingredient.embodied_energy - embodied).max(0.0);
+                        recovered += mass;
+                        if mass <= 0.0 { continue; }
+                        let pool = bindings.ingredient_pool[index][part_index].or_else(|| {
+                            // Only an inherited ingredient without a current pool
+                            // reaches this exceptional path. Other recovery in the
+                            // same phase may already have recreated its identity.
+                            state.pools.iter().position(|p| p.product == part.product)
+                        }).or_else(|| {
+                            if state.pools.len() >= MAX_POOLS { return None; }
+                            let pool = state.pools.len();
+                            state.pools.push(ProductPool {
+                                product: part.product.clone(), mass: 0.0, embodied_energy: 0.0,
+                                expression_requested: 0.0, expression_rate: 0.0,
+                            });
+                            Some(pool)
+                        });
+                        if let Some(pool) = pool {
+                            bindings.ingredient_pool[index][part_index] = Some(pool);
+                            // Installation energy is dissipated, never refunded as
+                            // usable energy or inflated product energy density.
+                            let retained = embodied.min(mass * part.product.kind.synthesis_cost() * EMBODIED_FRACTION);
+                            state.pools[pool].mass += mass;
+                            state.pools[pool].embodied_energy += retained;
+                            report.dissipated_energy += embodied - retained;
+                        } else {
+                            // A full inherited-identity table cannot destroy matter.
+                            report.minerals_recovered += mass;
+                            report.dissipated_energy += embodied;
+                        }
+                    }
+                    report.recycled_mass += recovered;
+                    report.dissipated_energy += spent;
+                    if let Some(definition) = bindings.instance_selector[index] {
+                        state.control_reports[definition].recycle_rate += recovered / dt;
+                    }
+                }
             }
         }
+        let previous_instances = state.assemblies.len();
         state.assemblies.retain(|assembly| assembly.mass() > 0.0);
         for assembly in &mut state.assemblies {
             if assembly.id == 0 {
@@ -1464,11 +1814,19 @@ impl Body {
             }
         }
         // Drop only exactly empty obsolete pools; never discard small residues.
+        let previous_pools = state.pools.len();
+        let mut pool_index = 0;
         state.pools.retain(|pool| {
+            let current = bindings.pool_current.get(pool_index).copied().unwrap_or(false);
+            pool_index += 1;
             pool.mass > 0.0
                 || pool.embodied_energy > 0.0
-                || program.products.contains(&pool.product)
+                || current
         });
+        if previous_instances != state.assemblies.len() || previous_pools != state.pools.len() {
+            bindings.invalidate();
+        }
+        drop(bindings);
         self.cellular = Some(state);
         *energy = (*energy - report.energy_spent + report.energy_recovered).max(0.0);
         *minerals = (*minerals - report.minerals_spent + report.minerals_recovered).max(0.0);
@@ -1529,10 +1887,12 @@ impl Body {
                 if index > 0 {
                     json.push(',');
                 }
-                write!(&mut json, "{{\"id\":{},\"name\":{:?},\"kind\":{:?},\"mass\":{},\"requiredMass\":{},\"functionalMass\":{},\"complete\":{},\"integrity\":{},\"activity\":{},\"at\":{},\"direction\":{},\"bottleneck\":",
+                let recycle = state.control_reports.iter().find(|r| r.name == assembly.recipe.name)
+                    .map_or(0.0, |r| r.recycle_requested);
+                write!(&mut json, "{{\"id\":{},\"name\":{:?},\"kind\":{:?},\"mass\":{},\"requiredMass\":{},\"functionalMass\":{},\"complete\":{},\"integrity\":{},\"activity\":{},\"at\":{},\"direction\":{},\"recycleRequested\":{},\"bottleneck\":",
                     assembly.id, assembly.recipe.name, assembly.recipe.kind.name(), assembly.mass(),
                     assembly.recipe.required_mass(), assembly.functional_mass(), assembly.complete(),
-                    assembly.integrity, assembly.activity, assembly.recipe.at, assembly.recipe.direction).unwrap();
+                    assembly.integrity, assembly.activity, assembly.recipe.at, assembly.recipe.direction, recycle).unwrap();
                 if assembly.complete() {
                     json.push_str("null");
                 } else {
@@ -1576,9 +1936,13 @@ impl Body {
                 if index > 0 {
                     json.push(',');
                 }
-                write!(&mut json, "{{\"name\":{:?},\"kind\":{:?},\"requiredMass\":{},\"at\":{},\"direction\":{},\"components\":[",
+                let report = self.cellular.as_ref().and_then(|s| s.control_reports.iter().find(|r| r.name == recipe.name));
+                write!(&mut json, "{{\"name\":{:?},\"kind\":{:?},\"requiredMass\":{},\"at\":{},\"direction\":{},\"startAllowed\":{},\"recycleRequested\":{},\"recycleRate\":{},\"components\":[",
                     recipe.name, recipe.kind.name(), recipe.parts.iter().map(|p| p.1).sum::<f64>(),
-                    recipe.at, recipe.direction).unwrap();
+                    recipe.at, recipe.direction,
+                    report.is_none_or(|r| r.start_allowed),
+                    report.map_or(0.0, |r| r.recycle_requested),
+                    report.map_or(0.0, |r| r.recycle_rate)).unwrap();
                 for (index, &(product, amount)) in recipe.parts.iter().enumerate() {
                     if index > 0 {
                         json.push(',');
@@ -1621,6 +1985,7 @@ enum CellOperation {
     Constrict,
     RepairOrgan(usize),
     RepairAssembly(usize),
+    RecycleAssembly(usize),
 }
 type CellDemand = MaterialDemand<CellOperation>;
 
@@ -1632,6 +1997,8 @@ pub(crate) struct CellularWorkScratch {
     stock: Vec<f64>,
     density: Vec<f64>,
     demands: Vec<CellDemand>,
+    recycle_requests: Vec<f64>,
+    measures: Vec<AssemblyMeasures>,
     allocation: AllocationScratch,
 }
 
@@ -1674,6 +2041,7 @@ mod tests {
         CellularControls {
             expression: vec![expression; program.products.len()],
             activity: vec![1.0; program.assemblies.len()],
+            ..CellularControls::default()
         }
     }
     fn stocked(program: &CellularProgram, masses: &[f64]) -> Body {
@@ -1845,6 +2213,7 @@ mod tests {
         let request = CellularControls {
             expression: vec![2.0, 1.0],
             activity: vec![],
+            ..CellularControls::default()
         };
         let report = work(
             &mut body,
@@ -2256,4 +2625,6 @@ mod tests {
         restored.write_checkpoint(&mut writer);
         assert!(Body::read_checkpoint(&mut Reader::new(&writer.0)).is_err());
     }
+    include!("cellular_control_tests.rs");
+
 }

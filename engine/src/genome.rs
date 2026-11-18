@@ -9,7 +9,10 @@ use std::rc::Rc;
 
 mod cellular;
 mod checkpoint;
+#[cfg(test)]
+mod control_tests;
 mod execution;
+mod functions;
 mod source;
 use execution::ExecutionPlan;
 
@@ -67,6 +70,160 @@ pub struct OrganelleInput {
     pub capacity: f64,
     pub damaged: f64,
     pub building: f64,
+}
+
+/// One named receptor's frozen reading. Multiple physical instances of the
+/// recipe are reduced by the observation phase; programs never receive IDs.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ReceptorInput {
+    pub available: bool,
+    pub valid: bool,
+    pub level: f64,
+    pub value: f64,
+    pub mineral: f64,
+    pub organic: f64,
+    pub offset: [f64; 2],
+    pub pressure: f64,
+    pub resistance: f64,
+    pub flow: [f64; 2],
+    pub speed: f64,
+    pub bearing: f64,
+    pub area: f64,
+    pub contrast: f64,
+    pub pigment: f64,
+    pub motion: [f64; 2],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum ReceptorField {
+    Available,
+    Valid,
+    Level,
+    Value,
+    Mineral,
+    Organic,
+    Offset,
+    Pressure,
+    Resistance,
+    Flow,
+    Speed,
+    Bearing,
+    Area,
+    Contrast,
+    Pigment,
+    Motion,
+}
+impl ReceptorField {
+    pub const ALL: [Self; 16] = [
+        Self::Available,
+        Self::Valid,
+        Self::Level,
+        Self::Value,
+        Self::Mineral,
+        Self::Organic,
+        Self::Offset,
+        Self::Pressure,
+        Self::Resistance,
+        Self::Flow,
+        Self::Speed,
+        Self::Bearing,
+        Self::Area,
+        Self::Contrast,
+        Self::Pigment,
+        Self::Motion,
+    ];
+    pub fn name(self) -> &'static str {
+        [
+            "available",
+            "valid",
+            "level",
+            "value",
+            "mineral",
+            "organic",
+            "offset",
+            "pressure",
+            "resistance",
+            "flow",
+            "speed",
+            "bearing",
+            "area",
+            "contrast",
+            "pigment",
+            "motion",
+        ][self as usize]
+    }
+    pub fn for_kind(kind: AssemblyKind) -> &'static [Self] {
+        use crate::body::OrganelleKind as O;
+        use crate::cellular::MechanismKind as M;
+        use ReceptorField::*;
+        match kind {
+            AssemblyKind::Mechanism(M::SenseLight) | AssemblyKind::Organelle(O::Photoreceptor) => {
+                &[Available, Valid, Level]
+            }
+            AssemblyKind::Mechanism(M::SenseHeat) | AssemblyKind::Organelle(O::Thermoreceptor) => {
+                &[Available, Valid, Value]
+            }
+            AssemblyKind::Mechanism(M::SenseChemical)
+            | AssemblyKind::Organelle(O::Chemoreceptor) => &[Available, Valid, Mineral, Organic],
+            AssemblyKind::Mechanism(M::SenseContact)
+            | AssemblyKind::Organelle(O::Mechanoreceptor) => &[
+                Available, Valid, Offset, Pressure, Resistance, Flow, Speed, Bearing,
+            ],
+            AssemblyKind::Mechanism(M::SenseOptical) | AssemblyKind::Organelle(O::Optical) => {
+                &[Available, Valid, Offset, Area, Contrast, Pigment, Motion]
+            }
+            _ => &[],
+        }
+    }
+    fn lookup(name: &str) -> Option<Self> {
+        if name == "light" {
+            return Some(Self::Level);
+        }
+        Self::ALL.into_iter().find(|field| field.name() == name)
+    }
+    fn ty(self) -> Type {
+        match self {
+            Self::Available | Self::Valid => Type::Bool,
+            Self::Offset | Self::Flow | Self::Motion => Type::Vector,
+            _ => Type::Number,
+        }
+    }
+    fn read(self, reading: Option<&ReceptorInput>) -> Value {
+        let Some(input) = reading else {
+            return Value::zero(self.ty());
+        };
+        if self == Self::Available {
+            return Value::Boolean(input.available);
+        }
+        if self == Self::Valid {
+            return Value::Boolean(input.available && input.valid);
+        }
+        if !input.available
+            || (!input.valid && !matches!(self, Self::Flow | Self::Speed | Self::Bearing))
+        {
+            return Value::zero(self.ty());
+        }
+        match self {
+            Self::Offset => Value::Vector(input.offset.map(finite)),
+            Self::Flow => Value::Vector(input.flow.map(finite)),
+            Self::Motion => Value::Vector(input.motion.map(finite)),
+            _ => Value::Scalar(finite(match self {
+                Self::Level => input.level,
+                Self::Value => input.value,
+                Self::Mineral => input.mineral,
+                Self::Organic => input.organic,
+                Self::Pressure => input.pressure,
+                Self::Resistance => input.resistance,
+                Self::Speed => input.speed,
+                Self::Bearing => input.bearing,
+                Self::Area => input.area,
+                Self::Contrast => input.contrast,
+                Self::Pigment => input.pigment,
+                _ => unreachable!(),
+            })),
+        }
+    }
 }
 
 /// External measurements are populated by the hardware-gated sensor pipeline.
@@ -151,6 +308,7 @@ pub struct Inputs {
     /// Free product stocks and functional installed recipe masses, sampled before the tick.
     pub products: Vec<f64>,
     pub assemblies: Vec<f64>,
+    pub receptors: Vec<ReceptorInput>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1375,9 +1533,11 @@ enum Function {
     Lerp,
     Noise,
     Identity,
+    Activate,
+    Repress,
 }
 impl Function {
-    const ALL: [Self; 21] = [
+    const ALL: [Self; 23] = [
         Self::Sin,
         Self::Cos,
         Self::Abs,
@@ -1399,6 +1559,8 @@ impl Function {
         Self::Lerp,
         Self::Noise,
         Self::Identity,
+        Self::Activate,
+        Self::Repress,
     ];
     fn name(self) -> &'static str {
         match self {
@@ -1423,11 +1585,20 @@ impl Function {
             Self::Lerp => "lerp",
             Self::Noise => "noise",
             Self::Identity => "identity",
+            Self::Activate => "activate",
+            Self::Repress => "repress",
         }
     }
     fn arity(self) -> usize {
         match self {
-            Self::Min | Self::Max | Self::Vec | Self::Dot | Self::Atan2 | Self::Noise => 2,
+            Self::Min
+            | Self::Max
+            | Self::Vec
+            | Self::Dot
+            | Self::Atan2
+            | Self::Noise
+            | Self::Activate
+            | Self::Repress => 2,
             Self::Clamp | Self::Lerp => 3,
             _ => 1,
         }
@@ -1452,7 +1623,9 @@ impl Function {
             | Self::Sign
             | Self::Atan2
             | Self::Lerp
-            | Self::Noise => numeric_type(t).map(|_| Type::Number),
+            | Self::Noise
+            | Self::Activate
+            | Self::Repress => numeric_type(t).map(|_| Type::Number),
             Self::Abs | Self::Min | Self::Max | Self::Clamp => numeric_type(t),
             Self::Vec => numeric_type(t).map(|_| Type::Vector),
             Self::Normalize => (t[0] == Type::Vector).then_some(Type::Vector),
@@ -1532,6 +1705,16 @@ impl Function {
             }
             Self::Lerp => n + (second() - n) * third(),
             Self::Noise => smooth_noise(n, second()),
+            Self::Activate | Self::Repress => {
+                let x = n.max(0.0);
+                let k = second().max(0.0);
+                let active = if x + k > 0.0 { x / (x + k) } else { 0.0 };
+                if self == Self::Repress {
+                    1.0 - active
+                } else {
+                    active
+                }
+            }
         };
         Value::Scalar(finite(result)).convert(ty)
     }
@@ -1556,7 +1739,9 @@ enum Op {
     Constant(Value),
     Sensor(Sensor),
     Pool(usize),
+    Concentration(usize),
     Built(usize),
+    Receptor(usize, ReceptorField),
     Register(Register),
     Populated(Register),
     Reference(usize),
@@ -1572,7 +1757,9 @@ impl Op {
             Self::Constant(_)
             | Self::Sensor(_)
             | Self::Pool(_)
+            | Self::Concentration(_)
             | Self::Built(_)
+            | Self::Receptor(_, _)
             | Self::Register(_)
             | Self::Populated(_) => ([0; 3], 0),
             Self::Reference(a) | Self::Negate(a) | Self::Not(a) => ([a, 0, 0], 1),
@@ -1599,9 +1786,18 @@ fn evaluate_operation(
         Op::Pool(index) => {
             Value::Scalar(finite(inputs.products.get(*index).copied().unwrap_or(0.0)).max(0.0))
         }
+        Op::Concentration(index) => {
+            let mass = finite(inputs.products.get(*index).copied().unwrap_or(0.0)).max(0.0);
+            Value::Scalar(if inputs.body_area.is_finite() && inputs.body_area > 0.0 {
+                finite(mass / inputs.body_area)
+            } else {
+                0.0
+            })
+        }
         Op::Built(index) => {
             Value::Scalar(finite(inputs.assemblies.get(*index).copied().unwrap_or(0.0)).max(0.0))
         }
+        Op::Receptor(index, field) => field.read(inputs.receptors.get(*index)),
         Op::Register(key) => memory.read(*key),
         Op::Populated(key) => Value::Boolean(memory.entries.contains_key(key)),
         Op::Reference(i) => values[*i].clone(),
@@ -1820,7 +2016,18 @@ pub fn language_schema_json() -> String {
         .collect::<Vec<_>>()
         .join(",");
     let cellular = cellular::schema_json();
-    format!("{{\"version\":3,\"signals\":[{signals}],\"outputs\":[{outputs}],\"maxNodes\":{MAX_NODES},\"maxSourceBytes\":{MAX_SOURCE_BYTES},\"registersPerType\":{REGISTER_COUNT},\"cellular\":{cellular}}}")
+    let functions = Function::ALL
+        .iter()
+        .map(|function| {
+            format!(
+                "{{\"name\":{},\"arity\":{}}}",
+                quote(function.name()),
+                function.arity()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{{\"version\":3,\"signals\":[{signals}],\"outputs\":[{outputs}],\"functions\":[{functions}],\"maxNodes\":{MAX_NODES},\"maxSourceBytes\":{MAX_SOURCE_BYTES},\"registersPerType\":{REGISTER_COUNT},\"cellular\":{cellular}}}")
 }
 #[derive(Debug, Clone)]
 pub struct Program {
@@ -1841,6 +2048,7 @@ pub enum MutationKind {
     Reference = 3,
     GeneSilence = 4,
     GeneDuplicate = 5,
+    Geometry = 6,
 }
 #[derive(Debug, Clone)]
 pub struct Mutation {
@@ -2092,9 +2300,24 @@ impl Program {
                     "sensor",
                     format!("pool.{}", self.cellular().unwrap().products[*index].name),
                 ),
+                Op::Concentration(index) => (
+                    "sensor",
+                    format!(
+                        "concentration.{}",
+                        self.cellular().unwrap().products[*index].name
+                    ),
+                ),
                 Op::Built(index) => (
                     "sensor",
                     format!("built.{}", self.cellular().unwrap().assemblies[*index].name),
+                ),
+                Op::Receptor(index, field) => (
+                    "sensor",
+                    format!(
+                        "sensed.{}.{}",
+                        self.cellular().unwrap().assemblies[*index].name,
+                        field.name()
+                    ),
                 ),
                 Op::Register(register) => ("register", register.name()),
                 Op::Populated(register) => ("populated", format!("populated({})", register.name())),
@@ -2194,10 +2417,23 @@ impl Program {
         memory: &mut Registers,
         scratch: &mut EvalScratch,
     ) -> Outputs {
-        self.execution.evaluate(inputs, memory, &mut scratch.values);
-        let result = self.evaluated_outputs(&scratch.values);
-        Self::commit_writes(&self.execution.writes, memory, &scratch.values);
+        let mut result = Outputs::default();
+        self.evaluate_cell_into(inputs, memory, scratch, &mut result);
         result
+    }
+
+    /// Reuse nested cellular control buffers while retaining simultaneous
+    /// observation and old-register semantics.
+    pub fn evaluate_cell_into(
+        &self,
+        inputs: &Inputs,
+        memory: &mut Registers,
+        scratch: &mut EvalScratch,
+        result: &mut Outputs,
+    ) {
+        self.execution.evaluate(inputs, memory, &mut scratch.values);
+        self.evaluated_outputs_into(&scratch.values, result);
+        Self::commit_writes(&self.execution.writes, memory, &scratch.values);
     }
 
     fn commit_writes(writes: &[WriteRule], memory: &mut Registers, values: &[Value]) {
@@ -2360,9 +2596,20 @@ impl Program {
             if let Some(cellular) = self.cellular() {
                 for op in (0..cellular.products.len())
                     .map(Op::Pool)
+                    .chain((0..cellular.products.len()).map(Op::Concentration))
                     .chain((0..cellular.assemblies.len()).map(Op::Built))
                 {
                     if self.nodes[current].op != op {
+                        options.push(op);
+                    }
+                }
+            }
+        }
+        if let Some(cellular) = self.cellular() {
+            for (index, recipe) in cellular.assemblies.iter().enumerate() {
+                for &field in ReceptorField::for_kind(recipe.kind) {
+                    let op = Op::Receptor(index, field);
+                    if field.ty() == node.ty && self.nodes[current].op != op {
                         options.push(op);
                     }
                 }
@@ -2451,7 +2698,9 @@ impl Program {
                     (text, tokens, nodes)
                 }
                 Op::Sensor(s) => (s.name().to_owned(), 1, 1),
-                Op::Pool(_) | Op::Built(_) => unreachable!(),
+                Op::Pool(_) | Op::Concentration(_) | Op::Built(_) | Op::Receptor(_, _) => {
+                    unreachable!()
+                }
                 Op::Register(r) => (r.name(), 1, 1),
                 Op::Populated(r) => (format!("populated({})", r.name()), 4, 1),
                 Op::Negate(a) => (format!("-{}", name(*a)), 2, 2),
@@ -2874,6 +3123,11 @@ struct Parser {
     product_names: HashMap<String, usize>,
     assembly_names: HashMap<String, usize>,
     gene_locations: Vec<cellular::GeneLocation>,
+    geometry_locations: Vec<cellular::GeometryLocation>,
+    receptor_references: Vec<(usize, ReceptorField, Location)>,
+    functions: HashMap<String, functions::UserFunction>,
+    function_scope: Option<usize>,
+    function_depth: usize,
 }
 impl Parser {
     fn new(tokens: Vec<Token>) -> Self {
@@ -2890,6 +3144,11 @@ impl Parser {
             product_names: HashMap::new(),
             assembly_names: HashMap::new(),
             gene_locations: Vec::new(),
+            geometry_locations: Vec::new(),
+            receptor_references: Vec::new(),
+            functions: HashMap::new(),
+            function_scope: None,
+            function_depth: 0,
         }
     }
     fn peek(&self) -> &Token {
@@ -2921,7 +3180,7 @@ impl Parser {
         self.nodes.push(Node {
             op,
             ty,
-            scope: self.binding_order.len(),
+            scope: self.function_scope.unwrap_or(self.binding_order.len()),
         });
         let end = self.tokens[self.position.saturating_sub(1)]
             .location
@@ -2931,6 +3190,7 @@ impl Parser {
             from: location.from,
             to: end,
             head: location,
+            authored: true,
         });
         Ok(index)
     }
@@ -3216,6 +3476,27 @@ impl Parser {
                         location.error(format!("unknown product stock '{name}'."))
                     })?;
                     self.add(Op::Pool(index), Type::Number, location)?
+                } else if self.cellular_mode && name.starts_with("concentration.") {
+                    let index = self
+                        .product_names
+                        .get(&name[14..])
+                        .copied()
+                        .ok_or_else(|| {
+                            location.error(format!("unknown product concentration '{name}'."))
+                        })?;
+                    self.add(Op::Concentration(index), Type::Number, location)?
+                } else if self.cellular_mode && name.starts_with("sensed.") {
+                    let (recipe, field) = name[7..].split_once('.').ok_or_else(|| {
+                        location.error("named receptor reads use sensed.Recipe.field.")
+                    })?;
+                    let index = self.assembly_names.get(recipe).copied().ok_or_else(|| {
+                        location.error(format!("unknown receptor assembly '{recipe}'."))
+                    })?;
+                    let field = ReceptorField::lookup(field).ok_or_else(|| {
+                        location.error(format!("unknown receptor measurement '{name}'."))
+                    })?;
+                    self.receptor_references.push((index, field, location));
+                    self.add(Op::Receptor(index, field), field.ty(), location)?
                 } else if self.cellular_mode && name.starts_with("built.") {
                     let index = self
                         .assembly_names
@@ -3291,6 +3572,9 @@ impl Parser {
         location: Location,
         depth: usize,
     ) -> Result<usize, CompileError> {
+        if self.functions.contains_key(name) {
+            return self.user_call(name, location, depth);
+        }
         if name == "populated" {
             if self.cellular_mode {
                 return Err(location.error("cellular genes use product stocks for persistent state; populated() is unavailable."));
@@ -4247,7 +4531,10 @@ mod tests {
                     }
                 }
                 Op::Sensor(sensor) => assert_eq!(node.ty, sensor.ty()),
-                Op::Pool(_) | Op::Built(_) => assert_eq!(node.ty, Type::Number),
+                Op::Pool(_) | Op::Concentration(_) | Op::Built(_) => {
+                    assert_eq!(node.ty, Type::Number)
+                }
+                Op::Receptor(_, field) => assert_eq!(node.ty, field.ty()),
                 Op::Register(register) => assert_eq!(register.ty, node.ty),
                 Op::Populated(_) => assert_eq!(node.ty, Type::Bool),
                 Op::Reference(child) => assert_eq!(node.ty, ty(*child)),

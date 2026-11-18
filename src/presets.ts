@@ -236,7 +236,51 @@ photosynthesize = 1;`),
 type CellularPart = readonly [role: string, mass: number];
 interface CellularRecipe {
   name: string; kind: string; parts: readonly CellularPart[];
-  activity?: string; at?: number; direction?: number; ready?: string; goal?: string;
+  activity?: string; at?: number; direction?: number; ready?: string; goal?: string; recycle?: string;
+}
+
+const sharedProduct: Record<string,string> = {
+  scaffold:'Frame',anchor:'Mount',motor:'Rotor',filament:'Tail',pigment:'Pigment',enzyme:'Catalyst',
+  membrane:'Wall',transporter:'Carrier',receptor:'Detector',replicase:'Replicase',constrictor:'Ring',
+};
+
+/** Explicit initiation lets independently regulated recipes share physical stocks. */
+function controlledProgram(recipes: CellularRecipe[], logic: string, regulator = false): string {
+  const roles = [...new Set(recipes.flatMap(recipe => recipe.parts.map(([role]) => role)))];
+  return `# Shared products supply independently regulated physical recipes.
+# Genes make stock; start_when permits new machines; activity runs built ones.
+cellular;
+
+${roles.map(role => `product ${sharedProduct[role]} = ${role}();`).join('\n')}
+${regulator ? 'product Persistence = regulator(8);\n' : ''}
+fn missing(installed, required) = installed + 0.000001 < required;
+fn buffered(stock, effort) = if stock < 0.001 then effort else 0;
+
+let funded = energy > 10 && nutrient.stored > 0.001;
+let expanding = body.area > body.birth_area * 1.6;
+${logic.trim()}
+
+${recipes.map(recipe => {
+    const mass = recipe.parts.reduce((sum, [, value]) => sum + value, 0);
+    const goal = recipe.goal ?? `(if expanding then ${amount(mass * 2)} else ${amount(mass)})`;
+    return `let need_${recipe.name} = funded && (${recipe.ready ?? 'true'}) && missing(built.${recipe.name}, ${goal});`;
+  }).join('\n')}
+
+${roles.map(role => {
+    const requests = recipes.flatMap(recipe => {
+      const part = recipe.parts.find(([kind]) => kind === role);
+      if (!part) return [];
+      const largest = Math.max(...recipe.parts.map(([, value]) => value));
+      return [`(if need_${recipe.name} then ${amount(part[1] / largest)} else 0)`];
+    });
+    return `gene supply_${sharedProduct[role]}: ${sharedProduct[role]} = buffered(pool.${sharedProduct[role]}, ${requests.join(' + ')});`;
+  }).join('\n')}
+${regulator ? '\n# Cue-driven material memory; growth dilutes its concentration.\ngene remember: Persistence = if sensed.LeftChemistry.valid && sensed.RightChemistry.valid\n  && concentration.Persistence < 0.008 then 0.15 * activate(sensed.LeftChemistry.organic + sensed.RightChemistry.organic, 0.002) else 0;\n' : ''}
+${recipes.map(recipe => `assembly ${recipe.name}: ${recipe.kind} {
+${recipe.parts.map(([role, value]) => `  ${sharedProduct[role]}: ${amount(value)};`).join('\n')}
+  start_when: need_${recipe.name};
+  activity: ${recipe.activity ?? '1'};${recipe.recycle === undefined ? '' : `\n  recycle: ${recipe.recycle};`}${recipe.at === undefined ? '' : `\n  at: ${amount(recipe.at)};`}${recipe.direction === undefined ? '' : `\n  direction: ${amount(recipe.direction)};`}
+}`).join('\n\n')}`;
 }
 const amount = (value: number): string => String(Number(value.toFixed(6)));
 const productName = (recipe: CellularRecipe, role: string): string => recipe.name + role[0].toUpperCase() + role.slice(1);
@@ -326,7 +370,7 @@ export const CELLULAR_FAMILY_PRESETS: Preset[] = [
 
 
 /** Each recipe installs one operation; no family grants additional hidden machinery. */
-function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?: boolean; giant?: boolean; memory?: boolean; predator?: boolean; conserve?: boolean } = {}): string {
+function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?: boolean; giant?: boolean; memory?: boolean; predator?: boolean; conserve?: boolean; local?:boolean } = {}): string {
   const hasLight = path !== 'organic', hasGut = path !== 'light';
   const foodReady = 'built.Gut + 0.000001 >= 0.06 && built.ExudateEnzyme + 0.000001 >= 0.04 && built.Capture + 0.000001 >= 0.03';
   const ready = hasLight && hasGut ? `built.Solar + 0.000001 >= 0.08 && ${foodReady}`
@@ -352,10 +396,13 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
     { name:'RightMotor', kind:'propel()', parts:[['anchor',0.005],['motor',0.01],['filament',0.01]], ready:movementReady, activity:'clamp(move + steer * 0.5, 0, 1)', at:-Math.PI/2, direction:0 },
     { name:'Vision', kind:'sense(optical)', parts:[['anchor',0.004],['receptor',0.012],['pigment',0.004]], ready:movementReady },
     { name:'Touch', kind:'sense(contact)', parts:[['anchor',0.002],['receptor',0.006],['filament',0.002]], ready:movementReady },
-    { name:'Chemistry', kind:'sense(chemical)', parts:[['anchor',0.003],['receptor',0.012]], ready:movementReady },
+    ...(options.local && options.memory ? [
+      { name:'LeftChemistry', kind:'sense(chemical)', parts:[['anchor',0.003],['receptor',0.012]] as CellularPart[], ready:movementReady, at:Math.PI/2 },
+      { name:'RightChemistry', kind:'sense(chemical)', parts:[['anchor',0.003],['receptor',0.012]] as CellularPart[], ready:movementReady, at:-Math.PI/2 },
+    ] : [{ name:'Chemistry', kind:'sense(chemical)', parts:[['anchor',0.003],['receptor',0.012]] as CellularPart[], ready:movementReady }]),
   );
   if (options.predator) recipes.push(
-    { name:'Piercer', kind:'pierce()', parts:[['anchor',0.01],['filament',0.03],['enzyme',0.01]], ready:'powered && body.area > 1.2', activity:'if contact.valid && gut.fraction < 0.5 then 0.8 else 0' },
+    { name:'Piercer', kind:'pierce()', parts:[['anchor',0.01],['filament',0.03],['enzyme',0.01]], ready:'powered && body.area > 1.2', activity:`if ${options.local?'sensed.Touch':'contact'}.valid && gut.fraction < 0.5 then 0.8 else 0` },
     { name:'Engulfment', kind:'engulf()', parts:[['anchor',0.005],['motor',0.01],['membrane',0.01]], ready:'powered && body.area > 1.2', activity:'if gut.fraction < 0.5 then 1 else 0' },
   );
   const growthArea = options.giant ? 'max(3, body.birth_area * 2)' : 'body.birth_area * 2';
@@ -365,11 +412,12 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
     { name:'Replication', kind:'replicate()', parts:[['scaffold',0.005],['replicase',0.015]], ready:'built.Support + 0.000001 >= 0.12', activity:'if energy > 80 then 1 else 0' },
     { name:'Division', kind:'constrict()', parts:[['anchor',0.004],['motor',0.008],['constrictor',0.008]], ready:'expanding', activity:`if body.area + 0.000001 >= ${growthArea} && energy > 100 then 1 else 0` },
   );
-  return cellularProgram(recipes, `let powered = ${ready};\n${behavior}`, options.memory, 0.001);
+  return options.local ? controlledProgram(recipes, `let powered = ${ready};\n${behavior}`, options.memory)
+    : cellularProgram(recipes, `let powered = ${ready};\n${behavior}`, options.memory, 0.001);
 }
 
 /** Defaults compose explicit operations from paid product stocks. */
-export const PRESETS: Preset[] = [
+export const MECHANISM_PRESETS_V6: Preset[] = [
   { name: 'Forager', description: 'Build separate food storage, substrate enzymes, particle import and placed motors.', source: cellularOrganism('organic', cellularForaging) },
   { name: 'Drifter', description: 'Use quiet paired motors and opportunistic contact feeding; most motion comes from the water.', source: cellularOrganism('organic', 'let steer = sin(age * 0.4) * 0.12;\nlet move = if gut.fraction < 0.3 then 0.08 else 0;', { drift: true }) },
   { name: 'Conserver', description: 'Express machinery in stages and preserve energy before copying its genome.', source: cellularOrganism('organic', 'let steer = if object.valid then clamp(angle(object.offset), -1, 1) else sin(age * 0.3) * 0.2;\nlet move = if energy.fraction < 0.6 && gut.fraction < 0.3 then 0.25 else 0.05;', { conserve: true }) },
@@ -378,4 +426,29 @@ export const PRESETS: Preset[] = [
   { name: 'Phototroph', description: 'Assemble pigment, enzyme and anchors into a light harvester, then build growth and division machinery.', source: cellularOrganism('light', '# This stationary producer spends no material on locomotion.') },
   { name: 'Predator', description: 'Build tissue enzymes, a piercer and engulfment machinery; paired motors approach visible objects.', source: cellularOrganism('organic', 'let hungry = energy.fraction < 0.7 && gut.fraction < 0.45;\nlet steer = if hungry && object.valid then clamp(angle(object.offset) * 1.8, -1, 1) else sin(age * 0.5) * 0.4;\nlet move = if contact.valid || gut.fraction > 0.45 then 0 else if hungry && object.valid then 0.5 else 0.07;', { predator: true }) },
   { name: 'Mixotroph', description: 'Combine light harvesting with independently built food storage, capture and substrate enzymes.', source: cellularOrganism('mixed', cellularForaging) },
+];
+
+const localForaging = `# Read the receptors the genome actually builds.
+let seen = sensed.Vision.valid && sensed.Vision.area < 0.35;
+let blocked = sensed.Touch.valid && sensed.Touch.resistance >= 0.12;
+let obstacle = if sensed.Touch.valid then angle(sensed.Touch.offset) else 0;
+let escape = if obstacle >= 0 then obstacle - 1.8 else obstacle + 1.8;
+let seek = gut.fraction < 0.55;
+let steer = if blocked then clamp(escape * 2, -1, 1)
+  else if seek && seen then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1)
+  else sin(age * 0.65) * 0.35;
+let move = if blocked then 0.65 else if gut.fraction > 0.45 then 0
+  else if seek && seen then 0.5
+  else if sensed.Chemistry.valid && sensed.Chemistry.organic > 0.001 then 0.18 else 0.28;`;
+
+/** Current defaults share role stocks and control each recipe's initiation explicitly. */
+export const PRESETS: Preset[] = [
+  { name:'Forager', description:'Share product stocks between food storage, digestion and motors; navigate using named physical receptors.', source:cellularOrganism('organic',localForaging,{local:true}) },
+  { name:'Drifter', description:'Use quiet paired motors and opportunistic particle feeding, with explicit control over starting new machinery.', source:cellularOrganism('organic','let steer = sin(age * 0.4) * 0.12;\nlet move = if gut.fraction < 0.3 then 0.08 else 0;',{local:true,drift:true}) },
+  { name:'Conserver', description:'Stage shared-stock construction and preserve energy before copying the genome.', source:cellularOrganism('organic','let steer = if sensed.Vision.valid then clamp(angle(sensed.Vision.offset), -1, 1) else sin(age * 0.3) * 0.2;\nlet move = if energy.fraction < 0.6 && gut.fraction < 0.3 then 0.25 else 0.05;',{local:true,conserve:true}) },
+  { name:'Giant', description:'Build extra support before expanding, using a shared supply of each product role.', source:cellularOrganism('organic',localForaging,{local:true,giant:true}) },
+  { name:'Rememberer', description:'Compare opposite chemical receptors and retain a decaying concentration signal to regulate movement.', source:cellularOrganism('organic','let difference = sensed.LeftChemistry.organic - sensed.RightChemistry.organic;\nlet steer = if sensed.LeftChemistry.valid && sensed.RightChemistry.valid && abs(difference) > 0.000001\n  then clamp(difference * 100, -1, 1) else sin(age * 0.5) * 0.3;\nlet move = if gut.fraction > 0.5 then 0 else 0.15 + 0.25 * activate(concentration.Persistence, 0.002);',{local:true,memory:true}) },
+  { name:'Phototroph', description:'Build a light harvester, then regulate the initiation of separate growth and division machinery.', source:cellularOrganism('light','# This stationary producer spends no material on locomotion.',{local:true}) },
+  { name:'Predator', description:'Approach visible objects with a named eye, then use a placed piercer and separate engulfment machinery.', source:cellularOrganism('organic','let hungry = energy.fraction < 0.7 && gut.fraction < 0.45;\nlet steer = if hungry && sensed.Vision.valid then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1) else sin(age * 0.5) * 0.4;\nlet move = if sensed.Touch.valid || gut.fraction > 0.45 then 0 else if hungry && sensed.Vision.valid then 0.5 else 0.07;',{local:true,predator:true}) },
+  { name:'Mixotroph', description:'Share materials between light harvesting and a separately regulated feeding pathway.', source:cellularOrganism('mixed',localForaging,{local:true}) },
 ];

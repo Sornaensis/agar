@@ -1,0 +1,4 @@
+{"scope":"native cellular input projection; warmed identity caches and output buffers","samples":7,"iterations":20000,"workloads":[
+{"products":16,"recipes":16,"instances":64,"previousMedianUs":4.758878,"cachedMedianUs":0.574690,"speedup":8.280778,"previousAllocations":2,"cachedAllocations":0}
+,{"products":64,"recipes":64,"instances":256,"previousMedianUs":90.479047,"cachedMedianUs":2.656854,"speedup":34.054958,"previousAllocations":2,"cachedAllocations":0}
+]}

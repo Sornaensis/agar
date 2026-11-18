@@ -435,7 +435,8 @@ export class ProgramEditor {
     const groups = new Map<string, HTMLOptGroupElement>();
     for (const item of genomeSignalCatalog(direction, this.source)) {
       const groupName = cellular && direction === 'write' ? item.type === 'mechanism' ? 'Mechanisms' : item.category === 'function' ? 'Product roles' : 'Declarations & placement'
-        : /^(pool|built)\./.test(item.name) ? 'This cell’s products & assemblies'
+        : /^(pool|concentration|built)\./.test(item.name) ? 'This cell’s products & assemblies'
+        : item.name.startsWith('sensed.') ? 'Named receptor readings'
         : item.category === 'register' ? 'Memory registers'
         : direction === 'write' ? /^(target|build|recycle)\./.test(item.name) ? 'Organelle construction' : item.name.startsWith('scan.') ? 'Physical scan' : 'Actions'
           : /^(object|contact)\./.test(item.name) ? 'Physical observations'
@@ -459,7 +460,7 @@ export class ProgramEditor {
       const label = document.createElement('strong'); label.textContent = 'Cellular program';
       const detail = document.createElement('span');
       const mechanisms = declarations.assemblies.filter(item=>item.kind.includes('(')).length;
-      detail.textContent = `${declarations.products.length} products · ${declarations.genes.length} genes · ${mechanisms ? `${mechanisms} mechanisms${mechanisms<declarations.assemblies.length?` · ${declarations.assemblies.length-mechanisms} family recipes`:''}` : `${declarations.assemblies.length} recipes`}`;
+      detail.textContent = `${declarations.products.length} products · ${declarations.genes.length} genes · ${mechanisms ? `${mechanisms} mechanisms${mechanisms<declarations.assemblies.length?` · ${declarations.assemblies.length-mechanisms} family recipes`:''}` : `${declarations.assemblies.length} recipes`}${declarations.functions.length ? ` · ${declarations.functions.length} functions` : ''}`;
       this.languageElement.replaceChildren(label, detail);
     }
     this.populateSignalSelect(this.readSignalSelect, 'read'); this.populateSignalSelect(this.writeSignalSelect, 'write');

@@ -9,7 +9,7 @@ const conserved = state => {
 };
 
 // Every authored example must compile, including files users can import directly.
-for (const name of ['solar', 'regulated-motor', 'phototroph', 'forager', 'rememberer', 'separate-digestion']) {
+for (const name of ['solar', 'regulated-motor', 'phototroph', 'forager', 'rememberer', 'separate-digestion', 'local-control']) {
   const api = await fresh({ ambientLight: 0.85, initialNutrients: 3 });
   const genome = compile(api, await readFile(new URL(`../examples/${name}.cell`, import.meta.url), 'utf8'));
   if (name === 'solar' || name === 'regulated-motor') {
@@ -18,6 +18,55 @@ for (const name of ['solar', 'regulated-motor', 'phototroph', 'forager', 'rememb
     assert.equal(body(api, 1).cellular.assemblies.filter(machine => machine.complete).length, 1,
       `${name} keeps its stock buffer small enough to avoid an unintended second complete machine`);
   }
+}
+
+// Exercise the shipped local-control program through real sensing and paid
+// remodeling. Compilation and a successful birth alone do not prove these work.
+{
+  const api = await fresh({ ambientLight: 0.85, initialNutrients: 3 });
+  const genome = compile(api, await readFile(new URL('../examples/local-control.cell', import.meta.url), 'utf8'));
+  seed(api, genome, 1, 600, 380);
+  let state = advance(api, 60 * 30);
+  conserved(state);
+  const built = body(api, 1).cellular;
+  const oldMotors = built.assemblies.filter(machine => machine.kind === 'propel()');
+  assert.equal(oldMotors.length, 2);
+  assert.ok(oldMotors.every(machine => machine.complete));
+  assert.ok(built.assemblies.some(machine => machine.kind === 'recycle()' && machine.complete));
+  const read = name => evaluation(api, 1).signals.find(signal => signal.name === name)?.value;
+  assert.equal(read('sensed.LeftEye.valid'), true);
+  assert.ok(Math.abs(read('sensed.LeftEye.level') - 0.85) < 0.001);
+
+  const cell = state.cells[0], left = cell.angle + Math.PI / 2;
+  api.set_environment(0.5, 0.35, 0);
+  assert.ok(api.add_source(0, cell.x + 35 * Math.cos(left), cell.y + 35 * Math.sin(left), 0.4, 35));
+  state = advance(api, 1);
+  assert.ok(read('sensed.LeftEye.level') > read('sensed.RightEye.level'), 'Opposite receptors sample different physical locations');
+  api.clear_sources();
+
+  api.set_environment(0.5, 0.1, 0);
+  let recovered = 0;
+  for (let second = 0; second < 15; second++) {
+    state = advance(api, 30);
+    conserved(state);
+    recovered += body(api, 1).cellular.recipes.filter(recipe => recipe.kind === 'propel()').reduce((sum, recipe) => sum + recipe.recycleRate, 0);
+  }
+  const shaded = body(api, 1).cellular;
+  assert.ok(shaded.products.find(product => product.name === 'Brake').concentration > 0.001);
+  assert.ok(shaded.recipes.filter(recipe => recipe.kind === 'propel()').every(recipe => !recipe.startAllowed));
+  assert.equal(shaded.assemblies.filter(machine => machine.kind === 'propel()').length, 0, 'Paid teardown finishes without microscopic residual objects');
+  assert.ok(recovered > 0, 'The complete recycler pays for actual material recovery');
+
+  api.set_environment(0.5, 0.85, 0);
+  state = advance(api, 40 * 30);
+  conserved(state);
+  const regrown = body(api, 1).cellular.assemblies.filter(machine => machine.kind === 'propel()' && machine.complete);
+  assert.equal(regrown.length, 2, 'The visible program regrows both motors when the material brake decays');
+  assert.ok(regrown.every(machine => !oldMotors.some(old => old.id === machine.id)), 'Regrowth constructs new physical instances');
+  const checkpoint = save(api), resumed = await fresh();
+  assert.equal(restore(resumed, checkpoint), 1, error(resumed));
+  advance(api, 60); advance(resumed, 60);
+  assert.deepEqual(save(api), save(resumed), 'Named sensing, shared stock, controls and remodeling resume exactly');
 }
 
 const cycles = [];
@@ -84,12 +133,12 @@ for (const preset of PRESETS) {
   if (preset.name === 'Forager') assert.equal(state.photosynthesis, 0);
 
   const bytes = save(api), resumed = await fresh();
-  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 6);
+  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 7);
   assert.equal(restore(resumed, bytes), 1, error(resumed));
   assert.deepEqual(save(resumed), bytes);
   advance(api, 90); advance(resumed, 90);
   assert.deepEqual(save(resumed), save(api), 'Products, progress, inherited recipes and subsequent dynamics resume exactly');
-  for (const kind of [4, 5]) {
+  for (const kind of [4, 5, 6]) {
     const mutant = api.mutate_genome(genome, 17, kind);
     assert.ok(mutant !== genome && mutant > 0, error(api));
     assert.equal(api.genome_mutation_kind(mutant), kind);
@@ -99,5 +148,5 @@ for (const preset of PRESETS) {
   cycles.push({ name: preset.name, firstDivisionSeconds: Math.round(state.seconds * 100) / 100 });
 }
 
-console.log('Cellular checks passed: 8 authored genomes, 6 importable examples, paid development, frozen inspection, resource conservation, physical fission, gene mutations, and exact v6 continuation.');
+console.log('Cellular checks passed: 8 authored genomes, 7 importable examples, local receptor separation, bright/shade motor recycling and regrowth, paid development, frozen inspection, resource conservation, physical fission, gene/placement mutations, and exact v7 continuation.');
 console.log(JSON.stringify({ conditions: 'One founder; 0.85 light; 3 initial minerals per patch; 4 supplied particles/s for non-phototrophs.', cycles }));
