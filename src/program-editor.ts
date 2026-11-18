@@ -17,7 +17,8 @@ import { searchKeymap } from '@codemirror/search';
 import { tags } from '@lezer/highlight';
 import type { Engine, GenomeAnalysis, GenomeBinding, GenomeDiagnostic, GenomeEvaluation } from './engine';
 import {
-  genomeCompletions, genomeSignalCatalog, genomeSymbolDocumentation, lookupGenomeSymbol, tokenizeGenome, unwrapGenomeSelection,
+  cellularDeclarations, genomeCompletions, genomeSignalCatalog, genomeSymbolDocumentation, isCellularSource,
+  lookupCellularSymbol, lookupGenomeSymbol, tokenizeGenome, unwrapGenomeSelection,
   type GenomeSymbol, type GenomeToken, type GenomeTokenKind,
 } from './genome-language';
 import './program-editor.css';
@@ -74,7 +75,7 @@ const genomeLanguage = StreamLanguage.define<StreamState>({
     genomeOutput: tags.propertyName,
     genomeRegister: tags.special(tags.propertyName),
   },
-  languageData: { commentTokens: { line: '#' }, closeBrackets: { brackets: ['(', '"'] }, wordChars: '.' },
+  languageData: { commentTokens: { line: '#' }, closeBrackets: { brackets: ['(', '{', '"'] }, wordChars: '.' },
 });
 
 const genomeHighlight = HighlightStyle.define([
@@ -159,6 +160,7 @@ export class ProgramEditor {
   private readonly writeSignalSelect: HTMLSelectElement;
   private readonly evaluationElement: HTMLElement;
   private readonly evaluationTimeElement: HTMLElement;
+  private readonly languageElement: HTMLElement;
   private referenceSymbol: GenomeSymbol | null = null;
   private evaluation: GenomeEvaluation | null = null;
   private evaluationUnavailable: string | null = null;
@@ -188,6 +190,7 @@ export class ProgramEditor {
     const identifier = `program-editor-${++editorSequence}`;
     this.element = document.createElement('div');
     this.element.className = 'program-editor';
+    this.languageElement = document.createElement('div'); this.languageElement.className = 'program-language-summary';
     const referenceBar = document.createElement('div'); referenceBar.className = 'program-reference-bar';
     this.readSignalSelect = this.createSignalSelect('read');
     this.writeSignalSelect = this.createSignalSelect('write');
@@ -218,7 +221,7 @@ export class ProgramEditor {
     const shortcuts = document.createElement('span');
     shortcuts.className = 'program-shortcuts'; shortcuts.id = `${identifier}-shortcuts`;
     shortcuts.textContent = 'Tab leaves the editor. Control or Command plus Space opens completions, Enter checks the program, S saves, Z undoes, and Shift Z redoes. Control or Command plus bracket indents. F8 goes to the next error.';
-    this.element.append(referenceBar, this.referenceElement, host, this.evaluationElement, this.helpElement, this.diagnosticsElement, statusBar, shortcuts);
+    this.element.append(this.languageElement, referenceBar, this.referenceElement, host, this.evaluationElement, this.helpElement, this.diagnosticsElement, statusBar, shortcuts);
     options.parent.append(this.element);
     this.view = new EditorView({
       parent: host,
@@ -278,7 +281,7 @@ export class ProgramEditor {
       }),
     });
     this.view.dispatch(setDiagnostics(this.view.state, []));
-    this.renderStatus(); this.renderContext();
+    this.renderStatus(); this.renderContext(); this.refreshLanguageReference();
     this.scheduleCheck();
     queueMicrotask(() => { if (!this.destroyed) this.options.onStateChange?.(); });
   }
@@ -405,7 +408,7 @@ export class ProgramEditor {
       if (this.evaluation) { this.evaluation = null; this.evaluationUnavailable = 'The source changed. Values are unavailable for this draft.'; }
       this.bindingByFrom.clear();
       this.sourceBytes = encoder.encode(this.source).length;
-      this.refreshTokens(); this.renderDiagnostics(); this.renderStatus();
+      this.refreshTokens(); this.refreshLanguageReference(); this.renderDiagnostics(); this.renderStatus();
       this.scheduleCheck(); this.options.onChange?.(this.source); this.options.onStateChange?.();
     }
     if (update.docChanged || update.selectionSet) { this.renderContext(); this.renderEvaluation(); }
@@ -413,12 +416,27 @@ export class ProgramEditor {
 
   private createSignalSelect(direction: 'read' | 'write'): HTMLSelectElement {
     const select = document.createElement('select'); select.className = `program-signal-select ${direction}`;
-    select.setAttribute('aria-label', direction === 'read' ? 'Read signal reference' : 'Write signal reference');
-    const prompt = document.createElement('option'); prompt.value = ''; prompt.textContent = direction === 'read' ? 'Read signals' : 'Write signals';
-    select.append(prompt);
+    this.populateSignalSelect(select, direction);
+    select.addEventListener('change', () => {
+      const selected = (isCellularSource(this.source) ? lookupCellularSymbol(select.value, this.source) : undefined) ?? lookupGenomeSymbol(select.value);
+      if (!selected) { this.referenceElement.hidden = true; this.referenceSymbol = null; return; }
+      (direction === 'read' ? this.writeSignalSelect : this.readSignalSelect).value = '';
+      this.showReference(selected);
+    });
+    return select;
+  }
+
+  private populateSignalSelect(select: HTMLSelectElement, direction: 'read' | 'write'): void {
+    const cellular = isCellularSource(this.source), selected = select.value;
+    select.setAttribute('aria-label', cellular ? direction === 'read' ? 'Cellular input reference' : 'Cellular declaration reference' : direction === 'read' ? 'Read signal reference' : 'Write signal reference');
+    const prompt = document.createElement('option'); prompt.value = '';
+    prompt.textContent = cellular ? direction === 'read' ? 'Inputs & stocks' : 'Products & recipes' : direction === 'read' ? 'Read signals' : 'Write signals';
+    select.replaceChildren(prompt);
     const groups = new Map<string, HTMLOptGroupElement>();
-    for (const item of genomeSignalCatalog(direction)) {
-      const groupName = item.category === 'register' ? 'Memory registers'
+    for (const item of genomeSignalCatalog(direction, this.source)) {
+      const groupName = cellular && direction === 'write' ? item.type === 'mechanism' ? 'Mechanisms' : item.category === 'function' ? 'Product roles' : 'Declarations & placement'
+        : /^(pool|built)\./.test(item.name) ? 'This cell’s products & assemblies'
+        : item.category === 'register' ? 'Memory registers'
         : direction === 'write' ? /^(target|build|recycle)\./.test(item.name) ? 'Organelle construction' : item.name.startsWith('scan.') ? 'Physical scan' : 'Actions'
           : /^(object|contact)\./.test(item.name) ? 'Physical observations'
             : /^(light|heat|chemical|flow)\./.test(item.name) ? 'Environment sensors'
@@ -429,13 +447,22 @@ export class ProgramEditor {
       option.textContent = `${item.name}${item.category === 'register' ? ` … ${item.name.slice(0, 2)}999` : ''} · ${item.type}`;
       group.append(option);
     }
-    select.addEventListener('change', () => {
-      const selected = lookupGenomeSymbol(select.value);
-      if (!selected) { this.referenceElement.hidden = true; this.referenceSymbol = null; return; }
-      (direction === 'read' ? this.writeSignalSelect : this.readSignalSelect).value = '';
-      this.showReference(selected);
-    });
-    return select;
+    select.value = selected;
+  }
+
+  private refreshLanguageReference(): void {
+    const cellular = isCellularSource(this.source);
+    this.languageElement.hidden = !cellular;
+    this.element.classList.toggle('cellular-program', cellular);
+    if (cellular) {
+      const declarations = cellularDeclarations(this.source);
+      const label = document.createElement('strong'); label.textContent = 'Cellular program';
+      const detail = document.createElement('span');
+      const mechanisms = declarations.assemblies.filter(item=>item.kind.includes('(')).length;
+      detail.textContent = `${declarations.products.length} products · ${declarations.genes.length} genes · ${mechanisms ? `${mechanisms} mechanisms${mechanisms<declarations.assemblies.length?` · ${declarations.assemblies.length-mechanisms} family recipes`:''}` : `${declarations.assemblies.length} recipes`}`;
+      this.languageElement.replaceChildren(label, detail);
+    }
+    this.populateSignalSelect(this.readSignalSelect, 'read'); this.populateSignalSelect(this.writeSignalSelect, 'write');
   }
 
   private showReference(symbol: GenomeSymbol): void {
@@ -452,11 +479,13 @@ export class ProgramEditor {
     const controls = document.createElement('div'); controls.className = 'program-reference-controls';
     if (!this.readOnly) {
       const insert = document.createElement('button'); insert.type = 'button'; insert.className = 'program-reference-insert';
-      insert.textContent = symbol.category === 'output' || this.writeSignalSelect.value ? 'Insert write' : 'Insert read';
+      const cellular = isCellularSource(this.source);
+      insert.textContent = cellular ? this.writeSignalSelect.value ? 'Insert declaration' : 'Insert input' : symbol.category === 'output' || this.writeSignalSelect.value ? 'Insert write' : 'Insert read';
       insert.addEventListener('click', () => {
         if (this.destroyed || this.readOnly) return;
         const writing = symbol.category === 'output' || Boolean(this.writeSignalSelect.value);
-        const text = writing ? `${symbol.name} = ` : symbol.name;
+        const text = cellular ? symbol.insertText ?? (symbol.category === 'function' ? `${symbol.name}(${symbol.name === 'regulator' ? '8' : ''})` : symbol.name)
+          : writing ? `${symbol.name} = ` : symbol.name;
         const selection = this.view.state.selection.main;
         this.view.dispatch({ changes: { from: selection.from, to: selection.to, insert: text }, selection: { anchor: selection.from + text.length },
           annotations: Transaction.userEvent.of('input.complete'), scrollIntoView: true });
@@ -502,6 +531,18 @@ export class ProgramEditor {
         start = token.from; end = token.to;
         const declaration = evaluation.bindings.find(binding => binding.from === token.from && binding.to === token.to);
         if (declaration) return { ...declaration, label: declaration.name, note: 'Local binding value.' };
+        if (evaluation.mode==='cellular') {
+          const declarations=cellularDeclarations(this.source);
+          const gene=declarations.genes.find(item=>item.from===token.from && item.to===token.to);
+          const assembly=declarations.assemblies.find(item=>item.from===token.from && item.to===token.to);
+          const name=gene?`gene.${gene.name}`:assembly?`activity.${assembly.name}`:null;
+          const request=name?evaluation.outputs.find(item=>item.name===name):undefined;
+          if (request) return {from:token.from,to:token.to,type:request.type,value:request.value,label:request.name,
+            note:gene?'Requested expression effort. Actual synthesis shares finite core work, minerals, energy and space.':'Requested activity. Only completed functional machinery can act.'};
+          const product=declarations.products.find(item=>item.name===token.text);
+          const stock=product?evaluation.signals.find(item=>item.name===`pool.${product.name}`):undefined;
+          if (stock) return {from:token.from,to:token.to,type:stock.type,value:stock.value,label:stock.name,note:'Available physical product mass at this snapshot.'};
+        }
         const output = token.kind === 'output' ? evaluation.outputs.find(output => output.name === token.text) : undefined;
         if (output) return { from: token.from, to: token.to, type: output.type, value: output.value, label: output.name,
           note: 'Action request after engine clamping. Capability and resource checks still apply.' };
@@ -554,7 +595,7 @@ export class ProgramEditor {
     for (let index = 0; index < this.codeTokens.length; index++) {
       if (this.codeTokens[index].text !== 'let') continue;
       const name = this.codeTokens[index + 1];
-      if (name?.kind !== 'identifier' || this.codeTokens[index + 2]?.text !== '=') continue;
+      if (!name || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name.text) || this.codeTokens[index + 2]?.text !== '=') continue;
       let end = index + 3;
       while (end < this.codeTokens.length && this.codeTokens[end].text !== ';') end++;
       this.declarations.push({ name: name.text, from: name.from, to: name.to, scopeFrom: this.codeTokens[end]?.to ?? Infinity });
@@ -595,7 +636,9 @@ export class ProgramEditor {
     if (!token || ['string', 'comment', 'number', 'operator', 'punctuation', 'invalid'].includes(token.kind)) return null;
     const bindings = this.visibleBindings(position, true);
     const local = this.declarations.find(item => item.name === token.text && (item.scopeFrom <= position || item.from === token.from));
-    const symbol = lookupGenomeSymbol(token.text, bindings) ?? (local ? this.localSymbol(local) : undefined);
+    const symbol = (local ? this.localSymbol(local) : undefined)
+      ?? (isCellularSource(this.source) ? lookupCellularSymbol(token.text, this.source) : undefined)
+      ?? lookupGenomeSymbol(token.text, bindings);
     return symbol ? { from: token.from, to: token.to, symbol } : null;
   }
 
@@ -608,7 +651,7 @@ export class ProgramEditor {
       if (token.text === '(') {
         if (depth) { depth--; continue; }
         const previous = this.codeTokens[index - 1];
-        if (previous?.kind === 'function') return lookupGenomeSymbol(previous.text);
+        if (previous?.kind === 'function') return (isCellularSource(this.source) ? lookupCellularSymbol(previous.text, this.source) : undefined) ?? lookupGenomeSymbol(previous.text);
       }
       if (token.text === ';' && !depth) break;
     }

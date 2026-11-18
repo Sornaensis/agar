@@ -1,0 +1,2259 @@
+//! Material-bearing products and locally assembled cellular machinery.
+//!
+//! Program declarations are blueprints, never inventories. Each built object
+//! keeps its own recipe and ingredient definitions, so editing or mutating a
+//! genome cannot reinterpret already paid-for physical matter.
+use crate::body::{
+    Body, OrganelleKind, OrganelleSummary, WorkReport, CORE_MASS_PER_AREA, EMBODIED_FRACTION,
+    FAMILY_COUNT, MAX_AREA, MIN_FUNCTIONAL_INTEGRITY, SCAFFOLD_ENERGY_PER_MASS,
+    SCAFFOLD_MASS_PER_AREA,
+};
+use crate::checkpoint::{ensure, Reader, Result as CheckpointResult, Writer};
+use crate::material_allocation::{AllocationScratch, MaterialDemand};
+
+pub const MAX_PRODUCTS: usize = 64;
+pub const MAX_ASSEMBLIES: usize = 64;
+const MAX_POOLS: usize = 1024;
+const MAX_INSTANCES: usize = 32768;
+const EPS: f64 = 1e-12;
+const TRANSLATION_WORK: f64 = 0.6;
+const INSTALLATION_WORK: f64 = 0.4;
+const REPLICA_MASS_PER_AREA: f64 = 0.01;
+const REPLICA_ENERGY_PER_MASS: f64 = 80.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ProductKind {
+    Scaffold,
+    Anchor,
+    Motor,
+    Filament,
+    Pigment,
+    Enzyme,
+    Membrane,
+    Transporter,
+    Receptor,
+    Regulator,
+    Replicase,
+    Constrictor,
+}
+impl ProductKind {
+    pub const ALL: [Self; 12] = [
+        Self::Scaffold,
+        Self::Anchor,
+        Self::Motor,
+        Self::Filament,
+        Self::Pigment,
+        Self::Enzyme,
+        Self::Membrane,
+        Self::Transporter,
+        Self::Receptor,
+        Self::Regulator,
+        Self::Replicase,
+        Self::Constrictor,
+    ];
+    pub fn name(self) -> &'static str {
+        [
+            "scaffold",
+            "anchor",
+            "motor",
+            "filament",
+            "pigment",
+            "enzyme",
+            "membrane",
+            "transporter",
+            "receptor",
+            "regulator",
+            "replicase",
+            "constrictor",
+        ][self as usize]
+    }
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.name() == name)
+    }
+    pub fn synthesis_cost(self) -> f64 {
+        [
+            40.0, 50.0, 70.0, 45.0, 70.0, 65.0, 40.0, 65.0, 70.0, 35.0, 80.0, 60.0,
+        ][self as usize]
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProductDef {
+    pub name: String,
+    pub kind: ProductKind,
+    /// Zero means stable; positive values are a half-life in simulation seconds.
+    pub half_life: f64,
+}
+
+/// Each mechanism grants one operation. Storage, structural support, and
+/// translation are deliberately independent of food processing and sensing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum MechanismKind {
+    Support, Translation, EnergyStorage, MineralStorage, FoodStorage,
+    LightHarvest, MineralImport, ParticleCapture, Engulf,
+    DigestExudate, DigestTissue, DigestWaste, Propulsion, Pierce, Shield,
+    Repair, SenseLight, SenseHeat, SenseChemical, SenseContact, SenseOptical,
+    Grow, Replicate, Constrict,
+}
+impl MechanismKind {
+    pub const ALL: [Self; 24] = [
+        Self::Support, Self::Translation, Self::EnergyStorage, Self::MineralStorage,
+        Self::FoodStorage, Self::LightHarvest, Self::MineralImport, Self::ParticleCapture,
+        Self::Engulf, Self::DigestExudate, Self::DigestTissue, Self::DigestWaste,
+        Self::Propulsion, Self::Pierce, Self::Shield, Self::Repair, Self::SenseLight,
+        Self::SenseHeat, Self::SenseChemical, Self::SenseContact, Self::SenseOptical,
+        Self::Grow, Self::Replicate, Self::Constrict,
+    ];
+    pub fn name(self) -> &'static str {
+        ["support()", "translate()", "store(energy)", "store(mineral)", "store(food)",
+         "harvest(light)", "import(mineral)", "import(particle)", "engulf()",
+         "digest(exudate)", "digest(tissue)", "digest(waste)", "propel()", "pierce()",
+         "shield()", "repair()", "sense(light)", "sense(heat)", "sense(chemical)",
+         "sense(contact)", "sense(optical)", "grow()", "replicate()", "constrict()"]
+            [self as usize]
+    }
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.name() == name)
+    }
+    pub fn constructor(self) -> &'static str {
+        self.name().split_once('(').unwrap().0
+    }
+    pub fn target(self) -> Option<&'static str> {
+        let target = self.name().split_once('(').unwrap().1.trim_end_matches(')');
+        if target.is_empty() { None } else { Some(target) }
+    }
+    pub fn description(self) -> &'static str {
+        ["Structural support for cell viability and division; no storage or translation.",
+         "Paid product synthesis and installation work; no storage or metabolic capacity.",
+         "Capacity to retain usable energy; does not produce energy.",
+         "Capacity to retain free minerals; does not import minerals.",
+         "A food compartment; does not capture or digest food.",
+         "Converts locally available light to energy, sharing the habitat photon supply.",
+         "Imports dissolved minerals using energy; requires available mineral storage.",
+         "Captures nearby organic particles into available food storage; no digestion.",
+         "Engulfs sufficiently small, damaged cells into available food storage.",
+         "Processes stored exudate; does not process tissue or waste.",
+         "Processes stored tissue; does not process exudate or waste.",
+         "Processes stored waste; does not process exudate or tissue.",
+         "Applies force at the declared attachment angle, with physical torque and energy cost.",
+         "Damages contacted cells; released tissue needs separate capture, storage and digestion.",
+         "Physical protection from damage; no repair or growth.",
+         "Paid repair of existing damaged structure; no growth.",
+         "Measures local light; does not harvest energy.",
+         "Measures local temperature.",
+         "Measures local mineral and organic concentrations.",
+         "Measures flow and physical contact.",
+         "Detects visible objects in its viewing direction, subject to occlusion.",
+         "Pays for additional envelope area; structural support must already exist.",
+         "Pays for a material-bearing genome copy over time.",
+         "Performs paid constriction after replication and feasible division geometry."]
+            [self as usize]
+    }
+    pub fn required_roles(self) -> &'static [ProductKind] {
+        use ProductKind::*;
+        match self {
+            Self::Support | Self::Shield => &[Scaffold],
+            Self::Translation => &[Scaffold, Enzyme],
+            Self::EnergyStorage | Self::MineralStorage | Self::FoodStorage => &[Membrane],
+            Self::LightHarvest => &[Anchor, Pigment, Enzyme],
+            Self::MineralImport => &[Anchor, Transporter],
+            Self::ParticleCapture => &[Anchor, Motor],
+            Self::Engulf => &[Anchor, Motor, Membrane],
+            Self::DigestExudate | Self::DigestTissue | Self::DigestWaste | Self::Repair => &[Enzyme],
+            Self::Propulsion => &[Anchor, Motor, Filament],
+            Self::Pierce => &[Anchor, Filament, Enzyme],
+            Self::SenseLight | Self::SenseOptical => &[Anchor, Receptor, Pigment],
+            Self::SenseHeat | Self::SenseChemical => &[Anchor, Receptor],
+            Self::SenseContact => &[Anchor, Receptor, Filament],
+            Self::Grow => &[Membrane, Enzyme],
+            Self::Replicate => &[Scaffold, Replicase],
+            Self::Constrict => &[Anchor, Motor, Constrictor],
+        }
+    }
+    pub fn minimum_mass(self) -> f64 {
+        [0.04, 0.02, 0.02, 0.02, 0.04, 0.04, 0.015, 0.015, 0.025,
+         0.01, 0.01, 0.01, 0.025, 0.025, 0.02, 0.025, 0.01, 0.01,
+         0.015, 0.01, 0.02, 0.02, 0.02, 0.02][self as usize]
+    }
+    fn internal_footprint(self) -> f64 {
+        [1.0, 1.0, 2.4, 2.4, 2.5, 1.35, 0.7, 0.8, 0.8,
+         1.0, 1.0, 1.0, 0.65, 0.8, 0.35, 1.0, 0.8, 0.8,
+         1.0, 0.7, 1.3, 1.0, 1.0, 1.0][self as usize]
+    }
+    fn surface_footprint(self) -> f64 {
+        [0.0, 0.0, 0.0, 0.0, 0.0, 0.55, 1.8, 2.2, 2.2,
+         0.0, 0.0, 0.0, 1.5, 2.0, 3.0, 0.0, 1.2, 1.1,
+         1.5, 1.1, 2.0, 1.5, 0.0, 1.5][self as usize]
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AssemblyKind {
+    Organelle(OrganelleKind),
+    Membrane,
+    Replicator,
+    Constrictor,
+    Mechanism(MechanismKind),
+}
+impl AssemblyKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Organelle(kind) => kind.name(),
+            Self::Membrane => "membrane",
+            Self::Replicator => "replicator",
+            Self::Constrictor => "constrictor",
+            Self::Mechanism(kind) => kind.name(),
+        }
+    }
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "membrane" => Some(Self::Membrane),
+            "replicator" => Some(Self::Replicator),
+            "constrictor" => Some(Self::Constrictor),
+            _ => MechanismKind::from_name(name).map(Self::Mechanism)
+                .or_else(|| OrganelleKind::from_name(name).map(Self::Organelle)),
+        }
+    }
+    pub fn required_roles(self) -> &'static [ProductKind] {
+        use ProductKind::*;
+        match self {
+            Self::Organelle(kind) => match kind {
+                OrganelleKind::Core | OrganelleKind::Metabolic => &[Scaffold, Enzyme],
+                OrganelleKind::Photosynthetic => &[Anchor, Pigment, Enzyme],
+                OrganelleKind::Digestive => &[Membrane, Enzyme],
+                OrganelleKind::Reserve => &[Membrane],
+                OrganelleKind::Transporter => &[Anchor, Transporter],
+                OrganelleKind::Phagocyte => &[Anchor, Motor, Membrane],
+                OrganelleKind::Flagellum => &[Anchor, Motor, Filament],
+                OrganelleKind::Piercer => &[Anchor, Filament, Enzyme],
+                OrganelleKind::Cortex => &[Scaffold],
+                OrganelleKind::Repair => &[Enzyme],
+                OrganelleKind::Photoreceptor | OrganelleKind::Optical => {
+                    &[Anchor, Receptor, Pigment]
+                }
+                OrganelleKind::Thermoreceptor | OrganelleKind::Chemoreceptor => &[Anchor, Receptor],
+                OrganelleKind::Mechanoreceptor => &[Anchor, Receptor, Filament],
+            },
+            Self::Membrane => &[Membrane, Enzyme],
+            Self::Replicator => &[Scaffold, Replicase],
+            Self::Constrictor => &[Anchor, Motor, Constrictor],
+            Self::Mechanism(kind) => kind.required_roles(),
+        }
+    }
+    pub fn allows_role(self, kind: ProductKind) -> bool {
+        kind == ProductKind::Scaffold || self.required_roles().contains(&kind)
+    }
+    pub fn minimum_mass(self) -> f64 {
+        match self {
+            Self::Organelle(kind) => kind.minimum_mass(),
+            Self::Mechanism(kind) => kind.minimum_mass(),
+            _ => 0.02,
+        }
+    }
+    pub fn internal_footprint(self) -> f64 {
+        match self {
+            Self::Organelle(kind) => kind.internal_footprint(),
+            Self::Mechanism(kind) => kind.internal_footprint(),
+            _ => 1.0,
+        }
+    }
+    pub fn surface_footprint(self) -> f64 {
+        match self {
+            Self::Organelle(kind) => kind.surface_footprint(),
+            Self::Membrane | Self::Constrictor => 1.5,
+            Self::Replicator => 0.0,
+            Self::Mechanism(kind) => kind.surface_footprint(),
+        }
+    }
+    fn installation_cost(self) -> f64 {
+        match self {
+            Self::Organelle(kind) => kind.construction_cost() * 0.4,
+            _ => 30.0,
+        }
+    }
+    pub fn supports_cell(self) -> bool {
+        matches!(self, Self::Organelle(OrganelleKind::Core) | Self::Mechanism(MechanismKind::Support))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AssemblyDef {
+    pub name: String,
+    pub kind: AssemblyKind,
+    pub parts: Vec<(usize, f64)>,
+    /// Body-relative polar attachment angle, in radians.
+    pub at: f64,
+    /// Body-relative force (or viewing) direction, in radians.
+    pub direction: f64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CellularProgram {
+    pub products: Vec<ProductDef>,
+    pub assemblies: Vec<AssemblyDef>,
+}
+impl CellularProgram {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.products.len() > MAX_PRODUCTS || self.assemblies.len() > MAX_ASSEMBLIES {
+            return Err("At most 64 products and 64 assemblies are supported.".into());
+        }
+        let mut names = std::collections::HashSet::new();
+        for product in &self.products {
+            if !valid_name(&product.name) || !names.insert(product.name.as_str()) {
+                return Err("Product names must be unique identifiers.".into());
+            }
+            if !product.half_life.is_finite()
+                || product.half_life < 0.0
+                || product.half_life > 1e6
+                || (product.kind == ProductKind::Regulator && product.half_life < 0.001)
+            {
+                return Err(format!(
+                    "Product '{}' has an invalid half-life.",
+                    product.name
+                ));
+            }
+        }
+        names.clear();
+        for assembly in &self.assemblies {
+            if !valid_name(&assembly.name) || !names.insert(assembly.name.as_str()) {
+                return Err("Assembly names must be unique identifiers.".into());
+            }
+            if !assembly.at.is_finite()
+                || !assembly.direction.is_finite()
+                || assembly.at.abs() > 1e12
+                || assembly.direction.abs() > 1e12
+            {
+                return Err(format!(
+                    "Assembly '{}' has an invalid angle.",
+                    assembly.name
+                ));
+            }
+            let mut roles = [0.0; 12];
+            let mut used = std::collections::HashSet::new();
+            let mut total = 0.0;
+            for &(index, amount) in &assembly.parts {
+                let Some(product) = self.products.get(index) else {
+                    return Err(format!(
+                        "Assembly '{}' references an unknown product.",
+                        assembly.name
+                    ));
+                };
+                if !amount.is_finite() || amount <= 0.0 || !used.insert(index) {
+                    return Err(format!(
+                        "Assembly '{}' needs positive, distinct ingredients.",
+                        assembly.name
+                    ));
+                }
+                if !assembly.kind.allows_role(product.kind) {
+                    return Err(format!(
+                        "{} cannot use a {} product.",
+                        assembly.kind.name(),
+                        product.kind.name()
+                    ));
+                }
+                roles[product.kind as usize] += amount;
+                total += amount;
+            }
+            if total + EPS < assembly.kind.minimum_mass()
+                || total > MAX_AREA * 0.9
+                || total * assembly.kind.internal_footprint() > MAX_AREA * 0.9
+                || total * assembly.kind.surface_footprint() > MAX_AREA.sqrt() * 0.9
+            {
+                return Err(format!(
+                    "Assembly '{}' recipe mass must fit its physical family (minimum {}).",
+                    assembly.name,
+                    assembly.kind.minimum_mass()
+                ));
+            }
+            for &role in assembly.kind.required_roles() {
+                if roles[role as usize] + EPS < total * 0.1 {
+                    return Err(format!(
+                        "Assembly '{}' needs at least 10% {} material.",
+                        assembly.name,
+                        role.name()
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn valid_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name
+            .bytes()
+            .enumerate()
+            .all(|(i, b)| b == b'_' || b.is_ascii_alphabetic() || (i > 0 && b.is_ascii_digit()))
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CellularControls {
+    pub expression: Vec<f64>,
+    pub activity: Vec<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProductPool {
+    pub product: ProductDef,
+    pub mass: f64,
+    pub embodied_energy: f64,
+    pub expression_requested: f64,
+    pub expression_rate: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RecipePart {
+    pub product: ProductDef,
+    pub required_mass: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Recipe {
+    pub name: String,
+    pub kind: AssemblyKind,
+    pub parts: Vec<RecipePart>,
+    pub at: f64,
+    pub direction: f64,
+}
+impl Recipe {
+    fn from_def(program: &CellularProgram, def: &AssemblyDef) -> Self {
+        Self {
+            name: def.name.clone(),
+            kind: def.kind,
+            at: def.at,
+            direction: def.direction,
+            parts: def
+                .parts
+                .iter()
+                .map(|&(i, amount)| RecipePart {
+                    product: program.products[i].clone(),
+                    required_mass: amount,
+                })
+                .collect(),
+        }
+    }
+    pub fn required_mass(&self) -> f64 {
+        self.parts.iter().map(|p| p.required_mass).sum()
+    }
+    fn matches(&self, program: &CellularProgram, def: &AssemblyDef) -> bool {
+        self.name == def.name
+            && self.kind == def.kind
+            && self.at == def.at
+            && self.direction == def.direction
+            && self.parts.len() == def.parts.len()
+            && self.parts.iter().zip(&def.parts).all(|(a, &(i, amount))| {
+                a.required_mass == amount && program.products.get(i) == Some(&a.product)
+            })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Ingredient {
+    pub mass: f64,
+    pub embodied_energy: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AssemblyInstance {
+    pub id: u32,
+    pub recipe: Recipe,
+    pub ingredients: Vec<Ingredient>,
+    pub integrity: f64,
+    pub activity: f64,
+}
+impl AssemblyInstance {
+    pub fn mass(&self) -> f64 {
+        self.ingredients.iter().map(|p| p.mass).sum()
+    }
+    pub fn embodied_energy(&self) -> f64 {
+        self.ingredients.iter().map(|p| p.embodied_energy).sum()
+    }
+    pub fn complete(&self) -> bool {
+        self.ingredients
+            .iter()
+            .zip(&self.recipe.parts)
+            .all(|(part, recipe)| part.mass + EPS >= recipe.required_mass)
+    }
+    pub fn functional_mass(&self) -> f64 {
+        if self.complete() && self.integrity >= MIN_FUNCTIONAL_INTEGRITY {
+            self.mass() * self.integrity
+        } else {
+            0.0
+        }
+    }
+    pub fn internal_space(&self) -> f64 {
+        self.mass() * self.recipe.kind.internal_footprint()
+    }
+    pub fn surface_space(&self) -> f64 {
+        self.mass() * self.recipe.kind.surface_footprint()
+    }
+    pub fn building(&self) -> f64 {
+        (self.recipe.required_mass() - self.mass()).max(0.0)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CellularState {
+    pub pools: Vec<ProductPool>,
+    pub assemblies: Vec<AssemblyInstance>,
+    pub next_assembly_id: u32,
+    /// Previously replicated genetic material, partitioned rather than erased.
+    pub genome_mass: f64,
+    pub genome_energy: f64,
+    pub replica_mass: f64,
+    pub replica_energy: f64,
+    pub constriction: f64,
+}
+impl Default for CellularState {
+    fn default() -> Self {
+        Self {
+            pools: Vec::new(),
+            assemblies: Vec::new(),
+            next_assembly_id: 1,
+            genome_mass: 0.0,
+            genome_energy: 0.0,
+            replica_mass: 0.0,
+            replica_energy: 0.0,
+            constriction: 0.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CellularActions {
+    pub force_x: f64,
+    pub force_y: f64,
+    pub torque: f64,
+    pub motor_cost: f64,
+    pub photosynthesize: f64,
+    pub absorb: f64,
+    pub feed: f64,
+    pub engulf: bool,
+    pub capture_activity: f64,
+    pub engulf_activity: f64,
+    pub independent_engulf: f64,
+    pub bite_extraction_fraction: f64,
+    pub light_harvest: f64,
+    pub substrate_digestion: [f64; 3],
+    pub bite: f64,
+    pub defend: f64,
+    pub repair: f64,
+    pub digest: [f64; 3],
+    pub divide: bool,
+    pub scan_bearing: f64,
+    pub scan_width: f64,
+}
+
+impl CellularState {
+    pub fn add_mechanism_capacities(&self, cap: &mut crate::body::BodyCapacities, area: f64) {
+        use MechanismKind::*;
+        for assembly in &self.assemblies {
+            let AssemblyKind::Mechanism(kind) = assembly.recipe.kind else { continue; };
+            let mass = assembly.functional_mass();
+            let active = mass * assembly.activity;
+            match kind {
+                // Capacity is physical room. Switching activity off never
+                // destroys a compartment or makes its contents disappear.
+                EnergyStorage => cap.energy += 2000.0 * mass,
+                MineralStorage => cap.minerals += 25.0 * mass,
+                FoodStorage => {
+                    cap.gut_energy += 800.0 * mass;
+                    cap.gut_minerals += 12.0 * mass;
+                }
+                Translation => cap.assembly += 0.55 * active,
+                LightHarvest => cap.light_harvest += 55.0 * mass,
+                MineralImport => cap.uptake += 0.8 * mass,
+                ParticleCapture => cap.capture += mass,
+                Engulf => { cap.phagocytosis += mass; cap.independent_engulf += mass; }
+                DigestExudate => cap.substrate_digestion[0] += 65.0 * mass,
+                DigestTissue => cap.substrate_digestion[1] += 65.0 * mass,
+                DigestWaste => cap.substrate_digestion[2] += 65.0 * mass,
+                Propulsion => { cap.thrust += 100.0 * mass; cap.turn += 25.0 * mass; }
+                Pierce => cap.piercing += mass,
+                Shield => cap.protection = (cap.protection + 6.0 * mass / area.sqrt()).min(0.8),
+                Repair => cap.repair += 0.08 * mass,
+                SenseLight => cap.light_sensing += active,
+                SenseHeat => cap.heat_sensing += active,
+                SenseChemical => cap.chemical_sensing += active,
+                SenseContact => cap.mechanical_sensing += active,
+                SenseOptical => cap.optical_sensing += active,
+                Support | Grow | Replicate | Constrict => {},
+            }
+        }
+        cap.optical_range = if cap.optical_sensing > 0.0 {
+            (35.0 + 300.0 * cap.optical_sensing.sqrt()).min(190.0)
+        } else { 0.0 };
+        cap.energy_storage = cap.energy;
+        cap.mineral_storage = cap.minerals;
+        cap.gut_storage = cap.gut_energy;
+        cap.propulsion = cap.thrust;
+        cap.attack = cap.piercing;
+        cap.defense = cap.protection;
+    }
+
+    pub fn stock_mass(&self) -> f64 {
+        self.pools.iter().map(|p| p.mass).sum()
+    }
+    pub fn genetic_mass(&self) -> f64 {
+        self.genome_mass + self.replica_mass
+    }
+    pub fn structural_mass(&self) -> f64 {
+        self.stock_mass()
+            + self.genetic_mass()
+            + self
+                .assemblies
+                .iter()
+                .map(AssemblyInstance::mass)
+                .sum::<f64>()
+    }
+    pub fn embodied_energy(&self) -> f64 {
+        self.genome_energy
+            + self.replica_energy
+            + self.pools.iter().map(|p| p.embodied_energy).sum::<f64>()
+            + self
+                .assemblies
+                .iter()
+                .map(AssemblyInstance::embodied_energy)
+                .sum::<f64>()
+    }
+    pub fn internal_space(&self) -> f64 {
+        self.stock_mass()
+            + self.genetic_mass()
+            + self
+                .assemblies
+                .iter()
+                .map(AssemblyInstance::internal_space)
+                .sum::<f64>()
+    }
+    pub fn surface_space(&self) -> f64 {
+        self.assemblies
+            .iter()
+            .map(AssemblyInstance::surface_space)
+            .sum()
+    }
+    pub fn upkeep(&self) -> f64 {
+        0.6 * (self.stock_mass() + self.genetic_mass())
+            + self
+                .assemblies
+                .iter()
+                .map(|a| {
+                    a.mass()
+                        * match a.recipe.kind {
+                            AssemblyKind::Organelle(
+                                OrganelleKind::Flagellum | OrganelleKind::Piercer,
+                            )
+                            | AssemblyKind::Constrictor
+                            | AssemblyKind::Mechanism(MechanismKind::Propulsion | MechanismKind::Pierce | MechanismKind::Constrict) => 0.9,
+                            _ => 0.45,
+                        }
+                })
+                .sum::<f64>()
+    }
+    pub fn add_summaries(&self, summaries: &mut [OrganelleSummary; FAMILY_COUNT]) {
+        for assembly in &self.assemblies {
+            if let AssemblyKind::Organelle(kind) = assembly.recipe.kind {
+                let entry = &mut summaries[kind as usize];
+                entry.count += 1;
+                entry.mass += assembly.mass();
+                entry.functional_mass += assembly.functional_mass();
+                entry.damaged += assembly.mass() * (1.0 - assembly.integrity);
+                entry.building += assembly.building();
+            }
+        }
+    }
+    pub fn family_mass(&self, kind: OrganelleKind, functional: bool) -> f64 {
+        self.assemblies
+            .iter()
+            .filter(|a| a.recipe.kind == AssemblyKind::Organelle(kind))
+            .map(|a| {
+                if functional {
+                    a.functional_mass()
+                } else {
+                    a.mass()
+                }
+            })
+            .sum()
+    }
+    pub fn replication_progress(&self, area: f64) -> f64 {
+        (self.replica_mass / (REPLICA_MASS_PER_AREA * area)).clamp(0.0, 1.0)
+    }
+    pub fn partition_base(&self) -> Self {
+        Self {
+            pools: self
+                .pools
+                .iter()
+                .map(|p| ProductPool {
+                    product: p.product.clone(),
+                    mass: p.mass * 0.5,
+                    embodied_energy: p.embodied_energy * 0.5,
+                    expression_requested: p.expression_requested,
+                    expression_rate: 0.0,
+                })
+                .collect(),
+            assemblies: Vec::new(),
+            next_assembly_id: self.next_assembly_id,
+            genome_mass: self.genetic_mass() * 0.5,
+            genome_energy: (self.genome_energy + self.replica_energy) * 0.5,
+            replica_mass: 0.0,
+            replica_energy: 0.0,
+            constriction: 0.0,
+        }
+    }
+    pub(crate) fn validate(&self) -> CheckpointResult<()> {
+        ensure(
+            self.pools.len() <= MAX_POOLS && self.assemblies.len() <= MAX_INSTANCES,
+            "too many cellular material records",
+        )?;
+        ensure(
+            self.next_assembly_id > 0,
+            "invalid next assembly identifier",
+        )?;
+        for (index, pool) in self.pools.iter().enumerate() {
+            validate_product(&pool.product)?;
+            ensure(
+                !self.pools[..index]
+                    .iter()
+                    .any(|p| p.product == pool.product),
+                "duplicate cellular product pool",
+            )?;
+            validate_ledger(
+                pool.mass,
+                pool.embodied_energy,
+                pool.product.kind.synthesis_cost(),
+            )?;
+            ensure(
+                pool.expression_requested.is_finite()
+                    && pool.expression_requested >= 0.0
+                    && pool.expression_rate.is_finite()
+                    && pool.expression_rate >= 0.0,
+                "invalid cellular expression rate",
+            )?;
+        }
+        let mut ids = std::collections::HashSet::new();
+        for assembly in &self.assemblies {
+            ensure(
+                assembly.id > 0 && assembly.id < self.next_assembly_id && ids.insert(assembly.id),
+                "invalid or duplicate assembly identifier",
+            )?;
+            let recipe = &assembly.recipe;
+            let program = CellularProgram {
+                products: recipe.parts.iter().map(|p| p.product.clone()).collect(),
+                assemblies: vec![AssemblyDef {
+                    name: recipe.name.clone(),
+                    kind: recipe.kind,
+                    at: recipe.at,
+                    direction: recipe.direction,
+                    parts: recipe
+                        .parts
+                        .iter()
+                        .enumerate()
+                        .map(|(i, p)| (i, p.required_mass))
+                        .collect(),
+                }],
+            };
+            ensure(
+                program.validate().is_ok(),
+                "invalid installed assembly recipe",
+            )?;
+            ensure(
+                assembly.ingredients.len() == recipe.parts.len() && assembly.mass() > 0.0,
+                "invalid assembly ingredient count",
+            )?;
+            ensure(
+                assembly.integrity.is_finite()
+                    && (0.0..=1.0).contains(&assembly.integrity)
+                    && assembly.activity.is_finite()
+                    && (0.0..=1.0).contains(&assembly.activity),
+                "invalid assembly integrity or activity",
+            )?;
+            for (ingredient, part) in assembly.ingredients.iter().zip(&recipe.parts) {
+                validate_ledger(
+                    ingredient.mass,
+                    ingredient.embodied_energy,
+                    part.product.kind.synthesis_cost() + recipe.kind.installation_cost(),
+                )?;
+                ensure(
+                    ingredient.mass <= part.required_mass + EPS,
+                    "assembly ingredient exceeds recipe",
+                )?;
+            }
+        }
+        validate_ledger(
+            self.genome_mass,
+            self.genome_energy,
+            REPLICA_ENERGY_PER_MASS,
+        )?;
+        validate_ledger(
+            self.replica_mass,
+            self.replica_energy,
+            REPLICA_ENERGY_PER_MASS,
+        )?;
+        ensure(
+            self.constriction.is_finite() && (0.0..=1.0).contains(&self.constriction),
+            "invalid constriction progress",
+        )?;
+        Ok(())
+    }
+    pub(crate) fn write_checkpoint(&self, writer: &mut Writer) {
+        writer.u32(self.next_assembly_id);
+        for value in [
+            self.genome_mass,
+            self.genome_energy,
+            self.replica_mass,
+            self.replica_energy,
+            self.constriction,
+        ] {
+            writer.f64(value);
+        }
+        writer.count(self.pools.len());
+        for pool in &self.pools {
+            write_product(writer, &pool.product);
+            for value in [
+                pool.mass,
+                pool.embodied_energy,
+                pool.expression_requested,
+                pool.expression_rate,
+            ] {
+                writer.f64(value);
+            }
+        }
+        writer.count(self.assemblies.len());
+        for assembly in &self.assemblies {
+            writer.u32(assembly.id);
+            writer.text(&assembly.recipe.name);
+            writer.u8(match assembly.recipe.kind {
+                AssemblyKind::Organelle(kind) => kind as u8,
+                AssemblyKind::Membrane => 16,
+                AssemblyKind::Replicator => 17,
+                AssemblyKind::Constrictor => 18,
+                AssemblyKind::Mechanism(kind) => 19 + kind as u8,
+            });
+            for value in [
+                assembly.recipe.at,
+                assembly.recipe.direction,
+                assembly.integrity,
+                assembly.activity,
+            ] {
+                writer.f64(value);
+            }
+            writer.count(assembly.recipe.parts.len());
+            for (part, ingredient) in assembly.recipe.parts.iter().zip(&assembly.ingredients) {
+                write_product(writer, &part.product);
+                writer.f64(part.required_mass);
+                writer.f64(ingredient.mass);
+                writer.f64(ingredient.embodied_energy);
+            }
+        }
+    }
+    pub(crate) fn read_checkpoint_version(reader: &mut Reader<'_>, version: u32) -> CheckpointResult<Self> {
+        let mut state = Self {
+            next_assembly_id: reader.u32()?,
+            genome_mass: reader.f64()?,
+            genome_energy: reader.f64()?,
+            replica_mass: reader.f64()?,
+            replica_energy: reader.f64()?,
+            constriction: reader.f64()?,
+            ..Self::default()
+        };
+        let count = reader.count(MAX_POOLS)?;
+        for _ in 0..count {
+            state.pools.push(ProductPool {
+                product: read_product(reader)?,
+                mass: reader.f64()?,
+                embodied_energy: reader.f64()?,
+                expression_requested: reader.f64()?,
+                expression_rate: reader.f64()?,
+            });
+        }
+        let count = reader.count(MAX_INSTANCES)?;
+        for _ in 0..count {
+            let id = reader.u32()?;
+            let name = reader.text(128)?;
+            let kind = match reader.u8()? {
+                16 => AssemblyKind::Membrane,
+                17 => AssemblyKind::Replicator,
+                18 => AssemblyKind::Constrictor,
+                value @ 19..=42 if version >= 6 => AssemblyKind::Mechanism(MechanismKind::ALL[(value - 19) as usize]),
+                value => AssemblyKind::Organelle(
+                    OrganelleKind::from_index(value as usize)
+                        .ok_or("Invalid simulation save: unknown assembly family.")?,
+                ),
+            };
+            let at = reader.f64()?;
+            let direction = reader.f64()?;
+            let integrity = reader.f64()?;
+            let activity = reader.f64()?;
+            let count = reader.count(MAX_PRODUCTS)?;
+            let mut parts = Vec::with_capacity(count);
+            let mut ingredients = Vec::with_capacity(count);
+            for _ in 0..count {
+                parts.push(RecipePart {
+                    product: read_product(reader)?,
+                    required_mass: reader.f64()?,
+                });
+                ingredients.push(Ingredient {
+                    mass: reader.f64()?,
+                    embodied_energy: reader.f64()?,
+                });
+            }
+            state.assemblies.push(AssemblyInstance {
+                id,
+                recipe: Recipe {
+                    name,
+                    kind,
+                    parts,
+                    at,
+                    direction,
+                },
+                ingredients,
+                integrity,
+                activity,
+            });
+        }
+        state.validate()?;
+        Ok(state)
+    }
+}
+
+fn validate_product(product: &ProductDef) -> CheckpointResult<()> {
+    ensure(
+        valid_name(&product.name)
+            && product.half_life.is_finite()
+            && (0.0..=1e6).contains(&product.half_life)
+            && (product.kind != ProductKind::Regulator || product.half_life >= 0.001),
+        "invalid cellular product definition",
+    )
+}
+fn validate_ledger(mass: f64, energy: f64, cost: f64) -> CheckpointResult<()> {
+    ensure(
+        mass.is_finite()
+            && (0.0..=MAX_AREA * 0.9).contains(&mass)
+            && energy.is_finite()
+            && energy >= 0.0
+            && energy <= mass * cost * EMBODIED_FRACTION + 1e-8,
+        "invalid cellular material or energy ledger",
+    )
+}
+fn write_product(writer: &mut Writer, product: &ProductDef) {
+    writer.text(&product.name);
+    writer.u8(product.kind as u8);
+    writer.f64(product.half_life);
+}
+fn read_product(reader: &mut Reader<'_>) -> CheckpointResult<ProductDef> {
+    let name = reader.text(128)?;
+    let kind = *ProductKind::ALL
+        .get(reader.u8()? as usize)
+        .ok_or("Invalid simulation save: unknown product role.")?;
+    let product = ProductDef {
+        name,
+        kind,
+        half_life: reader.f64()?,
+    };
+    validate_product(&product)?;
+    Ok(product)
+}
+
+fn nonnegative(value: f64) -> f64 {
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        0.0
+    }
+}
+fn effort(value: f64) -> f64 {
+    nonnegative(value).min(1.0)
+}
+
+impl Body {
+    /// Gene inputs are a read-only snapshot, including no material from this tick.
+    pub fn cellular_inputs(&self, program: &CellularProgram) -> (Vec<f64>, Vec<f64>) {
+        let products = program
+            .products
+            .iter()
+            .map(|def| {
+                self.cellular
+                    .as_ref()
+                    .and_then(|state| state.pools.iter().find(|pool| &pool.product == def))
+                    .map_or(0.0, |pool| pool.mass)
+            })
+            .collect();
+        let assemblies = program
+            .assemblies
+            .iter()
+            .map(|def| {
+                self.cellular.as_ref().map_or(0.0, |state| {
+                    state
+                        .assemblies
+                        .iter()
+                        .filter(|a| a.recipe.matches(program, def))
+                        .map(AssemblyInstance::functional_mass)
+                        .sum()
+                })
+            })
+            .collect();
+        (products, assemblies)
+    }
+
+    /// Freeze activities of already installed machines before any construction.
+    /// The vector force and its cross-product torque retain motor geometry.
+    pub fn cellular_actions(
+        &mut self,
+        program: &CellularProgram,
+        controls: &CellularControls,
+    ) -> CellularActions {
+        let mut total = [0.0; FAMILY_COUNT];
+        for kind in OrganelleKind::ALL {
+            total[kind as usize] = self.functional_mass(kind);
+        }
+        let radius = self.radius();
+        let area = self.area;
+        let state = self.cellular.get_or_insert_with(CellularState::default);
+        let mut active = [0.0; FAMILY_COUNT];
+        let mut mechanism_total = [0.0; 24];
+        let mut mechanism_active = [0.0; 24];
+        let mut actions = CellularActions {
+            scan_width: std::f64::consts::TAU,
+            digest: [1.0; 3],
+            ..CellularActions::default()
+        };
+        let mut optical_direction = [0.0; 2];
+        for assembly in &mut state.assemblies {
+            assembly.activity = program
+                .assemblies
+                .iter()
+                .position(|def| assembly.recipe.matches(program, def))
+                .map_or(0.0, |index| {
+                    effort(controls.activity.get(index).copied().unwrap_or(0.0))
+                });
+            let mass = assembly.functional_mass() * assembly.activity;
+            match assembly.recipe.kind {
+                AssemblyKind::Organelle(kind) => active[kind as usize] += mass,
+                AssemblyKind::Mechanism(kind) => {
+                    mechanism_total[kind as usize] += assembly.functional_mass();
+                    mechanism_active[kind as usize] += mass;
+                }
+                _ => {},
+            }
+            if matches!(assembly.recipe.kind, AssemblyKind::Organelle(OrganelleKind::Flagellum)
+                | AssemblyKind::Mechanism(MechanismKind::Propulsion)) {
+                    let force = 100.0 * mass;
+                    let fx = force * assembly.recipe.direction.cos();
+                    let fy = force * assembly.recipe.direction.sin();
+                    actions.force_x += fx;
+                    actions.force_y += fy;
+                    actions.torque +=
+                        radius * (assembly.recipe.at.cos() * fy - assembly.recipe.at.sin() * fx);
+                    actions.motor_cost += force * 0.06;
+            } else if matches!(assembly.recipe.kind, AssemblyKind::Organelle(OrganelleKind::Optical)
+                | AssemblyKind::Mechanism(MechanismKind::SenseOptical)) {
+                    optical_direction[0] += mass * assembly.recipe.direction.cos();
+                    optical_direction[1] += mass * assembly.recipe.direction.sin();
+            }
+        }
+        let ratio = |kind: OrganelleKind| {
+            if total[kind as usize] > 0.0 {
+                (active[kind as usize] / total[kind as usize]).clamp(0.0, 1.0)
+            } else {
+                0.0
+            }
+        };
+        let combined_ratio = |family: OrganelleKind, mechanism: MechanismKind| {
+            let total = total[family as usize] + mechanism_total[mechanism as usize];
+            if total > 0.0 {
+                ((active[family as usize] + mechanism_active[mechanism as usize]) / total).clamp(0.0, 1.0)
+            } else { 0.0 }
+        };
+        actions.photosynthesize = ratio(OrganelleKind::Photosynthetic);
+        actions.light_harvest = 55.0 * mechanism_active[MechanismKind::LightHarvest as usize];
+        actions.substrate_digestion = [MechanismKind::DigestExudate, MechanismKind::DigestTissue, MechanismKind::DigestWaste]
+            .map(|kind| 65.0 * mechanism_active[kind as usize]);
+        actions.absorb = combined_ratio(OrganelleKind::Transporter, MechanismKind::MineralImport);
+        actions.feed = ratio(OrganelleKind::Digestive);
+        actions.digest = [actions.feed; 3];
+        actions.engulf = active[OrganelleKind::Phagocyte as usize] + mechanism_active[MechanismKind::Engulf as usize] > 0.0;
+        actions.capture_activity = combined_ratio(OrganelleKind::Phagocyte, MechanismKind::ParticleCapture);
+        actions.engulf_activity = combined_ratio(OrganelleKind::Phagocyte, MechanismKind::Engulf);
+        actions.independent_engulf = mechanism_active[MechanismKind::Engulf as usize];
+        actions.bite = combined_ratio(OrganelleKind::Piercer, MechanismKind::Pierce);
+        let piercing = active[OrganelleKind::Piercer as usize] + mechanism_active[MechanismKind::Pierce as usize];
+        actions.bite_extraction_fraction = if piercing > 0.0 {
+            active[OrganelleKind::Piercer as usize] / piercing
+        } else { 0.0 };
+        actions.defend = combined_ratio(OrganelleKind::Cortex, MechanismKind::Shield);
+        actions.repair = combined_ratio(OrganelleKind::Repair, MechanismKind::Repair);
+        if optical_direction[0] != 0.0 || optical_direction[1] != 0.0 {
+            actions.scan_bearing = optical_direction[1].atan2(optical_direction[0]);
+            actions.scan_width = std::f64::consts::PI;
+        }
+        actions.divide =
+            state.replication_progress(area) >= 1.0 - EPS && state.constriction >= 1.0 - EPS;
+        actions
+    }
+
+    /// Translation, installation and the cell cycle compete for the same
+    /// ribosome work and free energy. Installation can consume only the product
+    /// inventory sampled before translation; recovered resources and new room
+    /// likewise become available on the next call.
+    pub fn cellular_work(
+        &mut self,
+        program: &CellularProgram,
+        controls: &CellularControls,
+        energy: &mut f64,
+        minerals: &mut f64,
+        dt: f64,
+        max_area: f64,
+        division_geometry_ready: bool,
+    ) -> WorkReport {
+        self.cellular_work_in(
+            program, controls, energy, minerals, dt, max_area,
+            division_geometry_ready, &mut CellularWorkScratch::default(),
+        )
+    }
+
+    /// World reuses this transient workspace between cells and ticks.
+    pub(crate) fn cellular_work_in(
+        &mut self,
+        program: &CellularProgram,
+        controls: &CellularControls,
+        energy: &mut f64,
+        minerals: &mut f64,
+        dt: f64,
+        max_area: f64,
+        division_geometry_ready: bool,
+        scratch: &mut CellularWorkScratch,
+    ) -> WorkReport {
+        let mut report = WorkReport::default();
+        if !dt.is_finite() || dt <= 0.0 || !energy.is_finite() || !minerals.is_finite() {
+            return report;
+        }
+        let cap = self.capacities();
+        let space = self.space().free;
+        let surface = self.surface().free;
+        let core_area = self.support_mass() / CORE_MASS_PER_AREA;
+        let mut state = self.cellular.take().unwrap_or_default();
+        let mut active = [0.0; FAMILY_COUNT];
+        let mut membrane = 0.0;
+        let mut replicator = 0.0;
+        let mut constrictor = 0.0;
+        let mut translation = 0.0;
+        for assembly in &state.assemblies {
+            let mass = assembly.functional_mass() * assembly.activity;
+            match assembly.recipe.kind {
+                AssemblyKind::Organelle(kind) => active[kind as usize] += mass,
+                AssemblyKind::Membrane => membrane += mass,
+                AssemblyKind::Replicator => replicator += mass,
+                AssemblyKind::Constrictor => constrictor += mass,
+                AssemblyKind::Mechanism(kind) => match kind {
+                    MechanismKind::Translation => translation += mass,
+                    MechanismKind::Grow => membrane += mass,
+                    MechanismKind::Replicate => replicator += mass,
+                    MechanismKind::Constrict => constrictor += mass,
+                    MechanismKind::Repair => active[OrganelleKind::Repair as usize] += mass,
+                    _ => {},
+                },
+            }
+        }
+        let core_work = 0.55
+            * (self
+                .organs
+                .iter()
+                .filter(|o| o.kind == OrganelleKind::Core)
+                .map(|o| o.functional_mass())
+                .sum::<f64>()
+                + active[OrganelleKind::Core as usize] + translation)
+            * dt;
+        let CellularWorkScratch { current_pools, stock, density, demands, allocation } = scratch;
+        current_pools.clear();
+        stock.clear();
+        density.clear();
+        demands.clear();
+        for product in &program.products {
+            let index = state
+                .pools
+                .iter()
+                .position(|p| &p.product == product)
+                .or_else(|| {
+                    if state.pools.len() >= MAX_POOLS {
+                        None
+                    } else {
+                        state.pools.push(ProductPool {
+                            product: product.clone(),
+                            mass: 0.0,
+                            embodied_energy: 0.0,
+                            expression_requested: 0.0,
+                            expression_rate: 0.0,
+                        });
+                        Some(state.pools.len() - 1)
+                    }
+                });
+            current_pools.push(index);
+        }
+        for pool in &mut state.pools {
+            pool.expression_requested = 0.0;
+            pool.expression_rate = 0.0;
+            if pool.product.half_life > 0.0 {
+                let fraction = -(-std::f64::consts::LN_2 * dt / pool.product.half_life).exp_m1();
+                let mass = pool.mass * fraction;
+                let embodied = pool.embodied_energy * fraction;
+                pool.mass = (pool.mass - mass).max(0.0);
+                pool.embodied_energy = (pool.embodied_energy - embodied).max(0.0);
+                report.minerals_recovered += mass;
+                report.dissipated_energy += embodied;
+            }
+        }
+        // Old-format protein remains physical when a genome is replaced. It
+        // turns over normally, without being retyped into the new products.
+        let legacy_decay =
+            -(-std::f64::consts::LN_2 * dt / crate::body::PROTEIN_HALF_LIFE).exp_m1();
+        for k in 0..FAMILY_COUNT {
+            let mass = self.precursor_mass[k] * legacy_decay;
+            let embodied = self.precursor_energy[k] * legacy_decay;
+            self.precursor_mass[k] -= mass;
+            self.precursor_energy[k] -= embodied;
+            report.minerals_recovered += mass;
+            report.dissipated_energy += embodied;
+        }
+        stock.extend(state.pools.iter().map(|p| p.mass));
+        density.extend(state
+            .pools
+            .iter()
+            .map(|p| {
+                if p.mass > 0.0 {
+                    p.embodied_energy / p.mass
+                } else {
+                    0.0
+                }
+            }));
+        for (product, pool) in current_pools.iter().enumerate() {
+            if let Some(pool) = *pool {
+                let expression =
+                    nonnegative(controls.expression.get(product).copied().unwrap_or(0.0))
+                        .min(256.0);
+                state.pools[pool].expression_requested = expression;
+                if expression > 0.0 {
+                    demands.push(CellDemand::new(
+                        CellOperation::Synthesis(pool),
+                        0.12 * self.area.sqrt() * dt * expression,
+                        [
+                            program.products[product].kind.synthesis_cost(),
+                            1.0,
+                            1.0,
+                            0.0,
+                            TRANSLATION_WORK,
+                        ],
+                    ));
+                }
+            }
+        }
+        let mut pending_ids = 0_u32;
+        for (definition, def) in program.assemblies.iter().enumerate() {
+            if state
+                .assemblies
+                .iter()
+                .any(|a| !a.complete() && a.recipe.matches(program, def))
+            {
+                continue;
+            }
+            if state.assemblies.len() >= MAX_INSTANCES {
+                break;
+            }
+            if self
+                .next_cellular_identifier_available(&state, pending_ids)
+                .is_none()
+            {
+                report.identifier_exhausted = true;
+                continue;
+            }
+            // A declaration alone never allocates a physical object.
+            if !def.parts.iter().any(|&(product, _)| {
+                current_pools
+                    .get(product)
+                    .and_then(|p| *p)
+                    .is_some_and(|pool| stock[pool] > EPS)
+            }) {
+                continue;
+            }
+            pending_ids += 1;
+            state.assemblies.push(AssemblyInstance {
+                id: 0,
+                recipe: Recipe::from_def(program, def),
+                ingredients: vec![Ingredient::default(); def.parts.len()],
+                integrity: 1.0,
+                activity: effort(controls.activity.get(definition).copied().unwrap_or(0.0)),
+            });
+        }
+        for (index, assembly) in state.assemblies.iter().enumerate() {
+            if assembly.complete() {
+                continue;
+            }
+            for (part, recipe) in assembly.recipe.parts.iter().enumerate() {
+                let needed = (recipe.required_mass - assembly.ingredients[part].mass).max(0.0);
+                if needed <= EPS {
+                    continue;
+                }
+                let Some(pool) = state.pools.iter().position(|p| p.product == recipe.product)
+                else {
+                    continue;
+                };
+                if stock[pool] <= 0.0 {
+                    continue;
+                }
+                let mut demand = CellDemand::new(
+                    CellOperation::Install(index, part, pool),
+                    needed,
+                    [
+                        assembly.recipe.kind.installation_cost(),
+                        0.0,
+                        (assembly.recipe.kind.internal_footprint() - 1.0).max(0.0),
+                        assembly.recipe.kind.surface_footprint(),
+                        INSTALLATION_WORK,
+                    ],
+                );
+                demand.stock = Some(pool);
+                demands.push(demand);
+            }
+        }
+        let max_area = if max_area.is_finite() {
+            max_area.clamp(self.area, MAX_AREA)
+        } else {
+            self.area
+        };
+        let growth = (2.0 * membrane * dt).min((max_area.min(core_area) - self.area).max(0.0));
+        if growth > EPS {
+            demands.push(CellDemand::new(
+                CellOperation::Grow,
+                growth * SCAFFOLD_MASS_PER_AREA,
+                [SCAFFOLD_ENERGY_PER_MASS, 1.0, 0.0, 0.0, 1.0],
+            ));
+        }
+        let replica_target = REPLICA_MASS_PER_AREA * self.area;
+        let replication =
+            (0.25 * replicator * dt).min((replica_target - state.replica_mass).max(0.0));
+        if replication > EPS {
+            demands.push(CellDemand::new(
+                CellOperation::Replicate,
+                replication,
+                [REPLICA_ENERGY_PER_MASS, 1.0, 1.0, 0.0, 1.0],
+            ));
+        }
+        // A newly completed copy is not usable for constriction in this tick.
+        if division_geometry_ready && state.replica_mass + EPS >= replica_target {
+            let constriction =
+                (20.0 * constrictor / self.area * dt).min((1.0 - state.constriction).max(0.0));
+            if constriction > EPS {
+                demands.push(CellDemand::new(
+                    CellOperation::Constrict,
+                    constriction,
+                    [8.0 * self.area, 0.0, 0.0, 0.0, 0.1 * self.area],
+                ));
+            }
+        }
+        let damaged = self
+            .organs
+            .iter()
+            .map(|o| o.mass * (1.0 - o.integrity))
+            .sum::<f64>()
+            + state
+                .assemblies
+                .iter()
+                .map(|a| a.mass() * (1.0 - a.integrity))
+                .sum::<f64>();
+        if damaged > EPS {
+            let repair = (0.08 * active[OrganelleKind::Repair as usize] * dt / damaged).min(1.0);
+            if repair > 0.0 {
+                for (index, organ) in self.organs.iter().enumerate() {
+                    let amount = organ.mass * (1.0 - organ.integrity) * repair;
+                    if amount > EPS {
+                        demands.push(CellDemand::new(
+                            CellOperation::RepairOrgan(index),
+                            amount,
+                            [60.0, 0.0, 0.0, 0.0, 1.0],
+                        ));
+                    }
+                }
+                for (index, assembly) in state.assemblies.iter().enumerate() {
+                    let amount = assembly.mass() * (1.0 - assembly.integrity) * repair;
+                    if amount > EPS {
+                        demands.push(CellDemand::new(
+                            CellOperation::RepairAssembly(index),
+                            amount,
+                            [60.0, 0.0, 0.0, 0.0, 1.0],
+                        ));
+                    }
+                }
+            }
+        }
+        let amounts = allocation.allocate(demands, [
+            (*energy - 0.15 * cap.energy).max(0.0),
+            minerals.max(0.0),
+            space,
+            surface,
+            core_work,
+        ], stock);
+        for (demand, &amount) in demands.iter().zip(amounts) {
+            if amount <= 0.0 {
+                continue;
+            }
+            let spent = amount * demand.common[0];
+            report.energy_spent += spent;
+            report.minerals_spent += amount * demand.common[1];
+            match demand.operation {
+                CellOperation::Synthesis(pool) => {
+                    state.pools[pool].mass += amount;
+                    state.pools[pool].embodied_energy += spent * EMBODIED_FRACTION;
+                    state.pools[pool].expression_rate += amount / dt;
+                    report.synthesized_mass += amount;
+                    report.dissipated_energy += spent * (1.0 - EMBODIED_FRACTION);
+                }
+                CellOperation::Install(index, part, pool) => {
+                    let substrate_energy = amount * density[pool];
+                    state.pools[pool].mass = (state.pools[pool].mass - amount).max(0.0);
+                    state.pools[pool].embodied_energy =
+                        (state.pools[pool].embodied_energy - substrate_energy).max(0.0);
+                    let assembly = &mut state.assemblies[index];
+                    let old_mass = assembly.mass();
+                    assembly.integrity =
+                        (old_mass * assembly.integrity + amount) / (old_mass + amount);
+                    assembly.ingredients[part].mass += amount;
+                    assembly.ingredients[part].embodied_energy +=
+                        substrate_energy + spent * EMBODIED_FRACTION;
+                    report.constructed_mass += amount;
+                    report.dissipated_energy += spent * (1.0 - EMBODIED_FRACTION);
+                }
+                CellOperation::Grow => {
+                    let area = amount / SCAFFOLD_MASS_PER_AREA;
+                    self.area += area;
+                    self.scaffold_energy += spent * EMBODIED_FRACTION;
+                    report.area_grown += area;
+                    report.constructed_mass += amount;
+                    report.dissipated_energy += spent * (1.0 - EMBODIED_FRACTION);
+                }
+                CellOperation::Replicate => {
+                    state.replica_mass += amount;
+                    state.replica_energy += spent * EMBODIED_FRACTION;
+                    report.constructed_mass += amount;
+                    report.dissipated_energy += spent * (1.0 - EMBODIED_FRACTION);
+                }
+                CellOperation::Constrict => {
+                    state.constriction = (state.constriction + amount).min(1.0);
+                    report.dissipated_energy += spent;
+                }
+                CellOperation::RepairOrgan(index) => {
+                    let organ = &mut self.organs[index];
+                    organ.integrity = (organ.integrity + amount / organ.mass).min(1.0);
+                    report.repaired_mass += amount;
+                    report.dissipated_energy += spent;
+                }
+                CellOperation::RepairAssembly(index) => {
+                    let assembly = &mut state.assemblies[index];
+                    assembly.integrity = (assembly.integrity + amount / assembly.mass()).min(1.0);
+                    report.repaired_mass += amount;
+                    report.dissipated_energy += spent;
+                }
+            }
+        }
+        state.assemblies.retain(|assembly| assembly.mass() > 0.0);
+        for assembly in &mut state.assemblies {
+            if assembly.id == 0 {
+                assembly.id = state.next_assembly_id;
+                state.next_assembly_id += 1;
+            }
+        }
+        // Drop only exactly empty obsolete pools; never discard small residues.
+        state.pools.retain(|pool| {
+            pool.mass > 0.0
+                || pool.embodied_energy > 0.0
+                || program.products.contains(&pool.product)
+        });
+        self.cellular = Some(state);
+        *energy = (*energy - report.energy_spent + report.energy_recovered).max(0.0);
+        *minerals = (*minerals - report.minerals_spent + report.minerals_recovered).max(0.0);
+        debug_assert!(self.space().used <= self.space().capacity + 1e-7);
+        debug_assert!(self.surface().used <= self.surface().capacity + 1e-7);
+        report
+    }
+
+    fn next_cellular_identifier_available(
+        &self,
+        state: &CellularState,
+        pending: u32,
+    ) -> Option<u32> {
+        state
+            .next_assembly_id
+            .checked_add(pending)
+            .filter(|&id| id < u32::MAX)
+    }
+
+    /// Inspection describes real pools and objects, including obsolete material
+    /// retained after a genome change. Declared recipes are shown separately.
+    pub fn cellular_json(&self, program: Option<&CellularProgram>) -> String {
+        use std::fmt::Write;
+        let mut json = String::from("{\"products\":[");
+        let mut first = true;
+        if let Some(state) = &self.cellular {
+            for pool in &state.pools {
+                if !first {
+                    json.push(',');
+                }
+                first = false;
+                let current = program.is_some_and(|p| p.products.contains(&pool.product));
+                write!(&mut json, "{{\"name\":{:?},\"role\":{:?},\"mass\":{},\"concentration\":{},\"halfLife\":{},\"expressionRequested\":{},\"expressionRate\":{},\"current\":{}}}",
+                    pool.product.name, pool.product.kind.name(), pool.mass, pool.mass / self.area,
+                    pool.product.half_life, pool.expression_requested, pool.expression_rate, current).unwrap();
+            }
+        }
+        if let Some(program) = program {
+            for product in &program.products {
+                if self
+                    .cellular
+                    .as_ref()
+                    .is_some_and(|state| state.pools.iter().any(|p| &p.product == product))
+                {
+                    continue;
+                }
+                if !first {
+                    json.push(',');
+                }
+                first = false;
+                write!(&mut json, "{{\"name\":{:?},\"role\":{:?},\"mass\":0,\"concentration\":0,\"halfLife\":{},\"expressionRequested\":0,\"expressionRate\":0,\"current\":true}}",
+                    product.name, product.kind.name(), product.half_life).unwrap();
+            }
+        }
+        json.push_str("],\"assemblies\":[");
+        if let Some(state) = &self.cellular {
+            for (index, assembly) in state.assemblies.iter().enumerate() {
+                if index > 0 {
+                    json.push(',');
+                }
+                write!(&mut json, "{{\"id\":{},\"name\":{:?},\"kind\":{:?},\"mass\":{},\"requiredMass\":{},\"functionalMass\":{},\"complete\":{},\"integrity\":{},\"activity\":{},\"at\":{},\"direction\":{},\"bottleneck\":",
+                    assembly.id, assembly.recipe.name, assembly.recipe.kind.name(), assembly.mass(),
+                    assembly.recipe.required_mass(), assembly.functional_mass(), assembly.complete(),
+                    assembly.integrity, assembly.activity, assembly.recipe.at, assembly.recipe.direction).unwrap();
+                if assembly.complete() {
+                    json.push_str("null");
+                } else {
+                    let part = assembly
+                        .ingredients
+                        .iter()
+                        .zip(&assembly.recipe.parts)
+                        .min_by(|(a, ar), (b, br)| {
+                            (a.mass / ar.required_mass).total_cmp(&(b.mass / br.required_mass))
+                        })
+                        .map(|(_, part)| part.product.name.as_str())
+                        .unwrap_or("");
+                    write!(&mut json, "{part:?}").unwrap();
+                }
+                json.push_str(",\"components\":[");
+                for (index, (ingredient, part)) in assembly
+                    .ingredients
+                    .iter()
+                    .zip(&assembly.recipe.parts)
+                    .enumerate()
+                {
+                    if index > 0 {
+                        json.push(',');
+                    }
+                    write!(
+                        &mut json,
+                        "{{\"name\":{:?},\"role\":{:?},\"mass\":{},\"requiredMass\":{}}}",
+                        part.product.name,
+                        part.product.kind.name(),
+                        ingredient.mass,
+                        part.required_mass
+                    )
+                    .unwrap();
+                }
+                json.push_str("]}");
+            }
+        }
+        json.push_str("],\"recipes\":[");
+        if let Some(program) = program {
+            for (index, recipe) in program.assemblies.iter().enumerate() {
+                if index > 0 {
+                    json.push(',');
+                }
+                write!(&mut json, "{{\"name\":{:?},\"kind\":{:?},\"requiredMass\":{},\"at\":{},\"direction\":{},\"components\":[",
+                    recipe.name, recipe.kind.name(), recipe.parts.iter().map(|p| p.1).sum::<f64>(),
+                    recipe.at, recipe.direction).unwrap();
+                for (index, &(product, amount)) in recipe.parts.iter().enumerate() {
+                    if index > 0 {
+                        json.push(',');
+                    }
+                    write!(
+                        &mut json,
+                        "{{\"name\":{:?},\"role\":{:?},\"requiredMass\":{}}}",
+                        program.products[product].name,
+                        program.products[product].kind.name(),
+                        amount
+                    )
+                    .unwrap();
+                }
+                json.push_str("]}");
+            }
+        }
+        let (mass, progress, genome, constriction) =
+            self.cellular
+                .as_ref()
+                .map_or((0.0, 0.0, 0.0, 0.0), |state| {
+                    (
+                        state.replica_mass,
+                        state.replication_progress(self.area),
+                        state.genome_mass,
+                        state.constriction,
+                    )
+                });
+        write!(&mut json, "],\"replication\":{{\"mass\":{},\"requiredMass\":{},\"progress\":{},\"genomeMass\":{}}},\"constriction\":{{\"progress\":{}}}}}",
+            mass, self.area * REPLICA_MASS_PER_AREA, progress, genome, constriction).unwrap();
+        json
+    }
+}
+
+#[derive(Clone, Copy)]
+enum CellOperation {
+    Synthesis(usize),
+    Install(usize, usize, usize),
+    Grow,
+    Replicate,
+    Constrict,
+    RepairOrgan(usize),
+    RepairAssembly(usize),
+}
+type CellDemand = MaterialDemand<CellOperation>;
+
+/// Material planning scratch belongs to the tick workspace, not to a physical
+/// cell or a checkpoint. Its buffers are reused even when genomes differ.
+#[derive(Default)]
+pub(crate) struct CellularWorkScratch {
+    current_pools: Vec<Option<usize>>,
+    stock: Vec<f64>,
+    density: Vec<f64>,
+    demands: Vec<CellDemand>,
+    allocation: AllocationScratch,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::body::BodyFixture;
+
+    fn close(actual: f64, expected: f64) {
+        assert!((actual - expected).abs() < 1e-9, "{actual} != {expected}");
+    }
+    fn product(name: &str, kind: ProductKind) -> ProductDef {
+        ProductDef {
+            name: name.into(),
+            kind,
+            half_life: if kind == ProductKind::Regulator {
+                1.0
+            } else {
+                0.0
+            },
+        }
+    }
+    fn flagellum_program() -> CellularProgram {
+        CellularProgram {
+            products: vec![
+                product("Anchor", ProductKind::Anchor),
+                product("Motor", ProductKind::Motor),
+                product("Tail", ProductKind::Filament),
+            ],
+            assemblies: vec![AssemblyDef {
+                name: "Swim".into(),
+                kind: AssemblyKind::Organelle(OrganelleKind::Flagellum),
+                parts: vec![(0, 0.005), (1, 0.01), (2, 0.025)],
+                at: 0.0,
+                direction: 0.0,
+            }],
+        }
+    }
+    fn controls(program: &CellularProgram, expression: f64) -> CellularControls {
+        CellularControls {
+            expression: vec![expression; program.products.len()],
+            activity: vec![1.0; program.assemblies.len()],
+        }
+    }
+    fn stocked(program: &CellularProgram, masses: &[f64]) -> Body {
+        let (mut body, _) = Body::founder();
+        body.cellular = Some(CellularState {
+            pools: program
+                .products
+                .iter()
+                .zip(masses)
+                .map(|(product, &mass)| ProductPool {
+                    product: product.clone(),
+                    mass,
+                    embodied_energy: mass * product.kind.synthesis_cost() * EMBODIED_FRACTION,
+                    expression_requested: 0.0,
+                    expression_rate: 0.0,
+                })
+                .collect(),
+            ..CellularState::default()
+        });
+        body
+    }
+    fn complete(program: &CellularProgram, definition: usize, id: u32) -> AssemblyInstance {
+        let recipe = Recipe::from_def(program, &program.assemblies[definition]);
+        let ingredients = recipe
+            .parts
+            .iter()
+            .map(|part| Ingredient {
+                mass: part.required_mass,
+                embodied_energy: part.required_mass
+                    * (part.product.kind.synthesis_cost() + recipe.kind.installation_cost())
+                    * EMBODIED_FRACTION,
+            })
+            .collect();
+        AssemblyInstance {
+            id,
+            recipe,
+            ingredients,
+            integrity: 1.0,
+            activity: 1.0,
+        }
+    }
+    fn add_complete(body: &mut Body, program: &CellularProgram, definition: usize) {
+        let state = body.cellular.get_or_insert_with(CellularState::default);
+        state
+            .assemblies
+            .push(complete(program, definition, state.next_assembly_id));
+        state.next_assembly_id += 1;
+    }
+    fn work(
+        body: &mut Body,
+        program: &CellularProgram,
+        controls: &CellularControls,
+        energy: &mut f64,
+        minerals: &mut f64,
+        dt: f64,
+    ) -> WorkReport {
+        body.cellular_actions(program, controls);
+        let can_divide = body.area >= 2.0 && body.can_partition();
+        let report = body.cellular_work(
+            program, controls, energy, minerals, dt, MAX_AREA, can_divide,
+        );
+        body.validate().unwrap();
+        report
+    }
+
+    #[test]
+    fn synthesis_is_paid_and_new_products_cannot_install_until_the_following_tick() {
+        let program = flagellum_program();
+        program.validate().unwrap();
+        let (mut body, _) = Body::founder();
+        let mut energy = 100.0;
+        let mut minerals = 2.0;
+        let initial_material = body.structural_mass() + minerals;
+        let initial_energy = body.embodied_energy() + energy;
+        let report = work(
+            &mut body,
+            &program,
+            &controls(&program, 1.0),
+            &mut energy,
+            &mut minerals,
+            5.0,
+        );
+        assert!(report.synthesized_mass > 0.0);
+        close(report.constructed_mass, 0.0);
+        assert!(body.cellular.as_ref().unwrap().assemblies.is_empty());
+        close(body.capacities().thrust, 0.0);
+        close(body.structural_mass() + minerals, initial_material);
+        close(
+            body.embodied_energy() + energy + report.dissipated_energy,
+            initial_energy,
+        );
+        let outputs = body.cellular_actions(&program, &controls(&program, 0.0));
+        close(outputs.force_x, 0.0);
+        let second = work(
+            &mut body,
+            &program,
+            &controls(&program, 0.0),
+            &mut energy,
+            &mut minerals,
+            1.0,
+        );
+        close(second.constructed_mass, 0.04);
+        close(body.capacities().thrust, 4.0);
+        close(body.structural_mass() + minerals, initial_material);
+        close(
+            body.embodied_energy() + energy + report.dissipated_energy + second.dissipated_energy,
+            initial_energy,
+        );
+        let outputs = body.cellular_actions(&program, &controls(&program, 0.0));
+        close(outputs.force_x, 4.0);
+        close(outputs.torque, 0.0);
+    }
+
+    #[test]
+    fn missing_ingredients_leave_paid_spatially_present_nonfunctional_assemblies() {
+        let program = flagellum_program();
+        let mut body = stocked(&program, &[0.005, 0.0, 0.025]);
+        let mut energy = 100.0;
+        let mut minerals = 1.0;
+        let initial = body.structural_mass() + minerals;
+        work(
+            &mut body,
+            &program,
+            &controls(&program, 0.0),
+            &mut energy,
+            &mut minerals,
+            10.0,
+        );
+        let state = body.cellular.as_ref().unwrap();
+        assert_eq!(state.assemblies.len(), 1);
+        close(state.assemblies[0].mass(), 0.03);
+        assert!(!state.assemblies[0].complete());
+        assert!(state.assemblies[0].internal_space() > 0.0);
+        assert!(state.assemblies[0].surface_space() > 0.0);
+        close(body.capacities().thrust, 0.0);
+        close(body.building(OrganelleKind::Flagellum), 0.01);
+        close(body.structural_mass() + minerals, initial);
+        assert!(body
+            .cellular_json(Some(&program))
+            .contains("\"bottleneck\":\"Motor\""));
+        let state = body.cellular.as_mut().unwrap();
+        state.pools[1].mass = 0.01;
+        state.pools[1].embodied_energy =
+            0.01 * ProductKind::Motor.synthesis_cost() * EMBODIED_FRACTION;
+        work(
+            &mut body,
+            &program,
+            &controls(&program, 0.0),
+            &mut energy,
+            &mut minerals,
+            1.0,
+        );
+        close(body.capacities().thrust, 4.0);
+        close(body.building(OrganelleKind::Flagellum), 0.0);
+    }
+
+    #[test]
+    fn duplicated_genes_change_competition_without_duplicating_translation_capacity() {
+        let program = CellularProgram {
+            products: vec![
+                product("A", ProductKind::Scaffold),
+                product("B", ProductKind::Scaffold),
+            ],
+            assemblies: vec![],
+        };
+        let (mut body, _) = Body::founder();
+        let mut energy = 100.0;
+        let mut minerals = 1.0;
+        let request = CellularControls {
+            expression: vec![2.0, 1.0],
+            activity: vec![],
+        };
+        let report = work(
+            &mut body,
+            &program,
+            &request,
+            &mut energy,
+            &mut minerals,
+            1.0,
+        );
+        let (pools, _) = body.cellular_inputs(&program);
+        close(pools[0], 2.0 * pools[1]);
+        close(report.synthesized_mass * TRANSLATION_WORK, 0.55 * 0.04);
+        close(report.minerals_spent, report.synthesized_mass);
+
+        let program = flagellum_program();
+        let mut body = stocked(&program, &[0.005, 0.01, 0.025]);
+        let report = work(
+            &mut body,
+            &program,
+            &controls(&program, 1.0),
+            &mut energy,
+            &mut minerals,
+            1.0,
+        );
+        assert!(report.constructed_mass > 0.0 && report.synthesized_mass > 0.0);
+        close(
+            report.synthesized_mass * TRANSLATION_WORK
+                + report.constructed_mass * INSTALLATION_WORK,
+            0.55 * 0.04,
+        );
+    }
+
+    #[test]
+    fn regulator_half_life_recovers_material_and_accounts_for_all_embodied_energy() {
+        let program = CellularProgram {
+            products: vec![product("Run", ProductKind::Regulator)],
+            assemblies: vec![],
+        };
+        let mut body = stocked(&program, &[0.2]);
+        let mut energy = 20.0;
+        let mut minerals = 0.0;
+        let initial_material = body.structural_mass();
+        let initial_energy = body.embodied_energy() + energy;
+        let report = work(
+            &mut body,
+            &program,
+            &controls(&program, 0.0),
+            &mut energy,
+            &mut minerals,
+            1.0,
+        );
+        close(body.cellular_inputs(&program).0[0], 0.1);
+        close(minerals, 0.1);
+        close(body.structural_mass() + minerals, initial_material);
+        close(
+            body.embodied_energy() + energy + report.dissipated_energy,
+            initial_energy,
+        );
+        close(report.energy_recovered, 0.0);
+    }
+
+    #[test]
+    fn installed_motors_generate_vector_forces_and_cross_product_torque() {
+        let mut program = flagellum_program();
+        program.assemblies[0].at = std::f64::consts::FRAC_PI_2;
+        let mut other = program.assemblies[0].clone();
+        other.name = "Other".into();
+        other.at = -std::f64::consts::FRAC_PI_2;
+        program.assemblies.push(other);
+        let (mut body, _) = Body::founder();
+        add_complete(&mut body, &program, 0);
+        add_complete(&mut body, &program, 1);
+        body.validate().unwrap();
+        let action = body.cellular_actions(&program, &controls(&program, 0.0));
+        close(action.force_x, 8.0);
+        close(action.force_y, 0.0);
+        close(action.torque, 0.0);
+        let mut request = controls(&program, 0.0);
+        request.activity[1] = 0.0;
+        let action = body.cellular_actions(&program, &request);
+        close(action.force_x, 4.0);
+        close(action.torque, -4.0 * body.radius());
+
+        program.assemblies[1].direction = std::f64::consts::PI;
+        body.cellular.as_mut().unwrap().assemblies[1] = complete(&program, 1, 2);
+        let action = body.cellular_actions(&program, &controls(&program, 0.0));
+        close(action.force_x, 0.0);
+        close(action.force_y, 0.0);
+        close(action.torque, -8.0 * body.radius());
+        close(action.motor_cost, 8.0 * 0.06);
+    }
+
+    #[test]
+    fn sensors_and_processing_obey_stored_activity_and_damage_never_erases_material() {
+        let program = CellularProgram {
+            products: vec![
+                product("Anchor", ProductKind::Anchor),
+                product("Sensor", ProductKind::Receptor),
+                product("Pigment", ProductKind::Pigment),
+                product("Frame", ProductKind::Scaffold),
+                product("Enzyme", ProductKind::Enzyme),
+            ],
+            assemblies: vec![
+                AssemblyDef {
+                    name: "Light".into(),
+                    kind: AssemblyKind::Organelle(OrganelleKind::Photoreceptor),
+                    parts: vec![(0, 0.002), (1, 0.006), (2, 0.002)],
+                    at: 0.0,
+                    direction: 0.0,
+                },
+                AssemblyDef {
+                    name: "Process".into(),
+                    kind: AssemblyKind::Organelle(OrganelleKind::Metabolic),
+                    parts: vec![(3, 0.01), (4, 0.02)],
+                    at: 0.0,
+                    direction: 0.0,
+                },
+            ],
+        };
+        program.validate().unwrap();
+        let (mut body, _) = Body::founder();
+        add_complete(&mut body, &program, 0);
+        add_complete(&mut body, &program, 1);
+        let mut request = controls(&program, 0.0);
+        request.activity.fill(0.0);
+        body.cellular_actions(&program, &request);
+        close(body.capacities().light_sensing, 0.0);
+        close(body.capacities().metabolism, 0.8);
+        request.activity.fill(0.5);
+        body.cellular_actions(&program, &request);
+        close(body.capacities().light_sensing, 0.005);
+        close(body.capacities().metabolism, 1.7);
+        let initial = (
+            body.structural_mass(),
+            body.embodied_energy(),
+            body.space().used,
+            body.surface().used,
+        );
+        body.damage(0.9);
+        close(body.capacities().light_sensing, 0.0);
+        close(body.structural_mass(), initial.0);
+        close(body.embodied_energy(), initial.1);
+        close(body.space().used, initial.2);
+        close(body.surface().used, initial.3);
+    }
+
+    #[test]
+    fn division_partitions_actual_recipes_stocks_and_copied_genome_material() {
+        let program = flagellum_program();
+        let (mut body, _) = Body::fixture(BodyFixture::Bare);
+        body.cellular = stocked(&program, &[0.02, 0.03, 0.04]).cellular;
+        add_complete(&mut body, &program, 0);
+        add_complete(&mut body, &program, 0);
+        let state = body.cellular.as_mut().unwrap();
+        state.genome_mass = 0.01;
+        state.genome_energy = 0.2;
+        state.replica_mass = 0.01;
+        state.replica_energy = 0.2;
+        state.constriction = 1.0;
+        body.validate().unwrap();
+        assert!(body.can_partition());
+        let (left, right) = body.partition().unwrap();
+        left.validate().unwrap();
+        right.validate().unwrap();
+        close(
+            left.structural_mass() + right.structural_mass(),
+            body.structural_mass(),
+        );
+        close(
+            left.embodied_energy() + right.embodied_energy(),
+            body.embodied_energy(),
+        );
+        let mut actual: Vec<_> = left
+            .cellular
+            .as_ref()
+            .unwrap()
+            .assemblies
+            .iter()
+            .chain(&right.cellular.as_ref().unwrap().assemblies)
+            .cloned()
+            .collect();
+        actual.sort_by_key(|a| a.id);
+        assert_eq!(actual, body.cellular.as_ref().unwrap().assemblies);
+        for daughter in [&left, &right] {
+            let state = daughter.cellular.as_ref().unwrap();
+            close(state.pools[1].mass, 0.015);
+            close(state.genome_mass, 0.01);
+            close(state.replica_mass, 0.0);
+            close(state.constriction, 0.0);
+        }
+    }
+
+    #[test]
+    fn cellular_cores_support_whole_daughters_and_partial_cores_never_do() {
+        let program = CellularProgram {
+            products: vec![
+                product("Frame", ProductKind::Scaffold),
+                product("Enzyme", ProductKind::Enzyme),
+            ],
+            assemblies: vec![AssemblyDef {
+                name: "Core".into(),
+                kind: AssemblyKind::Organelle(OrganelleKind::Core),
+                parts: vec![(0, 0.03), (1, 0.03)],
+                at: 0.0,
+                direction: 0.0,
+            }],
+        };
+        let (mut body, _) = Body::founder();
+        body.area = 2.001;
+        body.scaffold_energy *= body.area;
+        add_complete(&mut body, &program, 0);
+        assert!(!body.can_partition()); // one daughter would receive only .04 core
+        add_complete(&mut body, &program, 0);
+        assert!(body.can_partition());
+        let (left, right) = body.partition().unwrap();
+        assert!(left.viable() && right.viable());
+        assert_eq!(
+            left.count(OrganelleKind::Core) + right.count(OrganelleKind::Core),
+            3
+        );
+        body.cellular.as_mut().unwrap().assemblies[1].ingredients[1].mass = 0.0;
+        body.cellular.as_mut().unwrap().assemblies[1].ingredients[1].embodied_energy = 0.0;
+        assert!(!body.can_partition());
+    }
+
+    #[test]
+    fn membrane_replication_and_constriction_are_paid_distinct_delayed_steps() {
+        let program = CellularProgram {
+            products: vec![
+                product("Skin", ProductKind::Membrane),
+                product("Enzyme", ProductKind::Enzyme),
+                product("Frame", ProductKind::Scaffold),
+                product("Copy", ProductKind::Replicase),
+                product("Anchor", ProductKind::Anchor),
+                product("Motor", ProductKind::Motor),
+                product("Ring", ProductKind::Constrictor),
+            ],
+            assemblies: vec![
+                AssemblyDef {
+                    name: "Growth".into(),
+                    kind: AssemblyKind::Membrane,
+                    parts: vec![(0, 0.01), (1, 0.01)],
+                    at: 0.0,
+                    direction: 0.0,
+                },
+                AssemblyDef {
+                    name: "Replication".into(),
+                    kind: AssemblyKind::Replicator,
+                    parts: vec![(2, 0.01), (3, 0.01)],
+                    at: 0.0,
+                    direction: 0.0,
+                },
+                AssemblyDef {
+                    name: "Division".into(),
+                    kind: AssemblyKind::Constrictor,
+                    parts: vec![(4, 0.005), (5, 0.005), (6, 0.01)],
+                    at: 0.0,
+                    direction: 0.0,
+                },
+            ],
+        };
+        program.validate().unwrap();
+        let (mut body, _) = Body::fixture(BodyFixture::Bare);
+        for index in 0..3 {
+            add_complete(&mut body, &program, index);
+        }
+        let mut energy = 200.0;
+        let mut minerals = 3.0;
+        let material = minerals + body.structural_mass();
+        let initial_energy = energy + body.embodied_energy();
+        let mut heat = 0.0;
+        let request = controls(&program, 0.0);
+        let first = work(
+            &mut body,
+            &program,
+            &request,
+            &mut energy,
+            &mut minerals,
+            1.0,
+        );
+        heat += first.dissipated_energy;
+        assert!(body.area > 1.0);
+        assert!(body.cellular.as_ref().unwrap().replica_mass > 0.0);
+        close(body.cellular.as_ref().unwrap().constriction, 0.0);
+        assert!(!body.cellular_actions(&program, &request).divide);
+        for _ in 0..80 {
+            heat += work(
+                &mut body,
+                &program,
+                &request,
+                &mut energy,
+                &mut minerals,
+                1.0,
+            )
+            .dissipated_energy;
+            close(minerals + body.structural_mass(), material);
+            close(energy + body.embodied_energy() + heat, initial_energy);
+            if body.cellular_actions(&program, &request).divide {
+                break;
+            }
+        }
+        close(body.area, 2.0);
+        close(
+            body.cellular
+                .as_ref()
+                .unwrap()
+                .replication_progress(body.area),
+            1.0,
+        );
+        close(body.cellular.as_ref().unwrap().constriction, 1.0);
+        assert!(body.cellular_actions(&program, &request).divide);
+        assert!(body.partition().is_some());
+    }
+
+    #[test]
+    fn genome_changes_do_not_retype_old_products_or_reinterpret_existing_machines() {
+        let original = flagellum_program();
+        let mut body = stocked(&original, &[0.02, 0.03, 0.04]);
+        add_complete(&mut body, &original, 0);
+        let old = body.cellular.as_ref().unwrap().assemblies[0].clone();
+        let replacement = CellularProgram {
+            products: vec![product("Motor", ProductKind::Scaffold)],
+            assemblies: vec![AssemblyDef {
+                name: "Swim".into(),
+                kind: AssemblyKind::Organelle(OrganelleKind::Cortex),
+                parts: vec![(0, 0.02)],
+                at: 0.0,
+                direction: 0.0,
+            }],
+        };
+        replacement.validate().unwrap();
+        let mut energy = 100.0;
+        let mut minerals = 2.0;
+        let initial_material = minerals + body.structural_mass();
+        work(
+            &mut body,
+            &replacement,
+            &controls(&replacement, 1.0),
+            &mut energy,
+            &mut minerals,
+            1.0,
+        );
+        let state = body.cellular.as_ref().unwrap();
+        assert_eq!(state.assemblies[0].recipe, old.recipe);
+        assert_eq!(state.assemblies[0].ingredients, old.ingredients);
+        assert!(state
+            .pools
+            .iter()
+            .any(|p| p.product.name == "Motor" && p.product.kind == ProductKind::Motor));
+        assert!(state
+            .pools
+            .iter()
+            .any(|p| p.product.name == "Motor" && p.product.kind == ProductKind::Scaffold));
+        close(
+            body.cellular_actions(&replacement, &controls(&replacement, 0.0))
+                .force_x,
+            0.0,
+        );
+        close(body.capacities().thrust, 4.0); // retained physical flagellum
+        close(minerals + body.structural_mass(), initial_material);
+    }
+
+    #[test]
+    fn checkpoint_preserves_recipe_identity_partial_stocks_and_exact_continuation() {
+        let program = flagellum_program();
+        let mut body = stocked(&program, &[0.005, 0.0, 0.025]);
+        let mut energy = 100.0;
+        let mut minerals = 1.0;
+        let request = controls(&program, 1.0);
+        work(
+            &mut body,
+            &program,
+            &request,
+            &mut energy,
+            &mut minerals,
+            0.25,
+        );
+        let mut writer = Writer::new();
+        body.write_checkpoint(&mut writer);
+        let mut reader = Reader::new(&writer.0);
+        let mut restored = Body::read_checkpoint(&mut reader).unwrap();
+        assert!(reader.finished());
+        assert_eq!(restored, body);
+        let mut restored_energy = energy;
+        let mut restored_minerals = minerals;
+        for _ in 0..40 {
+            work(
+                &mut body,
+                &program,
+                &request,
+                &mut energy,
+                &mut minerals,
+                0.1,
+            );
+            work(
+                &mut restored,
+                &program,
+                &request,
+                &mut restored_energy,
+                &mut restored_minerals,
+                0.1,
+            );
+        }
+        assert_eq!(body, restored);
+        assert_eq!(energy, restored_energy);
+        assert_eq!(minerals, restored_minerals);
+        restored.cellular.as_mut().unwrap().pools[0].embodied_energy = 1000.0;
+        let mut writer = Writer::new();
+        restored.write_checkpoint(&mut writer);
+        assert!(Body::read_checkpoint(&mut Reader::new(&writer.0)).is_err());
+    }
+}

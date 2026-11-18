@@ -11,7 +11,7 @@ for(let i=0;i<args.length;i++){
   if(name==='--duration'){duration=Number(value);assert.ok(Number.isSafeInteger(duration)&&duration>0&&Number.isSafeInteger(duration*30),'Duration must be a positive whole number of simulated seconds.');}
 }
 assert.ok(measure||args.length===0);
-const {PRESETS,BUILTIN_ENVIRONMENTS,BUILTIN_GENOMES,BUILTIN_SIMULATIONS}=await catalog();
+const {LEGACY_PRESETS:PRESETS,BUILTIN_ENVIRONMENTS,BUILTIN_GENOMES,BUILTIN_SIMULATIONS}=await catalog();
 const organelleModule=await moduleUrl('../src/organelles.ts');
 const {tokenizeGenome}=await import(await moduleUrl('../src/genome-language.ts',{'./organelles':organelleModule}));
 const hasLegacyReference=source=>tokenizeGenome(source).some(token=>
@@ -104,7 +104,7 @@ console.log(`Organelle food-chain checks passed: ${PRESETS.length} genomes share
 if(measure){
   const template=BUILTIN_SIMULATIONS.find(s=>s.id==='builtin:simulation:mixed-ecosystem'),env=BUILTIN_ENVIRONMENTS.find(e=>e.id===template.environmentId);
   const populations=template.populations.map(row=>({...BUILTIN_GENOMES.find(g=>g.id===row.genomeId),...row}));
-  const study={startedAt:new Date().toISOString(),abi:10,checkpointVersion:4,wasmSha256:createHash('sha256').update(bytes).digest('hex'),wasmBytes:bytes.length,
+  const study={startedAt:new Date().toISOString(),abi:10,checkpointVersion:5,wasmSha256:createHash('sha256').update(bytes).digest('hex'),wasmBytes:bytes.length,
     template:template.name,environment:env,populations,mutationRate,seeds,durationSeconds:duration,
     sampleSeconds:[...new Set([...([0,15,30,60,120,180].filter(seconds=>seconds<=duration)),duration])].sort((a,b)=>a-b),results:[]};
   const round=n=>Math.round(n*1000)/1000;

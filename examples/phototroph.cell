@@ -1,0 +1,114 @@
+# Products are material stocks. Genes pay to synthesize them.
+# Recipes install old stock into machines; activity uses completed machines.
+cellular;
+
+product SolarAnchor = anchor();
+product SolarPigment = pigment();
+product SolarEnzyme = enzyme();
+product TranslationScaffold = scaffold();
+product TranslationEnzyme = enzyme();
+product MineralsAnchor = anchor();
+product MineralsTransporter = transporter();
+product EnergyStoreMembrane = membrane();
+product MineralStoreMembrane = membrane();
+product SupportScaffold = scaffold();
+product EnvelopeMembrane = membrane();
+product EnvelopeEnzyme = enzyme();
+product ReplicationScaffold = scaffold();
+product ReplicationReplicase = replicase();
+product DivisionAnchor = anchor();
+product DivisionMotor = motor();
+product DivisionConstrictor = constrictor();
+
+let funded = energy > 10 && nutrient.stored > 0.001;
+let expanding = body.area > body.birth_area * 1.6;
+let powered = built.Solar + 0.000001 >= 0.12;
+# This stationary producer spends no material on locomotion.
+
+# Solar: synthesize only while this recipe needs more installed material.
+let need_Solar = funded && (true) && built.Solar + 0.000001 < (if expanding then 0.24 else 0.12);
+gene make_SolarAnchor: SolarAnchor = if need_Solar && pool.SolarAnchor < 0.001 then 0.25 else 0;
+gene make_SolarPigment: SolarPigment = if need_Solar && pool.SolarPigment < 0.001 then 1 else 0;
+gene make_SolarEnzyme: SolarEnzyme = if need_Solar && pool.SolarEnzyme < 0.001 then 0.25 else 0;
+assembly Solar: harvest(light) {
+  SolarAnchor: 0.02;
+  SolarPigment: 0.08;
+  SolarEnzyme: 0.02;
+  activity: 1;
+}
+
+# Translation: synthesize only while this recipe needs more installed material.
+let need_Translation = funded && (powered) && built.Translation + 0.000001 < (if expanding then 0.08 else 0.04);
+gene make_TranslationScaffold: TranslationScaffold = if need_Translation && pool.TranslationScaffold < 0.001 then 1 else 0;
+gene make_TranslationEnzyme: TranslationEnzyme = if need_Translation && pool.TranslationEnzyme < 0.001 then 1 else 0;
+assembly Translation: translate() {
+  TranslationScaffold: 0.02;
+  TranslationEnzyme: 0.02;
+  activity: 1;
+}
+
+# Minerals: synthesize only while this recipe needs more installed material.
+let need_Minerals = funded && (powered) && built.Minerals + 0.000001 < (if expanding then 0.05 else 0.025);
+gene make_MineralsAnchor: MineralsAnchor = if need_Minerals && pool.MineralsAnchor < 0.001 then 0.25 else 0;
+gene make_MineralsTransporter: MineralsTransporter = if need_Minerals && pool.MineralsTransporter < 0.001 then 1 else 0;
+assembly Minerals: import(mineral) {
+  MineralsAnchor: 0.005;
+  MineralsTransporter: 0.02;
+  activity: if nutrient.fraction < 0.9 then 1 else 0;
+}
+
+# EnergyStore: synthesize only while this recipe needs more installed material.
+let need_EnergyStore = funded && (powered) && built.EnergyStore + 0.000001 < (if expanding then 0.16 else 0.08);
+gene make_EnergyStoreMembrane: EnergyStoreMembrane = if need_EnergyStore && pool.EnergyStoreMembrane < 0.001 then 1 else 0;
+assembly EnergyStore: store(energy) {
+  EnergyStoreMembrane: 0.08;
+  activity: 1;
+}
+
+# MineralStore: synthesize only while this recipe needs more installed material.
+let need_MineralStore = funded && (powered) && built.MineralStore + 0.000001 < (if expanding then 0.04 else 0.02);
+gene make_MineralStoreMembrane: MineralStoreMembrane = if need_MineralStore && pool.MineralStoreMembrane < 0.001 then 1 else 0;
+assembly MineralStore: store(mineral) {
+  MineralStoreMembrane: 0.02;
+  activity: 1;
+}
+
+# Support: synthesize only while this recipe needs more installed material.
+let need_Support = funded && (powered && energy > 45) && built.Support + 0.000001 < max(0.12, body.birth_area * 0.12);
+gene make_SupportScaffold: SupportScaffold = if need_Support && pool.SupportScaffold < 0.001 then 1 else 0;
+assembly Support: support() {
+  SupportScaffold: 0.06;
+  activity: 1;
+}
+
+# Envelope: synthesize only while this recipe needs more installed material.
+let need_Envelope = funded && (built.Support + 0.000001 >= 0.12) && built.Envelope + 0.000001 < (if expanding then 0.04 else 0.02);
+gene make_EnvelopeMembrane: EnvelopeMembrane = if need_Envelope && pool.EnvelopeMembrane < 0.001 then 1 else 0;
+gene make_EnvelopeEnzyme: EnvelopeEnzyme = if need_Envelope && pool.EnvelopeEnzyme < 0.001 then 0.333333 else 0;
+assembly Envelope: grow() {
+  EnvelopeMembrane: 0.015;
+  EnvelopeEnzyme: 0.005;
+  activity: if energy > 90 && body.area < body.birth_area * 2 then 0.8 else 0;
+}
+
+# Replication: synthesize only while this recipe needs more installed material.
+let need_Replication = funded && (built.Support + 0.000001 >= 0.12) && built.Replication + 0.000001 < (if expanding then 0.04 else 0.02);
+gene make_ReplicationScaffold: ReplicationScaffold = if need_Replication && pool.ReplicationScaffold < 0.001 then 0.333333 else 0;
+gene make_ReplicationReplicase: ReplicationReplicase = if need_Replication && pool.ReplicationReplicase < 0.001 then 1 else 0;
+assembly Replication: replicate() {
+  ReplicationScaffold: 0.005;
+  ReplicationReplicase: 0.015;
+  activity: if energy > 80 then 1 else 0;
+}
+
+# Division: synthesize only while this recipe needs more installed material.
+let need_Division = funded && (expanding) && built.Division + 0.000001 < (if expanding then 0.04 else 0.02);
+gene make_DivisionAnchor: DivisionAnchor = if need_Division && pool.DivisionAnchor < 0.001 then 0.5 else 0;
+gene make_DivisionMotor: DivisionMotor = if need_Division && pool.DivisionMotor < 0.001 then 1 else 0;
+gene make_DivisionConstrictor: DivisionConstrictor = if need_Division && pool.DivisionConstrictor < 0.001 then 1 else 0;
+assembly Division: constrict() {
+  DivisionAnchor: 0.004;
+  DivisionMotor: 0.008;
+  DivisionConstrictor: 0.008;
+  activity: if body.area + 0.000001 >= body.birth_area * 2 && energy > 100 then 1 else 0;
+}

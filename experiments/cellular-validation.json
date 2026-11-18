@@ -1,0 +1,43 @@
+{
+  "wasmSha256": "0eabd5edf745a5ebb8d600df97dc1b3d7615b4d17d2dd1039601b37a73da13c0",
+  "abi": 10,
+  "checkpointVersion": 5,
+  "languageVersion": 3,
+  "nativeTestsPassed": 205,
+  "checksPassed": [
+    "cellular WASM development and conservation",
+    "legacy WASM and loader",
+    "threaded worker",
+    "session",
+    "storage",
+    "language",
+    "inspection",
+    "cellular UI",
+    "graph",
+    "legacy food chain",
+    "legacy navigation",
+    "TypeScript",
+    "production build"
+  ],
+  "conditions": {
+    "foundersPerRun": 1,
+    "seed": 42,
+    "ambientLight": 0.85,
+    "ambientTemperature": 0.5,
+    "initialNutrientsPerPatch": 3,
+    "currentStrength": 0,
+    "mutationRate": 0,
+    "suppliedParticlesPerSecondForNonPhototrophs": 4
+  },
+  "firstDivisionSeconds": {
+    "Forager": 68.03,
+    "Drifter": 67.97,
+    "Conserver": 69.83,
+    "Giant": 85.17,
+    "Rememberer": 68.43,
+    "Phototroph": 68.53,
+    "Predator": 73.27,
+    "Mixotroph": 76.6
+  },
+  "limits": "Controlled development tests demonstrate a funded reproductive cycle. They do not establish long-term ecological coexistence or a speedup over the previous biology."
+}

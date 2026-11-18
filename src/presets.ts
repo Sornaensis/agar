@@ -107,7 +107,8 @@ feed = 1;
 engulf = gut.fraction < 0.65;
 photosynthesize = 0;`;
 
-export const PRESETS: Preset[] = [
+/** Preserved examples for existing v3 programs and compatibility regression checks. */
+export const LEGACY_PRESETS: Preset[] = [
   {
     name: 'Forager',
     description: 'Approach small visible objects and local organic cues; slide away from resistant surfaces.',
@@ -230,4 +231,151 @@ feed = 1;
 engulf = gut.fraction < 0.6;
 photosynthesize = 1;`),
   },
+];
+
+type CellularPart = readonly [role: string, mass: number];
+interface CellularRecipe {
+  name: string; kind: string; parts: readonly CellularPart[];
+  activity?: string; at?: number; direction?: number; ready?: string; goal?: string;
+}
+const amount = (value: number): string => String(Number(value.toFixed(6)));
+const productName = (recipe: CellularRecipe, role: string): string => recipe.name + role[0].toUpperCase() + role.slice(1);
+
+/** The expanded source is ordinary, inspectable cellular code, with no hidden behaviors. */
+function cellularProgram(recipes: CellularRecipe[], logic: string, regulator = false, stockBuffer = 0.004): string {
+  return `# Products are material stocks. Genes pay to synthesize them.
+# Recipes install old stock into machines; activity uses completed machines.
+cellular;
+
+${recipes.flatMap(recipe => recipe.parts.map(([role]) => `product ${productName(recipe, role)} = ${role}();`)).join('\n')}
+${regulator ? 'product Persistence = regulator(8);\n' : ''}
+let funded = energy > 10 && nutrient.stored > 0.001;
+let expanding = body.area > body.birth_area * 1.6;
+${logic.trim()}
+${regulator ? '\n# A physical, decaying memory of a recent organic cue.\ngene remember: Persistence = if chemical.valid && chemical.organic > 0.001 && pool.Persistence < 0.008 then 0.15 else 0;\n' : ''}
+${recipes.map(recipe => {
+    const mass = recipe.parts.reduce((sum, [, value]) => sum + value, 0), largest = Math.max(...recipe.parts.map(([, value]) => value));
+    const goal = recipe.goal ?? `(if expanding then ${amount(mass * 2)} else ${amount(mass)})`;
+    return `# ${recipe.name}: synthesize only while this recipe needs more installed material.
+let need_${recipe.name} = funded && (${recipe.ready ?? 'true'}) && built.${recipe.name} + 0.000001 < ${goal};
+${recipe.parts.map(([role, value]) => `gene make_${productName(recipe, role)}: ${productName(recipe, role)} = if need_${recipe.name} && pool.${productName(recipe, role)} < ${amount(Math.min(stockBuffer, value * 0.25))} then ${amount(value / largest)} else 0;`).join('\n')}
+assembly ${recipe.name}: ${recipe.kind} {
+${recipe.parts.map(([role, value]) => `  ${productName(recipe, role)}: ${amount(value)};`).join('\n')}
+  activity: ${recipe.activity ?? '1'};${recipe.at === undefined ? '' : `\n  at: ${amount(recipe.at)};`}${recipe.direction === undefined ? '' : `\n  direction: ${amount(recipe.direction)};`}
+}`;
+  }).join('\n\n')}`;
+}
+
+function cellularFamilyOrganism(path: EnergyPath, behavior: string, options: { drift?: boolean; giant?: boolean; memory?: boolean; predator?: boolean; conserve?: boolean } = {}): string {
+  const hasLight = path !== 'organic', hasGut = path !== 'light';
+  const ready = hasLight && hasGut ? 'built.Solar + 0.000001 >= 0.08 && built.Gut + 0.000001 >= 0.08 && built.Capture + 0.000001 >= 0.04'
+    : hasLight ? 'built.Solar + 0.000001 >= 0.12' : 'built.Gut + 0.000001 >= 0.08 && built.Capture + 0.000001 >= 0.04';
+  const recipes: CellularRecipe[] = [];
+  if (hasLight) recipes.push({ name: 'Solar', kind: 'photosynthetic', parts: [['anchor', hasGut ? 0.01 : 0.02], ['pigment', hasGut ? 0.06 : 0.08], ['enzyme', hasGut ? 0.01 : 0.02]], activity: '1' });
+  if (hasGut) recipes.push(
+    { name: 'Gut', kind: 'digestive', parts: [['membrane', 0.04], ['enzyme', 0.04]], activity: '1' },
+    { name: 'Capture', kind: 'phagocyte', parts: [['anchor', 0.008], ['motor', 0.016], ['membrane', 0.016]], activity: 'if gut.fraction < 0.7 then 1 else 0', ready: 'built.Gut + 0.000001 >= 0.08' },
+  );
+  recipes.push(
+    { name: 'Metabolism', kind: 'metabolic', parts: [['scaffold', 0.02], ['enzyme', 0.02]], ready: 'powered' },
+    { name: 'Minerals', kind: 'transporter', parts: [['anchor', 0.005], ['transporter', 0.02]], ready: 'powered', activity: 'if nutrient.fraction < 0.9 then 1 else 0' },
+    { name: 'Storage', kind: 'reserve', parts: [['membrane', 0.04]], ready: 'powered' },
+  );
+  if (hasGut || options.drift) recipes.push(
+    { name: 'LeftMotor', kind: 'flagellum', parts: [['anchor', 0.005], ['motor', 0.01], ['filament', 0.01]], ready: 'powered', activity: 'clamp(move - steer * 0.5, 0, 1)', at: Math.PI / 2, direction: 0 },
+    { name: 'RightMotor', kind: 'flagellum', parts: [['anchor', 0.005], ['motor', 0.01], ['filament', 0.01]], ready: 'powered', activity: 'clamp(move + steer * 0.5, 0, 1)', at: -Math.PI / 2, direction: 0 },
+    { name: 'Vision', kind: 'optical', parts: [['anchor', 0.004], ['receptor', 0.012], ['pigment', 0.004]], ready: 'powered' },
+    { name: 'Touch', kind: 'mechanoreceptor', parts: [['anchor', 0.002], ['receptor', 0.006], ['filament', 0.002]], ready: 'powered' },
+    { name: 'Chemistry', kind: 'chemoreceptor', parts: [['anchor', 0.003], ['receptor', 0.012]], ready: 'powered' },
+  );
+  if (options.predator) recipes.push({ name: 'Piercer', kind: 'piercer', parts: [['anchor', 0.01], ['filament', 0.03], ['enzyme', 0.01]], ready: 'powered', activity: 'if contact.valid && gut.fraction < 0.5 then 0.8 else 0' });
+  const growthArea = options.giant ? 'max(3, body.birth_area * 2)' : 'body.birth_area * 2';
+  recipes.push(
+    { name: 'Nucleus', kind: 'core', parts: [['scaffold', 0.03], ['enzyme', 0.03]], ready: `powered && energy > ${options.conserve ? 60 : 45}`, goal: options.giant ? 'max(0.24, body.birth_area * 0.12)' : 'max(0.12, body.birth_area * 0.12)' },
+    { name: 'Envelope', kind: 'membrane', parts: [['membrane', 0.015], ['enzyme', 0.005]], ready: 'built.Nucleus + 0.000001 >= 0.12', activity: `if energy > 90 && body.area < ${growthArea} then 0.8 else 0` },
+    { name: 'Replication', kind: 'replicator', parts: [['scaffold', 0.005], ['replicase', 0.015]], ready: 'built.Nucleus + 0.000001 >= 0.12', activity: 'if energy > 80 then 1 else 0' },
+    { name: 'Division', kind: 'constrictor', parts: [['anchor', 0.004], ['motor', 0.008], ['constrictor', 0.008]], ready: 'expanding', activity: `if body.area + 0.000001 >= ${growthArea} && energy > 100 then 1 else 0` },
+  );
+  return cellularProgram(recipes, `let powered = ${ready};\n${behavior}`, options.memory);
+}
+
+const cellularForaging = `# Receptor readings describe physical surroundings, not hidden identities.
+let seen = object.valid && object.area < 0.35;
+let blocked = contact.valid && contact.resistance >= 0.12;
+let obstacle = if contact.valid then angle(contact.offset) else 0;
+let escape = if obstacle >= 0 then obstacle - 1.8 else obstacle + 1.8;
+let seek = gut.fraction < 0.55;
+let steer = if blocked then clamp(escape * 2, -1, 1)
+  else if seek && seen then clamp(angle(object.offset) * 1.8, -1, 1)
+  else if seek && chemical.valid then clamp(chemical.organic_bearing, -1, 1)
+  else sin(age * 0.65) * 0.35;
+let move = if blocked then 0.65 else if gut.fraction > 0.45 then 0
+  else if seek && seen then 0.5 else 0.28;`;
+
+/** New runs use physical products, named genes and composition-based machinery. */
+export const CELLULAR_FAMILY_PRESETS: Preset[] = [
+  { name: 'Forager', description: 'Build a gut, capture machinery and two placed motors; steer from physical receptor readings.', source: cellularFamilyOrganism('organic', cellularForaging) },
+  { name: 'Drifter', description: 'Use quiet paired motors and opportunistic contact feeding; most motion comes from the water.', source: cellularFamilyOrganism('organic', 'let steer = sin(age * 0.4) * 0.12;\nlet move = if gut.fraction < 0.3 then 0.08 else 0;', { drift: true }) },
+  { name: 'Conserver', description: 'Express machinery in stages and preserve energy before replicating its physical core.', source: cellularFamilyOrganism('organic', 'let steer = if object.valid then clamp(angle(object.offset), -1, 1) else sin(age * 0.3) * 0.2;\nlet move = if energy.fraction < 0.6 && gut.fraction < 0.3 then 0.25 else 0.05;', { conserve: true }) },
+  { name: 'Giant', description: 'Build extra core material and an active membrane machine to grow a larger envelope.', source: cellularFamilyOrganism('organic', cellularForaging, { giant: true }) },
+  { name: 'Rememberer', description: 'A regulator with an eight-second half-life preserves a material memory of an organic cue.', source: cellularFamilyOrganism('organic', 'let steer = if chemical.valid then clamp(chemical.organic_bearing, -1, 1) else sin(age * 0.5) * 0.3;\nlet move = if gut.fraction > 0.5 then 0 else if pool.Persistence > 0.002 then 0.4 else 0.15;', { memory: true }) },
+  { name: 'Phototroph', description: 'Assemble pigment, enzyme and anchors into a light harvester, then build growth and division machinery.', source: cellularFamilyOrganism('light', '# This stationary producer spends no material on locomotion.') },
+  { name: 'Predator', description: 'Express a composed piercer and use contact activity to access tissue while paired motors approach objects.', source: cellularFamilyOrganism('organic', 'let hungry = energy.fraction < 0.7 && gut.fraction < 0.45;\nlet steer = if hungry && object.valid then clamp(angle(object.offset) * 1.8, -1, 1) else sin(age * 0.5) * 0.4;\nlet move = if contact.valid || gut.fraction > 0.45 then 0 else if hungry && object.valid then 0.5 else 0.07;', { predator: true }) },
+  { name: 'Mixotroph', description: 'Share finite material and core work between a light harvester and composed feeding machinery.', source: cellularFamilyOrganism('mixed', cellularForaging) },
+];
+
+
+/** Each recipe installs one operation; no family grants additional hidden machinery. */
+function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?: boolean; giant?: boolean; memory?: boolean; predator?: boolean; conserve?: boolean } = {}): string {
+  const hasLight = path !== 'organic', hasGut = path !== 'light';
+  const foodReady = 'built.Gut + 0.000001 >= 0.06 && built.ExudateEnzyme + 0.000001 >= 0.04 && built.Capture + 0.000001 >= 0.03';
+  const ready = hasLight && hasGut ? `built.Solar + 0.000001 >= 0.08 && ${foodReady}`
+    : hasLight ? 'built.Solar + 0.000001 >= 0.12' : foodReady;
+  const recipes: CellularRecipe[] = [];
+  if (hasLight) recipes.push({ name:'Solar', kind:'harvest(light)', parts:[['anchor',hasGut?0.01:0.02],['pigment',hasGut?0.06:0.08],['enzyme',hasGut?0.01:0.02]] });
+  if (hasGut) recipes.push(
+    { name:'Gut', kind:'store(food)', parts:[['membrane',0.06]] },
+    { name:'ExudateEnzyme', kind:'digest(exudate)', parts:[['enzyme',0.04]], activity:'if gut.exudate.energy > 0 then 1 else 0' },
+    { name:'Capture', kind:'import(particle)', parts:[['anchor',0.01],['motor',0.02]], activity:'if gut.fraction < 0.7 then 1 else 0', ready:'built.Gut + 0.000001 >= 0.06' },
+    { name:'TissueEnzyme', kind:'digest(tissue)', parts:[['enzyme',options.predator?0.04:hasLight?0.01:0.02]], ready:'powered', activity:'if gut.tissue.energy > 0 then 1 else 0' },
+    { name:'WasteEnzyme', kind:'digest(waste)', parts:[['enzyme',options.drift?0.03:hasLight?0.01:0.015]], ready:'powered', activity:'if gut.waste.energy > 0 then 1 else 0' },
+  );
+  recipes.push(
+    { name:'Translation', kind:'translate()', parts:[['scaffold',0.02],['enzyme',0.02]], ready:'powered' },
+    { name:'Minerals', kind:'import(mineral)', parts:[['anchor',0.005],['transporter',0.02]], ready:'powered', activity:'if nutrient.fraction < 0.9 then 1 else 0' },
+    { name:'EnergyStore', kind:'store(energy)', parts:[['membrane',0.08]], ready:'powered' },
+    { name:'MineralStore', kind:'store(mineral)', parts:[['membrane',0.02]], ready:'powered' },
+  );
+  const movementReady = hasLight && hasGut ? 'powered && body.area > 1.2' : 'powered';
+  if (hasGut || options.drift) recipes.push(
+    { name:'LeftMotor', kind:'propel()', parts:[['anchor',0.005],['motor',0.01],['filament',0.01]], ready:movementReady, activity:'clamp(move - steer * 0.5, 0, 1)', at:Math.PI/2, direction:0 },
+    { name:'RightMotor', kind:'propel()', parts:[['anchor',0.005],['motor',0.01],['filament',0.01]], ready:movementReady, activity:'clamp(move + steer * 0.5, 0, 1)', at:-Math.PI/2, direction:0 },
+    { name:'Vision', kind:'sense(optical)', parts:[['anchor',0.004],['receptor',0.012],['pigment',0.004]], ready:movementReady },
+    { name:'Touch', kind:'sense(contact)', parts:[['anchor',0.002],['receptor',0.006],['filament',0.002]], ready:movementReady },
+    { name:'Chemistry', kind:'sense(chemical)', parts:[['anchor',0.003],['receptor',0.012]], ready:movementReady },
+  );
+  if (options.predator) recipes.push(
+    { name:'Piercer', kind:'pierce()', parts:[['anchor',0.01],['filament',0.03],['enzyme',0.01]], ready:'powered && body.area > 1.2', activity:'if contact.valid && gut.fraction < 0.5 then 0.8 else 0' },
+    { name:'Engulfment', kind:'engulf()', parts:[['anchor',0.005],['motor',0.01],['membrane',0.01]], ready:'powered && body.area > 1.2', activity:'if gut.fraction < 0.5 then 1 else 0' },
+  );
+  const growthArea = options.giant ? 'max(3, body.birth_area * 2)' : 'body.birth_area * 2';
+  recipes.push(
+    { name:'Support', kind:'support()', parts:[['scaffold',0.06]], ready:`powered && energy > ${options.conserve?60:45}`, goal:options.giant?'max(0.24, body.birth_area * 0.12)':'max(0.12, body.birth_area * 0.12)' },
+    { name:'Envelope', kind:'grow()', parts:[['membrane',0.015],['enzyme',0.005]], ready:'built.Support + 0.000001 >= 0.12', activity:`if energy > 90 && body.area < ${growthArea} then 0.8 else 0` },
+    { name:'Replication', kind:'replicate()', parts:[['scaffold',0.005],['replicase',0.015]], ready:'built.Support + 0.000001 >= 0.12', activity:'if energy > 80 then 1 else 0' },
+    { name:'Division', kind:'constrict()', parts:[['anchor',0.004],['motor',0.008],['constrictor',0.008]], ready:'expanding', activity:`if body.area + 0.000001 >= ${growthArea} && energy > 100 then 1 else 0` },
+  );
+  return cellularProgram(recipes, `let powered = ${ready};\n${behavior}`, options.memory, 0.001);
+}
+
+/** Defaults compose explicit operations from paid product stocks. */
+export const PRESETS: Preset[] = [
+  { name: 'Forager', description: 'Build separate food storage, substrate enzymes, particle import and placed motors.', source: cellularOrganism('organic', cellularForaging) },
+  { name: 'Drifter', description: 'Use quiet paired motors and opportunistic contact feeding; most motion comes from the water.', source: cellularOrganism('organic', 'let steer = sin(age * 0.4) * 0.12;\nlet move = if gut.fraction < 0.3 then 0.08 else 0;', { drift: true }) },
+  { name: 'Conserver', description: 'Express machinery in stages and preserve energy before copying its genome.', source: cellularOrganism('organic', 'let steer = if object.valid then clamp(angle(object.offset), -1, 1) else sin(age * 0.3) * 0.2;\nlet move = if energy.fraction < 0.6 && gut.fraction < 0.3 then 0.25 else 0.05;', { conserve: true }) },
+  { name: 'Giant', description: 'Build extra structural support and separate translation, storage and growth machinery.', source: cellularOrganism('organic', cellularForaging, { giant: true }) },
+  { name: 'Rememberer', description: 'A regulator with an eight-second half-life preserves a material memory of an organic cue.', source: cellularOrganism('organic', 'let steer = if chemical.valid then clamp(chemical.organic_bearing, -1, 1) else sin(age * 0.5) * 0.3;\nlet move = if gut.fraction > 0.5 then 0 else if pool.Persistence > 0.002 then 0.4 else 0.15;', { memory: true }) },
+  { name: 'Phototroph', description: 'Assemble pigment, enzyme and anchors into a light harvester, then build growth and division machinery.', source: cellularOrganism('light', '# This stationary producer spends no material on locomotion.') },
+  { name: 'Predator', description: 'Build tissue enzymes, a piercer and engulfment machinery; paired motors approach visible objects.', source: cellularOrganism('organic', 'let hungry = energy.fraction < 0.7 && gut.fraction < 0.45;\nlet steer = if hungry && object.valid then clamp(angle(object.offset) * 1.8, -1, 1) else sin(age * 0.5) * 0.4;\nlet move = if contact.valid || gut.fraction > 0.45 then 0 else if hungry && object.valid then 0.5 else 0.07;', { predator: true }) },
+  { name: 'Mixotroph', description: 'Combine light harvesting with independently built food storage, capture and substrate enzymes.', source: cellularOrganism('mixed', cellularForaging) },
 ];

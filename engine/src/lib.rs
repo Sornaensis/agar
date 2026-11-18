@@ -2,9 +2,11 @@
 //! All mutable engine state belongs to this module. Genomes compute synchronous
 //! register transitions and commands from an immutable snapshot.
 pub mod body;
+pub mod cellular;
 mod checkpoint;
 pub mod environment;
 pub mod genome;
+mod material_allocation;
 pub mod simulation;
 
 use genome::{GenomeAnalysis, MutationKind, Program, MAX_SOURCE_BYTES};
@@ -84,8 +86,10 @@ impl Engine {
             1 => MutationKind::Constant,
             2 => MutationKind::Expression,
             3 => MutationKind::Reference,
+            4 => MutationKind::GeneSilence,
+            5 => MutationKind::GeneDuplicate,
             _ => {
-                self.error = "Unknown mutation kind. Use 0 (any), 1 (constant), 2 (expression), or 3 (reference).".into();
+                self.error = "Unknown mutation kind. Use 0 (any), 1 (constant), 2 (expression), 3 (reference), 4 (silence gene), or 5 (duplicate gene).".into();
                 return 0;
             }
         };
@@ -277,7 +281,7 @@ pub extern "C" fn cell_body_ptr(id: u32) -> *const u8 {
         let mut e = e.borrow_mut();
         e.error.clear();
         e.body_buffer.clear();
-        match e.world.body_json(id) {
+        match e.world.body_json(id, &e.genomes) {
             Some(json) => {
                 e.body_buffer = json.into_bytes();
                 e.body_buffer.as_ptr()
@@ -381,7 +385,7 @@ pub extern "C" fn cell_evaluation_ptr(cell_id: u32) -> *const u8 {
         let mut engine = engine.borrow_mut();
         engine.evaluation_buffer.clear();
         engine.error.clear();
-        let Some(inputs) = engine.world.sense_cell(cell_id) else {
+        let Some(mut inputs) = engine.world.sense_cell(cell_id) else {
             engine.error = "This organism is no longer alive.".into();
             return std::ptr::null();
         };
@@ -392,6 +396,9 @@ pub extern "C" fn cell_evaluation_ptr(cell_id: u32) -> *const u8 {
             .find(|cell| cell.id == cell_id)
             .unwrap();
         let genome = &engine.genomes[(cell.genome_id - 1) as usize];
+        if let Some(program) = genome.program.cellular() {
+            (inputs.products, inputs.assemblies) = cell.body.cellular_inputs(program);
+        }
         match Program::evaluation_json(
             &genome.source,
             &inputs,

@@ -8,7 +8,7 @@ use crate::{
 
 pub(crate) const MAX_STATE_BYTES: usize = 128 * 1024 * 1024;
 const MAGIC: &[u8; 8] = b"CELLAR01";
-const VERSION: u32 = 4;
+const VERSION: u32 = 6;
 pub(crate) type Result<T> = std::result::Result<T, String>;
 
 pub(crate) fn ensure(ok: bool, message: &str) -> Result<()> {
@@ -212,8 +212,8 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
     let mut r = Reader::new(bytes);
     ensure(r.take(8)? == MAGIC, "unknown save format")?;
     let version = r.u32()?;
-    if !matches!(version, 3 | VERSION) {
-        return Err(format!("Unsupported simulation version {version}. This save uses a different body/language model. Agar supports physical-organelle saves 3 and 4. The saved simulation is preserved; create a new simulation to use physical organelles."));
+    if !matches!(version, 3 | 4 | 5 | VERSION) {
+        return Err(format!("Unsupported simulation version {version}. Agar supports physical-organelle saves 3 and 4, cellular saves 5, and mechanism saves 6. The saved simulation is preserved."));
     }
     ensure(r.u32()? as usize == bytes.len(), "incorrect save length")?;
     ensure(r.u32()? == checksum(&bytes[20..]), "checksum mismatch")?;
@@ -223,7 +223,9 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
         let parent = r.u32()?;
         let kind = r.u32()?;
         ensure(
-            parent as usize <= index && kind <= 3 && ((parent == 0) == (kind == 0)),
+            parent as usize <= index
+                && kind <= if version >= 5 { 5 } else { 3 }
+                && ((parent == 0) == (kind == 0)),
             "invalid genome lineage",
         )?;
         let saved_bytes = r.count(MAX_GENOME_BYTES)?;
@@ -277,6 +279,38 @@ mod tests {
     use super::*;
     use crate::genome::MutationKind;
     use crate::simulation::mutate_registered;
+
+    #[test]
+    fn cellular_checkpoint_retains_products_recipes_and_gene_mutation_lineage() {
+        let mut original = Engine::new();
+        let source = include_str!("../../examples/solar.cell");
+        let id = original.compile(source);
+        assert_ne!(id, 0, "{}", original.error);
+        original.world.environment.configure(0.5, 0.85, 0.0);
+        original.world.environment.set_initial_nutrients(2.0);
+        original.world.reset_empty(49, 0);
+        original.world.set_food_rate(0.0);
+        original.world.set_mutation_rate(0.0);
+        original.world.seed_cells(id, 2, 600.0, 380.0);
+        for _ in 0..75 { original.world.step(&mut original.genomes); }
+        let duplicate = original.mutate(id, 17, 5);
+        let silent = original.mutate(id, 19, 4);
+        assert_ne!(duplicate, id, "{}", original.error);
+        assert_ne!(silent, id, "{}", original.error);
+        assert_eq!(original.genomes[(duplicate - 1) as usize].mutation_kind, 5);
+        assert_eq!(original.genomes[(silent - 1) as usize].mutation_kind, 4);
+        let bytes = save(&original).unwrap();
+        let mut restored = restore(&bytes).unwrap();
+        assert_eq!(save(&restored).unwrap(), bytes);
+        for _ in 0..600 {
+            original.world.step(&mut original.genomes);
+            restored.world.step(&mut restored.genomes);
+        }
+        assert_eq!(save(&restored).unwrap(), save(&original).unwrap());
+        assert!(original.world.photosynthesis_total > 0.0);
+        assert_eq!(original.world.body_json(1, &original.genomes),
+            restored.world.body_json(1, &restored.genomes));
+    }
 
     const PROGRAM: &str = "ri001 = ri001 + 1; rf001 = light.bearing; rb001 = light.valid; rs001 = if light.valid then \"light\" else \"search\"; rv001 = flow.vector; clear rb001 when ri001 == 9; thrust = 0.6; turn = if light.valid then light.bearing else sin(age); grow = if body.area < 2 then 1 else 0; divide = body.division_ready; photosynthesize = 1; absorb = 1;";
 
@@ -404,7 +438,9 @@ mod tests {
         // current serializer. Its stored budget contains no execution plan.
         let bytes = include_bytes!("../fixtures/execution-plan-v4.bin");
         let mut restored = restore(bytes).unwrap();
-        assert_eq!(save(&restored).unwrap(), bytes);
+        let migrated_bytes = save(&restored).unwrap();
+        assert_eq!(u32::from_le_bytes(migrated_bytes[8..12].try_into().unwrap()), 6);
+        assert_eq!(save(&restore(&migrated_bytes).unwrap()).unwrap(), migrated_bytes);
         let saved_budget = u32::from_le_bytes(bytes[32..36].try_into().unwrap()) as usize;
         let genome = &restored.genomes[0];
         assert!(genome.program.derived_execution_bytes() > 0);

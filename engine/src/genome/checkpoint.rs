@@ -101,12 +101,35 @@ impl Program {
         let mut b = Writer::new();
         self.write_checkpoint(&mut a);
         compiled.write_checkpoint(&mut b);
-        // Version 3 saves require the exact graph compiled from the stored source.
+        // Saves require the exact graph compiled from the stored source.
         // This also validates source-preserving mutations without canonicalization.
         !a.failed() && !b.failed() && a.0 == b.0
     }
 
     pub(crate) fn write_checkpoint(&self, w: &mut Writer) {
+        if let Some(cellular) = &self.cellular {
+            // An impossible legacy node count introduces the v5 extension.
+            // Legacy programs retain their original byte representation.
+            w.u32(u32::MAX);
+            w.count(cellular.definition.products.len());
+            for product in &cellular.definition.products {
+                w.text(&product.name);
+                w.text(product.kind.name());
+                w.f64(product.half_life);
+            }
+            w.count(cellular.definition.assemblies.len());
+            for assembly in &cellular.definition.assemblies {
+                w.text(&assembly.name);
+                w.text(assembly.kind.name());
+                w.count(assembly.parts.len());
+                for &(product, amount) in &assembly.parts {
+                    w.count(product);
+                    w.f64(amount);
+                }
+                w.f64(assembly.at);
+                w.f64(assembly.direction);
+            }
+        }
         w.count(self.nodes.len());
         for node in &self.nodes {
             write_type(node.ty, w);
@@ -119,6 +142,14 @@ impl Program {
                 Op::Sensor(sensor) => {
                     w.u8(1);
                     w.count(Sensor::ALL.iter().position(|s| s == sensor).unwrap());
+                }
+                Op::Pool(index) => {
+                    w.u8(10);
+                    w.count(*index);
+                }
+                Op::Built(index) => {
+                    w.u8(11);
+                    w.count(*index);
                 }
                 Op::Register(register) => {
                     w.u8(2);
@@ -175,16 +206,94 @@ impl Program {
             w.option(rule.value);
             w.option(rule.guard);
         }
+        if let Some(cellular) = &self.cellular {
+            w.count(cellular.genes.len());
+            for gene in &cellular.genes {
+                w.text(&gene.name);
+                w.count(gene.product);
+                w.count(gene.root);
+            }
+            for root in &cellular.activity {
+                w.option(*root);
+            }
+        }
     }
 
     #[cfg(test)]
     pub(crate) fn read_checkpoint(r: &mut Reader<'_>) -> Result<Self> {
-        Self::read_checkpoint_version(r, 4)
+        Self::read_checkpoint_version(r, 6)
     }
 
     pub(crate) fn read_checkpoint_version(r: &mut Reader<'_>, version: u32) -> Result<Self> {
-        let count = r.count(MAX_NODES)?;
-        ensure(count > 0, "genome has no expressions")?;
+        let header = r.u32()?;
+        let cellular = if header == u32::MAX {
+            ensure(version >= 5, "cellular programs need checkpoint version 5")?;
+            let count = r.count(cellular::MAX_PRODUCTS)?;
+            let mut products = Vec::with_capacity(count);
+            for _ in 0..count {
+                let name = r.text(64)?;
+                ensure(cellular::valid_name(&name), "invalid product name")?;
+                let kind = ProductKind::from_name(&r.text(64)?)
+                    .ok_or("Invalid simulation save: unknown product kind.")?;
+                let half_life = r.range(0.0, 1.0e6)?;
+                ensure(
+                    if kind == ProductKind::Regulator {
+                        half_life >= 0.001
+                    } else {
+                        half_life == 0.0
+                    },
+                    "invalid product half-life",
+                )?;
+                products.push(ProductDef {
+                    name,
+                    kind,
+                    half_life,
+                });
+            }
+            let count = r.count(cellular::MAX_ASSEMBLIES)?;
+            let mut assemblies = Vec::with_capacity(count);
+            for _ in 0..count {
+                let name = r.text(64)?;
+                ensure(cellular::valid_name(&name), "invalid assembly name")?;
+                let kind = AssemblyKind::from_name(&r.text(64)?)
+                    .ok_or("Invalid simulation save: unknown assembly kind.")?;
+                ensure(
+                    version >= 6 || !matches!(kind, AssemblyKind::Mechanism(_)),
+                    "mechanism assemblies need checkpoint version 6",
+                )?;
+                let count = r.count(cellular::MAX_PRODUCTS)?;
+                let mut parts = Vec::with_capacity(count);
+                for _ in 0..count {
+                    parts.push((r.index(products.len())?, r.range(0.0, 1.0e6)?));
+                }
+                let at = r.range(-MAX_SIGNAL, MAX_SIGNAL)?;
+                let direction = r.range(-MAX_SIGNAL, MAX_SIGNAL)?;
+                assemblies.push(AssemblyDef {
+                    name,
+                    kind,
+                    parts,
+                    at,
+                    direction,
+                });
+            }
+            let definition = CellularProgram {
+                products,
+                assemblies,
+            };
+            definition
+                .validate()
+                .map_err(|error| format!("Invalid simulation save: {error}"))?;
+            Some(definition)
+        } else {
+            None
+        };
+        let count = if cellular.is_some() {
+            r.count(MAX_NODES)?
+        } else {
+            header as usize
+        };
+        ensure(count <= MAX_NODES, "collection exceeds its limit")?;
+        ensure(count > 0 || cellular.is_some(), "genome has no expressions")?;
         let mut nodes: Vec<Node> = Vec::with_capacity(count);
         for index in 0..count {
             let ty = read_type(r)?;
@@ -217,12 +326,19 @@ impl Program {
                     }
                     Op::Call(function, args)
                 }
+                10 if cellular.is_some() => {
+                    Op::Pool(r.index(cellular.as_ref().unwrap().products.len())?)
+                }
+                11 if cellular.is_some() => {
+                    Op::Built(r.index(cellular.as_ref().unwrap().assemblies.len())?)
+                }
                 _ => return Err("Invalid simulation save: unknown expression operation.".into()),
             };
             let child_type = |child: usize| nodes[child].ty;
             let actual_type = match &op {
                 Op::Constant(value) => Some(value.ty()),
                 Op::Sensor(sensor) => Some(sensor.ty()),
+                Op::Pool(_) | Op::Built(_) => Some(Type::Number),
                 Op::Register(register) => Some(register.ty),
                 Op::Populated(_) => Some(Type::Bool),
                 Op::Reference(child) => Some(child_type(*child)),
@@ -246,6 +362,16 @@ impl Program {
                     .map(|i| child_type(*i))
                     .collect::<Vec<_>>()),
             };
+            if cellular.is_some() {
+                ensure(
+                    match &op {
+                        Op::Sensor(sensor) => sensor.cellular_allowed(),
+                        Op::Register(_) | Op::Populated(_) => false,
+                        _ => true,
+                    },
+                    "legacy signal in cellular program",
+                )?;
+            }
             ensure(actual_type == Some(ty), "expression type mismatch")?;
             nodes.push(Node { op, ty, scope });
         }
@@ -255,6 +381,9 @@ impl Program {
         for _ in 0..count {
             let name = r.text(MAX_SOURCE_BYTES)?;
             let node = r.index(nodes.len())?;
+            if cellular.is_some() {
+                ensure(cellular::valid_name(&name), "invalid cellular binding name")?;
+            }
             ensure(
                 !name.is_empty()
                     && name.bytes().enumerate().all(|(i, c)| {
@@ -312,7 +441,7 @@ impl Program {
             }
         }
         ensure(
-            roots[..3].iter().all(Option::is_some),
+            cellular.is_some() || roots[..3].iter().all(Option::is_some),
             "required output is missing",
         )?;
         let count = r.count(REGISTER_COUNT * 5 * 2)?;
@@ -342,12 +471,48 @@ impl Program {
                 guard,
             });
         }
-        Ok(Self::from_parts(
-            nodes,
-            bindings,
-            roots,
-            writes,
-        ))
+        if let Some(definition) = cellular {
+            ensure(
+                roots.iter().all(Option::is_none) && writes.is_empty(),
+                "legacy actions in cellular program",
+            )?;
+            let count = r.count(cellular::MAX_GENES)?;
+            let mut genes = Vec::with_capacity(count);
+            let mut names = HashSet::new();
+            for _ in 0..count {
+                let name = r.text(64)?;
+                ensure(
+                    cellular::valid_name(&name) && names.insert(name.clone()),
+                    "invalid gene name",
+                )?;
+                let product = r.index(definition.products.len())?;
+                let root = r.index(nodes.len())?;
+                ensure(nodes[root].ty.numeric(), "gene expression is not numeric")?;
+                genes.push(cellular::GeneRoot {
+                    name,
+                    product,
+                    root,
+                });
+            }
+            let mut activity = Vec::with_capacity(definition.assemblies.len());
+            for _ in &definition.assemblies {
+                let root = r.option(nodes.len())?;
+                if let Some(root) = root {
+                    ensure(nodes[root].ty.numeric(), "assembly activity is not numeric")?;
+                }
+                activity.push(root);
+            }
+            return Ok(Self::from_cellular(
+                nodes,
+                bindings,
+                cellular::CellularGraph {
+                    definition,
+                    genes,
+                    activity,
+                },
+            ));
+        }
+        Ok(Self::from_parts(nodes, bindings, roots, writes))
     }
 }
 

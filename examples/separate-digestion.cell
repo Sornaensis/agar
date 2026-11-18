@@ -1,0 +1,31 @@
+# A feeding pathway is three independently assembled operations.
+# This small demonstration needs organic particles in its environment.
+cellular;
+
+product Wall = membrane();
+product Mount = anchor();
+product Rotor = motor();
+product Catalyst = enzyme();
+
+gene walls: Wall = if built.FoodStore + 0.000001 < 0.04 && pool.Wall < 0.002 then 1 else 0;
+gene mounts: Mount = if built.Intake + 0.000001 < 0.02 && pool.Mount < 0.002 then 0.5 else 0;
+gene rotors: Rotor = if built.Intake + 0.000001 < 0.02 && pool.Rotor < 0.002 then 1 else 0;
+# Two recipes compete fairly for the same catalyst stock.
+gene enzymes: Catalyst = if (built.ExudateEnzyme + 0.000001 < 0.02 || built.TissueEnzyme + 0.000001 < 0.02) && pool.Catalyst < 0.002 then 1 else 0;
+
+assembly FoodStore: store(food) {
+  Wall: 0.04;
+}
+assembly Intake: import(particle) {
+  Mount: 0.005;
+  Rotor: 0.015;
+  activity: if gut.fraction < 0.7 then 1 else 0;
+}
+assembly ExudateEnzyme: digest(exudate) {
+  Catalyst: 0.02;
+  activity: if gut.exudate.energy > 0 then 1 else 0;
+}
+assembly TissueEnzyme: digest(tissue) {
+  Catalyst: 0.02;
+  activity: if gut.tissue.energy > 0 then 1 else 0;
+}

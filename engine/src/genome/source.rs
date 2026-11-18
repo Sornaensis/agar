@@ -14,6 +14,7 @@ struct ParsedSource {
     nodes: Vec<NodeLocation>,
     bindings: Vec<Location>,
     writes: Vec<Location>,
+    genes: Vec<cellular::GeneLocation>,
 }
 
 impl ParsedSource {
@@ -28,6 +29,7 @@ impl ParsedSource {
             nodes: parser.node_locations,
             bindings: parser.binding_locations,
             writes: parser.write_locations,
+            genes: parser.gene_locations,
         })
     }
 }
@@ -121,10 +123,27 @@ impl Program {
             if matches!(requested, MutationKind::Any | MutationKind::Reference)
                 && matches!(
                     node.op,
-                    Op::Reference(_) | Op::Sensor(_) | Op::Register(_) | Op::Populated(_)
+                    Op::Reference(_)
+                        | Op::Sensor(_)
+                        | Op::Pool(_)
+                        | Op::Built(_)
+                        | Op::Register(_)
+                        | Op::Populated(_)
                 )
             {
                 candidates.push((index, MutationKind::Reference));
+            }
+        }
+        if let Some(cellular) = &program.cellular {
+            for index in 0..cellular.genes.len() {
+                if matches!(requested, MutationKind::Any | MutationKind::GeneSilence) {
+                    candidates.push((index, MutationKind::GeneSilence));
+                }
+                if cellular.genes.len() < cellular::MAX_GENES
+                    && matches!(requested, MutationKind::Any | MutationKind::GeneDuplicate)
+                {
+                    candidates.push((index, MutationKind::GeneDuplicate));
+                }
             }
         }
         if candidates.is_empty() {
@@ -132,6 +151,12 @@ impl Program {
         }
         let mut rng = MutationRng::new(seed);
         let (index, kind) = candidates[rng.index(candidates.len())];
+        if matches!(
+            kind,
+            MutationKind::GeneSilence | MutationKind::GeneDuplicate
+        ) {
+            return Self::mutate_gene(source, &parsed, index, kind);
+        }
         let node = &program.nodes[index];
         let location = parsed.nodes[index];
         let (from, to, replacement) = match kind {
@@ -199,6 +224,13 @@ impl Program {
                     }
                     let replacement = match &choices[rng.index(choices.len())] {
                         Op::Sensor(sensor) => sensor.name().to_string(),
+                        Op::Pool(index) => {
+                            format!("pool.{}", program.cellular().unwrap().products[*index].name)
+                        }
+                        Op::Built(index) => format!(
+                            "built.{}",
+                            program.cellular().unwrap().assemblies[*index].name
+                        ),
                         Op::Register(register) => register.name(),
                         Op::Populated(register) => format!("populated({})", register.name()),
                         Op::Reference(target) => program.bindings[..node.scope]
@@ -211,7 +243,9 @@ impl Program {
                     (location.from, location.to, replacement)
                 }
             }
-            MutationKind::Any => unreachable!(),
+            MutationKind::Any | MutationKind::GeneSilence | MutationKind::GeneDuplicate => {
+                unreachable!()
+            }
         };
         if source[from..to] == replacement {
             return None;
@@ -251,6 +285,60 @@ impl Program {
         })
     }
 
+    fn mutate_gene(
+        source: &str,
+        parsed: &ParsedSource,
+        index: usize,
+        kind: MutationKind,
+    ) -> Option<Mutation> {
+        let cellular = parsed.program.cellular.as_ref()?;
+        let location = parsed.genes[index];
+        let (from, to, replacement) = if kind == MutationKind::GeneSilence {
+            let span = location.expression;
+            // Retain the inherited expression (and its comments) so a later
+            // regulatory mutation can reactivate this locus.
+            (
+                span.from,
+                span.to,
+                format!("0 * ({})", &source[span.from..span.to]),
+            )
+        } else {
+            let original_name = &cellular.genes[index].name;
+            let base = &original_name[..original_name.len().min(52)];
+            let mut serial = 2;
+            let mut name = format!("{base}_{serial}");
+            while cellular.genes.iter().any(|gene| gene.name == name) {
+                serial += 1;
+                name = format!("{base}_{serial}");
+            }
+            let span = location.declaration;
+            let declaration = format!(
+                "\n{}{}{}",
+                &source[span.from..location.name.from],
+                name,
+                &source[location.name.to..span.to]
+            );
+            (span.to, span.to, declaration)
+        };
+        let length = source
+            .len()
+            .checked_sub(to - from)?
+            .checked_add(replacement.len())?;
+        if length > MAX_SOURCE_BYTES {
+            return None;
+        }
+        let mut patched = String::with_capacity(length);
+        patched.push_str(&source[..from]);
+        patched.push_str(&replacement);
+        patched.push_str(&source[to..]);
+        let program = Self::compile(&patched).ok()?;
+        Some(Mutation {
+            program,
+            source: patched,
+            kind,
+        })
+    }
+
     /// Preview all pure expressions using current signals and memory. The same
     /// node evaluator as a tick runs, but writes/clears are only described.
     pub fn evaluation_json(
@@ -270,8 +358,8 @@ impl Program {
             format!("\"from\":{},\"to\":{}", map.offsets[from], map.offsets[to])
         };
         let mut json = format!(
-            "{{\"version\":1,\"cellId\":{cell_id},\"genomeId\":{genome_id},\"time\":{},\"tick\":{tick},\"semantics\":\"current-snapshot\",\"source\":{},\"expressions\":[",
-            inputs.time, quote(source),
+            "{{\"version\":1,\"mode\":{},\"cellId\":{cell_id},\"genomeId\":{genome_id},\"time\":{},\"tick\":{tick},\"semantics\":\"current-snapshot\",\"source\":{},\"expressions\":[",
+            quote(program.mode()), inputs.time, quote(source),
         );
         for (index, node) in program.nodes.iter().enumerate() {
             if index > 0 {
@@ -300,19 +388,69 @@ impl Program {
             ));
         }
         json.push_str("],\"signals\":[");
-        for (index, sensor) in Sensor::ALL.iter().enumerate() {
+        let mut signals = Sensor::ALL
+            .iter()
+            .filter(|sensor| program.cellular.is_none() || sensor.cellular_allowed())
+            .map(|sensor| {
+                (
+                    sensor.name().to_string(),
+                    sensor.ty(),
+                    sensor.read(inputs).convert(sensor.ty()),
+                )
+            })
+            .collect::<Vec<_>>();
+        if let Some(cellular) = program.cellular() {
+            signals.extend(
+                cellular
+                    .products
+                    .iter()
+                    .enumerate()
+                    .map(|(index, product)| {
+                        (
+                            format!("pool.{}", product.name),
+                            Type::Number,
+                            evaluate_operation(&Op::Pool(index), Type::Number, inputs, memory, &[]),
+                        )
+                    }),
+            );
+            signals.extend(
+                cellular
+                    .assemblies
+                    .iter()
+                    .enumerate()
+                    .map(|(index, assembly)| {
+                        (
+                            format!("built.{}", assembly.name),
+                            Type::Number,
+                            evaluate_operation(
+                                &Op::Built(index),
+                                Type::Number,
+                                inputs,
+                                memory,
+                                &[],
+                            ),
+                        )
+                    }),
+            );
+        }
+        for (index, (name, ty, value)) in signals.iter().enumerate() {
             if index > 0 {
                 json.push(',');
             }
             json.push_str(&format!(
                 "{{\"name\":{},\"type\":{},\"value\":{}}}",
-                quote(sensor.name()),
-                quote(sensor.ty().label()),
-                sensor.read(inputs).convert(sensor.ty()).json()
+                quote(name),
+                quote(ty.label()),
+                value.json()
             ));
         }
         json.push_str("],\"outputs\":[");
-        for (index, root) in program.output_indices().iter().enumerate() {
+        for (index, root) in program
+            .output_indices()
+            .iter()
+            .enumerate()
+            .filter(|_| program.cellular.is_none())
+        {
             if index > 0 {
                 json.push(',');
             }
@@ -331,6 +469,25 @@ impl Program {
                 quote(ty.label()),
                 value.json()
             ));
+        }
+        if let Some(cellular) = &program.cellular {
+            for (index, (name, root)) in cellular.named_roots().iter().enumerate() {
+                if index > 0 {
+                    json.push(',');
+                }
+                let value = root.map_or(1.0, |root| values[root].number().clamp(0.0, 1.0));
+                let offsets = root.map_or_else(
+                    || "\"from\":null,\"to\":null".to_string(),
+                    |root| {
+                        let location = parsed.nodes[root];
+                        range(location.from, location.to)
+                    },
+                );
+                json.push_str(&format!(
+                    "{{\"name\":{},\"type\":\"scalar\",\"value\":{value},{offsets}}}",
+                    quote(name)
+                ));
+            }
         }
         json.push_str("],\"writes\":[");
         let clearing: HashSet<_> = program

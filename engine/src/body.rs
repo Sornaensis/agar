@@ -3,6 +3,7 @@
 //! Minerals are the conserved structural material proxy. Energy spent on growth
 //! is split into recoverable embodied energy and heat; neither targets nor damage
 //! create or erase material. Storage overflow is deliberately handled by World.
+use crate::cellular::{AssemblyKind, CellularState, MechanismKind};
 use crate::checkpoint::{ensure, Reader, Result as CheckpointResult, Writer};
 
 pub const FAMILY_COUNT: usize = 16;
@@ -278,6 +279,13 @@ pub struct BodyCapacities {
     pub phagocytosis: f64,
     pub attack: f64,
     pub defense: f64,
+    /// Independent reaction capacity. These operations need no bundled
+    /// metabolic organelle and cannot process a different substrate.
+    pub light_harvest: f64,
+    pub substrate_digestion: [f64; 3],
+    pub independent_engulf: f64,
+    /// Only legacy piercing machinery includes extraction from a living cell.
+    pub bite_extraction_fraction: f64,
 }
 pub type Capacities = BodyCapacities;
 
@@ -342,6 +350,8 @@ pub struct Body {
     /// inherited, but is not functional organelle mass.
     pub precursor_mass: [f64; FAMILY_COUNT],
     pub precursor_energy: [f64; FAMILY_COUNT],
+    /// Named product stocks and discrete recipe machinery for cellular programs.
+    pub cellular: Option<CellularState>,
 }
 
 fn nonnegative(value: f64) -> f64 {
@@ -381,6 +391,7 @@ impl Body {
                 * EMBODIED_FRACTION,
             precursor_mass: [0.0; FAMILY_COUNT],
             precursor_energy: [0.0; FAMILY_COUNT],
+            cellular: None,
         };
         let budget = body.introduction_budget();
         debug_assert!(body.validate().is_ok());
@@ -397,6 +408,7 @@ impl Body {
             scaffold_energy: SCAFFOLD_MASS_PER_AREA * SCAFFOLD_ENERGY_PER_MASS * EMBODIED_FRACTION,
             precursor_mass: [0.0; FAMILY_COUNT],
             precursor_energy: [0.0; FAMILY_COUNT],
+            cellular: None,
         };
         // Test specimens isolate feeding, sensing, storage and inheritance.
         // Their full fabrication cost is recorded just like production input.
@@ -483,50 +495,109 @@ impl Body {
         self.scaffold_mass()
             + self.organs.iter().map(|o| o.mass).sum::<f64>()
             + self.precursor_mass.iter().sum::<f64>()
+            + self
+                .cellular
+                .as_ref()
+                .map_or(0.0, CellularState::structural_mass)
     }
     pub fn embodied_energy(&self) -> f64 {
         self.scaffold_energy
             + self.organs.iter().map(|o| o.embodied_energy).sum::<f64>()
             + self.precursor_energy.iter().sum::<f64>()
+            + self
+                .cellular
+                .as_ref()
+                .map_or(0.0, CellularState::embodied_energy)
     }
     pub fn precursor(&self, kind: OrganelleKind) -> f64 {
         self.precursor_mass[kind as usize]
     }
     pub fn count(&self, kind: OrganelleKind) -> u32 {
         self.organs.iter().filter(|o| o.kind == kind).count() as u32
+            + self.cellular.as_ref().map_or(0, |state| {
+                state
+                    .assemblies
+                    .iter()
+                    .filter(|a| a.recipe.kind == AssemblyKind::Organelle(kind))
+                    .count() as u32
+            })
     }
     pub fn mass(&self, kind: OrganelleKind) -> f64 {
-        self.organs
+        let mut mass = self
+            .organs
             .iter()
             .filter(|o| o.kind == kind)
             .map(|o| o.mass)
-            .sum()
+            .sum();
+        if let Some(state) = &self.cellular {
+            for assembly in state
+                .assemblies
+                .iter()
+                .filter(|a| a.recipe.kind == AssemblyKind::Organelle(kind))
+            {
+                mass += assembly.mass();
+            }
+        }
+        mass
     }
     pub fn functional_mass(&self, kind: OrganelleKind) -> f64 {
-        self.organs
+        let mut mass = self
+            .organs
             .iter()
             .filter(|o| o.kind == kind)
             .map(Organelle::functional_mass)
-            .sum()
+            .sum();
+        if let Some(state) = &self.cellular {
+            for assembly in state
+                .assemblies
+                .iter()
+                .filter(|a| a.recipe.kind == AssemblyKind::Organelle(kind))
+            {
+                mass += assembly.functional_mass();
+            }
+        }
+        mass
     }
     /// Equivalent minimum-sized functional units, not requested capacity.
     pub fn capacity(&self, kind: OrganelleKind) -> f64 {
         self.functional_mass(kind) / kind.min_mass()
     }
     pub fn damaged(&self, kind: OrganelleKind) -> f64 {
-        self.organs
+        let mut mass = self
+            .organs
             .iter()
             .filter(|o| o.kind == kind)
             .map(|o| o.mass * (1.0 - o.integrity))
-            .sum()
+            .sum();
+        if let Some(state) = &self.cellular {
+            for assembly in state
+                .assemblies
+                .iter()
+                .filter(|a| a.recipe.kind == AssemblyKind::Organelle(kind))
+            {
+                mass += assembly.mass() * (1.0 - assembly.integrity);
+            }
+        }
+        mass
     }
     /// Material missing before incomplete organs first become functional.
     pub fn building(&self, kind: OrganelleKind) -> f64 {
-        self.organs
+        let mut mass = self
+            .organs
             .iter()
             .filter(|o| o.kind == kind)
             .map(Organelle::building)
-            .sum()
+            .sum();
+        if let Some(state) = &self.cellular {
+            for assembly in state
+                .assemblies
+                .iter()
+                .filter(|a| a.recipe.kind == AssemblyKind::Organelle(kind))
+            {
+                mass += assembly.building();
+            }
+        }
+        mass
     }
     /// Collect all family signals in one pass, retaining each family's original
     /// summation order. The returned values are valid until the body changes.
@@ -539,6 +610,9 @@ impl Body {
             summary.functional_mass += organ.functional_mass();
             summary.damaged += organ.mass * (1.0 - organ.integrity);
             summary.building += organ.building();
+        }
+        if let Some(state) = &self.cellular {
+            state.add_summaries(&mut summaries);
         }
         for kind in OrganelleKind::ALL {
             let summary = &mut summaries[kind as usize];
@@ -553,7 +627,11 @@ impl Body {
             .iter()
             .map(Organelle::internal_space)
             .sum::<f64>()
-            + self.precursor_mass.iter().sum::<f64>() * PROTEIN_INTERNAL_FOOTPRINT;
+            + self.precursor_mass.iter().sum::<f64>() * PROTEIN_INTERNAL_FOOTPRINT
+            + self
+                .cellular
+                .as_ref()
+                .map_or(0.0, CellularState::internal_space);
         SpaceBudget {
             capacity,
             used,
@@ -566,7 +644,11 @@ impl Body {
             .organs
             .iter()
             .map(Organelle::surface_space)
-            .sum::<f64>();
+            .sum::<f64>()
+            + self
+                .cellular
+                .as_ref()
+                .map_or(0.0, CellularState::surface_space);
         SpaceBudget {
             capacity,
             used,
@@ -576,18 +658,62 @@ impl Body {
     pub fn minimum_core_mass(&self) -> f64 {
         CORE_MASS_PER_AREA * self.area
     }
+    pub fn support_mass(&self) -> f64 {
+        self.functional_mass(OrganelleKind::Core)
+            + self.mechanism_mass(MechanismKind::Support)
+    }
+    pub fn mechanism_mass(&self, kind: MechanismKind) -> f64 {
+        self.cellular.as_ref().map_or(0.0, |state| state.assemblies.iter()
+            .filter(|a| a.recipe.kind == AssemblyKind::Mechanism(kind))
+            .map(|a| a.functional_mass()).sum())
+    }
+    /// Compatibility render slots describe visible hardware, not capabilities.
+    /// Keep these out of sensing and capacity calculations to avoid granting
+    /// legacy family side effects to a primitive mechanism.
+    pub fn add_visual_mechanisms(&self, summaries: &mut [OrganelleSummary; FAMILY_COUNT]) {
+        let Some(state) = &self.cellular else { return; };
+        for a in &state.assemblies {
+            let kind = match a.recipe.kind {
+                AssemblyKind::Mechanism(MechanismKind::Propulsion) => OrganelleKind::Flagellum,
+                AssemblyKind::Mechanism(MechanismKind::LightHarvest) => OrganelleKind::Photosynthetic,
+                AssemblyKind::Mechanism(MechanismKind::DigestExudate | MechanismKind::DigestTissue | MechanismKind::DigestWaste) => OrganelleKind::Digestive,
+                AssemblyKind::Mechanism(MechanismKind::Shield) => OrganelleKind::Cortex,
+                AssemblyKind::Mechanism(MechanismKind::Pierce) => OrganelleKind::Piercer,
+                _ => continue,
+            };
+            let s = &mut summaries[kind as usize];
+            s.count += 1;
+            s.mass += a.mass();
+            s.functional_mass += a.functional_mass();
+            s.capacity = s.functional_mass / kind.min_mass();
+            s.damaged += a.mass() * (1.0 - a.integrity);
+            s.building += a.building();
+        }
+    }
     pub fn viable(&self) -> bool {
-        self.functional_mass(OrganelleKind::Core) + EPS >= self.minimum_core_mass()
+        self.support_mass() + EPS >= self.minimum_core_mass()
     }
     pub fn integrity(&self) -> f64 {
-        let mass = self.organs.iter().map(|o| o.mass).sum::<f64>();
+        let mass = self.organs.iter().map(|o| o.mass).sum::<f64>()
+            + self
+                .cellular
+                .as_ref()
+                .map_or(0.0, |state| state.assemblies.iter().map(|a| a.mass()).sum());
         if mass == 0.0 {
             0.0
         } else {
-            self.organs
+            (self
+                .organs
                 .iter()
                 .map(|o| o.mass * o.integrity)
                 .sum::<f64>()
+                + self.cellular.as_ref().map_or(0.0, |state| {
+                    state
+                        .assemblies
+                        .iter()
+                        .map(|a| a.mass() * a.integrity)
+                        .sum::<f64>()
+                }))
                 / mass
         }
     }
@@ -595,6 +721,7 @@ impl Body {
         // Damaged material remains costly to support; empty envelope is not free.
         0.16 * self.area
             + PROTEIN_UPKEEP * self.precursor_mass.iter().sum::<f64>()
+            + self.cellular.as_ref().map_or(0.0, CellularState::upkeep)
             + self
                 .organs
                 .iter()
@@ -615,6 +742,13 @@ impl Body {
         for organ in &self.organs {
             mass[organ.kind as usize] += organ.functional_mass();
         }
+        if let Some(state) = &self.cellular {
+            for assembly in &state.assemblies {
+                if let AssemblyKind::Organelle(kind) = assembly.recipe.kind {
+                    mass[kind as usize] += assembly.functional_mass();
+                }
+            }
+        }
         self.capacities_from_functional_mass(mass)
     }
     /// Reuse an already collected family snapshot without another organ scan.
@@ -626,8 +760,34 @@ impl Body {
         // independent family query sums used by family_summaries().
         self.capacities_from_functional_mass(summaries.map(|s| 0.0 + s.functional_mass))
     }
-    fn capacities_from_functional_mass(&self, mass: [f64; FAMILY_COUNT]) -> BodyCapacities {
+    fn capacities_from_functional_mass(&self, mut mass: [f64; FAMILY_COUNT]) -> BodyCapacities {
         use OrganelleKind::*;
+        // Sensing precedes gene evaluation. Receptors and processing enzymes
+        // therefore use their stored activity from the preceding tick, just as
+        // optical direction does. Passive storage and structure remain present.
+        if let Some(state) = &self.cellular {
+            for kind in [
+                Metabolic,
+                Photoreceptor,
+                Thermoreceptor,
+                Chemoreceptor,
+                Mechanoreceptor,
+                Optical,
+            ] {
+                mass[kind as usize] = self
+                    .organs
+                    .iter()
+                    .filter(|o| o.kind == kind)
+                    .map(Organelle::functional_mass)
+                    .fold(0.0, |sum, value| sum + value)
+                    + state
+                        .assemblies
+                        .iter()
+                        .filter(|a| a.recipe.kind == AssemblyKind::Organelle(kind))
+                        .map(|a| a.functional_mass() * a.activity)
+                        .sum::<f64>();
+            }
+        }
         let core = mass[Core as usize];
         let reserve = mass[Reserve as usize];
         let digestive = mass[Digestive as usize];
@@ -637,7 +797,7 @@ impl Body {
         let minerals = 25.0 * core + 12.0 * reserve;
         let gut_energy = 800.0 * digestive;
         let protection = (6.0 * mass[Cortex as usize] / self.area.sqrt()).clamp(0.0, 0.8);
-        BodyCapacities {
+        let mut capacities = BodyCapacities {
             energy,
             minerals,
             gut_energy,
@@ -670,7 +830,15 @@ impl Body {
             phagocytosis: mass[Phagocyte as usize],
             attack: mass[Piercer as usize],
             defense: protection,
+            light_harvest: 0.0,
+            substrate_digestion: [0.0; 3],
+            independent_engulf: 0.0,
+            bite_extraction_fraction: 1.0,
+        };
+        if let Some(state) = &self.cellular {
+            state.add_mechanism_capacities(&mut capacities, self.area);
         }
+        capacities
     }
     pub fn energy_capacity(&self) -> f64 {
         self.capacities().energy
@@ -688,6 +856,11 @@ impl Body {
         let retained = 1.0 - effort(fraction);
         for organ in &mut self.organs {
             organ.integrity *= retained;
+        }
+        if let Some(state) = &mut self.cellular {
+            for assembly in &mut state.assemblies {
+                assembly.integrity *= retained;
+            }
         }
     }
 
@@ -992,7 +1165,11 @@ impl Body {
     }
 
     pub fn can_partition(&self) -> bool {
-        self.assign_partition(|_, _| {})
+        if self.cellular.is_some() {
+            self.cellular_partition_assignment().is_some()
+        } else {
+            self.assign_partition(|_, _| {})
+        }
     }
     pub fn division_ready(&self) -> bool {
         self.can_partition()
@@ -1010,16 +1187,136 @@ impl Body {
             scaffold_energy: self.scaffold_energy * 0.5,
             precursor_mass: self.precursor_mass.map(|mass| mass * 0.5),
             precursor_energy: self.precursor_energy.map(|energy| energy * 0.5),
+            cellular: self.cellular.as_ref().map(CellularState::partition_base),
         };
         let mut daughters = [blank.clone(), blank];
-        if !self.assign_partition(|side, organ| daughters[side].organs.push(organ.clone())) {
+        if let Some(state) = &self.cellular {
+            for (cellular, index, side) in self.cellular_partition_assignment()? {
+                if cellular {
+                    daughters[side]
+                        .cellular
+                        .as_mut()
+                        .unwrap()
+                        .assemblies
+                        .push(state.assemblies[index].clone());
+                } else {
+                    daughters[side].organs.push(self.organs[index].clone());
+                }
+            }
+        } else if !self.assign_partition(|side, organ| daughters[side].organs.push(organ.clone())) {
             return None;
         }
         for daughter in &mut daughters {
             daughter.organs.sort_by_key(|o| o.id);
+            if let Some(state) = &mut daughter.cellular {
+                state.assemblies.sort_by_key(|a| a.id);
+            }
         }
         let [a, b] = daughters;
         Some((a, b))
+    }
+
+    /// Pack the actual old-format organs and recipe instances together. A core
+    /// assembled from products is as essential as the founder's physical core;
+    /// incomplete cores cannot support either daughter. No recipe is cloned.
+    fn cellular_partition_assignment(&self) -> Option<Vec<(bool, usize, usize)>> {
+        let state = self.cellular.as_ref()?;
+        let area = self.area * 0.5;
+        if area < MIN_AREA || !self.viable() {
+            return None;
+        }
+        struct Item {
+            cellular: bool,
+            index: usize,
+            id: u64,
+            core: f64,
+            inside: f64,
+            surface: f64,
+        }
+        let mut items = Vec::with_capacity(self.organs.len() + state.assemblies.len());
+        for (index, organ) in self.organs.iter().enumerate() {
+            items.push(Item {
+                cellular: false,
+                index,
+                id: u64::from(organ.id) * 2,
+                core: if organ.kind == OrganelleKind::Core {
+                    organ.functional_mass()
+                } else {
+                    0.0
+                },
+                inside: organ.internal_space(),
+                surface: organ.surface_space(),
+            });
+        }
+        for (index, assembly) in state.assemblies.iter().enumerate() {
+            items.push(Item {
+                cellular: true,
+                index,
+                id: u64::from(assembly.id) * 2 + 1,
+                core: if assembly.recipe.kind.supports_cell() {
+                    assembly.functional_mass()
+                } else {
+                    0.0
+                },
+                inside: assembly.internal_space(),
+                surface: assembly.surface_space(),
+            });
+        }
+        if items.iter().filter(|item| item.core > 0.0).count() < 2 {
+            return None;
+        }
+        let required = CORE_MASS_PER_AREA * area;
+        let internal = INTERNAL_PER_AREA * area;
+        let surface = SURFACE_PER_RADIUS * area.sqrt();
+        let shared = (self.precursor_mass.iter().sum::<f64>() * PROTEIN_INTERNAL_FOOTPRINT
+            + state.stock_mass()
+            + state.genetic_mass())
+            * 0.5;
+        let mut used = [[shared, 0.0]; 2];
+        let mut core = [0.0; 2];
+        items.sort_by(|x, y| {
+            let xc = x.core > 0.0;
+            let yc = y.core > 0.0;
+            let score = |item: &Item| {
+                if item.core > 0.0 {
+                    item.core / required
+                } else {
+                    (item.inside / internal).max(item.surface / surface)
+                }
+            };
+            yc.cmp(&xc)
+                .then_with(|| score(y).total_cmp(&score(x)))
+                .then(x.id.cmp(&y.id))
+        });
+        let mut assignment = Vec::with_capacity(items.len());
+        for item in items {
+            let load = |side: usize| (used[side][0] / internal).max(used[side][1] / surface);
+            let first = if item.core > 0.0 {
+                usize::from(core[1] < core[0])
+            } else {
+                usize::from(load(1) < load(0))
+            };
+            let fits = |side: usize| {
+                used[side][0] + item.inside <= internal + EPS
+                    && used[side][1] + item.surface <= surface + EPS
+            };
+            let side = if fits(first) {
+                first
+            } else if fits(1 - first) {
+                1 - first
+            } else {
+                return None;
+            };
+            used[side][0] += item.inside;
+            used[side][1] += item.surface;
+            core[side] += item.core;
+            assignment.push((item.cellular, item.index, side));
+        }
+        if core.iter().any(|&mass| mass + EPS < required) {
+            None
+        } else {
+            Some(assignment)
+        }
     }
 
     /// Share the exact greedy placement between feasibility and materialization.
@@ -1138,6 +1435,9 @@ impl Body {
                 "invalid assembly protein energy ledger",
             )?;
         }
+        if let Some(state) = &self.cellular {
+            state.validate()?;
+        }
         let mut ids = std::collections::HashSet::with_capacity(self.organs.len());
         let mut incomplete = [false; FAMILY_COUNT];
         for organ in &self.organs {
@@ -1183,7 +1483,8 @@ impl Body {
             "organs exceed membrane space",
         )?;
         ensure(
-            self.count(OrganelleKind::Core) > 0,
+            self.count(OrganelleKind::Core) > 0 || self.cellular.as_ref().is_some_and(|state|
+                state.assemblies.iter().any(|a| a.recipe.kind.supports_cell())),
             "body has no essential core",
         )?;
         Ok(())
@@ -1204,17 +1505,21 @@ impl Body {
             writer.f64(self.precursor_mass[k]);
             writer.f64(self.precursor_energy[k]);
         }
+        writer.u8(u8::from(self.cellular.is_some()));
+        if let Some(state) = &self.cellular {
+            state.write_checkpoint(writer);
+        }
     }
     #[cfg(test)]
     pub(crate) fn read_checkpoint(reader: &mut Reader<'_>) -> CheckpointResult<Self> {
-        Self::read_checkpoint_version(reader, 4)
+        Self::read_checkpoint_version(reader, 6)
     }
     pub(crate) fn read_checkpoint_version(
         reader: &mut Reader<'_>,
         version: u32,
     ) -> CheckpointResult<Self> {
         ensure(
-            matches!(version, 3 | 4),
+            matches!(version, 3 | 4 | 5 | 6),
             "unsupported body checkpoint version",
         )?;
         let area = reader.range(MIN_AREA, MAX_AREA)?;
@@ -1246,6 +1551,15 @@ impl Body {
                 precursor_energy[k] = reader.f64()?;
             }
         }
+        let cellular = if version >= 5 {
+            match reader.u8()? {
+                0 => None,
+                1 => Some(CellularState::read_checkpoint_version(reader, version)?),
+                _ => return Err("Invalid simulation save: invalid cellular state marker.".into()),
+            }
+        } else {
+            None
+        };
         let body = Self {
             area,
             organs,
@@ -1253,6 +1567,7 @@ impl Body {
             scaffold_energy,
             precursor_mass,
             precursor_energy,
+            cellular,
         };
         body.validate()?;
         Ok(body)
@@ -1748,7 +2063,7 @@ mod tests {
         let mut writer = Writer::new();
         old.write_checkpoint(&mut writer);
         // Version 3 ended after the individual organelle records.
-        writer.0.truncate(writer.0.len() - FAMILY_COUNT * 16);
+        writer.0.truncate(writer.0.len() - FAMILY_COUNT * 16 - 1);
         let mut reader = Reader::new(&writer.0);
         assert_eq!(Body::read_checkpoint_version(&mut reader, 3).unwrap(), old);
         assert!(reader.finished());

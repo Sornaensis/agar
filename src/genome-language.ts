@@ -1,4 +1,4 @@
-import { ORGANELLE_CATALOG } from './organelles';
+import { ORGANELLE_CATALOG, MECHANISM_CATALOG } from './organelles';
 
 /** Editor assistance for the language in engine/src/genome.rs; the Rust compiler remains authoritative. */
 export type PrimitiveType = 'integer' | 'scalar' | 'boolean' | 'string' | 'vec2';
@@ -180,6 +180,100 @@ export const LANGUAGE_KEYWORDS: readonly GenomeSymbol[] = Object.freeze([
   symbol('false', 'keyword', 'boolean', 'false: boolean', 'Boolean false. Booleans are not interchangeable with numbers.'),
 ]);
 
+/** Cellular declarations are kept separate from the v3 compatibility catalog. */
+export const CELLULAR_PRODUCT_ROLES = Object.freeze([
+  'scaffold', 'anchor', 'motor', 'filament', 'pigment', 'enzyme', 'membrane', 'transporter',
+  'receptor', 'regulator', 'replicase', 'constrictor',
+] as const);
+export const CELLULAR_CONSTRUCTORS: readonly GenomeSymbol[] = Object.freeze(CELLULAR_PRODUCT_ROLES.map(role =>
+  symbol(role, 'function', 'product', `${role}(${role === 'regulator' ? 'halfLife: number' : ''}) → product`,
+    role === 'regulator'
+      ? 'Declares a persistent regulatory product. Its positive half-life is measured in seconds; pool.Name reads its physical stock. Synthesis costs material and energy, and stock partitions at division.'
+      : `Declares a ${role} product. Genes synthesize its stock; assembly recipes consume it as a physical component. A declaration by itself creates no material.`)));
+export const CELLULAR_KEYWORDS: readonly GenomeSymbol[] = Object.freeze([
+  { ...symbol('cellular', 'keyword', 'mode', 'cellular;', 'Starts a cellular program. Declare products, express them with genes, and combine their stocks into physical assemblies.'), insertText: 'cellular;\n' },
+  { ...symbol('product', 'keyword', 'declaration', 'product Name = motor();', 'Names a typed material product. Product roles determine which physical recipes it can satisfy.'), insertText: 'product ' },
+  { ...symbol('gene', 'keyword', 'expression', 'gene drive: Motor = expression;', 'Allocates synthesis effort to a named product. Effort is bounded to 0–1; actual production shares finite translation work, minerals, energy and space.'), insertText: 'gene ' },
+  { ...symbol('assembly', 'keyword', 'recipe', 'assembly Swim: propel() { components; }', 'Names a physical recipe. Its product masses determine composition; stocks from the start of the tick are consumed as components are installed.'), insertText: 'assembly ' },
+  { ...symbol('activity', 'keyword', 'scalar', 'activity: expression;', 'Controls the activity of this assembly, bounded to 0–1. Activity does not create missing components or substitute for a finished machine.'), insertText: 'activity: ' },
+  { ...symbol('at', 'keyword', 'radians', 'at: 0;', 'Body-relative attachment angle in radians. Placement and force direction determine a motor’s force and torque.'), insertText: 'at: 0;' },
+  { ...symbol('direction', 'keyword', 'radians', 'direction: 0;', 'Body-relative force direction in radians. An off-center force can rotate the body as well as translate it.'), insertText: 'direction: 0;' },
+].map(item => Object.freeze(item)));
+export const CELLULAR_READ_SIGNALS: readonly GenomeSymbol[] = Object.freeze(BUILTIN_SIGNALS.filter(item =>
+  ['energy', 'energy.fraction', 'energy.capacity', 'age', 'speed', 'integrity'].includes(item.name)
+  || (item.name.startsWith('body.') && item.name !== 'body.division_ready')
+  || /^(nutrient|gut|light|heat|chemical|flow|contact|object)\./.test(item.name)));
+export const CELLULAR_ASSEMBLY_KINDS: readonly GenomeSymbol[] = Object.freeze([
+  ...ORGANELLE_CATALOG.map(item => symbol(item.kind, 'keyword', 'assembly', `${item.kind} { components; activity: expression; }`, item.description)),
+  symbol('membrane', 'keyword', 'assembly', 'membrane { components; activity: expression; }', 'Membrane and enzyme products support paid envelope growth, adding space with finite minerals, energy and core work.'),
+  symbol('replicator', 'keyword', 'assembly', 'replicator { components; activity: expression; }', 'Scaffold and replicase products build machinery that performs paid genome replication over time.'),
+  symbol('constrictor', 'keyword', 'assembly', 'constrictor { components; activity: expression; }', 'Anchor, motor and constrictor products build machinery that advances physical constriction after growth and replication.'),
+]);
+export const CELLULAR_MECHANISMS: readonly GenomeSymbol[] = Object.freeze(MECHANISM_CATALOG.map(item =>
+  symbol(item.kind, 'function', 'mechanism', `${item.kind} { components; activity: expression; }`, item.description)));
+const mechanismConstructorByName = new Map(MECHANISM_CATALOG.map(item => [item.constructor,
+  symbol(item.constructor, 'function', 'mechanism', `${item.constructor}(${MECHANISM_CATALOG.filter(other=>other.constructor===item.constructor).flatMap(other=>other.target?[other.target]:[]).join(' | ')})`,
+    MECHANISM_CATALOG.filter(other=>other.constructor===item.constructor).map(other=>other.description).join(' '))]));
+const cellularSymbolByName = new Map([...CELLULAR_CONSTRUCTORS, ...CELLULAR_KEYWORDS].map(item => [item.name, item]));
+
+export interface CellularDeclarations {
+  products: { name: string; role: string; from: number; to: number }[];
+  genes: { name: string; product: string; from: number; to: number }[];
+  assemblies: { name: string; kind: string; from: number; to: number }[];
+}
+let declarationCache:{source:string;value:CellularDeclarations}|undefined;
+
+/** Tolerant authoring assistance only. Rust validates names, recipes and types. */
+export function cellularDeclarations(source: string): CellularDeclarations {
+  if (declarationCache?.source===source) return declarationCache.value;
+  const tokens = tokenizeGenome(source).filter(token => token.kind !== 'comment');
+  const result: CellularDeclarations = { products: [], genes: [], assemblies: [] };
+  for (let index = 0; index + 3 < tokens.length; index++) {
+    const declaration = tokens[index].text, name = tokens[index + 1];
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name.text)) continue;
+    const detail = tokens[index + 3].text;
+    if (declaration === 'product' && tokens[index + 2].text === '=') result.products.push({ name: name.text, role: detail, from: name.from, to: name.to });
+    if (declaration === 'gene' && tokens[index + 2].text === ':') result.genes.push({ name: name.text, product: detail, from: name.from, to: name.to });
+    if (declaration === 'assembly' && tokens[index + 2].text === ':') {
+      let kind = detail;
+      if (tokens[index + 4]?.text === '(') {
+        const close = tokens.findIndex((token,i)=>i>index+4 && (token.text===')' || token.text==='{'));
+        if (close>index+4 && tokens[close].text===')') kind=tokens.slice(index+3,close+1).map(token=>token.text).join('');
+      }
+      result.assemblies.push({ name: name.text, kind, from: name.from, to: name.to });
+    }
+  }
+  declarationCache={source,value:result};
+  return result;
+}
+
+export function isCellularSource(source: string): boolean {
+  return /^(?:\s|#[^\r\n]*(?:\r?\n|$))*cellular\s*;/.test(source);
+}
+
+export function cellularDynamicSymbols(source: string): GenomeSymbol[] {
+  const declarations = cellularDeclarations(source);
+  return [
+    ...declarations.products.map(item => symbol(`pool.${item.name}`, 'signal', 'scalar', `pool.${item.name}: scalar`,
+      `Available ${item.role} product mass before this tick. Stock persists, occupies space and is shared by all recipes that name ${item.name}. Regulator stocks decay according to their half-life.`)),
+    ...declarations.assemblies.map(item => symbol(`built.${item.name}`, 'signal', 'scalar', `built.${item.name}: scalar`,
+      `Functional material in complete ${item.name} assemblies, reduced by damage. Incomplete assemblies contribute zero; their installed components are shown in the Body inspector.`)),
+  ];
+}
+
+export function lookupCellularSymbol(name: string, source: string): GenomeSymbol | undefined {
+  const dynamic = cellularDynamicSymbols(source).find(item => item.name === name);
+  if (dynamic) return dynamic;
+  const declarations = cellularDeclarations(source);
+  const product = declarations.products.find(item => item.name === name);
+  if (product) return symbol(name, 'binding', `${product.role} product`, `${name}: ${product.role}`, `Physical product declared by this genome. Use pool.${name} to read its available mass, or name it in an assembly recipe with a positive material amount.`);
+  const gene = declarations.genes.find(item => item.name === name);
+  if (gene) return symbol(name, 'binding', 'gene', `gene ${name}: ${gene.product}`, `Expression effort for ${gene.product}. The Body inspector compares requested expression with actual material synthesized.`);
+  const assembly = declarations.assemblies.find(item => item.name === name);
+  if (assembly) return symbol(name, 'binding', `${assembly.kind} assembly`, `${name}: ${assembly.kind}`, `Physical recipe with its own composition, activity and placement. Use built.${name} to read the functional mass in completed machinery, after damage.`);
+  return cellularSymbolByName.get(name) ?? CELLULAR_MECHANISMS.find(item=>item.name===name) ?? mechanismConstructorByName.get(name) ?? CELLULAR_ASSEMBLY_KINDS.find(item => item.name === name);
+}
+
 export const GENOME_SYMBOLS: readonly GenomeSymbol[] = Object.freeze([
   ...BUILTIN_FUNCTIONS, ...BUILTIN_SIGNALS, ...BUILTIN_OUTPUTS, ...LANGUAGE_KEYWORDS,
 ]);
@@ -267,18 +361,26 @@ export function tokenizeGenome(source: string): GenomeToken[] {
     } else if (/[A-Za-z_]/.test(character)) {
       pos++;
       while (/[A-Za-z0-9_.]/.test(source[pos] ?? '')) pos++;
-      const name = source.slice(start, pos), known = symbolByName.get(name) ?? compatibilityOutputs.get(name), register = registerSymbol(name);
-      if (name === 'true' || name === 'false') { kind = 'boolean'; type = 'boolean'; }
+      const name = source.slice(start, pos), known = symbolByName.get(name) ?? compatibilityOutputs.get(name) ?? cellularSymbolByName.get(name) ?? mechanismConstructorByName.get(name), register = registerSymbol(name);
+      let mechanismCall = false;
+      if (mechanismConstructorByName.has(name)) {
+        const previous: string[] = [];
+        for (let i=tokens.length-1; i>=0 && previous.length<3; i--) if (tokens[i].kind!=='comment') previous.push(tokens[i].text);
+        mechanismCall=previous[0]===':' && previous[2]==='assembly';
+      }
+      if (mechanismCall) kind='function';
+      else if (name === 'true' || name === 'false') { kind = 'boolean'; type = 'boolean'; }
       else if (register) { kind = 'register'; type = register.type as PrimitiveType; }
       else if (known) {
         kind = known.category as 'keyword' | 'signal' | 'function' | 'output';
         if (known.category === 'signal' || known.category === 'output') type = known.type as PrimitiveType;
-      } else kind = 'identifier';
+      } else if (/^(pool|built)\.[A-Za-z_][A-Za-z0-9_]*$/.test(name)) { kind = 'signal'; type = 'scalar'; }
+      else kind = 'identifier';
     } else if (['==', '!=', '<=', '>=', '&&', '||'].includes(source.slice(pos, pos + 2))) {
       pos += 2; kind = 'operator';
     } else if ('+-*/=<>!'.includes(character)) {
       pos++; kind = 'operator';
-    } else if ('(),;'.includes(character)) {
+    } else if ('(),;{}:'.includes(character)) {
       pos++; kind = 'punctuation';
     } else {
       pos += (source.codePointAt(pos) ?? 0) > 0xffff ? 2 : 1; kind = 'invalid';
@@ -301,7 +403,7 @@ export function identifierAt(source: string, position: number): { from: number; 
 export function symbolAt(source: string, position: number, bindings: readonly GenomeBinding[] = []): { from: number; to: number; symbol: GenomeSymbol } | null {
   const span = identifierAt(source, position);
   if (!span) return null;
-  const found = lookupGenomeSymbol(span.text, bindings);
+  const found = (isCellularSource(source) ? lookupCellularSymbol(span.text, source) : undefined) ?? lookupGenomeSymbol(span.text, bindings);
   return found ? { from: span.from, to: span.to, symbol: found } : null;
 }
 
@@ -353,7 +455,8 @@ export function searchGenomeSymbols(query: string, bindings: readonly GenomeBind
 }
 
 export interface GenomeCompletionContext {
-  kind: 'statement' | 'expression' | 'register' | 'none';
+  kind: 'statement' | 'expression' | 'register' | 'none' | 'constructor' | 'product' | 'assembly-kind' | 'component' | 'mechanism-target';
+  mechanismConstructor?: string;
   /** A useful editing hint, never a substitute for the Rust type checker. */
   expected?: PrimitiveType | 'number' | 'register' | 'vec2 | string';
 }
@@ -361,9 +464,51 @@ export interface GenomeCompletionContext {
 const numericFunctions = new Set(['sin', 'cos', 'abs', 'min', 'max', 'clamp', 'int', 'float', 'vec', 'sqrt', 'sign', 'atan2', 'lerp', 'noise']);
 const vectorFunctions = new Set(['dot', 'normalize', 'angle', 'x', 'y']);
 
+function cellularCompletionContext(source: string, position: number): GenomeCompletionContext {
+  const all = tokenizeGenome(source);
+  const enclosing = all.find(token => token.from <= position && position <= token.to);
+  if (enclosing?.kind === 'comment' && position > enclosing.from
+    || enclosing?.kind === 'string' && position > enclosing.from) return { kind: 'none' };
+  const preceding = all.filter(token => token.kind !== 'comment' && token.from < position);
+  const last = preceding.at(-1);
+  if (last && last.to >= position && identifierKinds.has(last.kind)
+    && !['cellular', 'product', 'gene', 'assembly', 'if', 'then', 'else', 'activity', 'at', 'direction'].includes(last.text)) preceding.pop();
+  const braces: number[] = [];
+  for (let index = 0; index < preceding.length; index++) {
+    if (preceding[index].text === '{') braces.push(index);
+    if (preceding[index].text === '}') braces.pop();
+  }
+  let start = preceding.length;
+  while (start > 0 && ![';', '{', '}'].includes(preceding[start - 1].text)) start--;
+  const tokens = preceding.slice(start);
+  if (braces.length) {
+    if (!tokens.length || !tokens.some(token => token.text === ':')) return { kind: 'component' };
+    if (tokens[0].text !== 'activity') return { kind: 'none' };
+    const expression = `thrust = ${source.slice(tokens.find(token=>token.text===':')!.to,position)}`;
+    return genomeCompletionContext(expression,expression.length);
+  }
+  if (!tokens.length) return { kind: 'statement' };
+  const assignment = tokens.some(token => token.text === '='), colon = tokens.some(token => token.text === ':');
+  if (tokens[0].text === 'product') return { kind: assignment && !tokens.some(token=>token.text==='(') ? 'constructor' : 'none' };
+  if (tokens[0].text === 'gene') {
+    if (!assignment) return { kind: colon ? 'product' : 'none' };
+    const expression = `thrust = ${source.slice(tokens.find(token=>token.text==='=')!.to,position)}`;
+    return genomeCompletionContext(expression,expression.length);
+  }
+  if (tokens[0].text === 'assembly') {
+    if (!colon) return { kind:'none' };
+    const open = tokens.findIndex(token=>token.text==='(');
+    if (open>=0) return tokens.some(token=>token.text===')') ? {kind:'none'} : {kind:'mechanism-target',mechanismConstructor:tokens[open-1]?.text};
+    return {kind:'assembly-kind'};
+  }
+  if (tokens[0].text === 'let') return { kind: assignment ? 'expression' : 'none' };
+  return { kind: 'statement' };
+}
+
 /** Incomplete code is expected here. Infer only the constraints visible at the cursor. */
 export function genomeCompletionContext(source: string, position: number, bindings: readonly GenomeBinding[] = []): GenomeCompletionContext {
   if (!Number.isInteger(position) || position < 0 || position > source.length) return { kind: 'none' };
+  if (isCellularSource(source)) return cellularCompletionContext(source, position);
   const all = tokenizeGenome(source);
   const enclosing = all.find(token => token.from <= position && position <= token.to);
   if (enclosing?.kind === 'comment' && position > enclosing.from
@@ -419,6 +564,7 @@ export function genomeCompletionContext(source: string, position: number, bindin
 export function genomeCompletions(source: string, position: number, prefix = '', bindings: readonly GenomeBinding[] = []): GenomeSymbol[] {
   const context = genomeCompletionContext(source, position, bindings);
   if (context.kind === 'none') return [];
+  const cellular = isCellularSource(source);
   const needle = prefix.toLowerCase();
   const registers = registerCompletions(prefix || 'r', source, prefix ? 40 : 15);
   if (!prefix) for (const family of REGISTER_FAMILIES) {
@@ -427,17 +573,37 @@ export function genomeCompletions(source: string, position: number, prefix = '',
   }
   const available = new Map<string, GenomeSymbol>();
   const add = (item: GenomeSymbol): void => { if (!needle || item.name.toLowerCase().startsWith(needle)) available.set(item.name, item); };
+  if (cellular && ['constructor', 'product', 'assembly-kind', 'component', 'mechanism-target'].includes(context.kind)) {
+    if (context.kind === 'constructor') CELLULAR_CONSTRUCTORS.forEach(add);
+    if (context.kind === 'mechanism-target') MECHANISM_CATALOG.filter(item=>item.constructor===context.mechanismConstructor && item.target).forEach(item=>add(symbol(item.target!, 'keyword', 'target', item.kind, item.description)));
+    if (context.kind === 'assembly-kind') [...CELLULAR_MECHANISMS,...CELLULAR_ASSEMBLY_KINDS].forEach(item => add({ ...item, insertText: `${item.name} {\n  activity: 1;\n}` }));
+    if (context.kind === 'product' || context.kind === 'component') {
+      cellularDeclarations(source).products.forEach(item => {
+        const product = lookupCellularSymbol(item.name, source)!;
+        add(context.kind === 'component' ? { ...product, insertText: `${item.name}: ` } : product);
+      });
+      if (context.kind === 'component') CELLULAR_KEYWORDS.filter(item => ['activity', 'at', 'direction'].includes(item.name)).forEach(add);
+    }
+    return [...available.values()];
+  }
   if (context.kind === 'register') {
     registers.forEach(add);
     return [...available.values()];
   }
   if (context.kind === 'statement') {
+    if (cellular) {
+      CELLULAR_KEYWORDS.filter(item => ['product', 'gene', 'assembly'].includes(item.name)).forEach(add);
+      add({ ...lookupGenomeSymbol('let')!, insertText: 'let ' });
+      return [...available.values()];
+    }
     BUILTIN_OUTPUTS.forEach(item => add({ ...item, insertText: `${item.name} = ` }));
     registers.forEach(item => add({ ...item, insertText: `${item.name} = ` }));
     for (const name of ['let', 'clear']) add({ ...lookupGenomeSymbol(name)!, insertText: `${name} ` });
     return [...available.values()];
   }
-  [...BUILTIN_SIGNALS, ...BUILTIN_FUNCTIONS, ...registers].forEach(add);
+  (cellular
+    ? [...CELLULAR_READ_SIGNALS, ...cellularDynamicSymbols(source), ...BUILTIN_FUNCTIONS.filter(item => item.name !== 'populated')]
+    : [...BUILTIN_SIGNALS, ...BUILTIN_FUNCTIONS, ...registers]).forEach(add);
   bindings.forEach(binding => add(lookupGenomeSymbol(binding.name, [binding])!));
   for (const name of ['if', 'true', 'false']) add(lookupGenomeSymbol(name)!);
   const expected = context.expected;
@@ -471,6 +637,27 @@ const outputExamples: Readonly<Record<string, string>> = Object.freeze({
 
 export interface GenomeSymbolDocumentation { example: string; notes: readonly string[] }
 export function genomeSymbolDocumentation(item: GenomeSymbol): GenomeSymbolDocumentation {
+  const mechanism = MECHANISM_CATALOG.find(entry=>entry.kind===item.name);
+  if (mechanism) {
+    const parts=mechanism.roles.map(role=>({name:role[0].toUpperCase()+role.slice(1)+'Part',role}));
+    return {example:`${parts.map(part=>`product ${part.name} = ${part.role}();`).join('\n')}\nassembly Machine: ${mechanism.kind} {\n${parts.map(part=>`  ${part.name}: 0.04;`).join('\n')}\n  activity: 1;\n}`,
+      notes:[mechanism.description,'Build separate mechanisms for the other operations the organism needs. Each recipe retains its physical ingredients and identity.']};
+  }
+  if (CELLULAR_KEYWORDS.some(keyword=>keyword.name===item.name) || item.category==='function' && item.type==='product') {
+    const snippets:Record<string,string> = {
+      cellular:'cellular;\nproduct Memory = regulator(8);\ngene remember: Memory = if energy > 50 then 0.1 else 0;',
+      product:'product Rotor = motor();\nproduct Memory = regulator(8);',
+      gene:'product Rotor = motor();\ngene drive: Rotor = if pool.Rotor < 0.01 then 0.5 else 0;',
+      assembly:'product Anchor = anchor();\nproduct Rotor = motor();\nproduct Tail = filament();\nassembly Swim: propel() {\n  Anchor: 0.005;\n  Rotor: 0.01;\n  Tail: 0.025;\n  activity: 0.6;\n  at: 1.570796;\n  direction: 0;\n}',
+      activity:'activity: if energy.fraction > 0.3 then 0.6 else 0;',
+      at:'at: 1.570796;\ndirection: 0;',
+      direction:'at: -1.570796;\ndirection: 0;',
+    };
+    return { example: snippets[item.name] ?? `product ${item.name[0].toUpperCase()+item.name.slice(1)} = ${item.name}(${item.name==='regulator'?'8':''});`,
+      notes: ['Use these declarations in a program beginning with cellular;. The compiler checks roles, recipe masses and expression types.',
+        item.name==='at'||item.name==='direction' ? 'Angles are body-relative radians. Off-center motor force produces torque; placement is part of the physical recipe.'
+          : 'Products are paid material. Synthesis and assembly share finite core work; only stock present at the start of a tick can be installed.'] };
+  }
   if (item.category === 'register') {
     return { example: `${item.name} = ${REGISTER_FAMILIES.find(family => family.type === item.type)?.empty ?? '0'};\nclear ${item.name} when age > 10;`,
       notes: ['Addresses run from 001 to 999 for each of the five primitive types.', 'Reads use memory from the start of the evaluation. Writes commit together after a real tick; clear wins when both rules fire.'] };
@@ -500,7 +687,10 @@ export function genomeSymbolDocumentation(item: GenomeSymbol): GenomeSymbolDocum
 }
 
 /** Reference menus include one address per family; typing a prefix explores all 999. */
-export function genomeSignalCatalog(direction: 'read' | 'write'): readonly GenomeSymbol[] {
+export function genomeSignalCatalog(direction: 'read' | 'write', source = ''): readonly GenomeSymbol[] {
+  if (isCellularSource(source)) return direction === 'read'
+    ? [...cellularDynamicSymbols(source), ...CELLULAR_READ_SIGNALS]
+    : [...CELLULAR_KEYWORDS.filter(item => item.name !== 'cellular'), ...CELLULAR_CONSTRUCTORS, ...CELLULAR_MECHANISMS];
   return [...(direction === 'read' ? BUILTIN_SIGNALS : BUILTIN_OUTPUTS), ...REGISTER_FAMILIES.map(family => registerSymbol(`${family.prefix}001`)!)];
 }
 

@@ -5,13 +5,79 @@ import engineContract from './engine-contract.json';
 export const ORGANELLE_KINDS = ['core','photosynthetic','metabolic','digestive','reserve','transporter','phagocyte','flagellum','piercer','cortex','repair','photoreceptor','thermoreceptor','chemoreceptor','mechanoreceptor','optical'] as const;
 export type OrganelleKind = typeof ORGANELLE_KINDS[number];
 export interface OrganelleSummary { kind: OrganelleKind; count:number; mass:number; capacity:number; damaged:number; building:number; functionalMass:number; protein:number }
+export type ProductRole = 'scaffold' | 'anchor' | 'motor' | 'filament' | 'pigment' | 'enzyme' | 'membrane' | 'transporter' | 'receptor' | 'regulator' | 'replicase' | 'constrictor';
+export const MECHANISM_KINDS = [
+  'support()', 'translate()', 'store(energy)', 'store(mineral)', 'store(food)', 'harvest(light)',
+  'import(mineral)', 'import(particle)', 'engulf()', 'digest(exudate)', 'digest(tissue)', 'digest(waste)',
+  'propel()', 'pierce()', 'shield()', 'repair()', 'sense(light)', 'sense(heat)', 'sense(chemical)',
+  'sense(contact)', 'sense(optical)', 'grow()', 'replicate()', 'constrict()',
+] as const;
+export type MechanismKind = typeof MECHANISM_KINDS[number];
+export type CellularAssemblyKind = OrganelleKind | 'membrane' | 'replicator' | 'constrictor' | MechanismKind;
+export interface CellularProduct {
+  name:string;role:ProductRole;mass:number;concentration:number;halfLife:number;
+  expressionRequested:number;expressionRate:number;current:boolean;
+}
+export interface CellularRecipe {
+  name:string;kind:CellularAssemblyKind;requiredMass:number;at:number;direction:number;
+  components:{name:string;role:ProductRole;requiredMass:number}[];
+}
+export interface CellularAssembly extends CellularRecipe {
+  id:number;mass:number;functionalMass:number;complete:boolean;integrity:number;activity:number;
+  bottleneck:string|null;components:{name:string;role:ProductRole;mass:number;requiredMass:number}[];
+}
+export interface CellularBodyInspection {
+  products:CellularProduct[];assemblies:CellularAssembly[];recipes:CellularRecipe[];
+  replication:{mass:number;requiredMass:number;progress:number;genomeMass:number};constriction:{progress:number};
+}
 export interface BodyInspection {
   cellId:number; area:number; mass:number; spaceUsed:number; spaceCapacity:number; surfaceUsed:number; surfaceCapacity:number;
   constructionRate:number; recyclingRate:number; repairRate:number; synthesisRate:number; assemblyCapacity:number;
   organs: { id:number; kind:OrganelleKind; mass:number; integrity:number; functional:boolean; minimumMass:number; embodiedEnergy:number }[];
   requested: { kind:OrganelleKind; count:number; size:number; build:number; recycle:number; proteinMass:number }[];
+  cellular?:CellularBodyInspection|null;
 }
-export interface LanguageSchema {version:3; signals:{name:string;type:GenomeValueType}[]; outputs:{name:string;type:GenomeValueType;required:boolean;default:GenomeValue}[];maxNodes:number;maxSourceBytes:number;registersPerType:number}
+
+/** Physical inventories are validated before use in the inspector or canvas. */
+export function validateBodyInspection(value: unknown, expectedCellId: number): BodyInspection {
+  const fail = (): never => { throw new Error('The engine returned an invalid body inspection.'); };
+  if (!value || typeof value !== 'object') return fail();
+  const body = value as BodyInspection;
+  const finite=(n:unknown):boolean=>typeof n==='number' && Number.isFinite(n) && n>=0 && n<=1e12;
+  const angle=(n:unknown):boolean=>typeof n==='number' && Number.isFinite(n) && Math.abs(n)<=1e12;
+  const kind=(v:unknown):boolean=>ORGANELLE_KINDS.includes(v as OrganelleKind);
+  if (body.cellId!==expectedCellId || ![body.area,body.mass,body.spaceUsed,body.spaceCapacity,body.surfaceUsed,body.surfaceCapacity,body.constructionRate,body.recyclingRate,body.repairRate,body.synthesisRate,body.assemblyCapacity].every(finite)
+    || !Array.isArray(body.organs) || body.organs.length>24000 || !body.organs.every(o=>o && Number.isInteger(o.id) && o.id>0 && kind(o.kind) && [o.mass,o.integrity,o.minimumMass,o.embodiedEnergy].every(finite) && o.integrity<=1 && typeof o.functional==='boolean')
+    || new Set(body.organs.map(o=>o.id)).size!==body.organs.length
+    || !Array.isArray(body.requested) || body.requested.length!==16 || !body.requested.every((r,i)=>r.kind===ORGANELLE_KINDS[i] && Number.isInteger(r.count) && r.count>=0 && [r.size,r.build,r.recycle,r.proteinMass].every(finite) && r.build<=1 && r.recycle<=1)) return fail();
+  if (body.cellular != null) {
+    const cellular = body.cellular;
+    const roles = new Set(['scaffold','anchor','motor','filament','pigment','enzyme','membrane','transporter','receptor','regulator','replicase','constrictor']);
+    const name=(n:unknown):boolean=>typeof n==='string' && /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(n);
+    const recipe=(r:CellularRecipe):boolean=>Boolean(r) && name(r.name) && (kind(r.kind)||['membrane','replicator','constrictor'].includes(r.kind)||MECHANISM_KINDS.includes(r.kind as MechanismKind))
+      && finite(r.requiredMass) && angle(r.at) && angle(r.direction) && Array.isArray(r.components) && r.components.length<=64
+      && r.components.every(part=>part && name(part.name) && roles.has(part.role) && finite(part.requiredMass));
+    if (!Array.isArray(cellular.products) || cellular.products.length>1024
+      || !cellular.products.every(p=>p && name(p.name) && roles.has(p.role) && typeof p.current==='boolean'
+        && [p.mass,p.concentration,p.halfLife,p.expressionRequested,p.expressionRate].every(finite))
+      || !Array.isArray(cellular.recipes) || cellular.recipes.length>64 || !cellular.recipes.every(recipe)
+      || !Array.isArray(cellular.assemblies) || cellular.assemblies.length>32768
+      || !cellular.assemblies.every(a=>recipe(a) && Number.isInteger(a.id) && a.id>0
+        && [a.mass,a.functionalMass,a.integrity,a.activity].every(finite) && a.integrity<=1 && a.activity<=1 && typeof a.complete==='boolean'
+        && (a.bottleneck===null || typeof a.bottleneck==='string' && a.bottleneck.length<=256) && a.components.every(part=>finite(part.mass)))
+      || new Set(cellular.assemblies.map(a=>a.id)).size!==cellular.assemblies.length
+      || !cellular.replication || ![cellular.replication.mass,cellular.replication.requiredMass,cellular.replication.progress,cellular.replication.genomeMass].every(finite)
+      || cellular.replication.progress>1 || !cellular.constriction || !finite(cellular.constriction.progress) || cellular.constriction.progress>1) return fail();
+  }
+  return body;
+}
+export interface LanguageSchema {
+  version:3; signals:{name:string;type:GenomeValueType}[]; outputs:{name:string;type:GenomeValueType;required:boolean;default:GenomeValue}[];
+  maxNodes:number;maxSourceBytes:number;registersPerType:number;
+  cellular?: { marker:'cellular;'; products:{name:string;arguments:string[]}[]; assemblies:{name:string;requiredRoles:string[]}[];
+    mechanisms?:{name:string;constructor:string;target:string|null;requiredRoles:string[];description:string}[];
+    reads:{name:string;type:GenomeValueType}[];maxProducts:number;maxAssemblies:number;maxGenes:number };
+}
 export interface Cell {
   id:number; genomeId:number; x:number; y:number; vx:number; vy:number; angle:number; energy:number; age:number; generation:number; parentId:number;
   radius:number; bodyArea:number; bodyMass:number; birthArea:number; energyCapacity:number; basalMetabolism:number; memoryUsed:number; memoryCost:number;
@@ -70,6 +136,7 @@ export interface GenomeWriteEvaluation {
  * It is a snapshot preview, not a record of its last tick or a committed action. */
 export interface GenomeEvaluation {
   version: 1; semantics: 'current-snapshot'; cellId: number; genomeId: number;
+  mode?: 'legacy' | 'cellular';
   time: number; tick: number; source: string;
   expressions: GenomeExpressionEvaluation[]; bindings: GenomeBindingEvaluation[];
   signals: GenomeSignalEvaluation[]; outputs: GenomeOutputEvaluation[]; writes: GenomeWriteEvaluation[];
@@ -80,19 +147,21 @@ export function validateGenomeEvaluation(value: unknown, expectedCellId?: number
   const fail = (): never => { throw new Error('The engine returned an invalid program evaluation. Rebuild the current WASM engine.'); };
   if (!value || typeof value !== 'object') return fail();
   const trace = value as GenomeEvaluation;
+  const cellular = trace.mode === 'cellular';
   const types = new Set<GenomeValueType>(['integer', 'scalar', 'boolean', 'string', 'vec2']);
   const positiveId = (id: number): boolean => Number.isInteger(id) && id >= 1 && id <= 0xffff_ffff;
   if (trace.version !== 1 || trace.semantics !== 'current-snapshot'
+    || (trace.mode !== undefined && trace.mode !== 'legacy' && !cellular)
     || !positiveId(trace.cellId) || !positiveId(trace.genomeId)
     || (expectedCellId !== undefined && trace.cellId !== expectedCellId)
     || !Number.isSafeInteger(trace.tick) || trace.tick < 0 || !Number.isFinite(trace.time) || trace.time < 0
     || typeof trace.source !== 'string' || trace.source.length > MAX_PROGRAM_BYTES
     || new TextEncoder().encode(trace.source).length > MAX_PROGRAM_BYTES
-    || !Array.isArray(trace.expressions) || !trace.expressions.length || trace.expressions.length > 8192
+    || !Array.isArray(trace.expressions) || (!cellular && !trace.expressions.length) || trace.expressions.length > 8192
     || !Array.isArray(trace.bindings) || trace.bindings.length > 8192
-    || !Array.isArray(trace.signals) || trace.signals.length !== READ_SIGNAL_COUNT
-    || !Array.isArray(trace.outputs) || trace.outputs.length !== WRITE_SIGNAL_COUNT
-    || !Array.isArray(trace.writes) || trace.writes.length > 9990) return fail();
+    || !Array.isArray(trace.signals) || (cellular ? trace.signals.length > READ_SIGNAL_COUNT + 128 : trace.signals.length !== READ_SIGNAL_COUNT)
+    || !Array.isArray(trace.outputs) || (cellular ? trace.outputs.length > 320 : trace.outputs.length !== WRITE_SIGNAL_COUNT)
+    || !Array.isArray(trace.writes) || trace.writes.length > (cellular ? 0 : 9990)) return fail();
   const range = (from: number, to: number): boolean => Number.isInteger(from) && Number.isInteger(to)
     && from >= 0 && to > from && to <= trace.source.length;
   const scalar = (item: unknown): item is number => typeof item === 'number' && Number.isFinite(item) && Math.abs(item) <= 1e12;
@@ -118,6 +187,7 @@ export function validateGenomeEvaluation(value: unknown, expectedCellId?: number
   const outputNames = new Set<string>();
   for (const output of trace.outputs) {
     if (!named(output) || outputNames.has(output.name)
+      || (cellular && (!/^(gene|activity)\.[A-Za-z_][A-Za-z0-9_]*$/.test(output.name) || output.type !== 'scalar'))
       || !((output.from === null && output.to === null)
         || (typeof output.from === 'number' && typeof output.to === 'number' && range(output.from, output.to)))) return fail();
     outputNames.add(output.name);
@@ -148,14 +218,14 @@ export interface GenomeGraphRoot {
   id: string; kind: 'output' | 'write' | 'clear'; name: string; type: GenomeValueType;
   value: number | null; guard: number | null; default: string | null;
 }
-export interface GenomeGraph { version: 1; nodes: GenomeGraphNode[]; roots: GenomeGraphRoot[] }
+export interface GenomeGraph { version: 1; mode?:'legacy'|'cellular'; nodes: GenomeGraphNode[]; roots: GenomeGraphRoot[] }
 
 /** Validate the owned JSON boundary before any graph traversal or DOM creation. */
 export function validateGenomeGraph(value: unknown): GenomeGraph {
   const fail = (): never => { throw new Error('The engine returned an invalid genome graph. Rebuild the current WASM engine.'); };
   if (!value || typeof value !== 'object') return fail();
   const graph = value as GenomeGraph;
-  if (graph.version !== 1 || !Array.isArray(graph.nodes) || graph.nodes.length > 8192
+  if (graph.version !== 1 || (graph.mode!==undefined && graph.mode!=='legacy' && graph.mode!=='cellular') || !Array.isArray(graph.nodes) || graph.nodes.length > 8192
     || !Array.isArray(graph.roots) || graph.roots.length > 9990 + WRITE_SIGNAL_COUNT) return fail();
   const types = new Set(['integer', 'scalar', 'boolean', 'string', 'vec2']);
   const kinds = new Set(['constant', 'sensor', 'register', 'populated', 'reference', 'unary', 'binary', 'conditional', 'call']);
@@ -184,7 +254,7 @@ const READ_SIGNAL_COUNT = 169;
 const WRITE_SIGNAL_COUNT = 81;
 const CELL_STRIDE = 158;
 const FOOD_STRIDE = 5;
-export type MutationKind = 0 | 1 | 2 | 3;
+export type MutationKind = 0 | 1 | 2 | 3 | 4 | 5;
 export interface GenomeRecord { source: string; parentId: number; mutationKind: MutationKind }
 export interface MutationResult { id: number; changed: boolean; reason: string }
 export interface WorldSnapshot {
@@ -474,16 +544,7 @@ export class Engine {
   cellBody(id:number):BodyInspection {
     const ptr=this.wasm.cell_body_ptr(id), len=this.wasm.cell_body_len();
     if (!ptr || !len) throw new Error(this.readError() || 'This organism is no longer available.');
-    const body=JSON.parse(new TextDecoder().decode(new Uint8Array(this.wasm.memory.buffer,ptr,len))) as BodyInspection;
-    const finite=(n:unknown):boolean=>typeof n==='number' && Number.isFinite(n) && n>=0 && n<=1e12;
-    const kind=(v:unknown):boolean=>ORGANELLE_KINDS.includes(v as OrganelleKind);
-    if (!body || body.cellId!==id || ![body.area,body.mass,body.spaceUsed,body.spaceCapacity,body.surfaceUsed,body.surfaceCapacity,body.constructionRate,body.recyclingRate,body.repairRate,body.synthesisRate,body.assemblyCapacity].every(finite)
-      || !Array.isArray(body.organs) || body.organs.length>24000 || !body.organs.every(o=>o && Number.isInteger(o.id) && o.id>0 && kind(o.kind) && [o.mass,o.integrity,o.minimumMass,o.embodiedEnergy].every(finite) && o.integrity<=1 && typeof o.functional==='boolean')
-      || new Set(body.organs.map(o=>o.id)).size!==body.organs.length
-      || !Array.isArray(body.requested) || body.requested.length!==16 || !body.requested.every((r,i)=>r.kind===ORGANELLE_KINDS[i] && Number.isInteger(r.count) && r.count>=0 && [r.size,r.build,r.recycle,r.proteinMass].every(finite) && r.build<=1 && r.recycle<=1)) {
-      throw new Error('The engine returned an invalid body inspection.');
-    }
-    return body;
+    return validateBodyInspection(JSON.parse(new TextDecoder().decode(new Uint8Array(this.wasm.memory.buffer,ptr,len))),id);
   }
   mutate(genomeId: number, seed: number, kind: MutationKind = 0): MutationResult {
     const id = this.wasm.mutate_genome(genomeId, seed >>> 0, kind);

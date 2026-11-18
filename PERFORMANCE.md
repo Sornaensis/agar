@@ -1,5 +1,84 @@
 # Simulation performance
 
+## Current material allocation improvement
+
+Cellular work now stores **five common costs and one optional product stock** per
+request. Previously every synthesis, ingredient installation, repair or lifecycle
+request allocated a vector containing all five common resources and every product
+pool, even when almost all entries were zero. The allocator now visits just the
+common costs and the one stock consumed by an installation operation. It preserves
+the order of demands and floating-point additions used by the previous solver.
+
+The world's tick workspace reuses the demand list, product-to-pool mapping, stock
+and embodied-energy snapshots, and allocation result/active/resource buffers.
+The same workspace serves cells sequentially; it is excluded from checkpoints.
+The solver clears its requirement buffer between progressive-filling rounds
+instead of allocating a new one each round. It still shares finite resources by
+requested completion fraction, and blocks only requests that consume an exhausted
+resource. Newly synthesized stock and newly freed room cannot fund construction
+in the same tick.
+
+### Measured material-planning cost
+
+| Workload | Previous dense allocation | Sparse allocation | Speedup | Heap allocations per call |
+| --- | ---: | ---: | ---: | ---: |
+| 16 product pools, 66 requests | 14.301 µs | 2.958 µs | 4.835× | 74 → 0 |
+| 64 product pools, 258 requests | 110.230 µs | 11.168 µs | 9.870× | 265 → 0 |
+
+These are native release microbenchmarks of **request construction and material
+allocation**, using the same requests and resource limits. Each workload has
+synthesis, competing ingredient installations, growth and replication requests,
+including unavailable and limited ingredients. Values are medians of seven
+20,000-call samples, with measurement order alternating. Allocation counters are
+read in a separate call and disabled during timing. Sparse buffers are warmed;
+zero allocations applies to this allocator path after capacity is sufficient.
+Creating actual products or machinery can still allocate physical-state records.
+
+This does **not** establish an overall simulation, WASM or browser speedup. Current
+presets also changed their physical machinery, so comparing their full runs with
+the old presets would mix performance and biological changes. The benchmark
+asserts bit-exact results before timing. Raw measurements are in
+[material-allocation-benchmark.json](experiments/material-allocation-benchmark.json).
+
+Four targeted native tests check missing-ingredient independence, fair completion
+fractions, resource bounds, scratch reuse across different cells, and bit-exact
+agreement with the prior dense solver across 192 workloads with 0–1,024 pools.
+The separate actual-WASM compatibility check uses the eight preserved cellular
+family sources, comparing complete world/environment bytes and body inspection,
+then imports a v5 save into v6 and checks its future and current-format replay.
+Save files themselves are not compared across differing format versions. The
+actual-WASM run passed **91 sampled old/new states for each of all eight old
+presets** over 90 simulation seconds, including one birth per preset. The
+30-second v5 checkpoints migrated successfully, matched the next 60 seconds of
+the previous engine's trajectory, and replayed as byte-exact v6 checkpoints.
+Binary hashes and scenario results are recorded in
+[cellular-compatibility.json](experiments/cellular-compatibility.json).
+
+Reproduce with:
+
+```sh
+cargo run --release --manifest-path engine/Cargo.toml --example material-allocation -- 20000
+node scripts/check-cellular-compatibility.mjs --baseline /path/to/cellular-v5/engine/pkg/agar_engine.wasm --output experiments/cellular-compatibility.json
+```
+
+The new solver is in [material_allocation.rs](engine/src/material_allocation.rs),
+its cellular integration in [cellular.rs](engine/src/cellular.rs), and its
+reproducible benchmark in
+[material-allocation.rs](engine/examples/material-allocation.rs).
+Product/recipe identity matching still scans named definitions. Cached blueprint
+indices and reusable gene-input/control vectors remain separate profiling
+candidates; this change does not claim to optimize them.
+
+## Historical architecture measurements
+
+The remaining measurements describe the previous optimization pass and its
+legacy programs/checkpoint-4 biology, not the current mechanism presets.
+Reproducing those cross-version byte comparisons requires matching source
+versions: later checkpoints add cellular state and mechanism definitions.
+The current harness without `--baseline` can measure current work. The first
+cellular implementation's development results remain recorded in
+[documented validation](experiments/cellular-validation.json).
+
 ## What changed
 
 The engine keeps its fixed 1/30-second timestep, numerical operation order,

@@ -120,3 +120,7 @@
   .program-diagnostics button { grid-template-columns: 39px minmax(0, 1fr); gap: 6px; font-size: 11px; }
   .program-size { display: none; }
 }
+.program-language-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 15px; padding: 10px 13px; border-bottom: 1px solid #35433d; background: #1c2d26; font-size: 11px; }
+.program-language-summary[hidden] { display: none; }
+.program-language-summary strong { color: #b9e6c8; font-weight: 500; }
+.program-language-summary span { color: #93afa0; font-size: 10px; }

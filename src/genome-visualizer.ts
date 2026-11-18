@@ -14,7 +14,8 @@ function button(text: string, className = 'secondary-button'): HTMLButtonElement
   const node = element('button', className, text); node.type = 'button'; return node;
 }
 const short = (text: string, count: number): string => text.length > count ? text.slice(0, count - 1) + '…' : text;
-const kindName = (kind: NetworkNode['kind']): string => kind === 'input' ? 'input signal' : kind === 'operation' ? 'builtin' : kind === 'register' ? 'register' : 'action';
+const kindName = (kind: NetworkNode['kind'],label=''): string => kind === 'input' ? label.startsWith('pool.')?'product stock':label.startsWith('built.')?'functional machinery':'input signal'
+  : kind === 'operation' ? 'builtin' : kind === 'register' ? 'register' : label.startsWith('gene.')?'gene expression':label.startsWith('activity.')?'machine activity':'action';
 const order = { register: 0, output: 1, input: 2, operation: 3 };
 const displayName = (node: NetworkNode): string => node.kind === 'operation' && node.bindings.length ? node.label + ' · ' + node.bindings[0] : node.label;
 interface Point { x: number; y: number }
@@ -188,7 +189,9 @@ export class GenomeVisualizer {
     this.heading.textContent=title;
     const count=(kind:NetworkNode['kind']):number=>this.network!.nodes.filter(node=>node.kind===kind).length;
     this.summary.textContent=([['input','inputs'],['operation','builtins'],['register','registers']] as const)
-      .filter(([kind])=>count(kind)>0).map(([kind,label])=>count(kind)+' '+label).join(' · ')||'Constant actions';
+      .filter(([kind])=>count(kind)>0).map(([kind,label])=>count(kind)+' '+label).join(' · ')||(graph.mode==='cellular'?'Constant expression & activity':'Constant actions');
+    this.search.placeholder=graph.mode==='cellular'?'Product, gene, activity…':'Signal, builtin, register…';
+    this.search.setAttribute('aria-label',graph.mode==='cellular'?'Find a product stock, gene, or assembly activity':'Find a signal, builtin, or register');
     this.summary.title=this.network.expressionCount.toLocaleString()+' / 8,192 expressions; '+this.network.constantCount+' literal nodes and '+this.network.aliasCount+' aliases folded into labels; '+this.network.unusedCount+' unused expressions omitted.';
     for(const [kind,item] of this.legendItems)item.hidden=!this.network.edges.some(edge=>edge.kind===kind);
     this.memoryNote.hidden=count('register')===0;this.legend.hidden=!this.network.edges.length&&this.memoryNote.hidden;
@@ -199,12 +202,12 @@ export class GenomeVisualizer {
 
   private renderList():void {
     const query=this.search.value.trim().toLowerCase();
-    const matching=this.eligibleNodes().filter(node=>(node.label+' '+node.kind+' '+kindName(node.kind)+' '+node.type+' '+node.bindings.join(' ')).toLowerCase().includes(query));
+    const matching=this.eligibleNodes().filter(node=>(node.label+' '+node.kind+' '+kindName(node.kind,node.label)+' '+node.type+' '+node.bindings.join(' ')).toLowerCase().includes(query));
     matching.sort((a,b)=>order[a.kind]-order[b.kind]||a.label.localeCompare(b.label)||a.id.localeCompare(b.id));
     const pages=Math.max(1,Math.ceil(matching.length/PAGE_SIZE));this.page=Math.max(0,Math.min(this.page,pages-1));
     const visible=matching.slice(this.page*PAGE_SIZE,(this.page+1)*PAGE_SIZE);this.nodeList.replaceChildren();let kind='';
     for(const node of visible){
-      if(kind!==node.kind){kind=node.kind;this.nodeList.append(element('h3','graph-list-group',node.kind==='input'?'Inputs':node.kind==='operation'?'Builtins':node.kind==='register'?'Registers':'Actions'));}
+      if(kind!==node.kind){kind=node.kind;this.nodeList.append(element('h3','graph-list-group',node.kind==='input'?'Inputs':node.kind==='operation'?'Builtins':node.kind==='register'?'Registers':this.graph?.mode==='cellular'?'Genes & activity':'Actions'));}
       const control=button('','graph-list-node graph-kind-'+node.kind+(node.id===this.selected?' active':''));
       control.dataset.networkId=node.id;control.setAttribute('aria-pressed',String(node.id===this.selected));control.append(element('span','',displayName(node)));
       const meta=node.implicit?'default '+node.constants.map(value=>value.value).join(', '):node.kind==='output'&&node.constants.length&&!this.network!.edges.some(edge=>edge.to===node.id)
@@ -268,7 +271,7 @@ export class GenomeVisualizer {
     if(slice.nodes.some(node=>node.kind==='input'||node.kind==='register'))caption(slice.nodes.some(node=>node.kind==='register')?'INPUTS & MEMORY':'INPUTS',26);
     const operations=slice.nodes.filter(node=>node.kind==='operation'),outputs=slice.nodes.filter(node=>node.kind==='output');
     if(operations.length)caption('BUILTINS',Math.min(...operations.map(node=>layout.points.get(node.id)!.x)));
-    if(outputs.length)caption('ACTIONS',Math.min(...outputs.map(node=>layout.points.get(node.id)!.x)));
+    if(outputs.length)caption(this.graph?.mode==='cellular'?'EXPRESSION & ACTIVITY':'ACTIONS',Math.min(...outputs.map(node=>layout.points.get(node.id)!.x)));
     drawing.append(captions);
     const edges=svg('g',{class:'graph-edges','aria-hidden':'true'}),temporal=slice.edges.filter(edge=>edge.temporal);let temporalIndex=0;
     for(const edge of slice.edges){
@@ -295,13 +298,13 @@ export class GenomeVisualizer {
     for(const node of slice.nodes){
       const point=layout.points.get(node.id)!;
       const group=svg('g',{transform:'translate('+point.x+','+point.y+')',class:'graph-node graph-kind-'+node.kind+(frontier.has(node.id)?' frontier':'')+(node.implicit?' implicit':''),
-        tabindex:0,role:'button','data-network-node':node.id,'aria-label':node.label+', '+kindName(node.kind)+', '+node.type+(frontier.has(node.id)?', more connections outside this view':'')});
+        tabindex:0,role:'button','data-network-node':node.id,'aria-label':node.label+', '+kindName(node.kind,node.label)+', '+node.type+(frontier.has(node.id)?', more connections outside this view':'')});
       group.append(svg('rect',{width:WIDTH,height:HEIGHT,rx:node.kind==='register'?10:6}));
       const label=svg('text',{x:11,y:21,class:'graph-node-label'});label.textContent=short(node.label,19);
       const meta=svg('text',{x:11,y:39,class:'graph-node-meta'});
       const literal=node.constants.slice(0,2).map(value=>(value.rule?.startsWith('clear:')?'clear '+(value.port==='when'?'when ':''):value.port==='value'||value.port==='default'?'':value.port+' ')+value.value).join(' · ');
-      meta.textContent=short(literal||(node.kind==='register'?'previous → next':node.bindings.join(', ')||kindName(node.kind)),25);
-      const tooltip=svg('title');tooltip.textContent=node.label+'\n'+node.type+' · '+kindName(node.kind)+(node.bindings.length?'\nAliases: '+node.bindings.join(', '):'')
+      meta.textContent=short(literal||(node.kind==='register'?'previous → next':node.bindings.join(', ')||kindName(node.kind,node.label)),25);
+      const tooltip=svg('title');tooltip.textContent=node.label+'\n'+node.type+' · '+kindName(node.kind,node.label)+(node.bindings.length?'\nAliases: '+node.bindings.join(', '):'')
         +node.constants.map(value=>'\n'+(value.rule?value.rule+' ':'')+value.port+': '+value.value).join('');
       group.append(label,meta,tooltip);
       if(node.kind==='register'||node.kind==='input')group.append(svg('circle',{cx:WIDTH,cy:HEIGHT/2,r:3.5,class:'graph-read-port'}));
@@ -384,11 +387,13 @@ export class GenomeVisualizer {
       this.details.append(note);return;
     }
     this.details.classList.remove('graph-details-empty');const header=element('div','graph-details-heading');
-    header.append(element('h3','',node.label),element('span','graph-detail-type',kindName(node.kind)+' · '+node.type));
+    header.append(element('h3','',node.label),element('span','graph-detail-type',kindName(node.kind,node.label)+' · '+node.type));
     const info=element('p');
     info.textContent=node.kind==='register'?'Reads the previous tick. Writes and clears apply next tick; clear wins. Empty reads do not populate memory.'
-      :node.kind==='input'?'Sensor value sampled at the start of this tick.'
-        :node.kind==='output'?(node.implicit?'Default value for an omitted action. ':'')+'Action request; energy and physical limits apply.'
+      :node.kind==='input'?node.label.startsWith('pool.')?'Available physical product mass at the start of this tick.':node.label.startsWith('built.')?'Functional mass of complete matching assemblies, reduced by damage.':'Input value sampled at the start of this tick.'
+        :node.kind==='output'?node.label.startsWith('gene.')?'Requested product synthesis effort. Genes share finite core work, minerals, energy and internal space.'
+          :node.label.startsWith('activity.')?'Activity of this physical assembly. Missing or incomplete machinery cannot produce the requested effect.'
+            :(node.implicit?'Default value for an omitted action. ':'')+'Action request; energy and physical limits apply.'
           :node.label==='populated'||node.label.startsWith('populated(')?'Checks previous register occupancy, including stored zero, false, or empty text.'
             :'Pure operation, recomputed from its inputs each tick.';
     if(node.bindings.length)info.textContent+=' Aliases: '+node.bindings.join(', ')+'.';this.details.append(header,info);

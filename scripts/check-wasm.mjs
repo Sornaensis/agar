@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { checkEngineLoader } from './check-engine-loader.mjs';
 import { fresh,compile,seed,snapshot,advance,save,restore,error,source,graph,body,memory,evaluation,json,catalog,kinds } from './organelle-harness.mjs';
-const {PRESETS}=await catalog();
+const {LEGACY_PRESETS:PRESETS}=await catalog();
 const idle='thrust=0;turn=0;divide=false;absorb=0;feed=0;';
 const producer=PRESETS.find(p=>p.name==='Phototroph').source;
 const api=await fresh({ambientLight:.8,initialNutrients:3,initialFood:360,foodRate:2});
@@ -53,7 +53,7 @@ const previous=await fresh();
 const previousSave=new Uint8Array(await readFile(new URL('../engine/fixtures/organelle-v3.bin',import.meta.url)));
 
 assert.equal(restore(previous,previousSave),1,error(previous));
-const migrated=save(previous);assert.equal(new DataView(migrated.buffer,migrated.byteOffset,migrated.byteLength).getUint32(8,true),4);
+const migrated=save(previous);assert.equal(new DataView(migrated.buffer,migrated.byteOffset,migrated.byteLength).getUint32(8,true),6);
 assert.equal(source(previous,1),JSON.parse(await readFile(new URL('../engine/fixtures/organelle-v3.json',import.meta.url),'utf8')).source);
 const priorCell=snapshot(previous).cells[0];
 assert.ok(priorCell.organs.photosynthetic.mass>0 && priorCell.organs.digestive.mass>0,'Restoring an existing cell never reconstructs it from the minimal founder');
@@ -88,5 +88,5 @@ const older=advance(longLived,10800);assert.equal(older.population,1,'A funded, 
 assert.ok(older.cells[0].age>359);assert.equal(older.cells[0].lifespan,0);
 const olderState=save(longLived),olderCopy=await fresh();assert.equal(restore(olderCopy,olderState),1,error(olderCopy));
 assert.deepEqual(save(olderCopy),olderState,'Older organisms remain valid saved state');
-console.log(`WASM organelle integration passed: ABI10, typed169/81schema, five register banks, original-source mutations, genome-grown bodies, closed material, checkpoint4 replay and v3 import, uncapped2,049-organism restore, ${state.births} producer births.`);
+console.log(`WASM organelle integration passed: ABI10, typed169/81schema, five register banks, original-source mutations, genome-grown bodies, closed material, checkpoint6 replay and v3/v4 compatibility, uncapped2,049-organism restore, ${state.births} producer births.`);
 await checkEngineLoader();

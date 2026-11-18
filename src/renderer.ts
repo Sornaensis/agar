@@ -1,5 +1,5 @@
 import { ORGANELLE_CATALOG } from './organelles';
-import type { Cell, RenderCell, EnvironmentSnapshot, EnvironmentSource } from './engine';
+import type { BodyInspection, Cell, RenderCell, EnvironmentSnapshot, EnvironmentSource } from './engine';
 import type { RenderWorldSnapshot } from './session';
 
 const PALETTE = ['#5ce1ba', '#aaa2ff', '#efa66b', '#6dcbea', '#ed9db7', '#d7d889'];
@@ -40,6 +40,7 @@ export class Renderer {
   private lastWorld: RenderWorldSnapshot | null = null;
   private lastSelected: number | null = null;
   private lastDetails: Cell | null = null;
+  private lastBody: BodyInspection | null = null;
   private lastOptions = '';
   private resizeVersion = 0;
   private renderedResize = -1;
@@ -116,7 +117,7 @@ export class Renderer {
     return nearest;
   }
 
-  render(world: RenderWorldSnapshot, selectedId: number | null, options: RenderOptions = {}, details: Cell | null = null): void {
+  render(world: RenderWorldSnapshot, selectedId: number | null, options: RenderOptions = {}, details: Cell | null = null, body: BodyInspection | null = null): void {
     if (world.width !== this.worldWidth || world.height !== this.worldHeight) {
       this.worldWidth = world.width;
       this.worldHeight = world.height;
@@ -125,9 +126,9 @@ export class Renderer {
     }
     if (this.pixelRatio !== Math.min(window.devicePixelRatio || 1, 2)) this.resize();
     const optionsKey = `${options.overlay ?? 'none'}:${options.trails ?? false}:${options.sensors ?? true}`;
-    if (this.lastWorld === world && this.lastSelected === selectedId && this.lastDetails === details
+    if (this.lastWorld === world && this.lastSelected === selectedId && this.lastDetails === details && this.lastBody === body
       && this.lastOptions === optionsKey && this.renderedResize === this.resizeVersion) return;
-    this.lastWorld = world; this.lastSelected = selectedId; this.lastDetails = details;
+    this.lastWorld = world; this.lastSelected = selectedId; this.lastDetails = details; this.lastBody = body;
     this.lastOptions = optionsKey; this.renderedResize = this.resizeVersion;
     const context = this.context;
     context.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0);
@@ -190,6 +191,9 @@ export class Renderer {
       for (const point of this.wrappedPositions(cell.x, cell.y, margin)) {
         this.drawCell(cell, point.x, point.y, cell.id === selectedId);
       }
+    }
+    if (selected && details?.id===selected.id && body?.cellId===selected.id && body.cellular && options.sensors!==false) {
+      for (const point of this.wrappedPositions(selected.x,selected.y,selected.radius+32/this.scale)) this.drawCellularDetails(details,body,point.x,point.y);
     }
     this.drawSources(world.environment.sources, overlay);
     context.restore();
@@ -481,6 +485,27 @@ export class Renderer {
       context.globalAlpha = organ.capacity > 0 ? 0.9 : 0.35;
       context.fillStyle = definition.color;
       context.beginPath(); context.arc(x+Math.cos(angle)*radius,y+Math.sin(angle)*radius,2/this.scale,0,Math.PI*2); context.fill();
+    }
+    context.restore();
+  }
+
+  /** Physical attachment and force direction from the inspected body, with arrow length showing activity. */
+  private drawCellularDetails(cell:Cell,body:BodyInspection,x:number,y:number):void {
+    const motors = body.cellular?.assemblies.filter(assembly=>(assembly.kind==='flagellum' || assembly.kind==='propel()') && assembly.mass>0) ?? [];
+    if (!motors.length) return;
+    const context = this.context;
+    context.save(); context.translate(x,y); context.rotate(cell.angle);
+    for (const motor of motors) {
+      const px = Math.cos(motor.at)*cell.radius, py = Math.sin(motor.at)*cell.radius;
+      context.globalAlpha = motor.functionalMass>0 ? .95 : .4;
+      context.fillStyle = '#a3e3ef'; context.strokeStyle = '#a3e3ef'; context.lineWidth = 1/this.scale;
+      context.beginPath(); context.arc(px,py,2.2/this.scale,0,Math.PI*2); context.fill();
+      if (!motor.complete || motor.activity<=0 || motor.functionalMass<=0) continue;
+      const length = (9+motor.activity*16)/this.scale, dx=Math.cos(motor.direction),dy=Math.sin(motor.direction);
+      const tipX=px+dx*length,tipY=py+dy*length,head=4/this.scale;
+      context.beginPath();context.moveTo(px,py);context.lineTo(tipX,tipY);
+      context.moveTo(tipX-dx*head-dy*head*.55,tipY-dy*head+dx*head*.55);context.lineTo(tipX,tipY);
+      context.lineTo(tipX-dx*head+dy*head*.55,tipY-dy*head-dx*head*.55);context.stroke();
     }
     context.restore();
   }

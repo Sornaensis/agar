@@ -4,7 +4,7 @@ import { fresh, compile, seed, snapshot, advance, evaluation, save, restore, cat
 // The actual authored program and shipped Rust engine are the test subjects.
 // Placement uses a portable checkpoint plus public seed calls; no engine state
 // or signals are patched, and the program sees no object classification.
-const { PRESETS } = await catalog();
+const { LEGACY_PRESETS: PRESETS } = await catalog();
 const forager = PRESETS.find(item => item.name === 'Forager');
 const api = await fresh({ seed: 42, ambientLight: 0.8, initialNutrients: 1 });
 const genome = compile(api, forager.source);

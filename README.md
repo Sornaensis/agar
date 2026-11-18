@@ -1,6 +1,6 @@
 # agar
 
-A playable, client-only artificial-life simulator: a TypeScript interface and canvas renderer backed by a Rust WebAssembly engine. Single cells carry reactive programs, sparse typed memory and individually built organelles. Cells compete for light, dissolved minerals and organic material in a wrapping 2D environment with heat and currents.
+A playable, client-only artificial-life simulator: a TypeScript interface and canvas renderer backed by a Rust WebAssembly engine. Single cells carry reactive cellular programs, material-bearing products and individually assembled machinery. The earlier action/register language remains supported for existing worlds. Cells compete for light, dissolved minerals and organic material in a wrapping 2D environment with heat and currents.
 
 ## Run
 
@@ -13,6 +13,12 @@ npm run dev
 
 Open the local URL printed by Vite. In **Simulation**, start a preset or choose an environment, genomes and population counts. Every introduced cell begins with the same minimal structure and finite reserves; its genome grows its capabilities. **Sunlit pond** uses producer programs; **Still water** supplies organic particles for consumer experiments. **Mixed ecosystem** combines producer, scavenger, mixed and hunter programs. Their survival depends on resources and behavior.
 
+## Cellular programming
+
+New built-in genomes use `cellular;` programs: declare typed **products**, express them through **genes**, then consume their stored material in explicit **assembly recipes**. Each recipe names one mechanism, such as `store(food)`, `digest(tissue)`, `import(mineral)` or `propel()`. Storage, capture, digestion, structural support and translation are independently built. A motor needs anchor, motor and filament material; a missing ingredient prevents it from functioning. Gene expression and machine activity are separate. Replication and constriction require built machinery and paid progress.
+
+See [the cellular language and physical rules](design/cellular.md), [a complete solar example](examples/solar.cell), and [a regulated motor example](examples/regulated-motor.cell), and [a composed feeding pathway](examples/separate-digestion.cell). The Body inspector shows stocks, recipe composition, bottlenecks, placement and replication. The following organelle/action-language details also document compatibility behavior for saved legacy programs.
+
 ## Workspace
 
 | View | Use |
@@ -23,7 +29,7 @@ Open the local URL printed by Vite. In **Simulation**, start a preset or choose 
 
 An open simulation has **Player**, **Metrics**, **Settings** and **Genomes** tabs. The player has Play/Pause, 1×/2×/5×/10× speed and **Add organism**. Choose a genome to add one cell. Click a cell for **Overview**, **Body**, **Memory** and **Program**. Its program and memory are read-only; saving its genome creates a separate catalog document.
 
-The Body inspector compares actual organ counts and mass with the last construction requests. Expand a family to inspect stable local unit IDs, built mass, integrity and functional state. Internal space, membrane attachment use, family-specific protein stocks and achieved expression/assembly/recycling/repair rates remain visible. Metrics includes resource totals, introduced material and energy, harvested light, populations and feeding capabilities.
+For cellular programs, the Body inspector shows product inventories, actual synthesis rates, assembled ingredients and lifecycle progress. For legacy programs, it compares actual organ counts and mass with the last construction requests. Expand a family to inspect stable local unit IDs, built mass, integrity and functional state. Internal space, membrane attachment use, family-specific protein stocks and achieved expression/assembly/recycling/repair rates remain visible. Metrics includes resource totals, introduced material and energy, harvested light, populations and feeding capabilities.
 
 Built-ins stay unchanged. Editing or importing creates independent catalog items. Running simulations own their programs and environment state, so catalog renames and deletions do not alter existing worlds.
 
@@ -76,7 +82,9 @@ Organic matter retains its composition through ingestion, gut storage, spills, d
 
 Particle appearance differs, but genome sensors continue to report physical properties and local chemical cues rather than an omniscient food/prey category.
 
-## Genome language
+## Legacy genome language
+
+Programs beginning with `cellular;` follow [the cellular language](design/cellular.md). The action and register syntax below remains supported for existing sources.
 
 Programs are immutable typed expression graphs. Each 1/30-second tick computes `(current signals, old memory) → (action requests, next memory)`. `let` names an expression recomputed every tick. Arithmetic, comparisons, booleans, bounded strings, 2D vectors, conditionals and pure built-ins are supported; there are no user loops, I/O or immediate writes inside expressions.
 
@@ -154,7 +162,7 @@ In an organism's read-only Program view, hover, place the caret or select an exp
 
 IndexedDB stores documents and complete worlds; localStorage stores preferences and editor drafts. Changing runs checkpoint every two seconds and after key actions, and reopen paused. The save indicator reports failures. Only the open, visible simulation advances; there is no offline catch-up. Web Locks protect a run from competing writers in multiple tabs. Clearing browser site data removes its local saves; export genomes and environments for portable copies.
 
-**Current formats: engine ABI 10, checkpoint 4, genome language 3.** Genome JSON exports use `agar.genome` version 2 with `languageVersion: 3`; environment JSON remains version 1. Plain `.cell` source is checked with the current compiler. Checkpoint-3 simulations retain their actual organs, resources, memory and source. Their previously unclassified organic particles and gut contents import as tissue; their new protein pools start empty. The next save uses checkpoint 4. Continued runs use the updated physical rules, so historical trajectories change. The old `build.*` source spelling is accepted as expression; programs can be edited to regulate their protein stocks explicitly.
+**Current formats: engine ABI 10, checkpoint 6, genome language 3 with cellular mechanism metadata.** Genome JSON exports use `agar.genome` version 2 with `languageVersion: 3`; environment JSON remains version 1. Plain `.cell` source is checked with the current compiler. Checkpoint-3 simulations retain their actual organs, resources, memory and source. Their previously unclassified organic particles and gut contents import as tissue; their new protein pools start empty. Checkpoint-4 and checkpoint-5 saves also remain readable. The next save uses checkpoint 6, retaining cellular products, ingredient ledgers, replication progress and the new mechanism identities. Version-5 family programs preserve their existing behavior; the new defaults express the smaller mechanisms explicitly. The old `build.*` source spelling is accepted as expression; programs can be edited to regulate their protein stocks explicitly.
 
 The organelle model is an intentional compatibility break. Checkpoints 1/2 are rejected before replacing the engine state. Older saved genomes remain viewable, renameable and exportable, but must be manually updated in a new copy before introduction. Their investment fractions and omniscient sensors are not silently converted into free organs. Saved records and old files remain preserved. New and old browser documents keep the same storage namespace.
 
@@ -197,11 +205,12 @@ The relative Vite base (`./`) works at both a user Pages root and a repository s
 | `src/storage.ts`, `src/session.ts` | Validated persistence and ordered checkpoint saves |
 | `src/worker-engine.ts`, `src/simulation-worker-runtime.ts`, `src/simulation-protocol.ts` | Dedicated simulation worker, ordered commands and transferable presentation buffers |
 | `src/renderer.ts`, `src/engine.ts` | Canvas display and the typed WASM boundary |
-| `engine/src/body.rs` | Organs, footprints, construction, recovery and conservative partitioning |
+| `engine/src/body.rs`, `engine/src/cellular.rs` | Organs, material-bearing products, recipes, physical work, footprints and conservative partitioning |
+| `engine/src/material_allocation.rs` | Sparse material costs, deterministic resource sharing and reusable allocation buffers |
 | `engine/src/genome.rs`, `engine/src/genome/` | Typed language, registers, source-preserving mutation and inspection |
 | `engine/src/environment.rs`, `engine/src/simulation.rs` | Fields, physical observations, feeding, growth and lifecycle |
 | `engine/src/checkpoint.rs`, checkpoint submodules | Complete-state validation and serialization |
-| `engine/ABI.md`, `design/organelles.md` | Detailed engine contract and body/sensing design |
+| `engine/ABI.md`, `design/cellular.md`, `design/organelles.md` | Engine contract, cellular language and body/sensing rules |
 | `experiments/` | Recorded ecosystem runs and their limits |
 
 ```sh
@@ -215,6 +224,8 @@ npm run test:graph
 npm run test:storage
 npm run test:session
 npm run test:worker
+npm run test:cellular
+npm run test:cellular-ui
 npm run test:food-chain
 node scripts/check-preset-navigation.mjs
 ```

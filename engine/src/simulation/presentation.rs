@@ -35,8 +35,9 @@ impl World {
         ]);
         let mut generation = 0;
         for cell in &self.cells {
-            let family = cell.body.family_summaries();
+            let mut family = cell.body.family_summaries();
             let capacities = cell.body.capacities_from_summaries(&family);
+            cell.body.add_visual_mechanisms(&mut family);
             let flagellum = family[Kind::Flagellum as usize];
             let cortex = family[Kind::Cortex as usize];
             generation = generation.max(cell.generation);
@@ -106,15 +107,16 @@ impl World {
         let mut cell_material = -0.0;
         let mut cell_energy = -0.0;
         for cell in &self.cells {
-            let photosynthetic = cell.body.functional_mass(Kind::Photosynthetic) > 0.0;
-            let digestive = cell.body.functional_mass(Kind::Digestive) > 0.0;
+            let cap = cell.body.capacities();
+            let photosynthetic = cap.photosynthesis > 0.0 || cap.light_harvest > 0.0;
+            let digestive = cap.digestion > 0.0 || cap.substrate_digestion.iter().any(|rate| *rate > 0.0);
             match (photosynthetic, digestive) {
                 (true, false) => trophic[0] += 1,
                 (false, true) => trophic[1] += 1,
                 (true, true) => trophic[2] += 1,
                 _ => {}
             }
-            trophic[3] += u64::from(cell.body.functional_mass(Kind::Piercer) > 0.0);
+            trophic[3] += u64::from(cap.piercing > 0.0);
             flow[0] += cell.photosynthesis_rate;
             flow[1] += cell.digestion_rate;
             flow[2] += cell.exudation_rate;
@@ -181,8 +183,9 @@ impl World {
 
     /// Shared exact legacy layout for a single selected cell or the full snapshot.
     pub(super) fn snapshot_cell_into(&self, c: &Cell, target: &mut Vec<f64>) {
-        let families = c.body.family_summaries();
+        let mut families = c.body.family_summaries();
         let cap = c.body.capacities_from_summaries(&families);
+        c.body.add_visual_mechanisms(&mut families);
         let space = c.body.space();
         let surface = c.body.surface();
         let used = c.memory.populated_count() as f64;

@@ -13,6 +13,7 @@ import { SimulationSession, claimSimulation } from './session';
 import { icon, escapeHtml as esc, createDialog, setDialogError, downloadFile, inputNumber, clock, readableError } from './ui';
 import { showGuide } from './guide';
 import { ORGANELLE_CATALOG } from './organelles';
+import { renderCellularBody } from './cellular-inspector';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 let preferenceWarning: unknown;
@@ -175,7 +176,7 @@ function renderView(): void {
         selectedId = cells.length ? cells[index < 0 ? (direction > 0 ? 0 : cells.length - 1) : (index + direction + cells.length) % cells.length].id : null; renderInspector();
       }
     });
-    renderInspector(); updatePlayback(); renderer.render(active.world, selectedId, prefs, cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.cell : null);
+    renderInspector(); updatePlayback(); renderer.render(active.world, selectedId, prefs, cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.cell : null, cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.body ?? null : null);
   }
   updateSimulationUi();
 }
@@ -429,8 +430,8 @@ function updateInspector(): void {
     const detail = await session.inspect(async engine => {
       const cell = await engine.cellSnapshot(id);
       if (!cell) return null;
-      const body = mode === 'body' ? await engine.cellBody(id) : undefined;
-      const memory = mode === 'memory' ? await engine.getMemory(id) : undefined;
+      const body = mode === 'body' || mode === 'memory' ? await engine.cellBody(id) : undefined;
+      const memory = mode === 'memory' ? body?.cellular ? [] : await engine.getMemory(id) : undefined;
       return { cell, body, memory };
     });
     if (!detail) return;
@@ -462,10 +463,13 @@ function paintInspector(): void {
     $('inspector-content').innerHTML = `<div class="inspector-metrics">${metricRow('Capabilities',trophicRole(cell))}${metricRow('Energy',cell.energy.toFixed(1)+' / '+cell.energyCapacity.toFixed(1))}${metricRow('Envelope area',cell.bodyArea.toFixed(3))}${metricRow('Material mass',cell.bodyMass.toFixed(3))}${metricRow('Division',cell.divisionReady ? 'Ready' : Math.round(cell.maturity*100)+'% grown')}${metricRow('Growth',cell.growthRate.toFixed(3)+' area / s')}${metricRow('Gut',cell.gutEnergy.toFixed(1)+' / '+cell.gutCapacity.toFixed(1))}${metricRow('Gut exudate',cell.gutExudateEnergy.toFixed(1)+' energy')}${metricRow('Gut tissue',cell.gutTissueEnergy.toFixed(1)+' energy')}${metricRow('Gut waste',cell.gutWasteEnergy.toFixed(1)+' energy')}${metricRow('Digestion',cell.digestionRate.toFixed(2)+' energy / s')}${metricRow('Photosynthesis',cell.photosynthesisRate.toFixed(2)+' energy / s')}${metricRow('Integrity',Math.round(cell.integrity*100)+'%')}${metricRow('Minerals',cell.nutrientStored.toFixed(2)+' / '+cell.nutrientCapacity.toFixed(2))}${metricRow('Age',clock(cell.age))}${metricRow('Generation',String(cell.generation))}${metricRow('Upkeep',(cell.basalMetabolism+cell.memoryCost).toFixed(2)+' energy / s')}</div>`;
   } else if (inspectorView === 'body') {
     const target = $('inspector-content'), expanded = new Set([...target.querySelectorAll<HTMLDetailsElement>('details[open]')].map(item => item.dataset.kind));
-    const focusedFamily = target.contains(document.activeElement) ? document.activeElement?.closest<HTMLDetailsElement>('.organelle-detail')?.dataset.kind : undefined;
+    const focusedFamily = target.contains(document.activeElement) ? document.activeElement?.closest<HTMLDetailsElement>('details[data-kind]')?.dataset.kind : undefined;
     try {
       const body = cellInspection?.body; if (!body) return;
       const meter = (name: string, used: number, capacity: number): string => `<div class="body-meter"><div><span>${name}</span><strong>${used.toFixed(3)} / ${capacity.toFixed(3)}</strong></div><meter min="0" max="${Math.max(capacity,0.000001)}" value="${used}" aria-label="${name}"></meter></div>`;
+      if (body.cellular) {
+        target.innerHTML = renderCellularBody(body, expanded, !target.querySelector('.cellular-body')) + `<details class="cellular-section" data-kind="cellular-budgets"${expanded.has('cellular-budgets') ? ' open' : ''}><summary><span>Core & physical budgets</span></summary><div class="body-capacity">${meter('Internal space',body.spaceUsed,body.spaceCapacity)}${meter('Membrane attachments',body.surfaceUsed,body.surfaceCapacity)}</div><p class="cellular-section-note">All products, incomplete assemblies and installed machinery occupy physical space.</p><table class="organelle-table"><thead><tr><th>Inherited organ</th><th>Mass</th><th>Integrity</th></tr></thead><tbody>${body.organs.map(organ=>`<tr><td>${esc(organ.kind)} #${organ.id}</td><td>${organ.mass.toFixed(4)}</td><td>${Math.round(organ.integrity*100)}%</td></tr>`).join('')}</tbody></table></details>`;
+      } else {
       target.innerHTML = `<div class="body-capacity">${meter('Internal space',body.spaceUsed,body.spaceCapacity)}${meter('Membrane attachments',body.surfaceUsed,body.surfaceCapacity)}</div><div class="body-work"><span>Expression <strong>${body.synthesisRate.toFixed(3)}</strong></span><span>Assembly <strong>${body.constructionRate.toFixed(3)}</strong></span><span title="Shared work budget: protein synthesis costs 0.6 work per material, and assembly costs 0.4.">Core capacity <strong>${body.assemblyCapacity.toFixed(3)}</strong></span><span>Recycling <strong>${body.recyclingRate.toFixed(3)}</strong></span><span>Repair <strong>${body.repairRate.toFixed(3)}</strong></span><small>material / s · synthesis and assembly share core work</small></div><div class="organelle-list">${ORGANELLE_CATALOG.map(definition => {
         const summary = cell.organelles.find(item => item.kind === definition.kind)!;
         const request = body.requested.find(item => item.kind === definition.kind)!;
@@ -473,14 +477,24 @@ function paintInspector(): void {
         if (!organs.length && !request.count && !request.build && !request.recycle && request.proteinMass < 0.000001) return '';
         return `<details class="organelle-detail" data-kind="${definition.kind}"${expanded.has(definition.kind) ? ' open' : ''}><summary><i style="background:${definition.color}"></i><span>${esc(definition.name)}<small>${summary.mass.toFixed(3)} material${summary.building > 0 ? ' · assembling' : ''}${summary.damaged > 0 ? ' · damaged' : ''}</small></span><strong title="Actual instances / last requested count">${summary.count}<small> / ${request.count}</small></strong></summary><div class="organelle-content"><p>${esc(definition.description)}</p><div class="organelle-request">${metricRow('Assembly protein',request.proteinMass.toFixed(4)+' material')}${metricRow('Expression / recycle effort',Math.round(request.build*100)+'% / '+Math.round(request.recycle*100)+'%')}${metricRow('Unit size target',request.size.toFixed(3))}${metricRow('Functional capacity',summary.capacity.toFixed(3))}${metricRow('Damaged material',summary.damaged.toFixed(3))}</div>${organs.length ? `<table class="organelle-table"><thead><tr><th>Unit</th><th>Built</th><th>Integrity</th><th>State</th></tr></thead><tbody>${organs.map(organ => `<tr><td>#${organ.id}</td><td>${organ.mass.toFixed(3)}</td><td>${Math.round(organ.integrity*100)}%</td><td>${organ.functional ? organ.mass + 1e-9 < request.size ? 'Growing' : 'Functional' : organ.mass < organ.minimumMass ? 'Assembling' : 'Damaged'}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">No physical units yet.</p>'}</div></details>`;
       }).join('')}</div><p class="body-explanation">Expression produces family-specific proteins. Targets assemble organs from existing stock. Unused proteins occupy space, consume energy and decay.</p>`;
+      }
       if (focusedFamily) target.querySelector<HTMLElement>(`[data-kind="${focusedFamily}"] > summary`)?.focus({preventScroll:true});
     } catch (error) { target.textContent = readableError(error); }
   } else if (inspectorView === 'memory') {
     const entries = cellInspection?.memory; if (!entries) return;
-    const matching = entries.filter(entry => (entry.name+' '+entry.type).toLowerCase().includes(memoryFilter.toLowerCase()));
+    const regulators = cellInspection?.body?.cellular?.products.filter(product=>product.role==='regulator');
+    const matching = regulators
+      ? regulators.filter(product=>product.name.toLowerCase().includes(memoryFilter.toLowerCase()))
+      : entries.filter(entry => (entry.name+' '+entry.type).toLowerCase().includes(memoryFilter.toLowerCase()));
     const pageCount = Math.max(1,Math.ceil(matching.length/50)); memoryPage = Math.max(0,Math.min(memoryPage,pageCount-1));
-    $('memory-summary').textContent = entries.length+' registers · '+cell.memoryCost.toFixed(4)+' energy / s';
-    $('memory-values').innerHTML = matching.slice(memoryPage*50,memoryPage*50+50).map(entry => `<tr><td title="${esc(entry.type)}"><code>${esc(entry.name)}</code></td><td title="${esc(JSON.stringify(entry.value) ?? String(entry.value))}"><code>${esc(memoryValue(entry.value))}</code></td></tr>`).join('') || `<tr><td colspan="2">${entries.length ? 'No matching registers.' : 'Memory is empty.'}</td></tr>`;
+    $('memory-summary').textContent = regulators ? `${regulators.length} regulatory products · physical stocks decay and partition at division`
+      : entries.length+' registers · '+cell.memoryCost.toFixed(4)+' energy / s';
+    const filter=$<HTMLInputElement>('memory-filter'); filter.placeholder=regulators?'Find a regulator':'Find a register';filter.setAttribute('aria-label',filter.placeholder);
+    $('memory-values').closest('table')!.querySelector('thead')!.innerHTML=regulators?'<tr><th>Regulator</th><th>Stock & persistence</th></tr>':'<tr><th>Address</th><th>Value</th></tr>';
+    $('memory-values').innerHTML = matching.slice(memoryPage*50,memoryPage*50+50).map(entry => 'role' in entry
+      ? `<tr><td><code>${esc(entry.name)}</code></td><td><code>${entry.mass.toFixed(4)} material</code><small class="regulator-memory-note">${entry.concentration.toFixed(4)} / area · half-life ${entry.halfLife}s</small></td></tr>`
+      : `<tr><td title="${esc(entry.type)}"><code>${esc(entry.name)}</code></td><td title="${esc(JSON.stringify(entry.value) ?? String(entry.value))}"><code>${esc(memoryValue(entry.value))}</code></td></tr>`).join('')
+      || `<tr><td colspan="2">${regulators ? regulators.length?'No matching regulators.':'No regulatory products declared. Product stocks and machinery are shown in Body.' : entries.length ? 'No matching registers.' : 'Memory is empty.'}</td></tr>`;
     $('memory-page').textContent = (memoryPage+1)+' / '+pageCount;
     $('memory-page').closest<HTMLElement>('.memory-footer')!.hidden = pageCount === 1;
     document.querySelector<HTMLButtonElement>('[data-action="memory-previous"]')!.disabled = memoryPage === 0;
@@ -812,7 +826,7 @@ function frame(now:number):void{
           accumulator-=steps/30;
         }
       }
-      if(renderer&&prefs.simulationView==='player')renderer.render(active.world,selectedId,prefs,cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.cell : null);
+      if(renderer&&prefs.simulationView==='player')renderer.render(active.world,selectedId,prefs,cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.cell : null,cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.body ?? null : null);
       if(!transitioning&&!lifecycleFlushes&&now-lastUi>250){updateSimulationUi();lastUi=now;}
     }
   }catch(error){

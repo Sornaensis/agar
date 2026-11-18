@@ -19,7 +19,7 @@ const networkUrl = await moduleUrl('../src/genome-network.ts');
 const { buildGenomeNetwork, networkSlice } = await import(networkUrl);
 // Import the real layout function without constructing the DOM-facing class.
 const { layoutNetwork } = await import(await moduleUrl('../src/genome-visualizer.ts', { './genome-network': networkUrl }));
-const { PRESETS } = await import(await moduleUrl('../src/presets.ts'));
+const { PRESETS, CELLULAR_FAMILY_PRESETS, LEGACY_PRESETS } = await import(await moduleUrl('../src/presets.ts'));
 const { instance } = await WebAssembly.instantiate(await readFile(new URL('../engine/pkg/agar_engine.wasm', import.meta.url)), {});
 const api = instance.exports;
 const decode = (pointer, length) => new TextDecoder().decode(new Uint8Array(api.memory.buffer, pointer, length));
@@ -44,7 +44,11 @@ function project(source) {
   const before = JSON.stringify(graph);
   const network = buildGenomeNetwork(graph);
   assert.equal(JSON.stringify(graph), before, 'Projection does not mutate its compiler graph');
-  validate(network);
+  validate(network,graph.roots.filter(root=>root.kind==='output').length);
+  if(graph.mode==='cellular') {
+    assert.ok(network.nodes.filter(node=>node.kind==='output').every(node=>/^(gene|activity)\./.test(node.label)));
+    assert.ok(!network.nodes.some(node=>node.kind==='register'),'Cellular state is physical product stock');
+  }
   assert.equal(network.expressionCount, graph.nodes.length);
   assert.equal(network.unusedCount, graph.nodes.filter(node => !node.reachable).length);
   assert.equal(network.constantCount, graph.nodes.filter(node => node.reachable && node.kind === 'constant').length);
@@ -52,11 +56,11 @@ function project(source) {
   assert.deepEqual(buildGenomeNetwork(graph), network, 'Projection IDs and order are deterministic');
   return { graph, network };
 }
-function validate(network) {
+function validate(network,outputCount=81) {
   const nodes = new Map(network.nodes.map(node => [node.id, node]));
   assert.equal(nodes.size, network.nodes.length, 'Projected node IDs are unique');
   assert.equal(new Set(network.edges.map(edge => edge.id)).size, network.edges.length, 'Parallel ports have distinct edge identities');
-  assert.equal(network.nodes.filter(node => node.kind === 'output').length, 81);
+  assert.equal(network.nodes.filter(node => node.kind === 'output').length, outputCount,'Every authored/default compiler output is represented');
   assert.ok(network.nodes.every(node => !['constant', 'reference'].includes(node.kind)), 'Literal and alias boxes are absent');
   for (const edge of network.edges) {
     const from = nodes.get(edge.from), to = nodes.get(edge.to);
@@ -152,7 +156,7 @@ assertSlice(self, networkSlice(self, 'register:rf001', 1), 1);
 assertSlice(mixed, networkSlice(mixed, null, 0), 0);
 assert.deepEqual(networkSlice(mixed, 'missing'), { nodes: [], edges: [], total: 0, omitted: 0, frontier: [] });
 
-for (const preset of PRESETS) {
+for (const preset of [...PRESETS,...CELLULAR_FAMILY_PRESETS,...LEGACY_PRESETS]) {
   const network = project(preset.source).network;
   const slice = networkSlice(network, null);
   assertSlice(network, slice, 112);
@@ -231,4 +235,4 @@ assert.ok(inlineUses.every(value => value.bindings === sharedAliases), 'All uses
 assert.equal([...new Set(inlineUses.map(value => value.bindings))].reduce((sum, aliases) => sum + aliases.length, 0), 6000, 'Stored aliases do not multiply with consumer count');
 assertSlice(fanOutNetwork, networkSlice(fanOutNetwork, null), 112);
 
-console.log(`Genome network checks passed: ${PRESETS.length} real preset layouts, ${variants} typed variants, builtin/alias projection, all primitive registers, read/write/clear timing, exact ports, literal defaults, 8192-node chains, 10071 roots, linear alias metadata, and bounded bidirectional navigation.`);
+console.log(`Genome network checks passed: ${PRESETS.length + CELLULAR_FAMILY_PRESETS.length + LEGACY_PRESETS.length} mechanism/cellular-family/legacy preset layouts, ${variants} typed variants, builtin/alias projection, all primitive registers, read/write/clear timing, exact ports, literal defaults, 8192-node chains, 10071 roots, linear alias metadata, and bounded bidirectional navigation.`);

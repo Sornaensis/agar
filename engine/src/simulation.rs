@@ -5,6 +5,7 @@ use crate::body::BodyFixture;
 use crate::body::{
     Body, BodyCapacities, BodyControls, FounderBudget, OrganelleKind as Kind, FAMILY_COUNT,
 };
+use crate::cellular::CellularWorkScratch;
 use crate::environment::{Environment, COLUMNS as FIELD_COLUMNS, PATCHES, ROWS as FIELD_ROWS};
 use crate::genome::{
     EvalScratch, Inputs, MutationKind, OrganelleInput, Outputs, Program, Registers,
@@ -14,6 +15,10 @@ use std::fmt::Write;
 use std::rc::Rc;
 mod checkpoint;
 mod presentation;
+#[cfg(test)]
+mod cellular_tests;
+#[cfg(test)]
+mod mechanism_tests;
 #[cfg(test)]
 mod sensing_tests;
 
@@ -105,6 +110,8 @@ pub fn mutate_registered(
         MutationKind::Constant => 1,
         MutationKind::Expression => 2,
         MutationKind::Reference => 3,
+        MutationKind::GeneSilence => 4,
+        MutationKind::GeneDuplicate => 5,
     };
     if mutation_kind == 0 || mutation.source == parent.source {
         return MutationResult {
@@ -339,7 +346,7 @@ pub struct Cell {
 }
 impl Cell {
     fn alive(&self) -> bool {
-        self.energy > 0.0 && self.integrity > 0.0 && self.body.functional_mass(Kind::Core) > 0.0
+        self.energy > 0.0 && self.integrity > 0.0 && self.body.support_mass() > 0.0
     }
     pub fn radius(&self) -> f64 {
         CELL_RADIUS * self.body.area.sqrt()
@@ -490,7 +497,8 @@ impl CellGeometry {
             self.angles.push(cell.angle);
             self.alive.push(cell.alive());
             self.pigments.push(if appearance {
-                (cell.body.functional_mass(Kind::Photosynthetic) / cell.body.structural_mass()
+                ((cell.body.functional_mass(Kind::Photosynthetic)
+                    + cell.body.mechanism_mass(crate::cellular::MechanismKind::LightHarvest)) / cell.body.structural_mass()
                     * 2.0)
                     .clamp(0.0, 1.0)
             } else {
@@ -542,7 +550,10 @@ struct TickWorkspace {
     capacities: Vec<BodyCapacities>,
     observations: ObservationWorkspace,
     outputs: Vec<Outputs>,
+    /// Body-relative force, torque and cost from machinery present at tick start.
+    motors: Vec<[f64; 4]>,
     processing: Vec<f64>,
+    cellular_work: CellularWorkScratch,
     phases: PhaseWorkspace,
 }
 
@@ -1198,7 +1209,9 @@ impl World {
             capacities: caps,
             observations,
             outputs,
+            motors,
             processing,
+            cellular_work,
             phases,
         } = workspace;
         let remaining = (u32::MAX - self.next_id) as usize;
@@ -1221,7 +1234,9 @@ impl World {
             || self
                 .cells
                 .iter()
-                .any(|c| c.tracking.next_serial == u64::MAX || c.body.next_organelle_id == u32::MAX)
+                .any(|c| c.tracking.next_serial == u64::MAX
+                    || c.body.next_organelle_id == u32::MAX
+                    || c.body.cellular.as_ref().is_some_and(|state| state.next_assembly_id == u32::MAX))
         {
             return Err(
                 "Simulation paused: an object or organelle identifier sequence is exhausted."
@@ -1240,7 +1255,7 @@ impl World {
                 c.energy.max(0.0)
                     + c.gut_energy
                     + c.body.embodied_energy()
-                    + cap.photosynthesis * DT
+                    + (cap.photosynthesis + cap.light_harvest) * DT
             })
             .sum();
         let packet_overhead = self
@@ -1269,6 +1284,11 @@ impl World {
         // Phase 1: one immutable observation/capability snapshot. Memory and
         // tracking commit only after every cell has observed that same world.
         self.observations_into(None, caps, observations);
+        for (cell, input) in self.cells.iter().zip(observations.inputs.iter_mut()) {
+            if let Some(program) = genomes[(cell.genome_id - 1) as usize].program.cellular() {
+                (input.products, input.assemblies) = cell.body.cellular_inputs(program);
+            }
+        }
         let inputs = &observations.inputs;
         let scratch = &mut self.eval_scratch;
         outputs.clear();
@@ -1286,6 +1306,35 @@ impl World {
                     )
                 }),
         );
+        // Regulation acts on existing machinery only. Construction is a later
+        // phase, so a newly synthesized part cannot propel, sense or divide now.
+        motors.clear();
+        for ((cell, output), cap) in self.cells.iter_mut().zip(outputs.iter_mut()).zip(caps.iter_mut()) {
+            let program = &genomes[(cell.genome_id - 1) as usize].program;
+            if let (Some(program), Some(controls)) = (program.cellular(), &output.cellular) {
+                let action = cell.body.cellular_actions(program, controls);
+                cap.capture *= action.capture_activity;
+                cap.phagocytosis *= action.engulf_activity;
+                cap.independent_engulf = action.independent_engulf;
+                cap.bite_extraction_fraction = action.bite_extraction_fraction;
+                cap.light_harvest = action.light_harvest;
+                cap.substrate_digestion = action.substrate_digestion;
+                motors.push([action.force_x, action.force_y, action.torque, action.motor_cost]);
+                output.photosynthesize = action.photosynthesize;
+                output.absorb = action.absorb;
+                output.feed = action.feed;
+                output.bite = action.bite;
+                output.defend = action.defend;
+                output.repair = action.repair;
+                output.engulf = action.engulf;
+                output.digest = action.digest;
+                output.divide = action.divide;
+                output.scan_bearing = action.scan_bearing;
+                output.scan_width = action.scan_width;
+            } else {
+                motors.push([0.0; 4]);
+            }
+        }
         let time = self.time();
         for (i, cell) in self.cells.iter_mut().enumerate() {
             let output = &outputs[i];
@@ -1310,25 +1359,35 @@ impl World {
             let temperature = self.environment.temperature_at(cell.x, cell.y);
             let (flow_x, flow_y) = self.environment.flow_at(cell.x, cell.y, time);
             let inertia = cell.inertia();
-            cell.angle = wrap(
-                cell.angle + output.turn * cap.turn / inertia.sqrt() * DT,
-                TAU,
-            );
+            let cellular = output.cellular.is_some();
+            cell.angle = if cellular {
+                wrap(cell.angle + 12.0 * motors[i][2] / (inertia * cell.radius().powi(2)) * DT, TAU)
+            } else {
+                wrap(cell.angle + output.turn * cap.turn / inertia.sqrt() * DT, TAU)
+            };
             let drag = (-1.8 * (cell.body.area.sqrt() + 0.35 * cell.body.surface().used)
                 / inertia.sqrt()
                 * DT)
                 .exp();
-            let acceleration = output.thrust * cap.thrust * 12.0 / inertia;
-            cell.vx = flow_x + (cell.vx - flow_x + cell.angle.cos() * acceleration * DT) * drag;
-            cell.vy = flow_y + (cell.vy - flow_y + cell.angle.sin() * acceleration * DT) * drag;
+            if cellular {
+                let [x, y, _, _] = motors[i];
+                let force_x = cell.angle.cos() * x - cell.angle.sin() * y;
+                let force_y = cell.angle.sin() * x + cell.angle.cos() * y;
+                cell.vx = flow_x + (cell.vx - flow_x + force_x * 12.0 / inertia * DT) * drag;
+                cell.vy = flow_y + (cell.vy - flow_y + force_y * 12.0 / inertia * DT) * drag;
+            } else {
+                let acceleration = output.thrust * cap.thrust * 12.0 / inertia;
+                cell.vx = flow_x + (cell.vx - flow_x + cell.angle.cos() * acceleration * DT) * drag;
+                cell.vy = flow_y + (cell.vy - flow_y + cell.angle.sin() * acceleration * DT) * drag;
+            }
             cell.x = wrap(cell.x + cell.vx * DT, WIDTH);
             cell.y = wrap(cell.y + cell.vy * DT, HEIGHT);
             cell.cooldown = (cell.cooldown - DT).max(0.0);
             cell.engulf_cooldown = (cell.engulf_cooldown - DT).max(0.0);
             let maintenance = (cell.basal_metabolism() * metabolic_factor(temperature)
                 + inputs[i].memory_cost
-                + 0.06 * cap.thrust * output.thrust
-                + 0.025 * cap.photosynthesis * output.photosynthesize
+                + if cellular { motors[i][3] } else { 0.06 * cap.thrust * output.thrust }
+                + 0.025 * (cap.photosynthesis * output.photosynthesize + cap.light_harvest)
                 + 1.5 * cap.piercing * output.bite
                 + 0.3 * cap.protection * output.defend)
                 * DT;
@@ -1373,15 +1432,20 @@ impl World {
                 );
             cell.energy -= repaired * 20.0 * cell.body.area;
             cell.integrity += repaired;
-            let report = cell.body.work(
-                output.grow,
-                &output.body,
-                output.repair,
-                &mut cell.energy,
-                &mut cell.nutrient_stored,
-                DT,
-                MAX_AREA,
-            );
+            let report = if let (Some(program), Some(controls)) = (
+                genomes[(cell.genome_id - 1) as usize].program.cellular(),
+                &output.cellular,
+            ) {
+                cell.body.cellular_work_in(
+                    program, controls, &mut cell.energy, &mut cell.nutrient_stored,
+                    DT, MAX_AREA, inputs[i].body_division_ready, cellular_work,
+                )
+            } else {
+                cell.body.work(
+                    output.grow, &output.body, output.repair,
+                    &mut cell.energy, &mut cell.nutrient_stored, DT, MAX_AREA,
+                )
+            };
             cell.growth_rate = report.area_grown / DT;
             cell.construction_rate = report.constructed_mass / DT;
             cell.synthesis_rate = report.synthesized_mass / DT;
@@ -1574,7 +1638,8 @@ impl World {
         let residues = &mut workspace.emissions;
         residues.clear();
         for (i, c) in self.cells.iter_mut().enumerate() {
-            if !c.alive() || outputs[i].feed <= 0.0 || c.gut_energy <= 0.0 {
+            if !c.alive() || c.gut_energy <= 0.0
+                || (outputs[i].feed <= 0.0 && caps[i].substrate_digestion.iter().all(|rate| *rate <= 0.0)) {
                 continue;
             }
             let room = (caps[i].energy - c.energy).max(0.0);
@@ -1584,7 +1649,7 @@ impl World {
             for kind in OrganicKind::ALL {
                 let k = kind as usize;
                 let pool = c.gut[k];
-                if pool.energy <= 0.0 || outputs[i].digest[k] <= 0.0 {
+                if pool.energy <= 0.0 || (outputs[i].digest[k] <= 0.0 && caps[i].substrate_digestion[k] <= 0.0) {
                     continue;
                 }
                 let mineral_demand = if pool.nutrients > 0.0 {
@@ -1601,7 +1666,12 @@ impl World {
             // Each substrate competes for the same digestive and metabolic work.
             // Saturated or absent substrates return their share to the others.
             let budget = (caps[i].digestion * outputs[i].feed * DT).min(processing[i]);
-            let work = shared_digestive_work(budget, demands, weights);
+            let independent = std::array::from_fn::<_, 3, _>(|k|
+                demands[k].min(caps[i].substrate_digestion[k] * DT));
+            let remaining = std::array::from_fn(|k| (demands[k] - independent[k]).max(0.0));
+            let mut work = shared_digestive_work(budget, remaining, weights);
+            let metabolic_work = work.iter().sum::<f64>();
+            for k in 0..3 { work[k] += independent[k]; }
             let mut remaining_room = room;
             let mut useful_total = 0.0;
             for kind in OrganicKind::ALL {
@@ -1649,7 +1719,7 @@ impl World {
             c.refresh_gut_totals();
             c.energy += useful_total;
             c.digestion_rate = useful_total / DT;
-            processing[i] = (processing[i] - work.iter().sum::<f64>()).max(0.0);
+            processing[i] = (processing[i] - metabolic_work).max(0.0);
         }
         self.emit_organic_pending(workspace);
     }
@@ -1723,7 +1793,8 @@ impl World {
                 continue;
             }
             let capacity =
-                (caps[i].photosynthesis * outputs[i].photosynthesize * DT).min(processing[i]);
+                (caps[i].photosynthesis * outputs[i].photosynthesize * DT).min(processing[i])
+                + caps[i].light_harvest * DT;
             if capacity <= 0.0 {
                 continue;
             }
@@ -1753,7 +1824,11 @@ impl World {
                 (gain * (1.0 - PHOTO_EXUDATION)).min((caps[i].energy - c.energy).max(0.0));
             c.energy += retained;
             c.photosynthesis_rate = gain / DT;
-            processing[i] = (processing[i] - gain).max(0.0);
+            let metabolic_gain = if caps[i].light_harvest > 0.0 {
+                let legacy = (caps[i].photosynthesis * outputs[i].photosynthesize * DT).min(processing[i]);
+                gain * legacy / (legacy + caps[i].light_harvest * DT)
+            } else { gain };
+            processing[i] = (processing[i] - metabolic_gain).max(0.0);
             self.photosynthesis_total += gain;
             exudates.push((i, c.x, c.y, c.radius(), c.angle, gain - retained));
         }
@@ -1783,7 +1858,7 @@ impl World {
         targets.resize(geometry.ids.len(), None);
         targets.fill(None);
         for i in 0..geometry.ids.len() {
-            if !geometry.alive[i] || (caps[i].capture == 0.0 && caps[i].piercing == 0.0) {
+            if !geometry.alive[i] || (caps[i].phagocytosis == 0.0 && caps[i].piercing == 0.0) {
                 continue;
             }
             let [x, y] = geometry.positions[i];
@@ -1843,9 +1918,9 @@ impl World {
         });
         for i in order.iter().copied() {
             if !outputs[i].engulf
-                || outputs[i].feed <= 0.0
+                || (outputs[i].feed <= 0.0 && caps[i].independent_engulf <= 0.0)
                 || !self.cells[i].alive()
-                || caps[i].capture <= 0.0
+                || caps[i].phagocytosis <= 0.0
                 || self.cells[i].engulf_cooldown > 0.0
             {
                 continue;
@@ -1858,7 +1933,7 @@ impl World {
             if !b.alive()
                 || b.integrity > 0.35
                 || a.body.area < 1.6 * b.body.area
-                || b.body.area > caps[i].capture * 40.0
+                || b.body.area > caps[i].phagocytosis * 40.0
             {
                 continue;
             }
@@ -1936,7 +2011,8 @@ impl World {
                     * inflicted
                     * fraction
                     * victim_cell.body.structural_mass()
-                    * outputs[attacker].feed;
+                    * outputs[attacker].feed
+                    * caps[attacker].bite_extraction_fraction;
                 let minerals = if victim_cell.energy > 0.0 {
                     victim_cell.nutrient_stored * raw / victim_cell.energy
                 } else {
@@ -2170,7 +2246,12 @@ impl World {
         budgets.extend(
             caps.iter()
                 .zip(outputs)
-                .map(|(c, o)| c.capture * 1200.0 * o.feed * DT),
+                .map(|(c, o)| {
+                    // Cellular capture and digestive activity are separate
+                    // machines. The legacy feed command controls both phases.
+                    let feed = if o.cellular.is_some() { 1.0 } else { o.feed };
+                    c.capture * 1200.0 * feed * DT
+                }),
         );
         self.food.retain_mut(|food| {
             let mut winner = None;
@@ -2283,7 +2364,7 @@ impl World {
             target.extend([f.x, f.y, f.energy, f.nutrients, f.kind as u8 as f64]);
         }
     }
-    pub fn body_json(&self, id: u32) -> Option<String> {
+    pub fn body_json(&self, id: u32, genomes: &[Genome]) -> Option<String> {
         let c = self.cells.iter().find(|c| c.id == id && c.alive())?;
         let space = c.body.space();
         let surface = c.body.surface();
@@ -2313,7 +2394,14 @@ impl World {
                 c.body.precursor_mass[i]
             );
         }
-        json.push_str("]}");
+        json.push(']');
+        let cellular_program = genomes.get((c.genome_id - 1) as usize)
+            .and_then(|genome| genome.program.cellular());
+        if cellular_program.is_some() || c.body.cellular.is_some() {
+            json.push_str(",\"cellular\":");
+            json.push_str(&c.body.cellular_json(cellular_program));
+        }
+        json.push('}');
         Some(json)
     }
 }
@@ -2532,7 +2620,7 @@ mod workspace_tests {
             }
             let bytes = state(&reused);
             let mut reader = Reader::new(&bytes);
-            let mut fresh = World::read_checkpoint(&mut reader, programs.len(), 4).unwrap();
+            let mut fresh = World::read_checkpoint(&mut reader, programs.len(), 5).unwrap();
             assert!(reader.finished());
             assert!(fresh.workspace.capacities.is_empty());
             let mut fresh_programs = programs.clone();

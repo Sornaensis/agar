@@ -1,0 +1,234 @@
+# Products are material stocks. Genes pay to synthesize them.
+# Recipes install old stock into machines; activity uses completed machines.
+cellular;
+
+product GutMembrane = membrane();
+product ExudateEnzymeEnzyme = enzyme();
+product CaptureAnchor = anchor();
+product CaptureMotor = motor();
+product TissueEnzymeEnzyme = enzyme();
+product WasteEnzymeEnzyme = enzyme();
+product TranslationScaffold = scaffold();
+product TranslationEnzyme = enzyme();
+product MineralsAnchor = anchor();
+product MineralsTransporter = transporter();
+product EnergyStoreMembrane = membrane();
+product MineralStoreMembrane = membrane();
+product LeftMotorAnchor = anchor();
+product LeftMotorMotor = motor();
+product LeftMotorFilament = filament();
+product RightMotorAnchor = anchor();
+product RightMotorMotor = motor();
+product RightMotorFilament = filament();
+product VisionAnchor = anchor();
+product VisionReceptor = receptor();
+product VisionPigment = pigment();
+product TouchAnchor = anchor();
+product TouchReceptor = receptor();
+product TouchFilament = filament();
+product ChemistryAnchor = anchor();
+product ChemistryReceptor = receptor();
+product SupportScaffold = scaffold();
+product EnvelopeMembrane = membrane();
+product EnvelopeEnzyme = enzyme();
+product ReplicationScaffold = scaffold();
+product ReplicationReplicase = replicase();
+product DivisionAnchor = anchor();
+product DivisionMotor = motor();
+product DivisionConstrictor = constrictor();
+
+let funded = energy > 10 && nutrient.stored > 0.001;
+let expanding = body.area > body.birth_area * 1.6;
+let powered = built.Gut + 0.000001 >= 0.06 && built.ExudateEnzyme + 0.000001 >= 0.04 && built.Capture + 0.000001 >= 0.03;
+# Receptor readings describe physical surroundings, not hidden identities.
+let seen = object.valid && object.area < 0.35;
+let blocked = contact.valid && contact.resistance >= 0.12;
+let obstacle = if contact.valid then angle(contact.offset) else 0;
+let escape = if obstacle >= 0 then obstacle - 1.8 else obstacle + 1.8;
+let seek = gut.fraction < 0.55;
+let steer = if blocked then clamp(escape * 2, -1, 1)
+  else if seek && seen then clamp(angle(object.offset) * 1.8, -1, 1)
+  else if seek && chemical.valid then clamp(chemical.organic_bearing, -1, 1)
+  else sin(age * 0.65) * 0.35;
+let move = if blocked then 0.65 else if gut.fraction > 0.45 then 0
+  else if seek && seen then 0.5 else 0.28;
+
+# Gut: synthesize only while this recipe needs more installed material.
+let need_Gut = funded && (true) && built.Gut + 0.000001 < (if expanding then 0.12 else 0.06);
+gene make_GutMembrane: GutMembrane = if need_Gut && pool.GutMembrane < 0.001 then 1 else 0;
+assembly Gut: store(food) {
+  GutMembrane: 0.06;
+  activity: 1;
+}
+
+# ExudateEnzyme: synthesize only while this recipe needs more installed material.
+let need_ExudateEnzyme = funded && (true) && built.ExudateEnzyme + 0.000001 < (if expanding then 0.08 else 0.04);
+gene make_ExudateEnzymeEnzyme: ExudateEnzymeEnzyme = if need_ExudateEnzyme && pool.ExudateEnzymeEnzyme < 0.001 then 1 else 0;
+assembly ExudateEnzyme: digest(exudate) {
+  ExudateEnzymeEnzyme: 0.04;
+  activity: if gut.exudate.energy > 0 then 1 else 0;
+}
+
+# Capture: synthesize only while this recipe needs more installed material.
+let need_Capture = funded && (built.Gut + 0.000001 >= 0.06) && built.Capture + 0.000001 < (if expanding then 0.06 else 0.03);
+gene make_CaptureAnchor: CaptureAnchor = if need_Capture && pool.CaptureAnchor < 0.001 then 0.5 else 0;
+gene make_CaptureMotor: CaptureMotor = if need_Capture && pool.CaptureMotor < 0.001 then 1 else 0;
+assembly Capture: import(particle) {
+  CaptureAnchor: 0.01;
+  CaptureMotor: 0.02;
+  activity: if gut.fraction < 0.7 then 1 else 0;
+}
+
+# TissueEnzyme: synthesize only while this recipe needs more installed material.
+let need_TissueEnzyme = funded && (powered) && built.TissueEnzyme + 0.000001 < (if expanding then 0.04 else 0.02);
+gene make_TissueEnzymeEnzyme: TissueEnzymeEnzyme = if need_TissueEnzyme && pool.TissueEnzymeEnzyme < 0.001 then 1 else 0;
+assembly TissueEnzyme: digest(tissue) {
+  TissueEnzymeEnzyme: 0.02;
+  activity: if gut.tissue.energy > 0 then 1 else 0;
+}
+
+# WasteEnzyme: synthesize only while this recipe needs more installed material.
+let need_WasteEnzyme = funded && (powered) && built.WasteEnzyme + 0.000001 < (if expanding then 0.03 else 0.015);
+gene make_WasteEnzymeEnzyme: WasteEnzymeEnzyme = if need_WasteEnzyme && pool.WasteEnzymeEnzyme < 0.001 then 1 else 0;
+assembly WasteEnzyme: digest(waste) {
+  WasteEnzymeEnzyme: 0.015;
+  activity: if gut.waste.energy > 0 then 1 else 0;
+}
+
+# Translation: synthesize only while this recipe needs more installed material.
+let need_Translation = funded && (powered) && built.Translation + 0.000001 < (if expanding then 0.08 else 0.04);
+gene make_TranslationScaffold: TranslationScaffold = if need_Translation && pool.TranslationScaffold < 0.001 then 1 else 0;
+gene make_TranslationEnzyme: TranslationEnzyme = if need_Translation && pool.TranslationEnzyme < 0.001 then 1 else 0;
+assembly Translation: translate() {
+  TranslationScaffold: 0.02;
+  TranslationEnzyme: 0.02;
+  activity: 1;
+}
+
+# Minerals: synthesize only while this recipe needs more installed material.
+let need_Minerals = funded && (powered) && built.Minerals + 0.000001 < (if expanding then 0.05 else 0.025);
+gene make_MineralsAnchor: MineralsAnchor = if need_Minerals && pool.MineralsAnchor < 0.001 then 0.25 else 0;
+gene make_MineralsTransporter: MineralsTransporter = if need_Minerals && pool.MineralsTransporter < 0.001 then 1 else 0;
+assembly Minerals: import(mineral) {
+  MineralsAnchor: 0.005;
+  MineralsTransporter: 0.02;
+  activity: if nutrient.fraction < 0.9 then 1 else 0;
+}
+
+# EnergyStore: synthesize only while this recipe needs more installed material.
+let need_EnergyStore = funded && (powered) && built.EnergyStore + 0.000001 < (if expanding then 0.16 else 0.08);
+gene make_EnergyStoreMembrane: EnergyStoreMembrane = if need_EnergyStore && pool.EnergyStoreMembrane < 0.001 then 1 else 0;
+assembly EnergyStore: store(energy) {
+  EnergyStoreMembrane: 0.08;
+  activity: 1;
+}
+
+# MineralStore: synthesize only while this recipe needs more installed material.
+let need_MineralStore = funded && (powered) && built.MineralStore + 0.000001 < (if expanding then 0.04 else 0.02);
+gene make_MineralStoreMembrane: MineralStoreMembrane = if need_MineralStore && pool.MineralStoreMembrane < 0.001 then 1 else 0;
+assembly MineralStore: store(mineral) {
+  MineralStoreMembrane: 0.02;
+  activity: 1;
+}
+
+# LeftMotor: synthesize only while this recipe needs more installed material.
+let need_LeftMotor = funded && (powered) && built.LeftMotor + 0.000001 < (if expanding then 0.05 else 0.025);
+gene make_LeftMotorAnchor: LeftMotorAnchor = if need_LeftMotor && pool.LeftMotorAnchor < 0.001 then 0.5 else 0;
+gene make_LeftMotorMotor: LeftMotorMotor = if need_LeftMotor && pool.LeftMotorMotor < 0.001 then 1 else 0;
+gene make_LeftMotorFilament: LeftMotorFilament = if need_LeftMotor && pool.LeftMotorFilament < 0.001 then 1 else 0;
+assembly LeftMotor: propel() {
+  LeftMotorAnchor: 0.005;
+  LeftMotorMotor: 0.01;
+  LeftMotorFilament: 0.01;
+  activity: clamp(move - steer * 0.5, 0, 1);
+  at: 1.570796;
+  direction: 0;
+}
+
+# RightMotor: synthesize only while this recipe needs more installed material.
+let need_RightMotor = funded && (powered) && built.RightMotor + 0.000001 < (if expanding then 0.05 else 0.025);
+gene make_RightMotorAnchor: RightMotorAnchor = if need_RightMotor && pool.RightMotorAnchor < 0.001 then 0.5 else 0;
+gene make_RightMotorMotor: RightMotorMotor = if need_RightMotor && pool.RightMotorMotor < 0.001 then 1 else 0;
+gene make_RightMotorFilament: RightMotorFilament = if need_RightMotor && pool.RightMotorFilament < 0.001 then 1 else 0;
+assembly RightMotor: propel() {
+  RightMotorAnchor: 0.005;
+  RightMotorMotor: 0.01;
+  RightMotorFilament: 0.01;
+  activity: clamp(move + steer * 0.5, 0, 1);
+  at: -1.570796;
+  direction: 0;
+}
+
+# Vision: synthesize only while this recipe needs more installed material.
+let need_Vision = funded && (powered) && built.Vision + 0.000001 < (if expanding then 0.04 else 0.02);
+gene make_VisionAnchor: VisionAnchor = if need_Vision && pool.VisionAnchor < 0.001 then 0.333333 else 0;
+gene make_VisionReceptor: VisionReceptor = if need_Vision && pool.VisionReceptor < 0.001 then 1 else 0;
+gene make_VisionPigment: VisionPigment = if need_Vision && pool.VisionPigment < 0.001 then 0.333333 else 0;
+assembly Vision: sense(optical) {
+  VisionAnchor: 0.004;
+  VisionReceptor: 0.012;
+  VisionPigment: 0.004;
+  activity: 1;
+}
+
+# Touch: synthesize only while this recipe needs more installed material.
+let need_Touch = funded && (powered) && built.Touch + 0.000001 < (if expanding then 0.02 else 0.01);
+gene make_TouchAnchor: TouchAnchor = if need_Touch && pool.TouchAnchor < 0.0005 then 0.333333 else 0;
+gene make_TouchReceptor: TouchReceptor = if need_Touch && pool.TouchReceptor < 0.001 then 1 else 0;
+gene make_TouchFilament: TouchFilament = if need_Touch && pool.TouchFilament < 0.0005 then 0.333333 else 0;
+assembly Touch: sense(contact) {
+  TouchAnchor: 0.002;
+  TouchReceptor: 0.006;
+  TouchFilament: 0.002;
+  activity: 1;
+}
+
+# Chemistry: synthesize only while this recipe needs more installed material.
+let need_Chemistry = funded && (powered) && built.Chemistry + 0.000001 < (if expanding then 0.03 else 0.015);
+gene make_ChemistryAnchor: ChemistryAnchor = if need_Chemistry && pool.ChemistryAnchor < 0.00075 then 0.25 else 0;
+gene make_ChemistryReceptor: ChemistryReceptor = if need_Chemistry && pool.ChemistryReceptor < 0.001 then 1 else 0;
+assembly Chemistry: sense(chemical) {
+  ChemistryAnchor: 0.003;
+  ChemistryReceptor: 0.012;
+  activity: 1;
+}
+
+# Support: synthesize only while this recipe needs more installed material.
+let need_Support = funded && (powered && energy > 45) && built.Support + 0.000001 < max(0.12, body.birth_area * 0.12);
+gene make_SupportScaffold: SupportScaffold = if need_Support && pool.SupportScaffold < 0.001 then 1 else 0;
+assembly Support: support() {
+  SupportScaffold: 0.06;
+  activity: 1;
+}
+
+# Envelope: synthesize only while this recipe needs more installed material.
+let need_Envelope = funded && (built.Support + 0.000001 >= 0.12) && built.Envelope + 0.000001 < (if expanding then 0.04 else 0.02);
+gene make_EnvelopeMembrane: EnvelopeMembrane = if need_Envelope && pool.EnvelopeMembrane < 0.001 then 1 else 0;
+gene make_EnvelopeEnzyme: EnvelopeEnzyme = if need_Envelope && pool.EnvelopeEnzyme < 0.001 then 0.333333 else 0;
+assembly Envelope: grow() {
+  EnvelopeMembrane: 0.015;
+  EnvelopeEnzyme: 0.005;
+  activity: if energy > 90 && body.area < body.birth_area * 2 then 0.8 else 0;
+}
+
+# Replication: synthesize only while this recipe needs more installed material.
+let need_Replication = funded && (built.Support + 0.000001 >= 0.12) && built.Replication + 0.000001 < (if expanding then 0.04 else 0.02);
+gene make_ReplicationScaffold: ReplicationScaffold = if need_Replication && pool.ReplicationScaffold < 0.001 then 0.333333 else 0;
+gene make_ReplicationReplicase: ReplicationReplicase = if need_Replication && pool.ReplicationReplicase < 0.001 then 1 else 0;
+assembly Replication: replicate() {
+  ReplicationScaffold: 0.005;
+  ReplicationReplicase: 0.015;
+  activity: if energy > 80 then 1 else 0;
+}
+
+# Division: synthesize only while this recipe needs more installed material.
+let need_Division = funded && (expanding) && built.Division + 0.000001 < (if expanding then 0.04 else 0.02);
+gene make_DivisionAnchor: DivisionAnchor = if need_Division && pool.DivisionAnchor < 0.001 then 0.5 else 0;
+gene make_DivisionMotor: DivisionMotor = if need_Division && pool.DivisionMotor < 0.001 then 1 else 0;
+gene make_DivisionConstrictor: DivisionConstrictor = if need_Division && pool.DivisionConstrictor < 0.001 then 1 else 0;
+assembly Division: constrict() {
+  DivisionAnchor: 0.004;
+  DivisionMotor: 0.008;
+  DivisionConstrictor: 0.008;
+  activity: if body.area + 0.000001 >= body.birth_area * 2 && energy > 100 then 1 else 0;
+}

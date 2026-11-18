@@ -1,9 +1,13 @@
 //! A bounded typed signal graph with explicit synchronous, per-cell registers.
 //! Expressions are pure: every read sees old memory; all writes commit together.
 use crate::body::{BodyControls, FAMILY_COUNT, MIN_ORGANELLE_MASS};
+use crate::cellular::{
+    AssemblyDef, AssemblyKind, CellularControls, CellularProgram, ProductDef, ProductKind,
+};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
+mod cellular;
 mod checkpoint;
 mod execution;
 mod source;
@@ -144,6 +148,9 @@ pub struct Inputs {
     pub object_pigment: f64,
     pub object_motion: [f64; 2],
     pub organelle: [OrganelleInput; FAMILY_COUNT],
+    /// Free product stocks and functional installed recipe masses, sampled before the tick.
+    pub products: Vec<f64>,
+    pub assemblies: Vec<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -168,6 +175,7 @@ pub struct Outputs {
     pub scan_width: f64,
     /// Opaque observation token; it never grants remote visibility or action.
     pub scan_target: Rc<str>,
+    pub cellular: Option<CellularControls>,
 }
 
 impl Default for Outputs {
@@ -189,6 +197,7 @@ impl Default for Outputs {
             scan_bearing: 0.0,
             scan_width: std::f64::consts::TAU,
             scan_target: Rc::from(""),
+            cellular: None,
         }
     }
 }
@@ -1546,6 +1555,8 @@ fn smooth_noise(seed: f64, phase: f64) -> f64 {
 enum Op {
     Constant(Value),
     Sensor(Sensor),
+    Pool(usize),
+    Built(usize),
     Register(Register),
     Populated(Register),
     Reference(usize),
@@ -1558,9 +1569,12 @@ enum Op {
 impl Op {
     fn children(&self) -> ([usize; 3], usize) {
         match *self {
-            Self::Constant(_) | Self::Sensor(_) | Self::Register(_) | Self::Populated(_) => {
-                ([0; 3], 0)
-            }
+            Self::Constant(_)
+            | Self::Sensor(_)
+            | Self::Pool(_)
+            | Self::Built(_)
+            | Self::Register(_)
+            | Self::Populated(_) => ([0; 3], 0),
             Self::Reference(a) | Self::Negate(a) | Self::Not(a) => ([a, 0, 0], 1),
             Self::Binary(_, a, b) => ([a, b, 0], 2),
             Self::Choose(a, b, c) => ([a, b, c], 3),
@@ -1582,6 +1596,12 @@ fn evaluate_operation(
     let value = match op {
         Op::Constant(value) => value.clone(),
         Op::Sensor(sensor) => sensor.read(inputs),
+        Op::Pool(index) => {
+            Value::Scalar(finite(inputs.products.get(*index).copied().unwrap_or(0.0)).max(0.0))
+        }
+        Op::Built(index) => {
+            Value::Scalar(finite(inputs.assemblies.get(*index).copied().unwrap_or(0.0)).max(0.0))
+        }
         Op::Register(key) => memory.read(*key),
         Op::Populated(key) => Value::Boolean(memory.entries.contains_key(key)),
         Op::Reference(i) => values[*i].clone(),
@@ -1799,7 +1819,8 @@ pub fn language_schema_json() -> String {
         })
         .collect::<Vec<_>>()
         .join(",");
-    format!("{{\"version\":3,\"signals\":[{signals}],\"outputs\":[{outputs}],\"maxNodes\":{MAX_NODES},\"maxSourceBytes\":{MAX_SOURCE_BYTES},\"registersPerType\":{REGISTER_COUNT}}}")
+    let cellular = cellular::schema_json();
+    format!("{{\"version\":3,\"signals\":[{signals}],\"outputs\":[{outputs}],\"maxNodes\":{MAX_NODES},\"maxSourceBytes\":{MAX_SOURCE_BYTES},\"registersPerType\":{REGISTER_COUNT},\"cellular\":{cellular}}}")
 }
 #[derive(Debug, Clone)]
 pub struct Program {
@@ -1809,6 +1830,7 @@ pub struct Program {
     writes: Vec<WriteRule>,
     // Derived from the immutable authored graph, never written to checkpoints.
     execution: Box<ExecutionPlan>,
+    cellular: Option<Box<cellular::CellularGraph>>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
@@ -1817,6 +1839,8 @@ pub enum MutationKind {
     Constant = 1,
     Expression = 2,
     Reference = 3,
+    GeneSilence = 4,
+    GeneDuplicate = 5,
 }
 #[derive(Debug, Clone)]
 pub struct Mutation {
@@ -1939,13 +1963,14 @@ impl Program {
         output_roots: [Option<usize>; OUTPUT_COUNT],
         writes: Vec<WriteRule>,
     ) -> Self {
-        let execution = ExecutionPlan::compile(&nodes, &output_roots, &writes);
+        let execution = ExecutionPlan::compile(&nodes, &output_roots, &writes, &[]);
         Self {
             nodes,
             bindings,
             output_roots,
             writes,
             execution,
+            cellular: None,
         }
     }
 
@@ -2028,6 +2053,10 @@ impl Program {
                 })
                 .sum::<usize>()
             + self.execution.allocated_bytes
+            + self
+                .cellular
+                .as_ref()
+                .map_or(0, |cellular| cellular.allocated_bytes())
     }
 
     /// Runtime-only storage, including the pointer added to Program itself.
@@ -2035,6 +2064,8 @@ impl Program {
     /// live registry charges both that estimate and the derived plan.
     pub(crate) fn derived_execution_bytes(&self) -> usize {
         std::mem::size_of::<Box<ExecutionPlan>>() + self.execution.allocated_bytes
+            // Keep the old authored byte budgets stable for legacy saves.
+            + std::mem::size_of::<Option<Box<cellular::CellularGraph>>>()
     }
 
     /// Describe the compiler's graph without evaluating it or changing memory.
@@ -2046,7 +2077,10 @@ impl Program {
         for binding in &self.bindings {
             bindings[binding.node].push(&binding.name);
         }
-        let mut json = String::from("{\"version\":1,\"nodes\":[");
+        let mut json = format!(
+            "{{\"version\":1,\"mode\":{},\"nodes\":[",
+            quote(self.mode())
+        );
         for (id, node) in self.nodes.iter().enumerate() {
             if id > 0 {
                 json.push(',');
@@ -2054,6 +2088,14 @@ impl Program {
             let (kind, label) = match &node.op {
                 Op::Constant(value) => ("constant", value.source()),
                 Op::Sensor(sensor) => ("sensor", sensor.name().to_owned()),
+                Op::Pool(index) => (
+                    "sensor",
+                    format!("pool.{}", self.cellular().unwrap().products[*index].name),
+                ),
+                Op::Built(index) => (
+                    "sensor",
+                    format!("built.{}", self.cellular().unwrap().assemblies[*index].name),
+                ),
                 Op::Register(register) => ("register", register.name()),
                 Op::Populated(register) => ("populated", format!("populated({})", register.name())),
                 Op::Reference(target) => (
@@ -2087,7 +2129,12 @@ impl Program {
             ));
         }
         json.push_str("],\"roots\":[");
-        for (index, value) in self.output_indices().iter().enumerate() {
+        for (index, value) in self
+            .output_indices()
+            .iter()
+            .enumerate()
+            .filter(|_| self.cellular.is_none())
+        {
             if index > 0 {
                 json.push(',');
             }
@@ -2103,6 +2150,9 @@ impl Program {
                 "{{\"id\":{},\"kind\":\"output\",\"name\":{},\"type\":{},\"value\":{value_json},\"guard\":null,\"default\":{default_json}}}",
                 quote(&format!("output:{name}")), quote(name), quote(ty.label()),
             ));
+        }
+        if let Some(cellular) = &self.cellular {
+            json.push_str(&cellular.graph_roots_json());
         }
         for rule in &self.writes {
             let name = rule.register.name();
@@ -2136,7 +2186,7 @@ impl Program {
     pub fn evaluate_with_scratch(&self, inputs: &Inputs, values: &mut Vec<Value>) -> Outputs {
         self.execution
             .evaluate(inputs, &Registers::default(), values);
-        Self::outputs_for(&self.execution.output_roots, values)
+        self.evaluated_outputs(values)
     }
     pub fn evaluate_cell(
         &self,
@@ -2145,7 +2195,7 @@ impl Program {
         scratch: &mut EvalScratch,
     ) -> Outputs {
         self.execution.evaluate(inputs, memory, &mut scratch.values);
-        let result = Self::outputs_for(&self.execution.output_roots, &scratch.values);
+        let result = self.evaluated_outputs(&scratch.values);
         Self::commit_writes(&self.execution.writes, memory, &scratch.values);
         result
     }
@@ -2177,7 +2227,9 @@ impl Program {
         // reserve() is relative to len (now zero), not to the existing capacity.
         values.reserve(self.nodes.len());
         for node in &self.nodes {
-            values.push(evaluate_operation(&node.op, node.ty, inputs, memory, values));
+            values.push(evaluate_operation(
+                &node.op, node.ty, inputs, memory, values,
+            ));
         }
     }
     fn output_value(&self, index: usize, values: &[Value]) -> Value {
@@ -2228,6 +2280,7 @@ impl Program {
             scan_bearing: number(SCAN_OUTPUT_START),
             scan_width: number(SCAN_OUTPUT_START + 1),
             scan_target,
+            cellular: None,
         }
     }
     fn output_indices(&self) -> [Option<usize>; OUTPUT_COUNT] {
@@ -2236,6 +2289,9 @@ impl Program {
     fn reachable(&self) -> Vec<bool> {
         let mut reached = vec![false; self.nodes.len()];
         let mut stack: Vec<_> = self.output_indices().into_iter().flatten().collect();
+        if let Some(cellular) = &self.cellular {
+            stack.extend(cellular.roots());
+        }
         for w in &self.writes {
             stack.extend(w.value);
             stack.extend(w.guard);
@@ -2280,17 +2336,36 @@ impl Program {
         let current = self.reference_root(index);
         let mut options = Vec::new();
         for s in Sensor::ALL {
-            if s.ty() == node.ty && self.nodes[current].op != Op::Sensor(s) {
+            if s.ty() == node.ty
+                && self.nodes[current].op != Op::Sensor(s)
+                && (self.cellular.is_none() || s.cellular_allowed())
+            {
                 options.push(Op::Sensor(s));
             }
         }
-        for id in 1..=REGISTER_COUNT {
+        for id in 1..=if self.cellular.is_some() {
+            0
+        } else {
+            REGISTER_COUNT
+        } {
             let op = Op::Register(Register {
                 ty: node.ty,
                 index: id as u16,
             });
             if self.nodes[current].op != op {
                 options.push(op);
+            }
+        }
+        if node.ty == Type::Number {
+            if let Some(cellular) = self.cellular() {
+                for op in (0..cellular.products.len())
+                    .map(Op::Pool)
+                    .chain((0..cellular.assemblies.len()).map(Op::Built))
+                {
+                    if self.nodes[current].op != op {
+                        options.push(op);
+                    }
+                }
             }
         }
         if let Op::Populated(key) = node.op {
@@ -2315,6 +2390,9 @@ impl Program {
     }
     #[cfg(test)]
     fn to_source(&self) -> Option<String> {
+        if self.cellular.is_some() {
+            return None;
+        }
         if self.output_roots[3].is_none() {
             let mut p = self.clone();
             p.output_roots[3] = Some(p.nodes.len());
@@ -2373,6 +2451,7 @@ impl Program {
                     (text, tokens, nodes)
                 }
                 Op::Sensor(s) => (s.name().to_owned(), 1, 1),
+                Op::Pool(_) | Op::Built(_) => unreachable!(),
                 Op::Register(r) => (r.name(), 1, 1),
                 Op::Populated(r) => (format!("populated({})", r.name()), 4, 1),
                 Op::Negate(a) => (format!("-{}", name(*a)), 2, 2),
@@ -2496,6 +2575,9 @@ enum Kind {
     Slash,
     LeftParen,
     RightParen,
+    LeftBrace,
+    RightBrace,
+    Colon,
     Comma,
     Semicolon,
     Assign,
@@ -2720,6 +2802,9 @@ fn lex(source: &str) -> Result<Vec<Token>, CompileError> {
                 b'/' => Kind::Slash,
                 b'(' => Kind::LeftParen,
                 b')' => Kind::RightParen,
+                b'{' => Kind::LeftBrace,
+                b'}' => Kind::RightBrace,
+                b':' => Kind::Colon,
                 b',' => Kind::Comma,
                 b';' => Kind::Semicolon,
                 b'=' if bytes.get(position) == Some(&b'=') => {
@@ -2785,6 +2870,10 @@ struct Parser {
     binding_locations: Vec<Location>,
     node_locations: Vec<source::NodeLocation>,
     write_locations: Vec<Location>,
+    cellular_mode: bool,
+    product_names: HashMap<String, usize>,
+    assembly_names: HashMap<String, usize>,
+    gene_locations: Vec<cellular::GeneLocation>,
 }
 impl Parser {
     fn new(tokens: Vec<Token>) -> Self {
@@ -2797,6 +2886,10 @@ impl Parser {
             binding_locations: Vec::new(),
             node_locations: Vec::new(),
             write_locations: Vec::new(),
+            cellular_mode: false,
+            product_names: HashMap::new(),
+            assembly_names: HashMap::new(),
+            gene_locations: Vec::new(),
         }
     }
     fn peek(&self) -> &Token {
@@ -2888,6 +2981,9 @@ impl Parser {
         })
     }
     fn program(&mut self) -> Result<Program, CompileError> {
+        if self.peek().kind == Kind::Name("cellular".to_string()) {
+            return self.cellular_program();
+        }
         let mut outputs = [None; OUTPUT_NAMES.len()];
         let mut writes = Vec::new();
         let (mut assigned, mut cleared) = (HashSet::new(), HashSet::new());
@@ -3115,13 +3211,33 @@ impl Parser {
             Kind::Name(name) => {
                 if self.peek().kind == Kind::LeftParen {
                     self.call(&name, location, depth + 1)?
+                } else if self.cellular_mode && name.starts_with("pool.") {
+                    let index = self.product_names.get(&name[5..]).copied().ok_or_else(|| {
+                        location.error(format!("unknown product stock '{name}'."))
+                    })?;
+                    self.add(Op::Pool(index), Type::Number, location)?
+                } else if self.cellular_mode && name.starts_with("built.") {
+                    let index = self
+                        .assembly_names
+                        .get(&name[6..])
+                        .copied()
+                        .ok_or_else(|| {
+                            location.error(format!("unknown installed assembly '{name}'."))
+                        })?;
+                    self.add(Op::Built(index), Type::Number, location)?
                 } else if let Some(register) = Register::parse(&name) {
+                    if self.cellular_mode {
+                        return Err(location.error("cellular genes use product stocks for persistent state; registers are unavailable."));
+                    }
                     self.add(Op::Register(register), register.ty, location)?
                 } else if Register::reserved(&name) {
                     return Err(Self::register(&name, location).unwrap_err());
                 } else if let Some(&target) = self.bindings.get(&name) {
                     self.add(Op::Reference(target), self.nodes[target].ty, location)?
                 } else if let Some((sensor, ty)) = Sensor::lookup(&name) {
+                    if self.cellular_mode && !sensor.cellular_allowed() {
+                        return Err(location.error(format!("'{name}' is not a cellular measurement; read named pool.* or built.* stocks and local sensors.")));
+                    }
                     self.add(Op::Sensor(sensor), ty, location)?
                 } else {
                     return Err(location.error(format!(
@@ -3176,6 +3292,9 @@ impl Parser {
         depth: usize,
     ) -> Result<usize, CompileError> {
         if name == "populated" {
+            if self.cellular_mode {
+                return Err(location.error("cellular genes use product stocks for persistent state; populated() is unavailable."));
+            }
             self.expect(Kind::LeftParen, "'('")?;
             let token = self.take();
             let Kind::Name(name) = token.kind else {
@@ -3387,7 +3506,7 @@ mod tests {
         )
         .unwrap();
         let graph = program.graph_json();
-        assert!(graph.starts_with("{\"version\":1,\"nodes\":["));
+        assert!(graph.starts_with("{\"version\":1,\"mode\":\"legacy\",\"nodes\":["));
         assert_eq!(graph.matches("\"reachable\":").count(), 14);
         assert_eq!(graph.matches("\"kind\":\"output\"").count(), OUTPUT_COUNT);
         assert!(graph.contains(r#"{"id":0,"kind":"sensor","type":"scalar","label":"energy","inputs":[],"bindings":["sensor"],"reachable":true}"#));
@@ -3862,13 +3981,16 @@ mod tests {
         assert!(schema.contains(
             "\"name\":\"scan.target\",\"type\":\"string\",\"required\":false,\"default\":\"\""
         ));
+        let legacy_catalog = schema.split(",\"cellular\":").next().unwrap();
         for name in Sensor::ALL
             .into_iter()
             .map(|s| s.name())
             .chain(OUTPUT_NAMES)
         {
             assert_eq!(
-                schema.matches(&format!("\"name\":{}", quote(name))).count(),
+                legacy_catalog
+                    .matches(&format!("\"name\":{}", quote(name)))
+                    .count(),
                 1
             );
         }
@@ -4125,6 +4247,7 @@ mod tests {
                     }
                 }
                 Op::Sensor(sensor) => assert_eq!(node.ty, sensor.ty()),
+                Op::Pool(_) | Op::Built(_) => assert_eq!(node.ty, Type::Number),
                 Op::Register(register) => assert_eq!(register.ty, node.ty),
                 Op::Populated(_) => assert_eq!(node.ty, Type::Bool),
                 Op::Reference(child) => assert_eq!(node.ty, ty(*child)),

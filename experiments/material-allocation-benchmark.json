@@ -1,0 +1,4 @@
+{"scope":"native request construction and material allocation; excludes the rest of the simulation","samples":7,"iterationsPerSample":20000,"workloads":[
+{"productPools":16,"requests":66,"oldDenseNsMedian":14300.8,"sparseNsMedian":2957.9,"speedup":4.835,"oldHeapAllocationsPerCall":74,"sparseHeapAllocationsAfterWarmup":0,"bitExact":true}
+,{"productPools":64,"requests":258,"oldDenseNsMedian":110229.8,"sparseNsMedian":11168.2,"speedup":9.870,"oldHeapAllocationsPerCall":265,"sparseHeapAllocationsAfterWarmup":0,"bitExact":true}
+]}

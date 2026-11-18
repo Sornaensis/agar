@@ -14,6 +14,7 @@
     "test:wasm": "node scripts/check-wasm.mjs",
     "test:graph": "node scripts/check-genome-network.mjs",
     "test:language": "node scripts/check-genome-language.mjs",
+    "test:cellular-ui": "node scripts/check-cellular-ui.mjs",
     "test:inspection": "node scripts/check-program-inspection.mjs",
     "preview": "vite preview --host 0.0.0.0",
     "test:storage": "node scripts/check-storage.mjs",
@@ -22,7 +23,8 @@
     "test:food-chain": "node scripts/check-food-chain.mjs",
     "test:navigation": "node scripts/check-preset-navigation.mjs",
     "bench:simulation": "node --no-liftoff scripts/benchmark-simulation.mjs",
-    "test:worker": "node scripts/check-worker.mjs"
+    "test:worker": "node scripts/check-worker.mjs",
+    "test:cellular": "node scripts/check-cellular.mjs"
   },
   "devDependencies": {
     "typescript": "5.9.3",

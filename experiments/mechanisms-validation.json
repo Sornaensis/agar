@@ -1,0 +1,100 @@
+{
+  "wasmSha256": "cbb776a40980d54d6324c16063ab14f4ab68226275ccf8dca1b6db35666cb0f5",
+  "wasmSizeBytes": 685346,
+  "abi": 10,
+  "checkpointVersion": 6,
+  "languageVersion": 3,
+  "productionWasm": "docs/assets/agar_engine-CZ0E5Vzh.wasm",
+  "productionWasmByteIdentical": true,
+  "checksPassedOnFinalArtifact": [
+    "TypeScript",
+    "build:pages",
+    "221 native Rust tests",
+    "test:cellular-ui",
+    "test:worker",
+    "browser code and physical inventory inspection"
+  ],
+  "cellularCoverage": {
+    "presets": 8,
+    "importableExamples": 6,
+    "paidDevelopment": true,
+    "frozenInspection": true,
+    "materialConservation": true,
+    "energyConservation": true,
+    "wholeInstanceInheritance": true,
+    "exactCheckpointContinuationTicks": 90,
+    "geneMutationReplay": true,
+    "wasmSha256": "c77eb6492bcfc954f8f4a665954a00095bf8576cb5c1e4add4ca43393a9946c6"
+  },
+  "earlierIntegrationChecks": {
+    "checksPassed": [
+      "test:cellular-ui",
+      "test:language",
+      "test:graph"
+    ],
+    "wasmSizeBytes": 685219,
+    "note": "Passed before the mixed legacy/primitive piercing extraction correction. Language schema and graph code are unchanged. The validated physics artifact rechecked all current presets after that correction; the final change affects digestive presentation only.",
+    "mechanismDocumentationRecipesCompiled": 24,
+    "presetGraphsValidated": 24
+  },
+  "conditions": {
+    "foundersPerRun": 1,
+    "seed": 42,
+    "ambientLight": 0.85,
+    "ambientTemperature": 0.5,
+    "initialNutrientsPerPatch": 3,
+    "currentStrength": 0,
+    "mutationRate": 0,
+    "suppliedParticlesPerSecondForNonPhototrophs": 4,
+    "maximumDevelopmentSeconds": 150
+  },
+  "firstDivisionSeconds": {
+    "Forager": 104.07,
+    "Drifter": 108.63,
+    "Conserver": 104.27,
+    "Giant": 131.93,
+    "Rememberer": 106.47,
+    "Phototroph": 56.83,
+    "Predator": 124.03,
+    "Mixotroph": 64.33
+  },
+  "presetCorrections": [
+    "Exudate enzyme mass increased to 0.04 to supply development energy.",
+    "New-program product buffers reduced to 0.001 to reduce unfinished surplus machinery.",
+    "Predator weapons and Mixotroph movement/sensing wait for body area above 1.2, leaving room for growth machinery.",
+    "Mixotroph auxiliary tissue and waste enzymes use mass 0.01 each, leaving room for replicated material."
+  ],
+  "compatibility": "Eight previous cellular-family sources remain byte-identical in CELLULAR_FAMILY_PRESETS; legacy PRESETS remain available as LEGACY_PRESETS.",
+  "limits": "Controlled supplied-resource development tests establish one funded reproductive cycle and exact continuation. They do not establish long-term ecological coexistence or a whole-simulation performance improvement.",
+  "compatibilitySampledStates": 728,
+  "validatedPhysicsArtifact": {
+    "wasmSha256": "c77eb6492bcfc954f8f4a665954a00095bf8576cb5c1e4add4ca43393a9946c6",
+    "wasmSizeBytes": 685346,
+    "checksPassed": [
+      "test:cellular",
+      "TypeScript",
+      "build:pages",
+      "test:wasm",
+      "engine artifact and loader",
+      "test:worker",
+      "test:session",
+      "test:storage",
+      "test:inspection",
+      "old v5 cellular WASM compatibility"
+    ],
+    "note": "Lifecycle timings, conservation, inheritance and exact continuation were measured on this artifact. The final change adds digestive capability to presentation only; physical simulation is unchanged."
+  },
+  "presentationChange": "Completed substrate-specific digestion machinery is represented in the visual digestive capability summary after physical capacities are computed. This corrects the feeding label without changing simulation inputs or dynamics.",
+  "nativeTestsPassed": 221,
+  "browserScreenshots": [
+    "screenshots/cellular-editor.jpg",
+    "screenshots/cellular-body.jpg"
+  ],
+  "materialAllocation": {
+    "report": "experiments/material-allocation-benchmark.json",
+    "bitExactReferenceWorkloads": 192,
+    "commonResourcesPerRequest": 5,
+    "maximumAdditionalStockCostsPerRequest": 1,
+    "warmAllocatorHeapAllocationsPerCall": 0
+  }
+}

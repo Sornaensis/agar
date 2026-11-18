@@ -10,6 +10,7 @@ import {
 import { createDialog, escapeHtml, icon, inputNumber, setDialogError } from './ui';
 import { ProgramEditor } from './program-editor';
 import { PRESETS } from './presets';
+import { isCellularSource } from './genome-language';
 
 export interface CatalogCallbacks {
   compiler: () => Promise<Engine>;
@@ -87,7 +88,7 @@ export class CatalogUI {
           <button type="button" class="button subtle" data-graph>${icon('graph')}Graph</button>
           ${editable ? `<button type="button" class="button subtle" data-check title="Check types (Ctrl/Cmd+Enter)">${icon('check')}Check</button>` : ''}
         </div>
-        ${editable ? `<details class="mutation-menu"><summary class="button subtle">${icon('dna')}Mutate</summary><div class="mutation-options">${['Any change','Constants','Expressions','References'].map((label, kind) => `<button type="button" data-mutation-kind="${kind}">${label}</button>`).join('')}</div></details>` : ''}
+        ${editable ? `<details class="mutation-menu"><summary class="button subtle">${icon('dna')}Mutate</summary><div class="mutation-options">${['Any change','Constants','Expressions','References','Silence a gene','Duplicate a gene'].map((label, kind) => `<button type="button" data-mutation-kind="${kind}"${kind >= 4 && !isCellularSource(source) ? ' hidden' : ''}>${label}</button>`).join('')}</div></details>` : ''}
       </div>
       <div id="genome-source" class="program-editor-host"></div>
       <footer class="editor-footer dialog-actions">
@@ -105,6 +106,7 @@ export class CatalogUI {
       const busy = dialog.getAttribute('aria-busy') === 'true';
       query<HTMLButtonElement>(dialog, '[data-undo]').disabled = busy || !editor.canUndo;
       query<HTMLButtonElement>(dialog, '[data-redo]').disabled = busy || !editor.canRedo;
+      dialog.querySelectorAll<HTMLButtonElement>('[data-mutation-kind="4"],[data-mutation-kind="5"]').forEach(button => { button.hidden = !isCellularSource(editor.value); });
     };
     const run = operations(dialog, updateActions);
     const withEditor = (task: () => Promise<void>): void => run(async () => {
