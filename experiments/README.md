@@ -2,7 +2,24 @@
 
 These are deterministic tests of the simulator, not a biological validation or a guarantee of stable coexistence. Each measurement JSON preserves its engine hash, environment, complete authored genomes, initialization, mutation rate and sampled results.
 
-## Current cellular food chain — ABI 10, checkpoint 7
+## Gas exchange — ABI 12, checkpoint 9
+
+`gas-exchange-seed42.json` records 600 simulated seconds with the current gas
+model and authored genomes, using the unchanged mixed population counts and
+the built-in open Sunlit pond. No organic food is supplied. The report includes
+carbon and oxygen inventories, external exchange, fixation, respiration and
+decay alongside the existing mineral and energy checks. All four accounting
+checks pass at every sample.
+
+This run ends with 285 Phototrophs, no Foragers, two Mixotrophs and one Predator.
+A Predator descendant is observed during the run; no Forager descendant is
+observed. The consumer-persistence gate therefore remains unsatisfied, as it
+was in the earlier records below. This is a measured ecosystem limitation,
+not evidence of stable coexistence. Separate supplied-habitat lifecycle checks
+verify that all eight current genomes can build, feed and reproduce under the
+new chemistry.
+
+## Earlier cellular food chain — ABI 10, checkpoint 7
 
 The mixed-ecosystem regression uses the actual current built-in sources and the
 catalog's unmodified Sunlit pond environment: 72 Phototrophs, 6 Foragers,

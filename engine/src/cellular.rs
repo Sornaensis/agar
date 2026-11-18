@@ -99,23 +99,23 @@ pub enum MechanismKind {
     LightHarvest, MineralImport, ParticleCapture, Engulf,
     DigestExudate, DigestTissue, DigestWaste, Propulsion, Pierce, Shield,
     Repair, SenseLight, SenseHeat, SenseChemical, SenseContact, SenseOptical,
-    Grow, Replicate, Constrict, Recycle,
+    Grow, Replicate, Constrict, Recycle, RespireOxygen,
 }
 impl MechanismKind {
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 26] = [
         Self::Support, Self::Translation, Self::EnergyStorage, Self::MineralStorage,
         Self::FoodStorage, Self::LightHarvest, Self::MineralImport, Self::ParticleCapture,
         Self::Engulf, Self::DigestExudate, Self::DigestTissue, Self::DigestWaste,
         Self::Propulsion, Self::Pierce, Self::Shield, Self::Repair, Self::SenseLight,
         Self::SenseHeat, Self::SenseChemical, Self::SenseContact, Self::SenseOptical,
-        Self::Grow, Self::Replicate, Self::Constrict, Self::Recycle,
+        Self::Grow, Self::Replicate, Self::Constrict, Self::Recycle, Self::RespireOxygen,
     ];
     pub fn name(self) -> &'static str {
         ["support()", "translate()", "store(energy)", "store(mineral)", "store(food)",
          "harvest(light)", "import(mineral)", "import(particle)", "engulf()",
          "digest(exudate)", "digest(tissue)", "digest(waste)", "propel()", "pierce()",
          "shield()", "repair()", "sense(light)", "sense(heat)", "sense(chemical)",
-         "sense(contact)", "sense(optical)", "grow()", "replicate()", "constrict()", "recycle()"]
+         "sense(contact)", "sense(optical)", "grow()", "replicate()", "constrict()", "recycle()", "respire(oxygen)"]
             [self as usize]
     }
     pub fn from_name(name: &str) -> Option<Self> {
@@ -134,7 +134,7 @@ impl MechanismKind {
          "Capacity to retain usable energy; does not produce energy.",
          "Capacity to retain free minerals; does not import minerals.",
          "A food compartment; does not capture or digest food.",
-         "Converts locally available light to energy, sharing the habitat photon supply.",
+         "Fixes inorganic carbon into organic reserves and oxygen using shared local light.",
          "Imports dissolved minerals using energy; requires available mineral storage.",
          "Captures nearby organic particles into available food storage; no digestion.",
          "Engulfs sufficiently small, damaged cells into available food storage.",
@@ -153,7 +153,8 @@ impl MechanismKind {
          "Pays for additional envelope area; structural support must already exist.",
          "Pays for a material-bearing genome copy over time.",
          "Performs paid constriction after replication and feasible division geometry.",
-         "Dismantles selected machinery over time, recovering original ingredients with paid work."]
+         "Dismantles selected machinery over time, recovering original ingredients with paid work.",
+         "Consumes organic carbon and oxygen to make usable energy and inorganic carbon."]
             [self as usize]
     }
     pub fn required_roles(self) -> &'static [ProductKind] {
@@ -163,6 +164,7 @@ impl MechanismKind {
             Self::Translation => &[Scaffold, Enzyme],
             Self::EnergyStorage | Self::MineralStorage | Self::FoodStorage => &[Membrane],
             Self::LightHarvest => &[Anchor, Pigment, Enzyme],
+            Self::RespireOxygen => &[Enzyme, Membrane],
             Self::MineralImport => &[Anchor, Transporter],
             Self::ParticleCapture => &[Anchor, Motor],
             Self::Engulf => &[Anchor, Motor, Membrane],
@@ -180,17 +182,17 @@ impl MechanismKind {
     pub fn minimum_mass(self) -> f64 {
         [0.04, 0.02, 0.02, 0.02, 0.04, 0.04, 0.015, 0.015, 0.025,
          0.01, 0.01, 0.01, 0.025, 0.025, 0.02, 0.025, 0.01, 0.01,
-         0.015, 0.01, 0.02, 0.02, 0.02, 0.02, 0.02][self as usize]
+         0.015, 0.01, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02][self as usize]
     }
     fn internal_footprint(self) -> f64 {
         [1.0, 1.0, 2.4, 2.4, 2.5, 1.35, 0.7, 0.8, 0.8,
          1.0, 1.0, 1.0, 0.65, 0.8, 0.35, 1.0, 0.8, 0.8,
-         1.0, 0.7, 1.3, 1.0, 1.0, 1.0, 1.0][self as usize]
+         1.0, 0.7, 1.3, 1.0, 1.0, 1.0, 1.0, 1.2][self as usize]
     }
     fn surface_footprint(self) -> f64 {
         [0.0, 0.0, 0.0, 0.0, 0.0, 0.55, 1.8, 2.2, 2.2,
          0.0, 0.0, 0.0, 1.5, 2.0, 3.0, 0.0, 1.2, 1.1,
-         1.5, 1.1, 2.0, 1.5, 0.0, 1.5, 0.0][self as usize]
+         1.5, 1.1, 2.0, 1.5, 0.0, 1.5, 0.0, 0.0][self as usize]
     }
 }
 
@@ -776,6 +778,7 @@ pub struct CellularActions {
     pub independent_engulf: f64,
     pub bite_extraction_fraction: f64,
     pub light_harvest: f64,
+    pub respiration: f64,
     pub substrate_digestion: [f64; 3],
     pub bite: f64,
     pub defend: f64,
@@ -804,6 +807,7 @@ impl CellularState {
                 }
                 Translation => cap.assembly += 0.55 * active,
                 LightHarvest => cap.light_harvest += 55.0 * mass,
+                RespireOxygen => cap.respiration += 60.0 * active,
                 MineralImport => cap.uptake += 0.8 * mass,
                 ParticleCapture => cap.capture += mass,
                 Engulf => { cap.phagocytosis += mass; cap.independent_engulf += mass; }
@@ -1136,6 +1140,7 @@ impl CellularState {
                 18 => AssemblyKind::Constrictor,
                 value @ 19..=42 if version >= 6 => AssemblyKind::Mechanism(MechanismKind::ALL[(value - 19) as usize]),
                 43 if version >= 7 => AssemblyKind::Mechanism(MechanismKind::Recycle),
+                44 if version >= 9 => AssemblyKind::Mechanism(MechanismKind::RespireOxygen),
                 value => AssemblyKind::Organelle(
                     OrganelleKind::from_index(value as usize)
                         .ok_or("Invalid simulation save: unknown assembly family.")?,
@@ -1314,8 +1319,8 @@ impl Body {
         let area = self.area;
         let state = self.cellular.get_or_insert_with(CellularState::default);
         let mut active = [0.0; FAMILY_COUNT];
-        let mut mechanism_total = [0.0; 25];
-        let mut mechanism_active = [0.0; 25];
+        let mut mechanism_total = [0.0; 26];
+        let mut mechanism_active = [0.0; 26];
         let mut actions = CellularActions {
             scan_width: std::f64::consts::TAU,
             digest: [1.0; 3],
@@ -1372,6 +1377,7 @@ impl Body {
         };
         actions.photosynthesize = ratio(OrganelleKind::Photosynthetic);
         actions.light_harvest = 55.0 * mechanism_active[MechanismKind::LightHarvest as usize];
+        actions.respiration = 60.0 * mechanism_active[MechanismKind::RespireOxygen as usize];
         actions.substrate_digestion = [MechanismKind::DigestExudate, MechanismKind::DigestTissue, MechanismKind::DigestWaste]
             .map(|kind| 65.0 * mechanism_active[kind as usize]);
         actions.absorb = combined_ratio(OrganelleKind::Transporter, MechanismKind::MineralImport);

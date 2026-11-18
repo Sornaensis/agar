@@ -7,9 +7,9 @@ export type SourceConfig = EnvironmentConfig['sources'][number];
 export type BarrierConfig = EnvironmentConfig['barriers'][number];
 export type EnvironmentTool = 'select' | `source:${SourceKind}` | 'barrier:fixed' | 'barrier:floating';
 export type ObjectSelection = { kind: 'source' | 'barrier'; id: number };
-export const SOURCE_NAMES = ['Light', 'Heat / cooling', 'Vortex', 'Nutrient spring', 'Nutrient absorber', 'Directional jet', 'Current band', 'Radial flow'] as const;
-export const SOURCE_ICONS = ['light', 'heat', 'flow', 'plus', 'download', 'arrow', 'flow', 'flow'] as const;
-export const SOURCE_FIELDS: FieldOverlay[] = ['light', 'heat', 'flow', 'nutrients', 'nutrients', 'flow', 'flow', 'flow'];
+export const SOURCE_NAMES = ['Light', 'Heat / cooling', 'Vortex', 'Nutrient spring', 'Nutrient absorber', 'Directional jet', 'Current band', 'Radial flow', 'Oxygen emitter', 'Oxygen absorber', 'Carbon emitter', 'Carbon absorber', 'Aerator'] as const;
+export const SOURCE_ICONS = ['light', 'heat', 'flow', 'plus', 'download', 'arrow', 'flow', 'flow', 'plus', 'download', 'plus', 'download', 'flow'] as const;
+export const SOURCE_FIELDS: FieldOverlay[] = ['light', 'heat', 'flow', 'nutrients', 'nutrients', 'flow', 'flow', 'flow', 'oxygen', 'oxygen', 'carbon', 'carbon', 'oxygen'];
 export const SOURCE_HINTS = [
   'Illuminates the surrounding water. Strength 0 switches it off.',
   'Positive strength heats; negative strength cools.',
@@ -19,8 +19,13 @@ export const SOURCE_HINTS = [
   'A local stream along its direction. Negative strength reverses the flow.',
   'A long, narrow current. Combine parallel bands with opposite strengths.',
   'Positive strength pushes water outward; negative strength draws it inward.',
+  'Adds dissolved oxygen. This external input is recorded in the oxygen budget.',
+  'Removes available dissolved oxygen. It cannot remove more than the water holds.',
+  'Adds dissolved inorganic carbon for carbon fixation. This pool includes effective CO₂ and bicarbonate availability.',
+  'Removes available dissolved inorganic carbon. Removed carbon is recorded separately.',
+  'Connects nearby water to the gas reservoir. Oxygen and inorganic carbon move toward their equilibrium concentrations, in either direction.',
 ] as const;
-export const sourceMinimum = (kind: SourceKind): number => [0, 3, 4].includes(kind) ? 0 : -1;
+export const sourceMinimum = (kind: SourceKind): number => [0, 3, 4].includes(kind) || kind >= 8 ? 0 : -1;
 export const defaultSource = (kind: SourceKind, x: number, y: number): SourceConfig => ({
   kind, x, y, strength: 0.7, radius: kind === 6 ? 90 : 200, angle: 0, length: kind === 6 ? 1000 : 600,
 });

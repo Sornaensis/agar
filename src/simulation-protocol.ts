@@ -21,6 +21,7 @@ export const ENGINE_METHODS = [
   'setFoodRate', 'setMutationRate', 'setEnvironment', 'setInitialNutrients', 'addNutrients',
   'addSource', 'removeSource', 'clearSources', 'getMemory', 'getCellEvaluation', 'languageSchema',
   'setWorldSize', 'updateSource', 'addBarrier', 'updateBarrier', 'removeBarrier', 'clearBarriers',
+  'setInitialGases', 'setGasExchange',
   'cellBody', 'mutate', 'getGenome', 'getGenomeGraph', 'tick', 'environment', 'renderSnapshot',
   'metricsSnapshot', 'cellSnapshot', 'summary', 'snapshot',
 ] as const;

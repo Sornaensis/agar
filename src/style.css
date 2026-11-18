@@ -869,6 +869,10 @@ kbd { padding: 2px 5px; border: 1px solid #505455; border-radius: 4px; font-size
 .environment-overlay-select select { width: 100%; min-height: 30px; padding: 5px 24px 5px 10px; font-size: 10px; color: #a6b5ba; background-color: #172024; }
 
 .source-fields input[aria-invalid="true"] { border-color: #cc8b7a; }
+.gas-boundary-field { grid-column: 1 / -1; }
+.gas-panel { padding: 20px 0; }
+.gas-panel > .muted, .metrics-secondary > .muted { font-size: 12px; line-height: 1.6; margin-top: 16px; }
+.gas-settings .gas-fields { margin-top: 15px; }
 /* Keep camera buttons reachable beside either inspector. */
 .player-stage:has(.cell-inspector:not([hidden])) .player-view-controls { left: 23px; right: auto; top: 80px; bottom: auto; }
 @media (min-width: 681px) and (max-width: 900px) {

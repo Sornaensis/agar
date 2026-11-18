@@ -1,0 +1,8 @@
+{
+  "source": "thrust=0;turn=0;divide=false;absorb=0;feed=0;",
+  "tick": 12,
+  "material": 685.5099999928484,
+  "materialIntroduced": 685.99,
+  "materialRemoved": 0.48000000715255825,
+  "genome": 1
+}

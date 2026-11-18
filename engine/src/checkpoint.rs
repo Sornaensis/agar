@@ -8,7 +8,7 @@ use crate::{
 
 pub(crate) const MAX_STATE_BYTES: usize = 128 * 1024 * 1024;
 const MAGIC: &[u8; 8] = b"CELLAR01";
-const VERSION: u32 = 8;
+const VERSION: u32 = 9;
 pub(crate) type Result<T> = std::result::Result<T, String>;
 
 pub(crate) fn ensure(ok: bool, message: &str) -> Result<()> {
@@ -212,8 +212,8 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
     let mut r = Reader::new(bytes);
     ensure(r.take(8)? == MAGIC, "unknown save format")?;
     let version = r.u32()?;
-    if !matches!(version, 3 | 4 | 5 | 6 | 7 | VERSION) {
-        return Err(format!("Unsupported simulation version {version}. Agar supports simulation saves 3 through 8. The saved simulation is preserved."));
+    if !matches!(version, 3 | 4 | 5 | 6 | 7 | 8 | VERSION) {
+        return Err(format!("Unsupported simulation version {version}. Agar supports simulation saves 3 through 9. The saved simulation is preserved."));
     }
     ensure(r.u32()? as usize == bytes.len(), "incorrect save length")?;
     ensure(r.u32()? == checksum(&bytes[20..]), "checksum mismatch")?;
@@ -340,6 +340,7 @@ mod tests {
             .unwrap();
         for c in &mut e.world.cells {
             for _ in 0..1000 {
+                let carbon_before = c.organic_carbon_total();
                 c.body.work(
                     1.0,
                     &crate::body::BodyControls::default(),
@@ -349,6 +350,7 @@ mod tests {
                     crate::simulation::DT,
                     2.0,
                 );
+                c.organic_carbon += carbon_before - c.organic_carbon_total();
                 if c.body.area >= 2.0 - 1e-10 {
                     break;
                 }
@@ -443,7 +445,7 @@ mod tests {
         let bytes = include_bytes!("../fixtures/execution-plan-v4.bin");
         let mut restored = restore(bytes).unwrap();
         let migrated_bytes = save(&restored).unwrap();
-        assert_eq!(u32::from_le_bytes(migrated_bytes[8..12].try_into().unwrap()), 8);
+        assert_eq!(u32::from_le_bytes(migrated_bytes[8..12].try_into().unwrap()), 9);
         assert_eq!(save(&restore(&migrated_bytes).unwrap()).unwrap(), migrated_bytes);
         let saved_budget = u32::from_le_bytes(bytes[32..36].try_into().unwrap()) as usize;
         let genome = &restored.genomes[0];
@@ -510,7 +512,7 @@ mod tests {
         let mut live = live_engine();
         let before = save(&live).unwrap();
         assert!(!live.restore_state(bytes));
-        assert!(live.error.contains("simulation saves 3 through 8"));
+        assert!(live.error.contains("simulation saves 3 through 9"));
         assert_eq!(save(&live).unwrap(), before);
         let mut version2 = before.clone();
         version2[8..12].copy_from_slice(&2u32.to_le_bytes());

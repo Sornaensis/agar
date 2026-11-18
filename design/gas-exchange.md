@@ -1,76 +1,89 @@
 # Gas exchange and material cycles
 
-This is the proposed next biology change, not behavior implemented by the environment editor update.
+Implemented in engine ABI 12 / checkpoint 9. This document describes the current model, its conservation rules, and its deliberate approximations.
 
-## What the simulator currently represents
+## Chemical stores and units
 
-`Environment` owns one conserved dissolved mineral field, temperature, instantaneous light, prescribed currents, and a nonconserved organic chemical cue. Organic particles separately hold energy and minerals, with distinct exudate, tissue, and waste processing. `World::photosynthesize_in` presently converts available light directly into usable energy and organic exudate; it does not consume inorganic carbon. `digest_in` supplies energy and minerals without requiring oxygen. Cellular products and structures consume a single material stock.
+Minerals remain the noncarbon construction resource. Two separate dissolved fields hold oxygen (O₂) and effective dissolved inorganic carbon (DIC). DIC is an available inorganic-carbon pool, not a calibrated measurement of free CO₂. Each physical 20 × 20 patch contains one abstract water-volume unit; field amounts therefore have the same numerical value as patch concentrations.
 
-Adding oxygen and carbon dioxide meters to those pathways would not create a carbon cycle. Photosynthesis must fix actual carbon, and respiration must transfer that carbon back to dissolved inorganic carbon. Mineral nutrients still have their own role. This distinction is central to conservation-based phytoplankton models [3].
-
-## Smallest useful chemical model
-
-Start with dissolved oxygen and a dissolved inorganic carbon pool alongside the current mineral field. Introduce organic carbon in cell reserves, physical products, bodies, gut contents, and particles. Keep usable energy separate from matter. The existing mineral field can remain an explicitly simplified noncarbon growth resource until nitrogen and phosphorus are represented separately.
-
-| Store | Role |
+| Store | Representation |
 | --- | --- |
-| Dissolved O2 | Oxidant available for aerobic respiration; produced by oxygenic photosynthesis |
-| Dissolved inorganic carbon | Carbon source for fixation and destination for respired carbon |
-| Organic carbon | Conserved carbon in reserves, bodies, products, gut contents, exudate, tissue, and waste |
-| Mineral nutrients | Noncarbon resources consumed in construction and returned by decomposition |
-| Usable energy | Paid metabolic work; neither carbon nor mineral mass |
+| Dissolved oxygen | Nonnegative amount in each water patch |
+| Dissolved inorganic carbon | Nonnegative amount in each water patch |
+| Internal gases | Finite O₂ and DIC amounts inside each organism |
+| Organic carbon reserves | Explicit amount available for respiration or construction |
+| Structural organic carbon | One carbon unit per unit of existing structural/product mass |
+| Food and gut carbon | Chemical substrate potential divided by 20 energy units per carbon unit |
+| Usable energy | ATP-like reserve used to pay for biological work |
+| Mineral nutrients | Separate conserved noncarbon material |
 
-Use internally consistent amount units and give every patch a defined water volume. Display concentrations as amount divided by volume. A normalized abstract simulation can use arbitrary consistent units; physical oxygen saturation values require a temperature scale, depth, and pressure assumptions. The current normalized temperature control alone is insufficient for calibrated mg/L chemistry.
+Food's legacy `energy` field now means chemical substrate potential. It is not immediately usable energy. ATP-like usable energy never turns into carbon when a cell dies or is eaten. Material in products, assemblies, frames, replication machinery and gut contents is counted once.
 
-Initially treat dissolved inorganic carbon as one effective available pool. Describe it honestly as an approximation. Real inorganic carbon includes dissolved CO2, bicarbonate, and carbonate; pH-dependent availability and buffering can follow after the simple carbon budget works. Do not silently label a total-inorganic-carbon pool as free CO2.
+## Reactions and physical machinery
 
-## Reactions belong to mechanisms
+The simplified balanced reactions are:
 
-Use typed reaction definitions associated with actual built machinery. The genome regulates the machinery through the existing products, recipes, and activity controls. No genome-name lookup or global phototroph/heterotroph flag should determine gas behavior.
+- Oxygenic fixation: inorganic C + light → organic C + O₂.
+- Aerobic respiration: organic C + O₂ → inorganic C + usable energy.
 
-For a simplified carbohydrate-like organic carbon unit, the reactions are:
+Water is an abundant implicit reservoir. One carbon unit and one oxygen unit participate in each reaction extent. Fixation stores 20 chemical-potential energy units per carbon; respiration releases 16 usable units, with the remainder dissipated. These are model parameters, not biochemical calibration.
 
-- Oxygenic photosynthesis: CO2 + H2O + light → CH2O + O2.
-- Aerobic respiration: CH2O + O2 → CO2 + H2O + usable energy + dissipated heat.
+`harvest(light)` and legacy photosynthetic organs fix carbon using shared local light, available internal DIC, built capacity and reserve space. They produce only the oxygen corresponding to actual fixation. A fixed 12% of newly fixed carbon is released as exudate; the rest enters organic reserves.
 
-Water is an explicit abundant reservoir in this first approximation; the formulas describe gross balanced chemistry, not all intermediate reactions. Carbon fixation is limited by local light, carbon supply, built reaction capacity, and reserve capacity. Respiration is limited by actual available organic carbon, oxygen, and respiratory machinery. Every reaction spends its complete set of substrates and produces only the matching outputs.
+`respire(oxygen)` requires both enzyme and membrane products. Built cores provide basal respiration toward a working reserve of 25% of usable-energy capacity; legacy metabolic complexes and explicitly constructed respiratory machinery can fill the larger store. Respiration is limited by organic carbon, internal oxygen, usable-energy storage and functional machinery. Activity regulates the explicit machine. Both phototrophs and heterotrophs respire; no genome name selects a metabolic behavior. A producer can therefore consume net oxygen in darkness.
 
-Phototrophs also respire. They can produce net oxygen in adequate light and consume net oxygen in darkness. The direction and size of their net gas flux must emerge from their simultaneous reaction rates. Aquatic oxygen concentrations reflect production, respiration, transport, and atmospheric exchange [1, 2].
+Digestion transfers accessible carbon and minerals from captured food into reserves. It does not grant a second energy reward. Refractory residues retain their carbon. Construction consumes organic carbon and minerals in a fixed quota; recycling returns the structural carbon it releases. Division partitions existing organic and internal-gas pools. Death and predation transfer actual carbon and release internal gases.
 
-Keep digestion separate from respiration. Digestion converts captured material into accessible substrates; respiration releases usable energy from those substrates. Existing `digest(tissue)`, `digest(exudate)`, and `digest(waste)` machinery can retain substrate-specific processing while a separately assembled respiratory mechanism determines aerobic energy yield. Food must not grant the same energy once during digestion and again during respiration.
+The retained background decay process is explicitly aerobic: it consumes dissolved oxygen, releases the same amount of inorganic carbon and returns associated minerals. Its reaction total is exposed separately from organism respiration. It stops when oxygen is unavailable, retaining unprocessed particle carbon. This is a simplified background decomposer process, not a population of modeled microbes.
 
-Do not let particles disappear through a hidden unlimited oxygen-consuming metabolism. Prefer explicit decomposers for biological recycling. If a background decay reaction is retained, expose and account for its substrates, products, rate, and gas demand. Abiotic fragmentation can change particle size or accessibility without destroying carbon.
+## Membrane exchange and transport
 
-## Exchange and transport
+O₂ and DIC cross membranes passively according to the external/internal concentration difference, finite permeability and cell surface size. Internal gas volume scales with body area. All organisms request from the same pre-exchange field; outward transfers are collected, and competing inward requests share available stock proportionally. No organism can spend oxygen or carbon already assigned to another.
 
-Use the current dimension-aware field grid and barrier topology. Store channels in separate contiguous arrays, share face-flow calculations, and reuse scratch buffers. Give each species its own diffusion coefficient and conservative fluxes. Avoid introducing per-organism whole-world scans.
+Water transport uses separate contiguous arrays for minerals, O₂ and DIC, with shared face velocities and reusable buffers. Diffusion and advection conserve each inventory. Full-depth barriers block the same faces as mineral transport. Resizing redistributes existing amounts without creating new matter. Currents move gases; they do not create them.
 
-Gas exchange across a cell membrane is a concentration-gradient flux with finite permeability and surface area. It should not require a newly invented pump for ordinary passive O2/CO2 diffusion. Optional transport machinery can alter permeability or support active carbon uptake. Internal gas pools make this boundary explicit; aggregate patch-level allocations ensure that overlapping cells cannot each claim the same external oxygen or carbon.
+The tick order is explicit: environment transport and external exchange; background aerobic decay; observation and regulation; membrane exchange; respiration; movement and maintenance; digestion and mineral uptake; collisions and food capture; fixation; predation; construction and lifecycle transfers. Captured food is digested on a later tick, and newly digested or fixed carbon becomes available to respiration on the following tick. Competing requests within a phase share the same inventory.
 
-Offer two environment boundary conditions:
+## Boundaries and environment objects
 
-- **Sealed:** no atmospheric exchange. Gas and carbon budgets close apart from explicit sources and absorbers.
-- **Open:** exchange at designated exposed-water regions with a specified reservoir. Compute a signed flux proportional to exchange coefficient × exposed area × (equilibrium concentration − water concentration). Record both inflow and outflow. Do not reset every patch to a target concentration each tick.
+The builder's **Gases & atmosphere** section sets initial O₂/DIC amounts and the boundary condition. Changing starting amounts affects the next reset only. Live controls change the boundary without replacing current gas fields.
 
-Air–water exchange can add or remove oxygen depending on saturation, and temperature affects equilibrium oxygen concentration [1, 2]. A flow generator moves dissolved material; it does not automatically create oxygen. A separate aerator is an explicit exchange object. In this 2D model, barriers are full-depth transport obstacles; depth-dependent flow around or beneath floating objects would require another physical model.
+- **Sealed:** no background atmospheric flux.
+- **Open:** every uncovered water patch has finite signed exchange with the specified reservoir. Excess gas leaves and undersaturated water receives gas.
+- **Oxygen emitter / absorber:** local, explicitly accounted O₂ input or removal.
+- **Carbon emitter / absorber:** local, explicitly accounted inorganic-carbon input or removal.
+- **Aerator:** a local reservoir connection, including in an otherwise sealed world. It can add or remove either gas.
 
-## Allocation and correctness
+Emitter/absorber strength ranges from 0 to 1, with total requested rate `1.5 × strength` amount units per second distributed over the object's footprint. Absorbers remove only available stock. A unit-strength aerator exchanges five abstract water volumes per second over its footprint. Background exchange rate ranges from 0 to 1 per second; initial and equilibrium concentrations range from 0 to 100.
 
-Build on the existing shared resource allocation: collect requests, determine each reaction's feasible extent from every required substrate, and commit matching withdrawals and products. Competing cells share the same finite field inventories. A single limiting substrate must scale the whole reaction rather than independently clamping products after consumption. Use a documented phase order for exchange, reactions, and transport so results do not depend on actor iteration order.
+Signed atmospheric exchange uses `1 − exp(−rate × dt)` of the concentration difference, avoiding overshoot or a hidden reset. Oxygen equilibrium has an explicitly abstract temperature factor `1.25 − 0.5 × temperature`; DIC equilibrium is fixed. This is not a Celsius-, pressure- or salinity-calibrated solubility model.
 
-The essential checks are:
+All built-in environments use open water with rate 0.02/s and equilibrium concentrations of 1. Blank recipes, imports without gas settings and pre-version-9 checkpoints default to sealed water with initial O₂/DIC of 1 each per patch. Copying a recipe preserves its gas settings. Local objects remain explicit external actions in either mode.
 
-1. A sealed world conserves carbon across dissolved, living, and particulate stores, including growth, damage, death, digestion, exudation, and division.
-2. No reaction or transport step makes a substrate negative or creates energy without spending its specified inputs.
-3. Oxygen starvation limits aerobic energy generation even with abundant food; carbon starvation limits fixation despite abundant light.
-4. Phototroph respiration continues without light; successful photosynthesis produces oxygen only in proportion to actual fixation.
-5. Sources, absorbers, and atmospheric fluxes reconcile against external species ledgers.
-6. Barriers block the appropriate transport faces, while world resize and checkpoint replay preserve chemical amounts and future deterministic behavior.
+## Inspection and accounting
 
-The first implementation should deliver this closed carbon/oxygen cycle. Nitrogen and phosphorus quotas, fermentation, nitrate respiration, carbonate chemistry, and temperature calibration can then be added as explicit reactions and species without redefining the underlying accounting.
+The player and builder provide **Oxygen** and **Inorganic carbon** overlays on fixed color scales. Organism inspection shows organic reserve, internal gases, fixation and respiration rates. Programs can read `carbon.organic`, `carbon.inorganic`, `oxygen`, `respiration.rate` and `carbon.fixation.rate`; the two reaction rates use carbon units per second.
 
-## Sources
+Metrics expose all carbon stores, internal and dissolved oxygen, external inputs/removals, cumulative fixation, organism respiration, background decay and legacy imports. The budgets are:
 
-1. Senn, Downing-Kunz, and Novick, *Dissolved oxygen: Chapter 6*, U.S. Geological Survey (2016). https://www.usgs.gov/publications/dissolved-oxygen-chapter-6
-2. U.S. Geological Survey, *Dissolved Oxygen and Water*. https://www.usgs.gov/water-science-school/science/dissolved-oxygen-and-water
-3. Inomura et al., *A Mechanistic Model of Macromolecular Allocation, Elemental Stoichiometry, and Growth Rate in Phytoplankton*, Frontiers in Microbiology (2020). https://www.frontiersin.org/journals/microbiology/articles/10.3389/fmicb.2020.00086/full
+```
+carbon present + carbon removed = carbon introduced
+oxygen present + oxygen removed + organism respiration + decay
+    = oxygen introduced + carbon fixed
+```
+
+Carbon present includes both internal and external inorganic carbon, structural/reserve/gut carbon and particles. Introductions include initial water, added organisms and supplied organic food. Source/sink and atmospheric transfers enter external ledgers. The same equations hold in open and sealed environments.
+
+Checkpoints 3–8 remain readable. Migration preserves existing physical structures, minerals, usable energy and sources, initializes gas fields explicitly, and classifies pre-existing organic inventory once in a legacy carbon-import ledger. It does not recreate cells from their genome. Continuation follows the new chemistry and is deterministic within the current engine; it is not intended to reproduce an older engine's biological trajectory. New checkpoints retain all chemical fields, internal pools, boundary settings and reaction ledgers.
+
+## Limits and future chemistry
+
+This implementation establishes a conserved oxygen/carbon cycle. Nitrogen and phosphorus remain combined in the mineral resource. Separate carbon reserves and gas pools do not change the legacy mechanical `body.mass` or cell radius. Carbonate speciation, pH, salinity, physical depth, anaerobic pathways and gases such as methane or nitrogen are not modeled. Metabolic heat dissipation is not a calibrated thermodynamic water model. Floating barriers remain full-depth transport obstacles rather than buoyant 3D objects.
+
+## Biological references
+
+The model choices are simplified implementations, informed by the underlying processes below rather than fitted to their quantitative data.
+
+1. Senn, Downing-Kunz, and Novick, *Dissolved oxygen: Chapter 6*, U.S. Geological Survey (2016): https://www.usgs.gov/publications/dissolved-oxygen-chapter-6
+2. U.S. Geological Survey, *Dissolved Oxygen and Water*: https://www.usgs.gov/water-science-school/science/dissolved-oxygen-and-water
+3. Inomura et al., *A Mechanistic Model of Macromolecular Allocation, Elemental Stoichiometry, and Growth Rate in Phytoplankton*, Frontiers in Microbiology (2020): https://www.frontiersin.org/journals/microbiology/articles/10.3389/fmicb.2020.00086/full

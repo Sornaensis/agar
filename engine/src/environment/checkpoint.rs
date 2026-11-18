@@ -63,6 +63,7 @@ impl Environment {
                 w.f64(*value);
             }
         }
+        self.gases.write_checkpoint(w);
     }
     pub(crate) fn read_checkpoint(r: &mut Reader<'_>, version: u32) -> Result<Self> {
         let (width, height) = if version >= 8 {
@@ -103,13 +104,27 @@ impl Environment {
                 id > 0
                     && id < next_source_id
                     && ids.insert(id)
-                    && kind <= if version >= 8 { 7 } else { 3 },
+                    && kind
+                        <= if version >= 9 {
+                            12
+                        } else if version >= 8 {
+                            7
+                        } else {
+                            3
+                        },
                 "invalid environment source",
             )?;
             let x = r.range(0.0, width)?;
             let y = r.range(0.0, height)?;
             ensure(x < width && y < height, "source is outside the habitat")?;
-            let strength = r.range(if matches!(kind, 0 | 3 | 4) { 0.0 } else { -1.0 }, 1.0)?;
+            let strength = r.range(
+                if matches!(kind, 0 | 3 | 4 | 8..=12) {
+                    0.0
+                } else {
+                    -1.0
+                },
+                1.0,
+            )?;
             let radius = r.range(20.0, 1000.0)?;
             let angle = if version >= 8 {
                 r.range(0.0, TAU)?
@@ -202,8 +217,14 @@ impl Environment {
             next_source_id,
             next_barrier_id,
             scratch: FieldScratch::default(),
+            gases: if version >= 9 {
+                GasState::read_checkpoint(r, patches)?
+            } else {
+                GasState::new(patches)
+            },
         };
         result.rebuild_flow_samples();
+        result.rebuild_gas_sources();
         result.rebuild_barriers();
         Ok(result)
     }

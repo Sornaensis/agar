@@ -16,7 +16,9 @@ const values = (api, id) => {
   return Object.fromEntries([...result.bindings, ...result.signals].map(entry => [entry.name, entry.value]));
 };
 async function developed(name, required) {
-  const api = await fresh({ seed: 42, ambientLight: 0.8, initialNutrients: 0.3 });
+  // Navigation/meal fixtures need oxygen as well as the supplied organic food.
+  const api = await fresh({ seed: 42, ambientLight: 0.8, initialNutrients: 0.3,
+    gases: { mode:'open', exchangeRate:.5, oxygenEquilibrium:1, carbonEquilibrium:1 } });
   const genome = compile(api, PRESETS.find(preset => preset.name === name).source);
   seed(api, genome, 1, 600, 380);
   let state = snapshot(api);
@@ -141,7 +143,8 @@ assert.equal(hunted.photosynthesis, 0);
   console.log(`Predator soft-contact approach passed: a particle beyond capture range is captured after ${captured.toFixed(2)} seconds without an attack.`);
 }
 
-// A late carcass must remain usable when the scavenger has fewer than ten ATP.
+// A late carcass remains usable while the scavenger retains ATP and enough
+// organic carbon to build its missing enzyme. ATP alone cannot pay that mass.
 // Predict its food-free route, then introduce a wasteful cell that naturally
 // starves just before it arrives. Both the route and the seed displacement are
 // measured by ordinary execution; no checkpoint contents are edited.
@@ -149,8 +152,9 @@ const late = await developed('Forager', ['Gut', 'ExudateEnzyme', 'Capture', 'Lef
 const wasteful = compile(late.api, 'cellular; product Waste = motor(); gene waste: Waste = 1;');
 const startBytes = save(late.api), startTick = snapshot(late.api).ticks;
 let route = snapshot(late.api);
-while (route.cells[0].energy > 8) route = advance(late.api, 1);
+while (route.cells[0].energy > 22) route = advance(late.api, 1);
 const arrival = route.cells[0], arrivalTick = route.ticks;
+assert.ok(arrival.organicCarbon > 0.08, 'The predicted encounter retains a real biosynthetic carbon reserve');
 assert.equal(restore(late.api, startBytes), 1);
 seed(late.api, wasteful, 1, 20, 20);
 let trial = snapshot(late.api), lastPrey = trial.cells.find(cell => cell.genome === wasteful);
@@ -169,18 +173,18 @@ seed(late.api, wasteful, 1,
 let lowMeal = false, lateDigestion = 0, lateComplete = false;
 for (let tick = birthTick; tick < arrivalTick + 600; tick++) {
   const state = advance(late.api, 1), cell = state.cells.find(cell => cell.id === 1);
-  assert.ok(cell, 'The solvent scavenger processes its captured meal before starving');
+  assert.ok(cell, 'The carbon-solvent scavenger processes its captured meal before starving');
   const enzyme = body(late.api, 1).cellular.assemblies.find(machine => machine.name === 'TissueEnzyme');
-  lowMeal ||= cell.energy < 10 && cell.gutEnergyByKind[1] > 0 && !enzyme?.complete;
+  lowMeal ||= cell.energy < 30 && cell.organicCarbon > 0.08 && cell.gutEnergyByKind[1] > 0 && !enzyme?.complete;
   if (lowMeal && cell.gutEnergyByKind[1] > 0) lateDigestion += cell.digestionRate / 30;
   lateComplete ||= enzyme?.complete ?? false;
   conserved(state);
   if (lowMeal && lateComplete && lateDigestion > 1) break;
 }
-assert.ok(lowMeal, 'The fixture reaches a real captured tissue meal below ten ATP without its enzyme');
+assert.ok(lowMeal, 'The fixture reaches a captured tissue meal below thirty ATP, with carbon but without its enzyme');
 assert.ok(lateComplete && lateDigestion > 1, 'Paid enzyme construction remains possible from actual available energy, independent of storage capacity');
 console.log(`Current cellular navigation passed: Forager travels ${Math.abs(surfaceTravel).toFixed(1)} radians around a resistant surface and captures particles (gut ${bestGut.toFixed(1)}, digestion ${digestion.toFixed(1)}); Predator equips before growth, attacks ${hunted.attacks} times and digests killed prey (tissue ${tissuePeak.toFixed(1)}, digestion ${usefulTissue.toFixed(1)}).`);
-console.log(`Late tissue recovery passed: the current Forager builds its missing enzyme below ten ATP and digests ${lateDigestion.toFixed(2)} useful energy from a naturally produced carcass.`);
+console.log(`Late tissue recovery passed: the current Forager pays carbon and ATP for its missing enzyme and assimilates ${lateDigestion.toFixed(2)} chemical-potential units from a naturally produced carcass.`);
 
 // Modest real damage must trigger paid maintenance, not a second complete body
 // plan. Heating the live water exercises damage, expression, installation and
@@ -220,7 +224,7 @@ for (const name of ['Forager', 'Predator']) {
   assert.ok(originals.every(original => repaired.find(machine => machine.id === original.id).integrity > 0.999), 'The original machinery regains its working integrity');
   assert.ok(repaired.some(machine => machine.name === 'Repair' && machine.complete), 'The authored repair mechanism is physically synthesized and installed');
   assert.ok(state.cells[0].integrity > 0.999 && repairedMass > 0.005);
-  assert.ok(state.cells[0].energy < initial.cells[0].energy - 2, 'Construction and repair consume energy');
+  assert.ok(state.energy < initial.energy - 2, 'Construction and repair consume accounted energy even when respiration replenishes ATP');
   assert.equal(state.materialIntroduced, initial.materialIntroduced);
   assert.equal(state.energyIntroduced, initial.energyIntroduced);
   assert.equal(state.photosynthesis, 0);
@@ -238,13 +242,19 @@ console.log(`Paid maintenance passed after real thermal stress: ${JSON.stringify
   advance(api, 6 * 30);
   assert.ok(!body(api, 1).cellular.assemblies.some(machine => machine.name === 'Repair'));
   api.set_environment(1, 0.8, 0);
-  const damaged = advance(api, 3 * 30);
+  let damaged = snapshot(api), requestedDuringDevelopment = false, partialDuringDevelopment = false;
+  for (let tick = 0; tick < 3 * 30; tick++) {
+    damaged = advance(api, 1);
+    const reading = values(api, 1);
+    requestedDuringDevelopment ||= !reading.powered && !reading.equipped && reading.need_Repair;
+    partialDuringDevelopment ||= body(api, 1).cellular.assemblies.some(machine => machine.name === 'Repair' && !machine.complete);
+  }
   api.set_environment(0.5, 0.8, 0);
   assert.ok(damaged.cells[0].integrity < 0.9);
   assert.equal(values(api, 1).powered, false);
   assert.equal(values(api, 1).equipped, false);
-  assert.equal(values(api, 1).need_Repair, true, 'Damage cannot revoke a solvent organism’s maintenance request');
-  assert.ok(body(api, 1).cellular.assemblies.some(machine => machine.name === 'Repair' && !machine.complete));
+  assert.ok(requestedDuringDevelopment, 'Damage cannot revoke a solvent organism’s maintenance request');
+  assert.ok(partialDuringDevelopment, 'Maintenance passes through real paid construction while development is interrupted');
   let repairWorked = false;
   for (let tick = 0; tick < 10 * 30; tick++) {
     const state = advance(api, 1);

@@ -381,9 +381,12 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
   const sufficient = (name: string, mass: number) => options.local
     ? `enough(built.${name}, ${amount(mass)})` : `built.${name} + 0.000001 >= ${amount(mass)}`;
   const foodReady = [sufficient('Gut', 0.06), sufficient('ExudateEnzyme', exudateMass), sufficient('Capture', 0.03)].join(' && ');
-  const ready = hasLight && hasGut ? `${sufficient('Solar', 0.08)} && ${foodReady}`
+  const feedingReady = hasLight && hasGut ? `${sufficient('Solar', 0.08)} && ${foodReady}`
     : hasLight ? sufficient('Solar', 0.12) : foodReady;
+  const ready = options.local ? `${feedingReady} && ${sufficient('Respiration', 0.04)}` : feedingReady;
   const recipes: CellularRecipe[] = [];
+  if (options.local) recipes.push({ name:'Respiration', kind:'respire(oxygen)', parts:[['enzyme',0.025],['membrane',0.015]],
+    activity:'if oxygen > 0 && energy.fraction < 0.98 && (carbon.organic > 0.2 * body.area || energy < 20) then 1 else 0' });
   const usesVision = !options.local || behavior.includes('sensed.Vision');
   const usesTouch = !options.local || behavior.includes('sensed.Touch') || options.predator;
   const usesChemistry = !options.local || behavior.includes('sensed.Chemistry') || options.memory;
@@ -407,8 +410,8 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
   recipes.push(
     { name:'Translation', kind:'translate()', parts:[['scaffold',0.02],['enzyme',0.02]], ready:options.local && options.predator ? 'surplus && body.area > 1.2' : surplusReady },
     { name:'Minerals', kind:'import(mineral)', parts:[['anchor',0.005],['transporter',0.02]], ready:options.local && hasGut ? 'powered && (nutrient.stored < 0.15 || surplus)' : 'powered', activity:'if nutrient.fraction < 0.9 then 1 else 0' },
-    { name:'EnergyStore', kind:'store(energy)', parts:[['membrane',0.08]], ready:surplusReady },
-    { name:'MineralStore', kind:'store(mineral)', parts:[['membrane',0.02]], ready:surplusReady },
+    { name:'EnergyStore', kind:'store(energy)', parts:[['membrane',options.local?0.04:0.08]], ready:surplusReady },
+    { name:'MineralStore', kind:'store(mineral)', parts:[['membrane',0.02]], ready:options.local?`${surplusReady} && body.area > 1.2`:surplusReady },
   );
   const movementReady = hasLight && hasGut ? 'powered && body.area > 1.2' : 'powered';
   const restMotors = options.local && options.restOnMeal ? `if ${options.scavenger ? 'meal > 2 && !injured' : 'gut.energy > 2'} then 0 else ` : '';
@@ -431,7 +434,7 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
   if (options.local) recipes.push({ name:'Repair', kind:'repair()', parts:[['enzyme',0.025]], ready:'integrity < 0.995' });
   const growthArea = options.giant ? 'max(3, body.birth_area * 2)' : 'body.birth_area * 2';
   recipes.push(
-    { name:'Support', kind:'support()', parts:[['scaffold',0.06]], ready:options.local && hasGut ? `equipped && energy > ${options.conserve?70:65}` : `powered && energy > ${options.conserve?60:45}`, goal:options.giant?'max(0.24, body.birth_area * 0.12)':'max(0.12, body.birth_area * 0.12)' },
+    { name:'Support', kind:'support()', parts:[['scaffold',0.06]], ready:options.local && hasGut ? `equipped && energy > ${options.conserve?70:65}${hasLight?'':' && gut.energy > 2 && carbon.organic > 0.3 * body.area'}` : `powered && energy > ${options.conserve?60:45}`, goal:options.giant?'max(0.24, body.birth_area * 0.12)':'max(0.12, body.birth_area * 0.12)' },
     { name:'Envelope', kind:'grow()', parts:[['membrane',0.015],['enzyme',0.005]], ready:sufficient('Support', 0.12), activity:`if energy > 90 && body.area < ${growthArea} then 0.8 else 0` },
     { name:'Replication', kind:'replicate()', parts:[['scaffold',0.005],['replicase',0.015]], ready:sufficient('Support', 0.12), activity:'if energy > 80 then 1 else 0' },
     { name:'Division', kind:'constrict()', parts:[['anchor',0.004],['motor',0.008],['constrictor',0.008]], ready:'expanding', activity:`if body.area + 0.000001 >= ${growthArea} && energy > 100 then 1 else 0` },
@@ -442,7 +445,7 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
     { name:'LeftHeat', kind:'sense(heat)', parts:[['anchor',0.002],['receptor',0.008]], ready:'powered', at:String(Math.PI/2) },
     { name:'RightHeat', kind:'sense(heat)', parts:[['anchor',0.002],['receptor',0.008]], ready:'powered', at:String(-Math.PI/2) },
   );
-  return options.local ? controlledProgram(recipes, `let powered = ${ready};\nlet equipped = ${equipped};\nlet surplus = equipped && energy > 55;\n${behavior}`, options.memory)
+  return options.local ? controlledProgram(recipes, `let powered = ${ready};\nlet equipped = ${equipped};\nlet surplus = equipped && energy > 55${hasGut&&!hasLight?' && gut.energy > 2 && carbon.organic > 0.3 * body.area':''};\n${behavior}`, options.memory)
     : cellularProgram(recipes, `let powered = ${ready};\n${behavior}`, options.memory, 0.001);
 }
 
@@ -478,7 +481,7 @@ let move = if ${scavenger ? 'blocked || injured' : 'blocked'} then 0.65 else if 
 }
 
 const localHunting = `let firm_contact = sensed.Touch.valid && sensed.Touch.resistance > 0.1;
-let hungry = energy.fraction < 0.7 && gut.fraction < 0.45;
+let hungry = (energy.fraction < 0.7 || carbon.organic * 20 < energy.capacity * 0.4) && gut.fraction < 0.45;
 # Paired local temperatures select the cooler side before tissue is damaged.
 let heat_escape = sensed.LeftHeat.valid && sensed.RightHeat.valid
   && max(sensed.LeftHeat.value, sensed.RightHeat.value) > 0.78;
@@ -494,7 +497,7 @@ export const PRESETS: Preset[] = [
   { name:'Conserver', description:'Stage shared-stock construction and preserve energy before copying the genome.', source:cellularOrganism('organic','let steer = if sensed.Vision.valid then clamp(angle(sensed.Vision.offset), -1, 1) else sin(age * 0.3) * 0.2;\nlet move = if energy.fraction < 0.6 && gut.fraction < 0.3 then 0.25 else 0.05;',{local:true,conserve:true}) },
   { name:'Giant', description:'Build extra support before expanding, using a shared supply of each product role.', source:cellularOrganism('organic',localForaging(),{local:true,giant:true,restOnMeal:true}) },
   { name:'Rememberer', description:'Compare opposite chemical receptors and retain a decaying concentration signal to regulate movement.', source:cellularOrganism('organic','let difference = sensed.LeftChemistry.organic - sensed.RightChemistry.organic;\nlet steer = if sensed.LeftChemistry.valid && sensed.RightChemistry.valid && abs(difference) > 0.000001\n  then clamp(difference * 100, -1, 1) else sin(age * 0.5) * 0.3;\nlet move = if gut.fraction > 0.5 then 0 else 0.15 + 0.25 * activate(concentration.Persistence, 0.002);',{local:true,memory:true}) },
-  { name:'Phototroph', description:'Build a light harvester, then regulate the initiation of separate growth and division machinery.', source:cellularOrganism('light','# This stationary producer spends no material on locomotion.',{local:true}) },
+  { name:'Phototroph', description:'Fix dissolved inorganic carbon with light, then respire stored organic carbon with oxygen, including at night.', source:cellularOrganism('light','# This stationary producer spends no material on locomotion.',{local:true}) },
   { name:'Predator', description:'Approach visible objects with a named eye, then use a placed piercer and separate engulfment machinery.', source:cellularOrganism('organic',localHunting,{local:true,predator:true}) },
   { name:'Mixotroph', description:'Share materials between light harvesting and a separately regulated feeding pathway.', source:cellularOrganism('mixed',localForaging(),{local:true,restOnMeal:true}) },
 ];

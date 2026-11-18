@@ -1,6 +1,6 @@
 # agar
 
-A playable, client-only artificial-life simulator: a TypeScript interface and canvas renderer backed by a Rust WebAssembly engine. Single cells carry reactive cellular programs, material-bearing products and individually assembled machinery. The earlier action/register language remains supported for existing worlds. Cells compete for light, dissolved minerals and organic material in a wrapping 2D environment with heat and currents.
+A playable, client-only artificial-life simulator: a TypeScript interface and canvas renderer backed by a Rust WebAssembly engine. Single cells carry reactive cellular programs, material-bearing products and individually assembled machinery. The earlier action/register language remains supported for existing worlds. Cells compete for light, dissolved minerals, inorganic carbon, oxygen and organic material in a wrapping 2D environment with heat and currents.
 
 ## Run
 
@@ -29,11 +29,17 @@ See [the cellular language and physical rules](design/cellular.md), [the solar e
 | Environments | Create, inspect, edit a new copy, rename, import, export or delete a habitat recipe. |
 | Genomes | Create or copy programs, check types, mutate a draft, inspect its graph and explicitly save. |
 
-An open simulation has **Player**, **Metrics**, **Settings** and **Genomes** tabs. The player has Play/Pause, 1×/2×/5×/10× speed and **Add organism**. Choose a genome to add one cell. Click a cell for **Overview**, **Body**, **Memory** and **Program**. Its program and memory are read-only; saving its genome creates a separate catalog document.
+An open simulation has **Player**, **Metrics**, **Settings** and **Genomes** tabs. The player has Play/Pause, 1×/2×/5×/10× speed, **Add organism**, and **Pop out**. Choose a genome to add one cell. Click a cell for **Overview**, **Body**, **Memory** and **Program**. Its program and memory are read-only; saving its genome creates a separate catalog document.
 
 For cellular programs, the Body inspector shows product inventories, actual synthesis rates, assembled ingredients and lifecycle progress. For legacy programs, it compares actual organ counts and mass with the last construction requests. Expand a family to inspect stable local unit IDs, built mass, integrity and functional state. Internal space, membrane attachment use, family-specific protein stocks and achieved expression/assembly/recycling/repair rates remain visible. Metrics includes resource totals, introduced material and energy, harvested light, populations and feeding capabilities.
 
 Built-ins stay unchanged. Editing or importing creates independent catalog items. Running simulations own their programs and environment state, so catalog renames and deletions do not alter existing worlds.
+
+## Floating player
+
+**Pop out** moves the current player into a browser picture-in-picture window that stays on top. It keeps the same simulation, controls, camera and inspector, and continues while the main app shows Metrics, Settings, Environments or Genomes, or while the main tab is in the background. **Return to tab** or closing the floating window restores that same player. Explicit Pause still pauses.
+
+If Document Picture-in-Picture is unavailable, **Window** opens an ordinary popup clearly labeled as unable to enforce always-on-top. The originating tab must remain open. An open player continues stepping even when both windows are hidden, using a bounded timer instead of drawing frames. Browser throttling may slow it; suspension, system sleep and closing the main tab can suspend or end playback. There is no offline catch-up. The existing dedicated worker remains the sole simulation owner. Without an open player window, hiding the main tab still pauses advancement.
 
 ## Editing the environment
 
@@ -56,13 +62,19 @@ The same controls are available when creating or copying an **Environment** reci
 
 **Navigation:** scroll to zoom around the pointer; Shift-drag, middle-drag or right-drag to pan. Touch supports dragging and pinch zoom. The **−**, **+** and **Fit** buttons work in both views. With the canvas focused, **+ / −** zoom and **Home** fits the world.
 
-Currents are prescribed flow fields, not a pressure-solving fluid simulation. Barriers represent full-depth obstacles in this wrapping 2D domain: they obstruct organisms, particles and transport across the wall; they are not boats that water can pass underneath. Their field effects are resolved on the 20-unit grid. Floating barriers follow the current without a full rigid-body buoyancy or angular-momentum model. Gas exchange is not part of the implemented physiology yet.
+Currents are prescribed flow fields, not a pressure-solving fluid simulation. Barriers represent full-depth obstacles in this wrapping 2D domain: they obstruct organisms, particles and transport across the wall; they are not boats that water can pass underneath. Their field effects are resolved on the 20-unit grid. Floating barriers follow the current without a full rigid-body buoyancy or angular-momentum model. 
 
-The proposed next biology change is described in [Gas exchange and material cycles](design/gas-exchange.md); gas physiology is not yet implemented.
+## Gas exchange
+
+The environment now tracks dissolved oxygen and effective inorganic carbon alongside minerals. Photosynthesis consumes inorganic carbon and creates organic carbon plus oxygen. Aerobic respiration consumes organic carbon and oxygen, producing inorganic carbon and usable energy. Digestion supplies carbon substrates; it does not bypass oxygen demand. Phototrophs also respire in darkness. The core provides basal respiration; built `respire(oxygen)` machinery adds regulated capacity. The `energy` reserve is ATP-like usable energy, while organic carbon carries 20 chemical-potential units per carbon unit and respiration yields 16 usable units.
+
+Choose **Oxygen** or **Inorganic carbon** in the field selector. **Gases & atmosphere** sets sealed/open water, equilibrium concentrations and finite surface exchange. The builder also sets starting gas amounts; live controls preserve existing inventories. Oxygen and carbon emitters/absorbers and local aerators can be added, tuned and removed in both editors; an aerator connects its local water to the reservoir even when the rest of the surface is sealed. Built-in habitats use open water. Blank recipes, imports without gas settings and pre-gas checkpoints default to sealed water with one unit of each gas per patch; copies retain their recipe's settings.
+
+Organism Overview shows internal gases, organic carbon, fixation and respiration. Metrics includes carbon and oxygen inventories and balances, including atmospheric input/output and background aerobic decay. All units are abstract; carbonate chemistry, pH and anaerobic pathways are outside the current model. See [Gas exchange and material cycles](design/gas-exchange.md) for reactions, phase order, conservation and migration rules.
 
 ## Bodies and capabilities
 
-`body.area` is paid envelope area; `body.mass` is actual material in the scaffold, organs, assembly proteins, reserve minerals and gut minerals. Usable energy, raw gut energy and embodied structural energy are separate. Energy does not add material mass. Compartment contents occupy their reserved capacity without being counted twice as internal space.
+`body.area` is paid envelope area; `body.mass` is the mechanical mass of the scaffold, organs, assembly proteins, reserve minerals and gut minerals. The separate carbon and dissolved-gas pools do not add to this mechanical mass. ATP-like usable energy, gut chemical potential and embodied structural energy are separate. Compartment contents occupy their reserved capacity without being counted twice as internal space.
 
 Growing the envelope creates room and increases upkeep and drag. It does not grant a motor, sensor or energy source. Organs use internal space; membrane-facing modules also use finite attachment capacity that scales with perimeter. Incomplete and damaged organs retain their material and occupied space.
 
@@ -85,7 +97,7 @@ Growing the envelope creates room and increases upkeep and drag. It does not gra
 | `mechanoreceptor` | Relative flow and physical contact |
 | `optical` | Visible object geometry, appearance and motion |
 
-The genome is the body plan. An introduced cell has area 1, one core of mass 0.04, 68 usable energy and 0.6 free minerals in the core's bounded compartments. Its frame, core, reserves and fabrication costs are charged to the introduction ledgers. There are no preassembled specialist bodies or genome-name mappings. Photosynthetic units, digestion, motors, sensors, storage and additional cores all have to be grown through ordinary paid ticks.
+The genome is the body plan. An introduced cell has area 1, one core of mass 0.04, 68 usable energy, 3.4 organic carbon and 0.6 free minerals in the core's bounded compartments. Its frame, core, reserves and fabrication costs are charged to the introduction ledgers. There are no preassembled specialist bodies or genome-name mappings. Photosynthetic units, digestion, motors, sensors, storage and additional cores all have to be grown through ordinary paid ticks.
 
 Programs must establish an energy source before spending their reserves on further development. The built-ins use actual organelle state to sequence construction, then build duplicates for division. This ordering is part of their visible source and can be edited or mutated. Changing a target changes future construction; it never replaces the living cell's existing organs.
 
@@ -93,7 +105,7 @@ Current consumers build capture, digestion and navigation before optional storag
 
 Current programs tolerate modest loss of working capacity before requesting replacement machinery. A paid `repair()` mechanism responds to actual damage, including during development. This prevents small injuries from filling a cell with duplicate equipment. The construction tolerance is capped below one recipe unit so larger body goals still require every whole copy.
 
-Each `express.<family>` produces that family’s assembly proteins from minerals and energy. Proteins persist between ticks, occupy internal space, add upkeep and turn over into returned minerals plus heat. Count/size targets assemble organs from matching proteins already present at the start of the tick; expressing a gene cannot create a functional organ immediately. Expression and assembly share finite core throughput, energy and space. Leaving every gene on can fill the cell with unused protein and delay the machinery it needs. Regulate expression using `protein.<family>`, actual organ mass and resource reserves. Allocation uses a common starting snapshot; new space, recovered resources and newly functional machinery are used on following ticks. Lowering a target does not remove anything without explicit recycling. Recycling costs processing energy and returns only accounted material and a fraction of retained structural energy. Capacity loss spills excess contents into the environment instead of silently discarding them.
+Each `express.<family>` produces that family’s assembly proteins from minerals, organic carbon and energy. Proteins persist between ticks, occupy internal space, add upkeep and turn over into recovered minerals and carbon, with dissipated energy. Count/size targets assemble organs from matching proteins already present at the start of the tick; expressing a gene cannot create a functional organ immediately. Expression and assembly share finite core throughput, energy and space. Leaving every gene on can fill the cell with unused protein and delay the machinery it needs. Regulate expression using `protein.<family>`, actual organ mass and resource reserves. Allocation uses a common starting snapshot; new space, recovered resources and newly functional machinery are used on following ticks. Lowering a target does not remove anything without explicit recycling. Recycling costs processing energy and returns only accounted material and a fraction of retained structural energy. Capacity loss releases mineral, organic-carbon and gut overflow into the environment; excess usable energy dissipates.
 
 Division requires doubled birth area, sufficient energy, cooldown and a feasible packing of actual organs with a viable core in each half. Discrete organs are assigned, never cloned. Cellular partitioning prefers to distribute functioning copies of each exact recipe between the two cells, subject to core support and space limits. Build duplicate essential capabilities before division if both daughters should inherit them. The retained parent keeps its memory and age; the daughter starts with empty registers and no object tracks. Mutations affect the inherited program, not the inherited body.
 
@@ -109,9 +121,9 @@ Organic matter retains its composition through ingestion, gut storage, spills, d
 | --- | --- | --- |
 | Exudate | Released photosynthetic surplus and supplied organic meals | Fast, readily assimilated carbon source |
 | Tissue | Dead cells, extracted cell contents and engulfed structural material | Slower, nutrient-rich processing that leaves digestive residue |
-| Waste | Unassimilated tissue residue | Slow, low-yield recovery; the remainder dissipates or remineralizes |
+| Waste | Unassimilated tissue residue | Slow recovery of accessible carbon; refractory carbon remains in residue |
 
-`digest.exudate`, `digest.tissue` and `digest.waste` allocate the same finite digestive throughput. Their default efforts are 1, 1 and 0.35. They cannot grant digestion without a functioning digestive organ. Read `gut.<kind>.energy` and `.nutrients` to choose which enzymes to prioritize; `feed` still regulates ingestion. Gut composition of an engulfed organism stays intact instead of turning its waste back into fresh tissue. Decay returns minerals to the environment and dissipates energy. Same-kind local merging combines accounted contents; particle counts never trigger deletion or artificial conversion.
+`digest.exudate`, `digest.tissue` and `digest.waste` allocate the same finite digestive throughput. Their default efforts are 1, 1 and 0.35. They cannot grant digestion without a functioning digestive organ. Read `gut.<kind>.energy` and `.nutrients` to choose which enzymes to prioritize; `feed` still regulates ingestion. Gut composition of an engulfed organism stays intact instead of turning its waste back into fresh tissue. Digestion yields organic carbon for respiration. Background decay consumes oxygen, releases inorganic carbon and returns minerals; it stops without oxygen. Same-kind local merging combines accounted contents; particle counts never trigger deletion or artificial conversion.
 
 Particle appearance differs, but genome sensors continue to report physical properties and local chemical cues rather than an omniscient food/prey category.
 
@@ -145,7 +157,7 @@ divide = false;
 
 Every organelle family has `target.<family>.count` (integer), `target.<family>.size` (scalar), `express.<family>` and `recycle.<family>` (0–1 effort). Omitted count is zero, size uses the family minimum, and both efforts are zero. Plain `2` is integer; `2.0` is scalar, so scalar counts require `int()`. Actual family signals are `organelle.<family>.count`, `.mass`, `.capacity`, `.damaged` and `.building`. Capacity is equivalent minimum-sized functional units; building is material still missing before incomplete units first become functional. `protein.<family>` is matching stored construction material; `expression.rate`, `assembly.rate` and `assembly.capacity` expose achieved synthesis, achieved assembly and shared core throughput. The old `build.<family>` spelling remains a compatibility alias for expression, with the same paid protein mechanism.
 
-The editor reference documents all **169 read signals and 81 write signals**, with authoritative types checked against Rust metadata. See [the implemented organelle design](design/organelles.md) and [engine/ABI.md](engine/ABI.md) for the detailed rules and interfaces.
+The editor reference documents all **174 read signals and 81 write signals**, with authoritative types checked against Rust metadata. See [the implemented organelle design](design/organelles.md) and [engine/ABI.md](engine/ABI.md) for the detailed rules and interfaces.
 
 ### Physical sensing
 
@@ -199,9 +211,9 @@ In an organism's read-only Program view, hover, place the caret or select an exp
 
 ## Persistence and version compatibility
 
-IndexedDB stores documents and complete worlds; localStorage stores preferences and editor drafts. Changing runs checkpoint every two seconds and after key actions, and reopen paused. The save indicator reports failures. Only the open, visible simulation advances; there is no offline catch-up. Web Locks protect a run from competing writers in multiple tabs. Clearing browser site data removes its local saves; export genomes and environments for portable copies.
+IndexedDB stores documents and complete worlds; localStorage stores preferences and editor drafts. Changing runs checkpoint every two seconds and after key actions, and reopen paused. The save indicator reports failures. The active simulation advances when its main view is visible or its floating player is open, including while the main app shows a catalog. An open player uses a timer when both windows are hidden; browser throttling can slow it. There is no offline catch-up. Web Locks protect a run from competing writers in multiple tabs. Clearing browser site data removes its local saves; export genomes and environments for portable copies.
 
-**Current formats: engine ABI 11, checkpoint 8, genome language 3 with additive cellular metadata.** Genome JSON exports use `agar.genome` version 2 with `languageVersion: 3`; environment JSON remains version 1. Plain `.cell` source is checked with the current compiler. Checkpoint-3 simulations retain their actual organs, resources, memory and source. Their previously unclassified organic particles and gut contents import as tissue; their new protein pools start empty. Checkpoints 4, 5, 6 and 7 also remain readable. New saves retain cellular products, ingredient ledgers, replication, mechanism identities and construction controls. Existing recipes default to allowing new starts and requesting no recycling. Corrected optical coverage and directional primitive interactions intentionally change affected trajectories. The old `build.*` source spelling remains an alias for expression.
+**Current formats: engine ABI 12, checkpoint 9, genome language 3 with additive cellular metadata.** Genome JSON exports use `agar.genome` version 2 with `languageVersion: 3`; environment JSON remains version 1. Plain `.cell` source is checked with the current compiler. Checkpoint-3 simulations retain their actual organs, resources, memory and source. Their previously unclassified organic particles and gut contents import as tissue; their new protein pools start empty. Checkpoints 4, 5, 6, 7 and 8 also remain readable. Older states receive explicit initial gases and a one-time ledger for existing carbon; their future follows the new chemistry. New saves retain cellular products, ingredient ledgers, replication, mechanism identities and construction controls. Existing recipes default to allowing new starts and requesting no recycling. Corrected optical coverage and directional primitive interactions intentionally change affected trajectories. The old `build.*` source spelling remains an alias for expression.
 
 The organelle model is an intentional compatibility break. Checkpoints 1/2 are rejected before replacing the engine state. Older saved genomes remain viewable, renameable and exportable, but must be manually updated in a new copy before introduction. Their investment fractions and omniscient sensors are not silently converted into free organs. Saved records and old files remain preserved. New and old browser documents keep the same storage namespace.
 
@@ -262,6 +274,8 @@ npm run test:inspection
 npm run test:graph
 npm run test:storage
 npm run test:session
+npm run test:player-view
+npm run test:environment-controls
 npm run test:worker
 npm run test:cellular
 npm run test:cellular-ui
@@ -269,7 +283,7 @@ npm run test:food-chain
 npm run test:ecosystem    # ten simulated minutes of the actual mixed preset
 ```
 
-Tests cover physical accounting and packing, sensor gates, conservative inheritance, safe mutations, checkpoint replay, real WASM interfaces, editor/Rust metadata agreement, graph bounds and persistence failures. Worker tests use real worker threads and WASM to check ordered commands, transferred buffers, atomic checkpoint capture, partial failures, disposal and main-thread responsiveness. Session tests cover related inspector reads on one tick and final-save ordering. Current food-chain fixtures grow the authored consumers, exercise resistant-contact navigation and actual prey capture and digestion, and check recovery from a low-energy tissue meal. The mixed-ecosystem regression requires surviving and reproducing Forager and Predator lineages, with no supplied organic food. Recorded runs and limits are in [experiments](experiments/README.md). A passing finite run does not guarantee permanent coexistence. Legacy program fixtures remain available through `test:food-chain:legacy` and `test:navigation:legacy`.
+Tests cover physical accounting and packing, sensor gates, conservative inheritance, safe mutations, checkpoint replay, real WASM interfaces, editor/Rust metadata agreement, graph bounds and persistence failures. Worker tests use real worker threads and WASM to check ordered commands, transferred buffers, atomic checkpoint capture, partial failures, disposal and main-thread responsiveness. Session tests cover related inspector reads on one tick and final-save ordering. Player tests cover cross-document adoption, catalog navigation, close/return, failure cleanup, explicit pause, hidden-window timer scheduling and stale-callback cancellation. Gas tests cover substrate limits, carbon/oxygen budgets, barriers, signed exchange, conservative resize and checkpoint migration/replay. Food-chain tests check authored consumer development, resistant-contact navigation, prey capture and digestion, and recovery from a low-energy tissue meal. The mixed-ecosystem regression requires surviving and reproducing Forager and Predator lineages, with no supplied organic food. Recorded runs and limits are in [experiments](experiments/README.md). A passing finite run does not guarantee permanent coexistence. Legacy program fixtures remain available through `test:food-chain:legacy` and `test:navigation:legacy`.
 
 Start a fresh **Mixed ecosystem** to use updated built-in programs. Saved simulations retain their own original genome sources.
 

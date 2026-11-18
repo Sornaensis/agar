@@ -2,8 +2,8 @@
 # Genes make stock; start_when permits new machines; activity runs built ones.
 cellular;
 
-product Wall = membrane();
 product Catalyst = enzyme();
+product Wall = membrane();
 product Mount = anchor();
 product Rotor = motor();
 product Frame = scaffold();
@@ -22,14 +22,15 @@ fn buffered(stock, effort) = if stock < 0.001 then effort else 0;
 
 let funded = (energy > 10 || gut.energy > 0) && nutrient.stored > 0.001;
 let expanding = body.area > body.birth_area * 1.6;
-let powered = enough(built.Gut, 0.06) && enough(built.ExudateEnzyme, 0.04) && enough(built.Capture, 0.03);
+let powered = enough(built.Gut, 0.06) && enough(built.ExudateEnzyme, 0.04) && enough(built.Capture, 0.03) && enough(built.Respiration, 0.04);
 let equipped = powered && enough(built.LeftMotor, 0.025) && enough(built.RightMotor, 0.025);
-let surplus = equipped && energy > 55;
+let surplus = equipped && energy > 55 && gut.energy > 2 && carbon.organic > 0.3 * body.area;
 let difference = sensed.LeftChemistry.organic - sensed.RightChemistry.organic;
 let steer = if sensed.LeftChemistry.valid && sensed.RightChemistry.valid && abs(difference) > 0.000001
   then clamp(difference * 100, -1, 1) else sin(age * 0.5) * 0.3;
 let move = if gut.fraction > 0.5 then 0 else 0.15 + 0.25 * activate(concentration.Persistence, 0.002);
 
+let need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);
 let need_Gut = funded && (true) && missing(built.Gut, (if expanding then 0.12 else 0.06), 0.06);
 let need_ExudateEnzyme = funded && (true) && missing(built.ExudateEnzyme, (if expanding then 0.08 else 0.04), 0.04);
 let need_Capture = funded && (enough(built.Gut, 0.06)) && missing(built.Capture, (if expanding then 0.06 else 0.03), 0.03);
@@ -37,20 +38,20 @@ let need_TissueEnzyme = funded && (powered && gut.tissue.energy > 0) && missing(
 let need_WasteEnzyme = funded && (powered && gut.waste.energy > 0) && missing(built.WasteEnzyme, (if expanding then 0.03 else 0.015), 0.015);
 let need_Translation = funded && (surplus) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);
 let need_Minerals = funded && (powered && (nutrient.stored < 0.15 || surplus)) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);
-let need_EnergyStore = funded && (surplus) && missing(built.EnergyStore, (if expanding then 0.16 else 0.08), 0.08);
-let need_MineralStore = funded && (surplus) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);
+let need_EnergyStore = funded && (surplus) && missing(built.EnergyStore, (if expanding then 0.08 else 0.04), 0.04);
+let need_MineralStore = funded && (surplus && body.area > 1.2) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);
 let need_LeftMotor = funded && (powered) && missing(built.LeftMotor, (if expanding then 0.05 else 0.025), 0.025);
 let need_RightMotor = funded && (powered) && missing(built.RightMotor, (if expanding then 0.05 else 0.025), 0.025);
 let need_LeftChemistry = funded && (powered) && missing(built.LeftChemistry, (if expanding then 0.03 else 0.015), 0.015);
 let need_RightChemistry = funded && (powered) && missing(built.RightChemistry, (if expanding then 0.03 else 0.015), 0.015);
 let need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);
-let need_Support = funded && (equipped && energy > 65) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);
+let need_Support = funded && (equipped && energy > 65 && gut.energy > 2 && carbon.organic > 0.3 * body.area) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);
 let need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);
 let need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);
 let need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);
 
-gene supply_Wall: Wall = buffered(pool.Wall, (if need_Gut then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0));
-gene supply_Catalyst: Catalyst = buffered(pool.Catalyst, (if need_ExudateEnzyme then 1 else 0) + (if need_TissueEnzyme then 1 else 0) + (if need_WasteEnzyme then 1 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0));
+gene supply_Catalyst: Catalyst = buffered(pool.Catalyst, (if need_Respiration then 1 else 0) + (if need_ExudateEnzyme then 1 else 0) + (if need_TissueEnzyme then 1 else 0) + (if need_WasteEnzyme then 1 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0));
+gene supply_Wall: Wall = buffered(pool.Wall, (if need_Respiration then 0.6 else 0) + (if need_Gut then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0));
 gene supply_Mount: Mount = buffered(pool.Mount, (if need_Capture then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_LeftMotor then 0.5 else 0) + (if need_RightMotor then 0.5 else 0) + (if need_LeftChemistry then 0.25 else 0) + (if need_RightChemistry then 0.25 else 0) + (if need_Division then 0.5 else 0));
 gene supply_Rotor: Rotor = buffered(pool.Rotor, (if need_Capture then 1 else 0) + (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Division then 1 else 0));
 gene supply_Frame: Frame = buffered(pool.Frame, (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0));
@@ -63,6 +64,13 @@ gene supply_Ring: Ring = buffered(pool.Ring, (if need_Division then 1 else 0));
 # Cue-driven material memory; growth dilutes its concentration.
 gene remember: Persistence = if sensed.LeftChemistry.valid && sensed.RightChemistry.valid
   && concentration.Persistence < 0.008 then 0.15 * activate(sensed.LeftChemistry.organic + sensed.RightChemistry.organic, 0.002) else 0;
+
+assembly Respiration: respire(oxygen) {
+  Catalyst: 0.025;
+  Wall: 0.015;
+  start_when: need_Respiration;
+  activity: if oxygen > 0 && energy.fraction < 0.98 && (carbon.organic > 0.2 * body.area || energy < 20) then 1 else 0;
+}
 
 assembly Gut: store(food) {
   Wall: 0.06;
@@ -110,7 +118,7 @@ assembly Minerals: import(mineral) {
 }
 
 assembly EnergyStore: store(energy) {
-  Wall: 0.08;
+  Wall: 0.04;
   start_when: need_EnergyStore;
   activity: 1;
 }

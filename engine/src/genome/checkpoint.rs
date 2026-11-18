@@ -236,7 +236,7 @@ impl Program {
 
     #[cfg(test)]
     pub(crate) fn read_checkpoint(r: &mut Reader<'_>) -> Result<Self> {
-        Self::read_checkpoint_version(r, 7)
+        Self::read_checkpoint_version(r, 9)
     }
 
     pub(crate) fn read_checkpoint_version(r: &mut Reader<'_>, version: u32) -> Result<Self> {
@@ -275,6 +275,10 @@ impl Program {
                 ensure(
                     version >= 6 || !matches!(kind, AssemblyKind::Mechanism(_)),
                     "mechanism assemblies need checkpoint version 6",
+                )?;
+                ensure(
+                    version >= 9 || kind.name() != "respire(oxygen)",
+                    "aerobic respiration needs checkpoint version 9",
                 )?;
                 ensure(
                     version >= 7 || kind.name() != "recycle()",

@@ -1,5 +1,5 @@
 import { MAX_PROGRAM_BYTES, MAX_STATE_BYTES } from './engine';
-import type { EnvironmentBarrier, EnvironmentSource } from './engine';
+import type { EnvironmentBarrier, EnvironmentSource, GasConfig } from './engine';
 
 export interface DocumentBase { id: string; name: string; createdAt: number; updatedAt: number }
 export const GENOME_LANGUAGE_VERSION = 3;
@@ -7,6 +7,7 @@ export interface GenomeDocument extends DocumentBase { source: string; descripti
 export interface EnvironmentConfig {
   width: number; height: number;
   foodRate: number; ambientTemperature: number; ambientLight: number; currentStrength: number; initialNutrients: number;
+  gases: GasConfig;
   sources: Array<Omit<EnvironmentSource, 'id'>>;
   barriers: Array<Omit<EnvironmentBarrier, 'id' | 'vx' | 'vy'>>;
 }
@@ -22,7 +23,7 @@ export interface UiPreferences {
   tab: 'simulation' | 'environments' | 'genomes';
   simulationView: 'player' | 'metrics' | 'settings' | 'genomes';
   activeSimulationId: string | null;
-  overlay: 'none' | 'light' | 'heat' | 'flow' | 'nutrients';
+  overlay: 'none' | 'light' | 'heat' | 'flow' | 'nutrients' | 'oxygen' | 'carbon';
   sensors: boolean; trails: boolean;
 }
 export interface GenomeDraft { name: string; source: string }
@@ -93,6 +94,9 @@ export function validateEnvironmentConfig(value: unknown): EnvironmentConfig {
   if (!Array.isArray(config.sources) || config.sources.length > 64) throw new Error('An environment can contain at most 64 sources.');
   const barriers = config.barriers ?? [];
   if (!Array.isArray(barriers) || barriers.length > 64) throw new Error('An environment can contain at most 64 barriers.');
+  const gases = object(config.gases ?? {}, 'Gas settings');
+  const mode = gases.mode ?? 'sealed';
+  if (mode !== 'sealed' && mode !== 'open') throw new Error('Gas boundary must be sealed or open.');
   return {
     width, height,
     foodRate: number(config.foodRate, 'External organic input', 0, 60),
@@ -100,13 +104,21 @@ export function validateEnvironmentConfig(value: unknown): EnvironmentConfig {
     ambientLight: number(config.ambientLight, 'Light', 0, 1),
     currentStrength: number(config.currentStrength, 'Current', 0, 30),
     initialNutrients: number(config.initialNutrients, 'Starting nutrients', 0, 5),
+    gases: {
+      mode,
+      initialOxygen: number(gases.initialOxygen ?? 1, 'Starting oxygen', 0, 100),
+      initialCarbon: number(gases.initialCarbon ?? 1, 'Starting inorganic carbon', 0, 100),
+      exchangeRate: number(gases.exchangeRate ?? 0.02, 'Gas exchange rate', 0, 1),
+      oxygenEquilibrium: number(gases.oxygenEquilibrium ?? 1, 'Oxygen equilibrium', 0, 100),
+      carbonEquilibrium: number(gases.carbonEquilibrium ?? 1, 'Inorganic carbon equilibrium', 0, 100),
+    },
     sources: config.sources.map((value, index) => {
       const item = object(value, `Source ${index + 1}`);
-      const kind = number(item.kind, 'Source kind', 0, 7, true) as EnvironmentSource['kind'];
+      const kind = number(item.kind, 'Source kind', 0, 12, true) as EnvironmentSource['kind'];
       return {
         kind, x: number(item.x, 'Source x', 0, width - Number.EPSILON * width),
         y: number(item.y, 'Source y', 0, height - Number.EPSILON * height),
-        strength: number(item.strength, 'Source strength', [0, 3, 4].includes(kind) ? 0 : -1, 1),
+        strength: number(item.strength, 'Source strength', [0, 3, 4].includes(kind) || kind >= 8 ? 0 : -1, 1),
         radius: number(item.radius, 'Source radius', 20, 1000),
         angle: number(item.angle ?? 0, 'Source angle', -Math.PI * 2, Math.PI * 2),
         length: number(item.length ?? 600, 'Source length', 40, 4800),
@@ -364,7 +376,7 @@ export function loadPreferences(): UiPreferences {
     tab: ['simulation', 'environments', 'genomes'].includes(saved.tab ?? '') ? saved.tab! : DEFAULT_PREFERENCES.tab,
     simulationView: ['player', 'metrics', 'settings', 'genomes'].includes(saved.simulationView ?? '') ? saved.simulationView! : DEFAULT_PREFERENCES.simulationView,
     activeSimulationId: typeof saved.activeSimulationId === 'string' && /^[A-Za-z0-9:_-]{1,160}$/.test(saved.activeSimulationId) && !saved.activeSimulationId.startsWith('builtin:') ? saved.activeSimulationId : null,
-    overlay: ['none', 'light', 'heat', 'flow', 'nutrients'].includes(saved.overlay ?? '') ? saved.overlay! : 'none',
+    overlay: ['none', 'light', 'heat', 'flow', 'nutrients', 'oxygen', 'carbon'].includes(saved.overlay ?? '') ? saved.overlay! : 'none',
     sensors: typeof saved.sensors === 'boolean' ? saved.sensors : true,
     trails: typeof saved.trails === 'boolean' ? saved.trails : false,
   };

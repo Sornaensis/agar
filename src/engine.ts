@@ -11,6 +11,7 @@ export const MECHANISM_KINDS = [
   'import(mineral)', 'import(particle)', 'engulf()', 'digest(exudate)', 'digest(tissue)', 'digest(waste)',
   'propel()', 'pierce()', 'shield()', 'repair()', 'sense(light)', 'sense(heat)', 'sense(chemical)',
   'sense(contact)', 'sense(optical)', 'grow()', 'replicate()', 'constrict()', 'recycle()',
+  'respire(oxygen)',
 ] as const;
 export type MechanismKind = typeof MECHANISM_KINDS[number];
 export type CellularAssemblyKind = OrganelleKind | 'membrane' | 'replicator' | 'constrictor' | MechanismKind;
@@ -93,11 +94,19 @@ export interface Cell {
   gutExudateEnergy:number; gutTissueEnergy:number; gutWasteEnergy:number;
   gutExudateNutrients:number; gutTissueNutrients:number; gutWasteNutrients:number; expressionRate:number;
   bodyUpkeep:number; spaceUsed:number; spaceCapacity:number; surfaceUsed:number; surfaceCapacity:number; divisionReady:boolean; opticalRange:number;
+  organicCarbon:number; internalOxygen:number; internalInorganicCarbon:number; respirationRate:number; carbonFixationRate:number;
   organelles:OrganelleSummary[];
 }
 export type OrganicKind = 0 | 1 | 2;
 export interface Food { x: number; y: number; energy: number; nutrients: number; kind:OrganicKind }
-export type SourceKind = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export type SourceKind = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
+export interface GasExchangeConfig {
+  mode: 'sealed' | 'open'; exchangeRate: number; oxygenEquilibrium: number; carbonEquilibrium: number;
+}
+export interface GasConfig extends GasExchangeConfig {
+  /** Abstract amount per water patch; every patch has unit water volume. */
+  initialOxygen: number; initialCarbon: number;
+}
 export interface EnvironmentSource {
   id: number; kind: SourceKind; x: number; y: number; strength: number; radius: number;
   /** Orientation in radians, and longitudinal extent for directional flow. */
@@ -111,7 +120,10 @@ export interface EnvironmentSnapshot {
   columns: number; rows: number; width: number; height: number;
   ambientTemperature: number; ambientLight: number; currentStrength: number; initialNutrients: number;
   nutrientRemovedTotal: number;
-  /** Interleaved light, temperature, flow x, flow y, dissolved nutrients; an owned copy. */
+  gases: GasConfig;
+  oxygenInputTotal: number; oxygenRemovedTotal: number;
+  carbonInputTotal: number; carbonRemovedTotal: number;
+  /** Interleaved light, temperature, flow x, flow y, minerals, O2 and inorganic carbon. */
   samples: Float32Array; sources: EnvironmentSource[]; barriers: EnvironmentBarrier[];
 }
 export interface RegisterEntry { name: string; type: string; value: unknown }
@@ -272,9 +284,9 @@ export function validateGenomeGraph(value: unknown): GenomeGraph {
 }
 export const MAX_PROGRAM_BYTES = 262_144;
 export const MAX_STATE_BYTES = 128 * 1024 * 1024;
-const READ_SIGNAL_COUNT = 169;
+const READ_SIGNAL_COUNT = 174;
 const WRITE_SIGNAL_COUNT = 81;
-const CELL_STRIDE = 158;
+const CELL_STRIDE = 163;
 const FOOD_STRIDE = 5;
 export type MutationKind = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 export interface GenomeRecord { source: string; parentId: number; mutationKind: MutationKind }
@@ -310,12 +322,16 @@ export interface MetricsSnapshot extends SimulationSummary {
   trophic:{autotrophs:number;heterotrophs:number;mixotrophs:number;hunters:number};
   flow:{production:number;digestion:number;exudation:number};
   organicCounts:[number,number,number];
+  carbonTotal:number; carbonInputTotal:number; organicCellTotal:number; organicFoodTotal:number;
+  carbonFixedTotal:number; carbonRespiredTotal:number; decayRespiredTotal:number; legacyCarbonImported:number;
+  oxygenCellTotal:number; oxygenDissolvedTotal:number; inorganicCarbonTotal:number;
+  oxygenInputTotal:number; oxygenRemovedTotal:number; carbonRemovedTotal:number; internalInorganicCarbonTotal:number;
   genomes:{id:number;population:number;maxGeneration:number}[];
 }
 
 const RENDER_HEADER = 12;
 const RENDER_CELL_STRIDE = 21;
-const METRICS_HEADER = 36;
+const METRICS_HEADER = 51;
 
 /** Decode a worker-transferred compact buffer without any WASM calls. */
 export function decodeRenderSnapshot(data: Float64Array): RenderSnapshot {
@@ -359,7 +375,11 @@ export function decodeMetricsSnapshot(data: Float64Array): MetricsSnapshot {
     photosynthesisTotal:data[17],energyTotal:data[18],energyInputTotal:data[19],nutrientTotal:data[20],
     nutrientInputTotal:data[21],nutrientDissolvedTotal:data[22],nutrientFoodTotal:data[23],nutrientCellTotal:data[24],
     trophic:{autotrophs:data[25],heterotrophs:data[26],mixotrophs:data[27],hunters:data[28]},
-    flow:{production:data[29],digestion:data[30],exudation:data[31]},organicCounts:[data[32],data[33],data[34]],genomes};
+    flow:{production:data[29],digestion:data[30],exudation:data[31]},organicCounts:[data[32],data[33],data[34]],
+    carbonTotal:data[36],carbonInputTotal:data[37],organicCellTotal:data[38],organicFoodTotal:data[39],
+    carbonFixedTotal:data[40],carbonRespiredTotal:data[41],decayRespiredTotal:data[42],legacyCarbonImported:data[43],
+    oxygenCellTotal:data[44],oxygenDissolvedTotal:data[45],inorganicCarbonTotal:data[46],oxygenInputTotal:data[47],
+    oxygenRemovedTotal:data[48],carbonRemovedTotal:data[49],internalInorganicCarbonTotal:data[50],genomes};
 }
 
 interface WasmExports extends WebAssembly.Exports {
@@ -396,6 +416,10 @@ interface WasmExports extends WebAssembly.Exports {
   set_environment(temperature: number, light: number, current: number): void;
   set_world_size(width: number, height: number): number;
   set_initial_nutrients(level: number): void; add_nutrients(x: number, y: number, amount: number): number;
+  set_initial_gases(oxygen: number, carbon: number): number;
+  set_gas_exchange(mode: number, rate: number, oxygenEquilibrium: number, carbonEquilibrium: number): number;
+  oxygen_dissolved_total(): number; inorganic_carbon_total(): number;
+  oxygen_input_total(): number; oxygen_removed_total(): number; carbon_input_total(): number; carbon_removed_total(): number;
   nutrient_total(): number; nutrient_input_total(): number; nutrient_dissolved_total(): number;
   nutrient_food_total(): number; nutrient_cell_total(): number;
   nutrient_removed_total(): number;
@@ -541,6 +565,11 @@ export class Engine {
   setEnvironment(temperature: number, light: number, current: number): void { this.wasm.set_environment(temperature, light, current); }
   setWorldSize(width: number, height: number): boolean { return this.wasm.set_world_size(width, height) !== 0; }
   setInitialNutrients(level: number): void { this.wasm.set_initial_nutrients(level); }
+  setInitialGases(oxygen: number, carbon: number): boolean { return this.wasm.set_initial_gases(oxygen, carbon) !== 0; }
+  setGasExchange(config: GasExchangeConfig): boolean {
+    if (config.mode !== 'sealed' && config.mode !== 'open') return false;
+    return this.wasm.set_gas_exchange(config.mode === 'open' ? 1 : 0, config.exchangeRate, config.oxygenEquilibrium, config.carbonEquilibrium) !== 0;
+  }
   addNutrients(x = -1, y = -1, amount = 25): number { return this.wasm.add_nutrients(x, y, amount); }
   addSource(kind: SourceKind, x: number, y: number, strength: number, radius: number, angle = 0, length = 600): number {
     if (![x, y, strength, radius, angle, length].every(Number.isFinite)) return 0;
@@ -629,18 +658,19 @@ export class Engine {
     const pointer = this.wasm.environment_snapshot_ptr();
     const data = new Float32Array(this.wasm.memory.buffer, pointer, this.wasm.environment_snapshot_len());
     const columns = data[0], rows = data[1], count = data[5], width = data[7], height = data[8], barrierCount = data[9];
-    const sampleEnd = 11 + columns * rows * 5, barrierStart = sampleEnd + count * 8;
+    const sampleEnd = 21 + columns * rows * 7, barrierStart = sampleEnd + count * 8;
     if (!Number.isInteger(columns) || !Number.isInteger(rows) || columns < 1 || rows < 1
       || columns > 240 || rows > 152 || width !== columns * 20 || height !== rows * 20
       || !Number.isInteger(count) || count < 0 || count > 64
       || !Number.isInteger(barrierCount) || barrierCount < 0 || barrierCount > 64
       || !Number.isFinite(data[10]) || data[10] < 0
+      || ![0, 1].includes(data[13]) || !data.subarray(11, 21).every(value => Number.isFinite(value) && value >= 0)
       || data.length !== barrierStart + barrierCount * 10) throw new Error('The environment snapshot has an invalid layout.');
-    const samples = data.slice(11, sampleEnd);
+    const samples = data.slice(21, sampleEnd);
     const sources: EnvironmentSource[] = [];
     for (let i = 0; i < count; i++) {
       const n = sampleEnd + i * 8;
-      if (!Number.isInteger(data[n + 1]) || data[n + 1] < 0 || data[n + 1] > 7
+      if (!Number.isInteger(data[n + 1]) || data[n + 1] < 0 || data[n + 1] > 12
         || !data.subarray(n, n + 8).every(Number.isFinite)) throw new Error('The environment contains an invalid source.');
       sources.push({ id: data[n], kind: data[n + 1] as SourceKind, x: data[n + 2], y: data[n + 3], strength: data[n + 4], radius: data[n + 5], angle: data[n + 6], length: data[n + 7] });
     }
@@ -650,7 +680,9 @@ export class Engine {
       if (![0, 1].includes(data[n + 6]) || !data.subarray(n, n + 10).every(Number.isFinite)) throw new Error('The environment contains an invalid barrier.');
       barriers.push({ id: data[n], x: data[n + 1], y: data[n + 2], length: data[n + 3], width: data[n + 4], angle: data[n + 5], floating: data[n + 6] === 1, vx: data[n + 7], vy: data[n + 8] });
     }
-    return { columns, rows, width, height, ambientTemperature: data[2], ambientLight: data[3], currentStrength: data[4], initialNutrients: data[6], nutrientRemovedTotal: data[10], samples, sources, barriers };
+    return { columns, rows, width, height, ambientTemperature: data[2], ambientLight: data[3], currentStrength: data[4], initialNutrients: data[6], nutrientRemovedTotal: data[10],
+      gases: { initialOxygen: data[11], initialCarbon: data[12], mode: data[13] === 1 ? 'open' : 'sealed', exchangeRate: data[14], oxygenEquilibrium: data[15], carbonEquilibrium: data[16] },
+      oxygenInputTotal: data[17], oxygenRemovedTotal: data[18], carbonInputTotal: data[19], carbonRemovedTotal: data[20], samples, sources, barriers };
   }
 
   /** Owned compact bytes can be transferred to the UI without cloning cell objects. */
@@ -718,5 +750,6 @@ function decodeCell(data: Float64Array, n: number): Cell {
   return {id:data[n],genomeId:data[n+1],x:data[n+2],y:data[n+3],vx:data[n+4],vy:data[n+5],angle:data[n+6],energy:data[n+7],age:data[n+8],generation:data[n+9],parentId:data[n+10],radius:data[n+11],
     bodyArea:data[n+12],bodyMass:data[n+13],birthArea:data[n+14],energyCapacity:data[n+15],basalMetabolism:data[n+16],memoryUsed:data[n+17],memoryCost:data[n+18],integrity:data[n+19],photosynthesisRate:data[n+20],
     nutrientStored:data[n+21],nutrientCapacity:data[n+22],nutrientUptakeRate:data[n+23],gutEnergy:data[n+24],gutCapacity:data[n+25],gutNutrients:data[n+26],digestionRate:data[n+27],growthRate:data[n+28],maturity:data[n+29],exudationRate:data[n+31],bodyUpkeep:data[n+32],spaceUsed:data[n+33],spaceCapacity:data[n+34],surfaceUsed:data[n+35],surfaceCapacity:data[n+36],divisionReady:data[n+37]!==0,opticalRange:data[n+38],
-    gutExudateEnergy:data[n+135],gutTissueEnergy:data[n+136],gutWasteEnergy:data[n+137],gutExudateNutrients:data[n+138],gutTissueNutrients:data[n+139],gutWasteNutrients:data[n+140],expressionRate:data[n+157],organelles};
+    gutExudateEnergy:data[n+135],gutTissueEnergy:data[n+136],gutWasteEnergy:data[n+137],gutExudateNutrients:data[n+138],gutTissueNutrients:data[n+139],gutWasteNutrients:data[n+140],expressionRate:data[n+157],
+    organicCarbon:data[n+158],internalOxygen:data[n+159],internalInorganicCarbon:data[n+160],respirationRate:data[n+161],carbonFixationRate:data[n+162],organelles};
 }

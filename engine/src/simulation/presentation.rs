@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 pub(super) const RENDER_HEADER: usize = 12;
 pub(super) const RENDER_CELL_STRIDE: usize = 21;
-pub(super) const METRICS_HEADER: usize = 36;
+pub(super) const METRICS_HEADER: usize = 51;
 
 impl World {
     pub(crate) fn cell_snapshot(&self, id: u32, target: &mut Vec<f64>) -> bool {
@@ -121,7 +121,8 @@ impl World {
             flow[1] += cell.digestion_rate;
             flow[2] += cell.exudation_rate;
             cell_material += cell.mass();
-            cell_energy += cell.energy + cell.gut_energy + cell.body.embodied_energy();
+            cell_energy += cell.energy + cell.gut_energy + cell.body.embodied_energy()
+                + (cell.organic_carbon + cell.body.structural_mass() * STRUCTURAL_CARBON_PER_MASS) * CHEMICAL_ENERGY_PER_CARBON;
             generation = generation.max(cell.generation);
             let group = groups.entry(cell.genome_id).or_default();
             group.0 += 1;
@@ -174,6 +175,11 @@ impl World {
             organic_counts[1] as f64,
             organic_counts[2] as f64,
             groups.len() as f64,
+            self.carbon_total(), self.carbon_input_total(), self.organic_cell_total(), self.organic_food_total(),
+            self.carbon_fixed_total, self.carbon_respired_total, self.decay_carbon_respired_total, self.legacy_carbon_imports,
+            self.oxygen_cell_total(), self.environment.oxygen_total(), self.environment.inorganic_carbon_total(),
+            self.environment.oxygen_input_total(), self.environment.oxygen_output_total(), self.environment.carbon_output_total(),
+            self.internal_inorganic_carbon_total(),
         ]);
         debug_assert_eq!(target.len(), METRICS_HEADER);
         for (id, (population, max_generation)) in groups {
@@ -249,6 +255,7 @@ impl World {
         target.extend(c.gut.iter().map(|pool| pool.nutrients));
         target.extend(c.body.precursor_mass);
         target.push(c.synthesis_rate);
+        target.extend([c.organic_carbon, c.internal_oxygen, c.internal_inorganic_carbon, c.respiration_rate, c.carbon_fixation_rate]);
     }
 }
 

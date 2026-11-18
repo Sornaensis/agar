@@ -55,6 +55,7 @@ fn mature(cell: &mut Cell) {
         if cell.body.area + 1e-10 >= target {
             break;
         }
+        let mass = cell.body.structural_mass();
         cell.body.work(
             1.0,
             &BodyControls::default(),
@@ -64,6 +65,7 @@ fn mature(cell: &mut Cell) {
             1.0,
             target,
         );
+        cell.organic_carbon -= cell.body.structural_mass() - mass;
     }
     close(cell.body.area, target);
     cell.cooldown = 0.0;
@@ -76,6 +78,7 @@ fn partial_organ(cell: &mut Cell, kind: Kind, mass: f64) {
     assert!(cell.energy > energy && cell.nutrient_stored > mass);
     cell.energy -= energy;
     cell.nutrient_stored -= mass;
+    cell.organic_carbon -= mass;
     cell.body.organs.push(Organelle {
         id: cell.body.next_organelle_id,
         kind,
@@ -144,7 +147,8 @@ fn production_seeding_gives_every_program_the_same_minimal_founder() {
         assert!(!cell.division_ready());
     }
     close(world.nutrient_total(), world.nutrient_input_total());
-    close(world.energy_input_total(), 6.0 * budget.introduced_energy);
+    close(world.energy_input_total(), 6.0 * (budget.introduced_energy + budget.energy
+        + expected_body.structural_mass() * CHEMICAL_ENERGY_PER_CARBON));
     world.reset(82, hunter);
     assert!(world.cells.iter().all(|cell| cell.body == expected_body));
 }
@@ -168,7 +172,7 @@ fn idle_and_action_only_genomes_cannot_gain_specialization_without_construction(
     assert_eq!(world.attacks, 0);
     for cell in &world.cells {
         assert_eq!(cell.body, body);
-        assert!(cell.energy < budget.energy);
+        assert!(cell.energy + cell.organic_carbon * CHEMICAL_ENERGY_PER_CARBON < 2.0 * budget.energy);
         close(cell.nutrient_stored, budget.minerals);
         close(cell.gut_energy, 0.0);
     }
@@ -196,6 +200,9 @@ fn universal_newborn_builds_feeding_organs_and_a_paid_conservative_daughter() {
     for world in [&mut fed, &mut unfed] {
         world.food_rate = 0.0;
         world.mutation_rate = 0.0;
+        // This heavily supplied culture isolates food-limited development.
+        // Aeration is explicit; sealed/anoxic limitations are tested separately.
+        world.environment.configure_gas_exchange(true, 0.5, 1.0, 1.0);
         world.try_seed_cells(1, 1, 300.0, 300.0).unwrap();
     }
     let x = fed.cells[0].x;
@@ -370,7 +377,7 @@ fn a_closed_dark_world_cannot_gain_energy_from_build_recycle_feed_or_repair() {
 }
 
 #[test]
-fn broken_storage_spills_energy_and_minerals_without_erasing_contents() {
+fn broken_storage_spills_carbon_and_minerals_and_dissipates_unstored_usable_energy() {
     let mut world = world(BodyFixture::Scavenger);
     let cell = &mut world.cells[0];
     cell.energy = cell.energy_capacity();
@@ -381,6 +388,8 @@ fn broken_storage_spills_energy_and_minerals_without_erasing_contents() {
         cell.body.capacities().gut_minerals,
     );
     let energy = world.energy_total();
+    let carbon = world.carbon_total();
+    let usable = world.cells[0].energy;
     let minerals = world.nutrient_total();
     let structure = world.cells[0].body.structural_mass();
     for organ in &mut world.cells[0].body.organs {
@@ -389,7 +398,8 @@ fn broken_storage_spills_energy_and_minerals_without_erasing_contents() {
         }
     }
     world.spill_excess_stores();
-    close(world.energy_total(), energy);
+    close(world.energy_total() + usable - world.cells[0].energy, energy);
+    close(world.carbon_total(), carbon);
     close(world.nutrient_total(), minerals);
     close(world.cells[0].body.structural_mass(), structure);
     close(world.cells[0].gut_energy, 0.0);
@@ -412,6 +422,7 @@ fn dismantling_occupied_compartments_returns_all_material_and_accounts_energy_lo
     request.recycle[Kind::Digestive as usize] = 1.0;
     for _ in 0..500 {
         let cell = &mut world.cells[0];
+        let mass = cell.body.structural_mass();
         let report = cell.body.work(
             0.0,
             &request,
@@ -421,8 +432,11 @@ fn dismantling_occupied_compartments_returns_all_material_and_accounts_energy_lo
             DT,
             MAX_AREA,
         );
+        cell.organic_carbon += mass - cell.body.structural_mass();
         heat += report.dissipated_energy;
+        let usable = cell.energy;
         world.spill_excess_stores();
+        heat += usable - world.cells[0].energy;
     }
     assert_eq!(world.cells[0].body.count(Kind::Reserve), 0);
     assert_eq!(world.cells[0].body.count(Kind::Digestive), 0);
@@ -445,7 +459,8 @@ fn division_preserves_whole_organ_identities_and_pays_the_fission_cost() {
     close(world.nutrient_total(), minerals);
     close(
         energy - world.energy_total(),
-        maintenance + DIVISION_COST * original.area,
+        maintenance + DIVISION_COST * original.area
+            + world.carbon_respired_total * (CHEMICAL_ENERGY_PER_CARBON - RESPIRATION_ENERGY_PER_CARBON),
     );
     let mut inherited: Vec<_> = world
         .cells
@@ -628,6 +643,7 @@ fn local_photon_supply_is_finite_and_shared_by_overlapping_producers() {
         cell.x = 110.0;
         cell.y = 110.0;
         cell.energy = 50.0;
+        cell.internal_inorganic_carbon = 1.0;
     }
     let capacities = caps(&world);
     let mut processing: Vec<_> = capacities.iter().map(|c| c.metabolism * DT).collect();
@@ -701,17 +717,18 @@ fn capturing_and_digesting_are_separate_and_conversion_has_a_real_energy_loss() 
     close(world.energy_total(), energy);
     close(world.nutrient_total(), material);
     let before = world.cells[0].gut_energy;
+    let carbon = world.cells[0].organic_carbon;
     let mut processing = [capacities[0].metabolism * DT];
     world.digest(&outputs, &capacities, &mut processing);
     let processed = before - world.cells[0].gut_energy;
     assert!(processed > 0.0 && processed <= capacities[0].digestion * DIGESTION_SPEED[0] * DT);
     close(
-        world.cells[0].energy - 50.0,
-        processed * ASSIMILATION_EFFICIENCY[0],
+        world.cells[0].organic_carbon - carbon,
+        processed * ASSIMILATION_EFFICIENCY[0] / CHEMICAL_ENERGY_PER_CARBON,
     );
     close(
         energy - world.energy_total(),
-        processed * (1.0 - ASSIMILATION_EFFICIENCY[0]),
+        processed * 0.02,
     );
     close(world.nutrient_total(), material);
 }
@@ -797,6 +814,7 @@ fn engulfing_transfers_one_whole_body_once_and_pays_before_the_meal() {
     world.cells[1].vy = 0.0;
     world.cells[1].integrity = 0.2;
     world.cells[1].energy = 5.0;
+    world.cells[1].organic_carbon = 0.25;
     world.cells[1].nutrient_stored = 0.0;
     let energy = world.energy_total();
     let material = world.nutrient_total();
@@ -809,7 +827,8 @@ fn engulfing_transfers_one_whole_body_once_and_pays_before_the_meal() {
     assert_eq!(world.predations, 1);
     assert_eq!(world.deaths, 1);
     assert!(world.cells[0].gut_energy > 10.0 && world.cells[0].engulf_cooldown > 0.0);
-    close(predator_energy - world.cells[0].energy, expected_cost);
+    close(predator_energy - world.cells[0].energy
+        + world.cells[0].respiration_rate * DT * RESPIRATION_ENERGY_PER_CARBON, expected_cost);
     close(world.nutrient_total(), material);
     assert!(world.energy_total() < energy);
 }
@@ -958,7 +977,8 @@ fn full_genome_registry_keeps_reproduction_and_counts_skipped_mutations() {
     assert_eq!(world.mutations, 0);
     assert_eq!(world.mutations_skipped, 1);
     assert_eq!(programs.len(), MAX_GENOMES);
-    close(energy - world.energy_total(), upkeep + DIVISION_COST * area);
+    close(energy - world.energy_total(), upkeep + DIVISION_COST * area
+        + world.carbon_respired_total * (CHEMICAL_ENERGY_PER_CARBON - RESPIRATION_ENERGY_PER_CARBON));
 }
 
 #[test]
@@ -1005,6 +1025,8 @@ fn dark_scavenger_completes_a_meal_dependent_lifecycle_with_accounted_food() {
     let mut unfed = world(BodyFixture::Scavenger);
     fed.environment.configure(0.5, 0.0, 0.0);
     unfed.environment.configure(0.5, 0.0, 0.0);
+    fed.environment.configure_gas_exchange(true, 0.5, 1.0, 1.0);
+    unfed.environment.configure_gas_exchange(true, 0.5, 1.0, 1.0);
     let mut fed_programs = registry(source);
     let mut unfed_programs = registry(source);
     let founder_energy = fed.cells[0].energy;
@@ -1074,25 +1096,22 @@ fn digestive_substrates_have_distinct_costs_yields_and_conservative_residue() {
         }];
         let material = world.nutrient_total();
         let energy = world.energy_total();
+        let carbon = world.cells[0].organic_carbon;
         let mut processing = [capacities[0].metabolism * DT];
         world.digest(&outputs, &capacities, &mut processing);
         let raw = 10.0 - world.cells[0].gut_energy;
         assert!(raw > 0.0);
         close(
-            world.cells[0].energy - 50.0,
-            raw * ASSIMILATION_EFFICIENCY[kind as usize],
+            world.cells[0].organic_carbon - carbon,
+            raw * ASSIMILATION_EFFICIENCY[kind as usize] / CHEMICAL_ENERGY_PER_CARBON,
         );
         close(world.nutrient_total(), material);
-        let residue = if kind == OrganicKind::Tissue {
-            0.2
-        } else {
-            0.0
-        };
         close(
             energy - world.energy_total(),
-            raw * (1.0 - ASSIMILATION_EFFICIENCY[kind as usize] - residue),
+            raw * 0.02,
         );
-        assert_eq!(!world.food.is_empty(), kind == OrganicKind::Tissue);
+        assert!(!world.food.is_empty());
+        close(world.food.iter().map(|f| f.energy).sum(), raw * (1.0 - ASSIMILATION_EFFICIENCY[kind as usize]));
         assert!(world.food.iter().all(|f| f.kind == OrganicKind::Waste));
         rates.push(raw);
     }
@@ -1114,7 +1133,7 @@ fn digestive_preferences_share_capacity_and_can_leave_a_substrate_untouched() {
         ..Outputs::default()
     }];
     let mut processing = [capacities[0].metabolism * DT];
-    let budget = (capacities[0].digestion * DT).min(processing[0]);
+    let budget = capacities[0].digestion * DT;
     world.digest(&outputs, &capacities, &mut processing);
     let spent_exudate = (10.0 - world.cells[0].gut[0].energy) / DIGESTION_SPEED[0];
     let spent_tissue = (10.0 - world.cells[0].gut[1].energy) / DIGESTION_SPEED[1];
@@ -1140,6 +1159,7 @@ fn tissue_then_waste_reprocessing_cannot_regenerate_edible_energy_or_material() 
         ..Outputs::default()
     }];
     let material = world.nutrient_total();
+    let carbon = world.cells[0].organic_carbon;
     let mut last_energy = world.energy_total();
     for _ in 0..3000 {
         let mut processing = [capacities[0].metabolism * DT];
@@ -1159,11 +1179,9 @@ fn tissue_then_waste_reprocessing_cannot_regenerate_edible_energy_or_material() 
         }
     }
     assert!(world.cells[0].gut_energy <= 1e-10);
-    close(
-        world.cells[0].energy,
-        50.0 + 20.0 * 0.65 + 20.0 * 0.2 * 0.32,
-    );
-    close(world.cells[0].nutrient_stored, 0.4 * 0.8 + 0.4 * 0.2 * 0.5);
+    close(world.cells[0].organic_carbon - carbon, 20.0 / CHEMICAL_ENERGY_PER_CARBON);
+    assert!(world.cells[0].energy < 50.0, "hydrolysis is paid work, not usable energy production");
+    close(world.cells[0].nutrient_stored, 0.4);
 }
 
 #[test]

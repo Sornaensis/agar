@@ -175,9 +175,11 @@ impl Sensor {
         matches!(
             name,
             "energy" | "energy.fraction" | "energy.capacity" | "age" | "speed" | "integrity"
+                | "oxygen" | "respiration.rate"
         ) || (name.starts_with("body.") && name != "body.division_ready")
             || [
                 "nutrient.",
+                "carbon.",
                 "gut.",
                 "light.",
                 "heat.",
@@ -1172,7 +1174,9 @@ assembly Digest: digest(tissue) { Catalyst: 0.04; activity: if gut.tissue.energy
         program.write_checkpoint(&mut writer);
         assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 5).is_err());
         assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 6).is_err());
-        let restored = Program::read_checkpoint_version(&mut Reader::new(&writer.0), 7).unwrap();
+        assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 7).is_err());
+        assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 8).is_err());
+        let restored = Program::read_checkpoint_version(&mut Reader::new(&writer.0), 9).unwrap();
         assert_eq!(program.cellular(), restored.cellular());
         assert_eq!(program.evaluate(&inputs()), restored.evaluate(&inputs()));
         assert!(restored.checkpoint_source_matches(&program, &source, true));

@@ -83,7 +83,7 @@ const sensorRows: ReadonlyArray<readonly [string, PrimitiveType, string]> = [
   ['gut.energy', 'scalar', 'Raw organic energy waiting in digestive compartments. It is not yet usable.'],
   ['gut.capacity', 'scalar', 'Raw-energy storage provided by functional digestive vacuoles.'],
   ['gut.fraction', 'scalar', 'Gut energy divided by digestive capacity, clamped to 0–1. Zero when capacity is absent.'],
-  ['digestion.rate', 'scalar', 'Usable energy gained from digestion per second during the last completed tick, after assimilation losses.'],
+  ['digestion.rate', 'scalar', 'Chemical substrate potential processed per second during the last completed tick. Digestion releases organic carbon; oxygen-dependent respiration supplies usable energy.'],
   ['growth.rate', 'scalar', 'Envelope area added per second during the last completed tick.'],
   ['lifespan', 'scalar', 'Compatibility signal, always zero: cells have no age limit. Use age for elapsed lifetime; survival depends on resources and structural integrity.'],
   ['exudation.rate', 'scalar', 'Raw organic energy released as particles per second during the last completed tick.'],
@@ -139,6 +139,11 @@ const sensorRows: ReadonlyArray<readonly [string, PrimitiveType, string]> = [
   ...ORGANELLE_CATALOG.map(({kind, name}) => [
     `protein.${kind}`, 'scalar', `Unassembled ${name.toLowerCase()} protein material. Only this family can use it. Stocks consume internal space and upkeep, turn over with a 45-second half-life, and partition at division. Express only what the body can use.`,
   ] as [string, PrimitiveType, string]),
+  ['carbon.organic', 'scalar', 'Organic carbon reserves available for respiration and construction. Structural carbon and gut contents are separate.'],
+  ['carbon.inorganic', 'scalar', 'Internal dissolved inorganic carbon available for fixation or passive release through the membrane.'],
+  ['oxygen', 'scalar', 'Internal oxygen available for aerobic respiration. Membrane exchange follows the concentration gradient.'],
+  ['respiration.rate', 'scalar', 'Organic carbon oxidized per second during the last completed tick. The same amount of oxygen is consumed and inorganic carbon produced.'],
+  ['carbon.fixation.rate', 'scalar', 'Inorganic carbon fixed into organic carbon per second during the last completed tick. The same amount of oxygen is produced.'],
 ];
 export const BUILTIN_SIGNALS: readonly GenomeSymbol[] = Object.freeze(sensorRows.map(([name, type, description]) =>
   symbol(name, 'signal', type, `${name}: ${type}`, `${description} Sampled before actions this tick.`)));
@@ -166,9 +171,9 @@ export const BUILTIN_OUTPUTS: readonly GenomeSymbol[] = Object.freeze([
   output('scan.bearing', 'scalar', 'Body-relative scan center in radians, wrapped to −π…π; defaults to 0. Takes effect on the following tick.'),
   output('scan.width', 'scalar', 'Requested scan width in radians, clamped to 0…2π; defaults to a full circle. Built detector coverage, visibility and occlusion still limit observations. Takes effect on the following tick.'),
   output('scan.target', 'string', 'Optional opaque token to reacquire within the next physical scan; defaults to an empty string. It grants no access outside the detector’s observable region.'),
-  output('digest.exudate', 'scalar', 'Processing effort for gut exudate, clamped to 0–1; defaults to 1. Relatively fast digestion converts 80% of its raw energy to usable reserves. Shares processing capacity with tissue and waste.'),
-  output('digest.tissue', 'scalar', 'Processing effort for gut tissue, clamped to 0–1; defaults to 1. Slower than exudate: 65% of raw energy becomes usable reserves, 20% remains in waste and 15% dissipates. Some minerals remain in the waste.'),
-  output('digest.waste', 'scalar', 'Processing effort for gut waste, clamped to 0–1; defaults to 0.35. Slow refractory digestion converts 32% of raw energy to usable reserves. Remaining energy dissipates and unassimilated minerals return to water.'),
+  output('digest.exudate', 'scalar', 'Processing effort for gut exudate, clamped to 0–1; defaults to 1. Transfers accessible organic carbon into reserves. Shares processing capacity with tissue and waste; usable energy requires respiration.'),
+  output('digest.tissue', 'scalar', 'Processing effort for gut tissue, clamped to 0–1; defaults to 1. Transfers accessible carbon into reserves and retains refractory carbon and minerals in waste.'),
+  output('digest.waste', 'scalar', 'Processing effort for gut waste, clamped to 0–1; defaults to 0.35. Slowly extracts accessible carbon. Remaining carbon stays in waste and unassimilated minerals return to water.'),
 ]);
 
 export const LANGUAGE_KEYWORDS: readonly GenomeSymbol[] = Object.freeze([
@@ -205,9 +210,9 @@ export const CELLULAR_KEYWORDS: readonly GenomeSymbol[] = Object.freeze([
   { ...symbol('direction', 'keyword', 'radians', 'direction: 0;', 'Body-relative force direction in radians. An off-center force can rotate the body as well as translate it.'), insertText: 'direction: 0;' },
 ].map(item => Object.freeze(item)));
 export const CELLULAR_READ_SIGNALS: readonly GenomeSymbol[] = Object.freeze(BUILTIN_SIGNALS.filter(item =>
-  ['energy', 'energy.fraction', 'energy.capacity', 'age', 'speed', 'integrity'].includes(item.name)
+  ['energy', 'energy.fraction', 'energy.capacity', 'age', 'speed', 'integrity', 'oxygen', 'respiration.rate'].includes(item.name)
   || (item.name.startsWith('body.') && item.name !== 'body.division_ready')
-  || /^(nutrient|gut|light|heat|chemical|flow|contact|object)\./.test(item.name)));
+  || /^(nutrient|gut|light|heat|chemical|flow|contact|object|carbon)\./.test(item.name)));
 export const CELLULAR_ASSEMBLY_KINDS: readonly GenomeSymbol[] = Object.freeze([
   ...ORGANELLE_CATALOG.map(item => symbol(item.kind, 'keyword', 'assembly', `${item.kind} { components; activity: expression; }`, item.description)),
   symbol('membrane', 'keyword', 'assembly', 'membrane { components; activity: expression; }', 'Membrane and enzyme products support paid envelope growth, adding space with finite minerals, energy and core work.'),

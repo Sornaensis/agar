@@ -2,11 +2,11 @@
 
 ## Cellular extension
 
-ABI 11 accepts an explicit `cellular;` source mode. It includes typed product declarations, gene expression, physical recipes, pool/concentration/built reads, named receptor observations, pure functions, assembly initiation, activity and paid recycling. Existing unmarked programs retain the action/register language documented below. See [cellular language and accounting](../design/cellular.md) for the implemented rules.
+ABI 12 accepts an explicit `cellular;` source mode. It includes typed product declarations, gene expression, physical recipes, pool/concentration/built reads, named receptor observations, pure functions, assembly initiation, activity and paid recycling. Existing unmarked programs retain the action/register language documented below. See [cellular language and accounting](../design/cellular.md) for the implemented rules.
 
-`language_schema_ptr` retains schema version 3. Its additive `cellular.mechanisms` array lists each canonical constructor, typed target, required material roles, effect description and typed `receptorFields` with `requiresValid` flags. `cellular.recipeControls` describes activity, start_when and recycle types/defaults; `cellular.userFunctions` gives numeric-parameter and inlining limits. Top-level `functions` supplies builtin names and arities. Graph/evaluation JSON identifies its mode; cellular roots describe genes, activity, boolean initiation and recycling. `cell_body_ptr` adds material pools, ingredient-level assemblies, lifecycle progress and sampled construction/recovery controls. Compact/full numeric snapshot layouts remain unchanged. Render summaries do not grant legacy family capabilities to mechanisms.
+`language_schema_ptr` retains schema version 3. Its additive `cellular.mechanisms` array lists each canonical constructor, typed target, required material roles, effect description and typed `receptorFields` with `requiresValid` flags. `cellular.recipeControls` describes activity, start_when and recycle types/defaults; `cellular.userFunctions` gives numeric-parameter and inlining limits. Top-level `functions` supplies builtin names and arities. Graph/evaluation JSON identifies its mode; cellular roots describe genes, activity, boolean initiation and recycling. `cell_body_ptr` adds material pools, ingredient-level assemblies, lifecycle progress and sampled construction/recovery controls. Compact rendering remains unchanged; ABI 12 extends full cell records and aggregate metrics with gas/carbon state. Render summaries do not grant legacy family capabilities to mechanisms.
 
-Mutation kinds additionally accept gene silence (4), gene duplication (5), and future placement changes (6). Checkpoint 8 stores the cellular graph, mechanism identities, construction controls and physical state; readers also accept versions 3 through 7. Bare family kinds retain their combined capabilities; constructor kinds such as `store(food)` and `digest(tissue)` each grant one explicit operation. The same minimal paid founder core bootstraps both modes.
+Mutation kinds additionally accept gene silence (4), gene duplication (5), and future placement changes (6). Checkpoint 9 stores the cellular graph, mechanism identities, construction controls and physical state; readers also accept versions 3 through 8. Bare family kinds retain their combined capabilities; constructor kinds such as `store(food)` and `digest(tissue)` each grant one explicit operation. The same minimal paid founder core bootstraps both modes.
 
 
 The dependency-free Rust crate owns simulation, genome compilation, mutation, and cell memory. TypeScript loads WASM, renders snapshots, and stores browser-local catalogs/checkpoints. There is no simulation server or JavaScript simulation fallback.
@@ -15,19 +15,19 @@ The dependency-free Rust crate owns simulation, genome compilation, mutation, an
 
 The world defaults to 1,200 × 760, supports dimensions up to 4,800 × 3,040, is toroidal and advances at a fixed 1/30 second. Programs sample body state, hardware measurements, and old memory before action resolution. Construction changes capabilities on the following tick. Newly captured organic material enters digestive storage before later assimilation.
 
-Envelope area, material mass, usable energy, digestive contents, and embodied structural energy are distinct ledgers. Radius is `7 × sqrt(body.area)`. Growing the enclosing frame costs minerals and energy; it creates space without creating organelles. Organelle material must come from cell reserves. Internal footprints are limited by body area, and membrane attachment capacity scales with perimeter. Damaged or incomplete structures still occupy space and retain their material.
+Envelope area, mechanical mass, ATP-like usable energy, carbon, dissolved gases, digestive contents, and embodied structural energy are distinct ledgers. Radius is `7 × sqrt(body.area)`. Growing the enclosing frame costs minerals, organic carbon and usable energy; it creates space without creating organelles. Organelle material must come from cell reserves. Internal footprints are limited by body area, and membrane attachment capacity scales with perimeter. Damaged or incomplete structures still occupy space and retain their material. Separate carbon reserves and gas pools do not add to the legacy mechanical `body.mass`.
 
-The former area-4 ceiling is removed. The remaining geometric bound is `(760 / 8 / 7)²`, approximately 184.18 area units: the largest diameter is one quarter of the world's shorter dimension. This bounds toroidal contact geometry, separately from physical growth costs. There is no population cap or maximum cell age. Energy exhaustion, damage and loss of essential machinery still cause death. Organic particles have no count cap; the genome registry remains bounded to 2,048 entries and 64 MiB of estimated allocations. Allocations and identifier exhaustion fail explicitly.
+The former area-4 ceiling is removed. The remaining geometric bound is `(760 / 8 / 7)²`, approximately 184.18 area units, giving a maximum radius of 95 world units regardless of world resize. This bounds toroidal contact geometry, separately from physical growth costs. There is no population cap or maximum cell age. Energy exhaustion, damage and loss of essential machinery still cause death. Organic particles have no count cap; the genome registry remains bounded to 2,048 entries and 64 MiB of estimated allocations. Allocations and identifier exhaustion fail explicitly.
 
-Every organelle has a stable local identifier, family, built mass, integrity, and recorded embodied energy. Family targets do not grant capabilities. Family-specific expression spends minerals and energy to produce persistent assembly proteins. Count/size targets assemble organs only from matching protein already present before the tick. Translation and assembly share core work and physical budgets; leaving an irrelevant gene on still produces costly protein. Competing requests share finite budgets; source statement order does not confer priority. Lowering targets leaves structures intact until explicit recycling. Recycling and repair are paid operations. Core machinery cannot be dismantled below the viable minimum. Compartment loss releases accounted overflow instead of deleting stored material.
+Every organelle has a stable local identifier, family, built mass, integrity, and recorded embodied energy. Family targets do not grant capabilities. Family-specific expression spends minerals, organic carbon and usable energy to produce persistent assembly proteins. Count/size targets assemble organs only from matching protein already present before the tick. Translation and assembly share core work and physical budgets; leaving an irrelevant gene on still produces costly protein. Competing requests share finite budgets; source statement order does not confer priority. Lowering targets leaves structures intact until explicit recycling. Recycling and repair are paid operations. Core machinery cannot be dismantled below the viable minimum. Compartment loss returns mineral/carbon/gut overflow to the environment; excess usable energy dissipates.
 
-Every introduced founder has area 1, one core of mass 0.04, 68 usable energy and 0.6 free minerals. Core compartments hold those finite reserves. The introduction ledger records 99.2 energy (68 usable, 7.8 embodied and 23.4 fabrication heat) and 0.99 mineral material (0.39 structure and 0.6 reserve). No optional organelles are present. The same constructor is used for every genome; the program must build its own capabilities through ordinary paid ticks. Mutations change construction requests, not existing physical organs.
+Every introduced founder has area 1, one core of mass 0.04, 68 usable energy, 3.4 reserve carbon and 0.6 free minerals. Its introduction ledgers record 0.99 minerals (0.39 structure plus 0.6 reserve), 3.79 organic carbon (0.39 structural plus 3.4 reserve), and 175 energy (68 usable, 7.8 embodied, 23.4 fabrication heat and 75.8 chemical potential). Internal dissolved gas pools start empty and fill through finite passive exchange. No optional organelles are present. The same constructor is used for every genome; the program must build its own capabilities through ordinary paid ticks. Mutations change construction requests, not existing physical organs.
 
-Division requires doubled grown frame, sufficient reserves, core machinery for two viable bodies, and a feasible partition. Actual discrete organs are assigned to daughters; they are not copied. Protein pools and their embodied energy split proportionally with cytoplasm. Producers must construct sufficient photosynthetic hardware for both descendants if both are to remain producers. The parent retains memory; the daughter starts with empty registers. Death returns the remaining accounted material and recoverable energy once. Damage, dismantling, division, and death cannot create minerals or recover unrecorded construction energy.
+Division requires doubled grown frame, sufficient reserves, core machinery for two viable bodies, and a feasible partition. Actual discrete organs are assigned to daughters; they are not copied. Protein pools and their embodied energy split proportionally with cytoplasm. Producers must construct sufficient photosynthetic hardware for both descendants if both are to remain producers. The parent retains memory; the daughter starts with empty registers. Death returns remaining organic carbon and minerals as tissue/gut contents and releases internal gases once; usable and embodied structural energy dissipate. Damage, dismantling, division, and death cannot create minerals or recover unrecorded construction energy.
 
 ### Protein expression and assembly
 
-`protein.<family>` reports conserved construction material awaiting assembly. It counts toward body mass and internal space at one space unit per material unit. Its upkeep is 0.6 energy per material per second and its half-life is 45 seconds. Turnover returns its mineral mass and dissipates its embodied energy; released room/material can fund work on later ticks.
+`protein.<family>` reports conserved construction material awaiting assembly. It counts toward body mass and internal space at one space unit per material unit. Its upkeep is 0.6 energy per material per second and its half-life is 45 seconds. Turnover returns its mineral and organic-carbon mass and dissipates its embodied energy; released room/material can fund work on later ticks.
 
 Translation uses 60% of the family's construction energy and 0.6 units of shared core work per material; assembly uses the remaining 40% and 0.4 work. Shared capacity is `0.55 × functional core mass` per second. Thus `0.6 × synthesized mass + 0.4 × assembled mass`, plus other paid work, cannot exceed that tick's common work budget. There is no per-family protein-stock quota; energy, minerals and actual packing limit synthesis. Expression can continue after targets are complete, so programs should regulate it using protein stock and built mass.
 
@@ -35,13 +35,15 @@ Translation uses 60% of the family's construction energy and 0.6 units of shared
 
 Organic kinds retain separate energy/mineral gut pools and are not interchangeable:
 
-| Kind | ID | Relative processing speed | Usable energy yield | Decay / second |
+| Kind | ID | Relative processing speed | Organic-carbon assimilation fraction | Aerobic decay / second |
 | --- | ---: | ---: | ---: | ---: |
 | Exudate | 0 | 1.2 | 0.80 | 0.040 |
 | Tissue | 1 | 0.7 | 0.65 | 0.012 |
 | Waste | 2 | 0.35 | 0.32 | 0.006 |
 
-The three `digest.*` efforts share one digestive/metabolic work budget. Tissue processing leaves 20% of its raw energy and mineral content as Waste; the remaining unassimilated energy dissipates. Waste processing recovers 32% of energy and 50% of minerals; the rest dissipates or returns as dissolved minerals, without creating another equal-value meal. Exudate comes from photosynthetic release and supplied organic particles. Death and extracted cell reserves contribute tissue. An engulfed cell's existing gut retains its substrate identity, preventing waste from becoming fresh tissue through predation. All transfers preserve mineral mass and cannot create energy.
+The three `digest.*` efforts share one digestive work budget. Digestion transfers chemical substrate from the gut into organic-carbon reserves and costs usable energy; it does not generate usable energy. Exudate/tissue/waste carbon assimilation fractions are 0.80/0.65/0.32. Every unassimilated carbon atom remains in a physical waste residue. Mineral assimilation fractions are 1.0/0.8/0.5, with returned or retained minerals fully accounted. A separate aerobic reaction converts one organic-carbon unit plus one oxygen unit into one inorganic-carbon unit and 16 usable energy; substrate chemical potential is 20 energy per carbon, so the difference dissipates. The primitive `respire(oxygen)` requires enzyme and membrane ingredients. Physical core/legacy metabolic machinery supplies its existing respiratory capacity; neither genotype names nor organism labels control gas reactions.
+
+Background particle decay is an explicit oxygen-limited reaction using the rates above. It consumes actual available O2 and organic carbon together, returns matching inorganic carbon and mineral content, and increments the decay-respiration ledger. Without oxygen, particles retain their carbon. Exudate comes from carbon fixation and supplied organic particles. Death and extracted cell reserves contribute tissue. Engulfed gut contents retain their substrate identity. All transfers preserve carbon and mineral mass and cannot create energy.
 
 Same-kind nearby emissions may merge by adding their exact contents. Counts never cause particle deletion or conversion. Generic senses report appearance and contact properties, not a semantic prey/edibility classification.
 
@@ -158,7 +160,7 @@ String literals use double quotes and accept `\"`, `\\`, `\n`, `\r`, `\t`, and f
 
 ### Read signals
 
-There are **169 read signals**. Scalars are finite numbers; `organelle.<family>.count` is integer; availability, validity, and division-ready flags are boolean; tokens are strings; vectors are `vec2`.
+There are **174 read signals**. Scalars are finite numbers; `organelle.<family>.count` is integer; availability, validity, and division-ready flags are boolean; tokens are strings; vectors are `vec2`.
 
 | Group | Signals |
 | --- | --- |
@@ -167,6 +169,7 @@ There are **169 read signals**. Scalars are finite numbers; `organelle.<family>.
 | Packing | `body.space.free`, `.used`, `.capacity`; `body.surface.free`, `.used`, `.capacity` |
 | Reserves and digestion | `nutrient.stored`, `.capacity`, `.fraction`; `gut.energy`, `.capacity`, `.fraction`; `digestion.rate`, `growth.rate`, `lifespan`, `exudation.rate` |
 | Gut composition | `gut.exudate.energy`, `.nutrients`; `gut.tissue.energy`, `.nutrients`; `gut.waste.energy`, `.nutrients` |
+| Internal chemistry | `carbon.organic`, `carbon.inorganic`, `oxygen` (amounts); `respiration.rate`, `carbon.fixation.rate` (carbon/s) |
 | Protein and construction | `protein.<family>`; `expression.rate`, `assembly.rate`, `assembly.capacity` |
 | Actual organelles | `organelle.<family>.count`, `.mass`, `.capacity`, `.damaged`, `.building`, for each family above |
 | Light | `light.available`, `.valid`, `.level`, `.bearing` |
@@ -212,7 +215,7 @@ The module exports `memory`. Pointers/lengths use bytes, except snapshot lengths
 
 | Exports | Behavior |
 | --- | --- |
-| `abi_version() -> u32` | Returns 10 |
+| `abi_version() -> u32` | Returns 12 |
 | `alloc(len) -> ptr`, `dealloc(ptr, len)` | Allocate/free a zeroed source buffer; above 256 KiB returns null |
 | `compile_genome(ptr, len) -> u32` | UTF-8 source → ID ≥ 1; zero plus readable error on failure |
 | `analyze_genome(ptr, len) -> ptr`, `genome_analysis_len()` | Authoritative compiler analysis as engine-owned UTF-8 JSON; no genome registration or simulation mutation |
@@ -234,13 +237,18 @@ The module exports `memory`. Pointers/lengths use bytes, except snapshot lengths
 | `snapshot_ptr()`, `snapshot_len()` | Build/read float64 world snapshot; length in elements |
 | `render_snapshot_ptr()` | Compact geometry/appearance snapshot; read `presentation_len()` immediately afterwards |
 | `metrics_snapshot_ptr()` | Aggregate metrics and per-genome population groups; read `presentation_len()` |
-| `cell_snapshot_ptr(cell_id)` | Exactly one living cell in the existing 158-value layout; missing cell returns null with zero presentation length |
+| `cell_snapshot_ptr(cell_id)` | Exactly one living cell in the 163-value layout; missing cell returns null with zero presentation length |
 | `summary_snapshot_ptr()` | Six values describing the current checkpoint summary; read `presentation_len()` |
 | `presentation_len()` | Element count for the most recent render, metrics, selected-cell or summary projection |
 | `language_schema_ptr()`, `language_schema_len()` | Authoritative language-version-3 read/write signal names, types, defaults, and limits as UTF-8 JSON |
 | `cell_body_ptr(cell_id)`, `cell_body_len()` | Actual organelles, body packing, construction requests, and achieved work as UTF-8 JSON |
 | `cell_memory_ptr(cell_id)`, `cell_memory_len()` | UTF-8 JSON of populated registers; unknown cell returns `[]` and an error |
 | `set_environment(temperature: f32, light: f32, current: f32)` | Clamp parameters; nonfinite values use 0.5/0/0 |
+| `set_initial_gases(oxygen: f32, carbon: f32) -> u32` | Set next-reset amounts per unit-volume patch, each 0–100; 1 success, 0 invalid, no live reset |
+| `set_gas_exchange(mode: u32, rate: f32, oxygen_equilibrium: f32, carbon_equilibrium: f32) -> u32` | Mode 0 sealed / 1 globally open; rate 0–1/s; equilibrium concentrations 0–100; edits preserve live inventories |
+| `oxygen_dissolved_total() -> f64`, `inorganic_carbon_total() -> f64` | Current dissolved oxygen and effective inorganic-carbon amounts |
+| `oxygen_input_total() -> f64`, `oxygen_removed_total() -> f64` | External oxygen introductions/removals, including initial water and signed reservoir exchange |
+| `carbon_input_total() -> f64`, `carbon_removed_total() -> f64` | External dissolved inorganic-carbon introductions/removals; world metrics additionally count organic introductions |
 | `set_initial_nutrients(level: f32)` | Set the next reset's dissolved mass per patch, clamped 0–5; nonfinite input uses 0.3. Live material is unchanged |
 | `add_nutrients(x: f32, y: f32, amount: f32) -> f64` | Add fertilizer, clamped to 1,000; nonpositive/nonfinite amounts return zero. Negative/nonfinite coordinates distribute uniformly; otherwise deposit in the wrapped local patch. Returns actual added mass |
 | `nutrient_total() -> f64`, `nutrient_input_total() -> f64` | Current total material / cumulative external input since reset, including initial water, cells, and food |
@@ -255,7 +263,7 @@ The module exports `memory`. Pointers/lengths use bytes, except snapshot lengths
 | `remove_source(id) -> u32`, `clear_sources()` | Remove by ID (1 success, 0 missing) / all sources; existing heat persists |
 | `environment_snapshot_ptr()`, `environment_snapshot_len()` | Build/read fields and sources; length in floats |
 | `predation_count()`, `attack_count()` | Predation deaths / contact bite hits since reset |
-| `photosynthesis_total() -> f64` | Gross absorbed light energy since reset |
+| `photosynthesis_total() -> f64` | Chemical potential stored by actual carbon fixation since reset: 20 × fixed carbon |
 | `reset_empty(seed, initial_food: f64) -> u32` | Reset dynamics/counters and create the requested exudate particles with no cells. Retain the environment recipe, rates and genomes. Returns 1 on success, 0 plus error on invalid count/allocation failure; rejection preserves the current world. |
 | `alloc_state(len)` | Allocate a checkpoint input buffer, 20 bytes–128 MiB; release using `dealloc(ptr, len)` |
 | `save_state_ptr()`, `save_state_len()` | Build/read an owned versioned checkpoint; length in bytes; copy immediately |
@@ -283,11 +291,11 @@ Ranges use zero-based UTF-16 offsets with exclusive ends, suitable for JavaScrip
 
 Valid source has no diagnostics. Invalid source returns the first compiler error; completed earlier declarations and the partial node count remain available after parser/type errors. Lexical errors return no bindings and a zero node count because lexing precedes parsing. `sourceBytes` counts the input's UTF-8 bytes, independently of its UTF-16 length. Oversized input is rejected before parsing, with an empty range at the document start.
 
-Analysis changes only its transient response buffer. It does not consume genome IDs or registry space, change the latest engine error, advance RNGs or cells, or alter checkpoint bytes. It remains available when the genome registry is full. The native ABI accepts a null pointer for empty or oversized input; other nonempty inputs must provide a readable UTF-8 source buffer. Copy the returned JSON before another allocating engine call, and free only the caller's source buffer. The analysis JSON schema is unchanged in ABI 10.
+Analysis changes only its transient response buffer. It does not consume genome IDs or registry space, change the latest engine error, advance RNGs or cells, or alter checkpoint bytes. It remains available when the genome registry is full. The native ABI accepts a null pointer for empty or oversized input; other nonempty inputs must provide a readable UTF-8 source buffer. Copy the returned JSON before another allocating engine call, and free only the caller's source buffer. The analysis JSON schema is unchanged in ABI 12.
 
 ### World snapshot
 
-Layout: `12 + cells × 158 + food × 5` floats. The first 39 floats of each cell are physical/rendering state; the following 16 groups of six floats summarize organelle families in the order above. The world snapshot uses float64 values and a JavaScript `Float64Array`, preserving the entire u32 cell-ID range. Persistent state uses complete checkpoints.
+Layout: `12 + cells × 163 + food × 5` floats. The first 39 floats of each cell are physical/rendering state; the following 16 groups of six floats summarize organelle families in the order above. The world snapshot uses float64 values and a JavaScript `Float64Array`, preserving the entire u32 cell-ID range. Persistent state uses complete checkpoints.
 
 ```text
 Header (12): tick, time, cell_count, food_count, total_births,
@@ -338,15 +346,15 @@ Each food (5): x, y, energy, nutrients, kind (0 exudate, 1 tissue, 2 waste)
 | 37 | `division_ready` |
 | 38 | `optical_range` |
 
-For family index `k`, offsets `39 + 6k` through `44 + 6k` are **count, mass, capacity, damaged mass, building mass, functional mass**. All summaries describe actual structures. `division_ready` is 0/1. Basal metabolism includes body upkeep and current thermal scaling, excluding action/register/construction costs. Digestive rate reports usable energy after assimilation loss; photosynthesis reports harvested gross energy. `optical_range` is built hardware reach, not a free genome signal.
+For family index `k`, offsets `39 + 6k` through `44 + 6k` are **count, mass, capacity, damaged mass, building mass, functional mass**. All summaries describe actual structures. `division_ready` is 0/1. Basal metabolism includes body upkeep and current thermal scaling, excluding action/register/construction costs. Digestive rate reports assimilated substrate chemical potential per second; usable energy is generated by respiration. Photosynthesis reports the light energy stored by actual carbon fixation. `optical_range` is built hardware reach, not a free genome signal.
 
-Cell offsets 135–137 contain gut energies for exudate/tissue/waste; 138–140 contain their mineral masses; 141–156 contain protein stock mass in family order; 157 is actual synthesis mass per second. The old aggregate gut fields equal the sums of their three compartments.
+Cell offsets 135–137 contain gut energies for exudate/tissue/waste; 138–140 contain their mineral masses; 141–156 contain protein stock mass in family order; 157 is actual synthesis mass per second. The old aggregate gut fields equal the sums of their three compartments. Cell offsets 158–162 append organic-carbon reserve, internal O2, internal DIC, aerobic respiration rate (carbon/s), and carbon-fixation rate (carbon/s).
 
 The reserved header field and `max_food` are zero; neither is a population or particle limit. Float64 world identifiers preserve all u32 cell IDs exactly; counters are exact through 2⁵³, with u64 counters retained internally. The environment rendering buffer remains float32.
 
 ### Presentation projections
 
-The presentation exports are additive to ABI 10. The full snapshot above remains available with its original layout. Render, metrics, selected-cell and summary projections share one engine-owned `Float64Array` buffer. Read `presentation_len()` and copy before calling another projection or any allocating engine operation. These exports do not advance time, change observations or memory, or modify checkpoint state.
+The presentation exports retain their ownership rules. ABI 12 extends only the full cell and aggregate-metric layouts as documented here. Render, metrics, selected-cell and summary projections share one engine-owned `Float64Array` buffer. Read `presentation_len()` and copy before calling another projection or any allocating engine operation. These exports do not advance time, change observations or memory, or modify checkpoint state.
 
 `render_snapshot_ptr()` returns `12 + cell_count × 21 + food_count × 5` values. It omits organelle inspection arrays, resource totals and environmental grid samples. Particle layout remains unchanged.
 
@@ -363,9 +371,9 @@ The presentation exports are additive to ABI 10. The full snapshot above remains
 | 14–17 | flagellum count, flagellum capacity, cortex mass, cortex capacity |
 | 18–20 | photosynthetic capacity, piercer capacity, generation |
 
-The visual family capacities retain their existing meaning: functional mass divided by the family's minimum mass. They are not action throughput values. `cell_snapshot_ptr(id)` supplies the full 158-value cell record when inspection needs it, without packing the rest of the world. A missing cell clears the presentation buffer; it does not replace the latest simulation error.
+The visual family capacities retain their existing meaning: functional mass divided by the family's minimum mass. They are not action throughput values. `cell_snapshot_ptr(id)` supplies the full 163-value cell record when inspection needs it, without packing the rest of the world. A missing cell clears the presentation buffer; it does not replace the latest simulation error.
 
-`metrics_snapshot_ptr()` returns a 36-value header followed by three values for each living genome group. Groups are sorted by genome ID; each is `[genome_id, population, maximum_generation]`. Registry counts include all registered genomes, whereas groups contain only genomes with living cells.
+`metrics_snapshot_ptr()` returns a 51-value header followed by three values for each living genome group. Groups are sorted by genome ID; each is `[genome_id, population, maximum_generation]`. Registry counts include all registered genomes, whereas groups contain only genomes with living cells.
 
 | Metric offsets | Fields in order |
 | --- | --- |
@@ -376,8 +384,12 @@ The visual family capacities retain their existing meaning: functional mass divi
 | 25–28 | autotrophs, heterotrophs, mixotrophs, attack-capable cells |
 | 29–31 | total current photosynthesis, digestion and exudation rates |
 | 32–35 | exudate count, tissue count, waste count, living genome group count |
+| 36–39 | total carbon, total introduced carbon, organic carbon in cells, organic carbon in particles |
+| 40–43 | cumulative fixed carbon, cellular respired carbon, background-decay respired carbon, legacy organic-carbon baseline |
+| 44–46 | internal cellular O2, dissolved O2, dissolved inorganic carbon |
+| 47–50 | external O2 introductions, external O2 removals, external inorganic-carbon removals, internal cellular inorganic carbon |
 
-Feeding categories follow the same functional photosynthetic/digestive organ checks as cell inspection; attack-capable count is independent. Rates and ledgers preserve the full snapshot's meanings. `summary_snapshot_ptr()` returns `[time, population, food_count, births, deaths, maximum_generation]` and performs no particle, organelle or field export.
+Metric 18 sums usable energy, embodied structural energy and chemical potential in structural/reserve/gut/particle carbon. It is a total energy inventory; the cell's `energy` field reports its ATP-like usable reserve. Feeding categories follow the same functional photosynthetic/digestive organ checks as cell inspection; attack-capable count is independent. Rates and ledgers preserve the full snapshot's meanings. `summary_snapshot_ptr()` returns `[time, population, food_count, births, deaths, maximum_generation]` and performs no particle, organelle or field export.
 
 The TypeScript `Engine` exposes `renderSnapshot()`, `metricsSnapshot()`, `cellSnapshot(id)` and `summary()` alongside its existing API. `renderSnapshotData()` and `metricsSnapshotData()` return owned packed buffers for transfer.
 
@@ -387,7 +399,7 @@ The TypeScript `Engine` exposes `renderSnapshot()`, `metricsSnapshot()`, `cellSn
 
 `advance(steps, {metrics?, environment?})` executes a bounded batch of 0–120 fixed ticks and returns `{frame, metrics?, environment?, error?}`. If a tick fails after earlier ticks completed, the response contains the resulting frame and original error; the caller can pause while retaining accurate state. `presentation(options)` returns the same projections without advancing time. A rejected ordinary command does not block subsequent commands.
 
-`captureCheckpoint()` synchronously captures checkpoint bytes and summary inside a single queued worker command, so both describe the same state even when later advances are already queued. Restore transfers a copy of the caller's bytes, preserving the original on either success or failure. `dispose()` terminates the worker and rejects outstanding/future requests. These ownership changes do not change tick duration, physical phase order or the checkpoint model. Environment dimensions, barriers and removal ledgers extend checkpoints to version 8.
+`captureCheckpoint()` synchronously captures checkpoint bytes and summary inside a single queued worker command, so both describe the same state even when later advances are already queued. Restore transfers a copy of the caller's bytes, preserving the original on either success or failure. `dispose()` terminates the worker and rejects outstanding/future requests. These ownership changes do not change tick duration, physical phase order or the checkpoint model. Gas fields, internal carbon/oxygen inventories and reaction ledgers extend checkpoints to version 9.
 
 ### Body inspection
 
@@ -411,13 +423,16 @@ The JSON `build` field retains its compatibility spelling and reports expression
 
 ### Environment snapshot
 
-ABI 11 uses `11 + columns × rows × 5 + source_count × 8 + barrier_count × 10` floats:
+ABI 12 uses `21 + columns × rows × 7 + source_count × 8 + barrier_count × 10` floats:
 
 ```text
 Header: columns, rows, ambient_temperature, ambient_light,
         current_strength, source_count, initial_nutrients,
-        world_width, world_height, barrier_count, nutrient_removed_total
-Each row-major patch: light, temperature, flow_x, flow_y, nutrients
+        world_width, world_height, barrier_count, nutrient_removed_total,
+        initial_oxygen, initial_carbon, atmosphere_open, exchange_rate,
+        oxygen_equilibrium, carbon_equilibrium,
+        oxygen_input_total, oxygen_removed_total, carbon_input_total, carbon_removed_total
+Each row-major patch: light, temperature, flow_x, flow_y, nutrients, oxygen, inorganic_carbon
 Each source: id, kind, x, y, strength, radius, angle, length
 Each barrier: id, x, y, length, width, angle, floating, vx, vy, reserved_zero
 ```
@@ -434,14 +449,31 @@ Fields retain physical 20 × 20 patches when the world changes size. Patch nutri
 | 5 | Directed Gaussian jet; angle selects direction, length controls longitudinal extent |
 | 6 | Parallel current band; flat longitudinal center with rounded end falloff |
 | 7 | Radial outward/inward current |
+| 8 | Dissolved oxygen emitter, total input 1.5 × strength amount/s |
+| 9 | Oxygen absorber, requested export 1.5 × strength amount/s, limited by available oxygen |
+| 10 | Effective inorganic-carbon emitter, total input 1.5 × strength amount/s |
+| 11 | Inorganic-carbon absorber, requested export 1.5 × strength amount/s, limited by available carbon |
+| 12 | Local reservoir aerator, exchanging 5 × strength water-volume units/s over a normalized footprint |
 
-At most 64 sources and 64 barriers are supported. Source strength is clamped to 0–1 for light/spring/absorber and −1–1 for heat and flow. Source radius is 20–1000; length is 40–4800; angles are radians normalized to [0, 2π). Zero strength disables a source without changing its identity. Flow superposition is capped at speed 60. Nutrient spring and absorber weights are normalized, so radius changes their spatial distribution without increasing their requested total rate. The material invariant is `current_total + cumulative_removed = cumulative_introduced`. Grid samples of time-independent emitter flow are cached and recomputed after source edits or world resize; moving barrier masks remain independent. The legacy nonzero time-varying global current retains direct evaluation. These derived caches are rebuilt on restore and are not checkpoint data.
+At most 64 sources and 64 barriers are supported. Source strength is clamped to 0–1 for light, springs, absorbers and gas objects (kinds 0,3,4,8–12), and −1–1 for heat and flow. Source radius is 20–1000; length is 40–4800; angles are radians normalized to [0, 2π). Zero strength disables a source without changing its identity. Flow superposition is capped at speed 60. Nutrient spring and absorber weights are normalized, so radius changes their spatial distribution without increasing their requested total rate. The material invariant is `current_total + cumulative_removed = cumulative_introduced`. Grid samples of time-independent emitter flow are cached and recomputed after source edits or world resize; moving barrier masks remain independent. The legacy nonzero time-varying global current retains direct evaluation. These derived caches are rebuilt on restore and are not checkpoint data.
 
 Barriers are oriented rectangles with length 20–2400 and width 10–400. Their rotated bounding boxes must fit within the world dimensions (1e-3 unit tolerance accommodates the f32 ABI); invalid create/update and incompatible world shrink return zero without altering state. Fixed barriers stay anchored. Floating barriers follow local prescribed flow with finite response time and separate from other obstacles using periodic rectangle overlap resolution. Cells and organic particles use swept collision detection, preventing thin-wall tunneling; colliding motion slides along obstacle faces. Placing a barrier over an existing organism or particle projects it clear without destroying its inventory. Barriers occlude optical sensing, feeding/predation paths, and field transport across intersected grid edges. Heat and organic interpolation also excludes samples across walls.
 
 Currents remain prescribed velocity fields, not a pressure-solving fluid simulation. Obstacles stop crossing flux and suppress flow inside their solid regions; they do not solve a new incompressible flow field around their shapes. Obstacle transport is resolved at the 20-unit field grid; physical cells and particles use continuous rectangle geometry. Overlapping fixed barriers are allowed as compound walls. Barrier/organism displacement does not attempt fluid-volume displacement.
 
-The organic-cue field is internal simulation state and is persisted as an additional checkpoint field; it does not change this five-channel rendering ABI. Genomes read it through built chemoreceptors using `chemical.organic` and `chemical.organic_bearing`.
+The organic-cue field is internal simulation state and is persisted as an additional checkpoint field; it is not an additional rendering channel. Genomes read it through built chemoreceptors using `chemical.organic` and `chemical.organic_bearing`.
+
+### Dissolved gases and reservoir exchange
+
+Oxygen and effective dissolved inorganic carbon are distinct, nonnegative amount arrays beside the mineral field. Each 20 × 20 patch contains one abstract water-volume unit, so amount and displayed concentration have equal numeric values. The engine defaults to a sealed boundary and reset inventory of one oxygen and one inorganic-carbon unit per patch; built-in UI habitats explicitly select open water. These are simulation units, not calibrated mg/L; DIC represents an effective available inorganic-carbon pool, not a claim that all carbon is free CO2.
+
+Minerals, O2 and DIC share the same conservative finite-volume solver, obstacle masks and once-per-step face velocities. Diffusion coefficients are respectively 12, 80 and 60 world-unit²/s. Outgoing mass is jointly limited by each donor patch's old inventory; same-step arrivals cannot be sent again. Resizing distributes all three conserved fields by area overlap and leaves their external ledgers unchanged. Field temperatures and the organic scent cue remain scalar intensities.
+
+The sealed boundary contributes no background air–water exchange. Open mode exposes every uncovered water patch to the configured reservoir. An explicitly placed aerator is a local air connection even when the rest of the scene is sealed; removing it restores the closed background. Solid full-depth obstacle patches have no exposed air–water surface. For each exposed patch, the exact bounded reservoir relaxation is `Δamount = (equilibrium × volume − amount) × (1 − exp(−rate × dt))`. Global exchange and local aerator conductance add. Positive flux increments external introductions; negative flux increments removals and never overdraws the field. Gas emitters/absorbers likewise charge only actual external amounts. No boundary operation resets an entire field to equilibrium during a tick.
+
+The oxygen target uses the explicitly abstract temperature law `oxygen_equilibrium × (1.25 − 0.5 × temperature)`; its nominal value occurs at temperature 0.5. DIC equilibrium is constant until carbonate/pH chemistry is introduced. Reservoir exchange uses the field temperature at the start of that fixed tick.
+
+Environment processing first moves barriers and computes shared face velocities, then transports dissolved amounts, applies emitters/absorbers and signed reservoir exchange. Organism membrane exchange and reactions run afterward in the world biology phase. `take_oxygen`, `take_inorganic_carbon`, `release_oxygen` and `release_inorganic_carbon` are internal transfers and do not change external ledgers; the world owns reaction production/consumption and organic-carbon accounting. Primitive physical flow sources do not create gases.
 
 ### Memory snapshots
 
@@ -486,7 +518,7 @@ The evaluation buffer is independent of source, analysis, graph, memory, and fie
 
 ### Genome graph
 
-Graph JSON remains version 1 in ABI 11: `{version: 1, nodes: [...], roots: [...]}`. Inspection does not evaluate programs, advance the world, change memory, or register genomes. Invalid IDs clear the graph buffer and report an error.
+Graph JSON remains version 1 in ABI 12: `{version: 1, nodes: [...], roots: [...]}`. Inspection does not evaluate programs, advance the world, change memory, or register genomes. Invalid IDs clear the graph buffer and report an error.
 
 Nodes contain `id`, `kind`, `type`, `label`, `inputs`, `bindings`, and `reachable`. IDs are compiler-array indexes. Inputs preserve operand order and duplicates and precede their consumer's index. Conditional operands are condition, then branch, else branch. Types are `integer`, `scalar`, `boolean`, `string`, and `vec2`. Kinds are `constant`, `sensor`, `register`, `populated`, `reference`, `unary`, `binary`, `conditional`, and `call`. Unused nodes remain present, marked unreachable, so graph counts match the 8,192-node budget.
 
@@ -504,9 +536,11 @@ Constant writes, constant guards, unconditional clears, and omitted output defau
 
 ### Persistent checkpoints
 
-Current checkpoint format is **8**, using the `CELLAR01` magic, a separate version, exact byte length, FNV-1a corruption checksum, and bounded little-endian values. The checksum is not authentication; every decoded value is independently checked. Checkpoints preserve actual frame and organelles, integrity, resource/embodied-energy ledgers, construction progress, protein stocks and their embodied energy, separate gut substrates and particle kinds, memory occupancy and values, sensor tracks and scan controls, sources/fields, deterministic RNG state, counters, and the genome registry with lineage.
+Current checkpoint format is **9**, using the `CELLAR01` magic, a separate version, exact byte length, FNV-1a corruption checksum, and bounded little-endian values. The checksum is not authentication; every decoded value is independently checked. Checkpoints preserve actual frame and organelles, integrity, resource/embodied-energy ledgers, construction progress, protein stocks and their embodied energy, separate gut substrates and particle kinds, memory occupancy and values, sensor tracks and scan controls, sources/fields, deterministic RNG state, counters, and the genome registry with lineage.
 
-Version-1 and version-2 body schemas are explicitly unsupported. They cannot be silently interpreted as paid structures or hardware-gated observations. Existing exports are preserved; create a new simulation with rewritten genomes. Future unknown versions are also rejected. Version-3 checkpoints remain supported. Existing organs, energy, minerals, memory and program source are preserved; formerly unclassified particles and gut contents import as tissue, and protein pools initialize empty. New digestion/expression rules govern subsequent evolution, so continuation is deterministic within the new engine but is not an exact replay of the old engine. Versions 4, 5, 6 and 7 remain supported. Saving writes version 8, including cellular pools, recipe snapshots, ingredient ledgers, sampled construction controls, activity, genetic progress, mechanism kinds, world dimensions, emitter directions, floating obstacle state and cumulative mineral removals. Primitive mechanism tags are rejected before version 6, and recycling/local-control additions are rejected before version 7. Old recipe sources default to allowing new starts and requesting no recycling. Optical coverage corrections and directional primitive interactions change affected trajectories; deterministic continuation is verified within the current engine.
+Version-1 and version-2 body schemas are explicitly unsupported. They cannot be silently interpreted as paid structures or hardware-gated observations. Existing exports are preserved; create a new simulation with rewritten genomes. Future unknown versions are also rejected. Version-3 checkpoints remain supported. Existing organs, energy, minerals, memory and program source are preserved; formerly unclassified particles and gut contents import as tissue, and protein pools initialize empty. New digestion/expression rules govern subsequent evolution, so continuation is deterministic within the new engine but is not an exact replay of the old engine. Versions 4, 5, 6, 7 and 8 remain supported. Saving writes version 9, including cellular pools, recipe snapshots, ingredient ledgers, sampled construction controls, activity, genetic progress, mechanism kinds, world dimensions, emitter directions, floating obstacle state, gas fields and reservoir configuration, cumulative external species fluxes, internal organism gas/carbon pools, reaction ledgers and cumulative mineral removals. Primitive mechanism tags are rejected before version 6, recycling/local-control additions before version 7, and respire(oxygen) before version 9. Old recipe sources default to allowing new starts and requesting no recycling. Optical coverage corrections and directional primitive interactions change affected trajectories; deterministic continuation is verified within the current engine.
+
+On pre-version-9 restore, water receives the documented default O2/DIC inventories and matching external baseline ledgers. Existing organic material receives an explicit legacy carbon baseline; old snapshots are preserved but subsequent trajectories follow the gas-aware physiology.
 
 Stored programs retain exact expression trees and source. Restore recompiles source and requires its typed graph to match the stored graph. It validates backward references, scopes, register types/addresses, output types, finite physical state, IDs, resource bounds, and complete input consumption before atomically replacing the world. A failed restore leaves the current world unchanged. Save size remains bounded at 128 MiB; writing stops before exceeding the limit and reports allocation failures. Cell and particle counts are bounded by encoded data and available memory, not biological ceilings. Age is validated as finite nonnegative state rather than against a lifespan.
 

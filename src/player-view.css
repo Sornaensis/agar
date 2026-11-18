@@ -1,0 +1,26 @@
+.player-popout { min-height: 40px; padding: 7px 13px; border: 1px solid #4b5356; border-radius: 22px; background: #212424ed; color: #d1d6d7; box-shadow: 0 4px 20px #0004; }
+.player-popout:hover { background: #333839; border-color: #8a9192; }
+.player-window-placeholder { display: flex; flex: 1; min-height: 0; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 32px; text-align: center; background: #0e181b; }
+.player-window-placeholder h2 { font-size: 21px; }
+.player-window-placeholder p { max-width: 420px; font-size: 13px; color: #9aafb2; }
+.player-window-placeholder .toolbar { margin-top: 10px; }
+body.player-window { min-width: 320px; height: 100dvh; overflow: hidden; }
+.player-window-shell { display: flex; flex-direction: column; width: 100%; height: 100dvh; min-height: 0; }
+.player-window-header { display: flex; flex: 0 0 auto; min-width: 0; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid #303b3f; background: #172024; }
+.player-window-header strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 550; }
+.player-window-mode { color: #91b7aa; font-size: 10px; }
+.player-window-header .button { flex-shrink: 0; }
+.player-window-shell > .player-stage { height: auto; }
+.player-window-shell .player-popout { display: none; }
+.player-window-shell .player-toolbar { top: 12px; right: 12px; left: 12px; justify-content: flex-end; }
+.player-window-shell .player-toolbar .playback { margin-right: auto; }
+.player-window-shell .live-environment { top: 66px; bottom: 54px; left: 12px; max-height: none; }
+.player-window-shell .cell-inspector { top: 66px; right: 12px; max-height: calc(100% - 82px); }
+@media (max-width: 680px) {
+  .player-popout { min-height: 40px; padding: 7px 10px; font-size: 10px; }
+  .player-popout .icon { display: none; }
+  .player-window-mode { display: none; }
+  .player-window-header { min-height: 42px; flex-wrap: wrap; }
+  .player-window[data-player-window-mode="window"] .player-window-mode { display: block; order: 3; flex-basis: 100%; }
+  .player-window-shell .cell-inspector, .player-window-shell .live-environment { left: 0; right: 0; top: auto; bottom: 0; max-height: min(68%, calc(100% - 106px)); width: 100%; max-width: 100%; }
+}

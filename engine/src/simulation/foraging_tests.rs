@@ -8,6 +8,7 @@ fn forager(light: f64) -> (World, Vec<Genome>) {
     let mut world = World::empty(42);
     world.environment.configure(0.5, light, 0.0);
     world.environment.set_initial_nutrients(3.0);
+    world.environment.configure_gas_exchange(true, 0.5, 1.0, 1.0);
     world.reset_empty(42, 0);
     world.set_food_rate(0.0);
     world.set_mutation_rate(0.0);
@@ -17,7 +18,7 @@ fn forager(light: f64) -> (World, Vec<Genome>) {
         checked_step(&mut world, &mut genomes);
         assert_eq!(world.cells.len(), 1);
     }
-    assert!(world.cells[0].energy < initial_energy);
+    assert!(world.cells[0].energy - world.carbon_respired_total * RESPIRATION_ENERGY_PER_CARBON < initial_energy);
     assert_eq!(world.cells[0].body.area, 1.0);
     assert_eq!(world.cells[0].gut_energy, 0.0);
     assert_eq!(world.eaten, 0);
@@ -32,6 +33,10 @@ fn checked_step(world: &mut World, genomes: &mut Vec<Genome>) {
     assert!((world.nutrient_total() - world.nutrient_input_total()).abs() < 1e-7);
     assert!(world.energy_total() <= world.energy_input_total() + 1e-7);
     assert_eq!(world.photosynthesis_total, 0.0);
+    assert!((world.carbon_total() + world.environment.carbon_output_total() - world.carbon_input_total()).abs() < 1e-7);
+    assert!((world.environment.oxygen_total() + world.oxygen_cell_total() + world.environment.oxygen_output_total()
+        - world.environment.oxygen_input_total() - world.carbon_fixed_total
+        + world.carbon_respired_total + world.decay_carbon_respired_total).abs() < 1e-7);
 }
 
 fn working(cell: &Cell, name: &str) -> f64 {
@@ -58,7 +63,7 @@ fn supply(world: &mut World, kind: OrganicKind, x: f64, y: f64) {
 #[test]
 fn shipped_forager_induces_tissue_digestion_and_funds_whole_daughters() {
     let (mut world, mut genomes) = forager(0.0);
-    let essential: Vec<_> = ["Gut", "ExudateEnzyme", "Capture", "TissueEnzyme",
+    let essential: Vec<_> = ["Respiration", "Gut", "ExudateEnzyme", "Capture", "TissueEnzyme",
         "LeftMotor", "RightMotor", "Vision", "Touch"]
         .into_iter().map(|name| {
             let recipe = genomes[0].program.cellular().unwrap().assemblies.iter()
@@ -83,7 +88,7 @@ fn shipped_forager_induces_tissue_digestion_and_funds_whole_daughters() {
         if world.births > 0 { break; }
     }
     assert_eq!(world.births, 1,
-        "A supplied tissue meal must fund the authored cell cycle, not only prolonged maintenance");
+        "A supplied tissue meal must fund the authored cell cycle: {:?}", world.cells.iter().map(|c| (c.energy,c.organic_carbon,c.respiration_rate,c.gut_energy,c.body.area,c.body.space(),c.body.cellular.as_ref().map(|s| s.assemblies.iter().map(|a| (a.recipe.name.as_str(),a.mass())).collect::<Vec<_>>()))).collect::<Vec<_>>());
     assert_eq!(world.cells.len(), 2);
     assert!(useful > 100.0);
     for cell in &world.cells {
@@ -131,7 +136,7 @@ fn shipped_forager_seeks_a_meal_with_waste_in_its_gut_without_overfilling_it() {
     assert!(capture_pauses_when_full, "Actual total gut occupancy still limits particle import");
     assert!(captured_at.is_some_and(|seconds| seconds < 10.0),
         "A visible nearby meal must be approached while the old waste is still being processed");
-    assert!(useful > 10.0);
+    assert!(useful > 10.0, "assimilated {useful}, cells {:?}",world.cells.iter().map(|c| (c.energy,c.organic_carbon,c.respiration_rate,c.gut_energy,c.body.area)).collect::<Vec<_>>());
     eprintln!("Forager with more than 45% waste captured exudate after {:.2}s", captured_at.unwrap());
 }
 
@@ -140,6 +145,7 @@ fn fed_target(source: &str) -> (World, Vec<Genome>) {
     let mut world = World::empty(42);
     world.environment.configure(0.5, 0.8, 0.0);
     world.environment.set_initial_nutrients(0.3);
+    world.environment.configure_gas_exchange(true, 0.5, 1.0, 1.0);
     world.reset_empty(42, 0);
     world.set_food_rate(0.0);
     world.set_mutation_rate(0.0);
@@ -273,7 +279,10 @@ fn shipped_forager_pays_to_escape_injury_while_fed_and_preserves_healthy_rest() 
     assert!(passive.first_injury.is_some_and(|first| first[1] > 30.0 && first[2] > 25.0));
     assert!(!passive.alive && passive.last_energy > 20.0 && passive.last_gut > 2.0,
         "The disabled reflex leaves a solvent, fed organism exposed to the actual weapon");
-    assert!(escaping.alive && escaping.minimum_integrity > 0.8 && escaping.final_integrity > 0.99);
+    assert!(escaping.alive && escaping.minimum_integrity > 0.8 && escaping.final_integrity > 0.99,
+        "escaped alive={} integrity={}..{} energy={} gut={} motors={} first={:?} cleared={:?}",
+        escaping.alive,escaping.minimum_integrity,escaping.final_integrity,escaping.last_energy,escaping.last_gut,
+        escaping.motor_energy,escaping.first_injury,escaping.cleared);
     assert!(escaping.fed_injured_motion && escaping.injury_without_contact,
         "Injury remains observable when a narrow front receptor cannot see the attacker");
     assert!(escaping.cleared.is_some_and(|clear| clear[0] < 10.0 && clear[1] > 0.0));

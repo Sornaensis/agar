@@ -127,7 +127,7 @@ thread_local! { static ENGINE: RefCell<Engine> = RefCell::new(Engine::new()); }
 
 #[no_mangle]
 pub extern "C" fn abi_version() -> u32 {
-    11
+    12
 }
 
 /// Allocate a writable, zero-initialized byte buffer. The caller must deallocate
@@ -572,7 +572,8 @@ pub extern "C" fn set_environment(temperature: f32, light: f32, current: f32) {
     });
 }
 
-/// Kinds: 0 light, 1 heat, 2 vortex, 3 spring, 4 absorber, 5 jet, 6 band, 7 radial. Position wraps.
+/// Kinds 0–7 are physical/mineral sources; 8 oxygen, 9 oxygen absorber,
+/// 10 inorganic carbon, 11 carbon absorber, 12 local aerator. Position wraps.
 /// Returns zero without changing the environment if invalid or already full.
 #[no_mangle]
 pub extern "C" fn add_source(kind: u32, x: f32, y: f32, strength: f32, radius: f32) -> u32 {
@@ -581,7 +582,7 @@ pub extern "C" fn add_source(kind: u32, x: f32, y: f32, strength: f32, radius: f
         e.error.clear();
         let id = e.world.environment.add_source(kind, x as f64, y as f64, strength as f64, radius as f64);
         if id == 0 {
-            e.error = "Could not add source: use a kind from 0 through 7, finite values, and at most 64 sources.".into();
+            e.error = "Could not add source: use a kind from 0 through 12, finite values, and at most 64 sources.".into();
         }
         id
     })
@@ -651,6 +652,35 @@ pub extern "C" fn remove_barrier(id:u32)->u32 {
 pub extern "C" fn clear_barriers() {
     ENGINE.with(|e|{let mut e=e.borrow_mut();e.error.clear();e.world.environment.clear_barriers();});
 }
+
+/// Configure only the next reset's dissolved gas inventory.
+#[no_mangle]
+pub extern "C" fn set_initial_gases(oxygen:f32,carbon:f32)->u32 {
+    ENGINE.with(|e|{let mut e=e.borrow_mut();e.error.clear();
+        let ok=e.world.environment.set_initial_gases(oxygen as f64,carbon as f64);
+        if !ok {e.error="Initial dissolved oxygen and inorganic carbon must be finite amounts from 0 through 100 per patch.".into();}
+        u32::from(ok)})
+}
+/// A finite reservoir boundary; this never resets the current gas fields.
+#[no_mangle]
+pub extern "C" fn set_gas_exchange(mode:u32,rate:f32,oxygen_equilibrium:f32,carbon_equilibrium:f32)->u32 {
+    ENGINE.with(|e|{let mut e=e.borrow_mut();e.error.clear();
+        let ok=mode<=1 && e.world.environment.configure_gas_exchange(mode==1,rate as f64,oxygen_equilibrium as f64,carbon_equilibrium as f64);
+        if !ok {e.error="Use sealed/open mode 0/1, exchange rate 0–1 per second, and gas equilibrium concentrations 0–100.".into();}
+        u32::from(ok)})
+}
+#[no_mangle]
+pub extern "C" fn oxygen_dissolved_total()->f64 {ENGINE.with(|e|e.borrow().world.environment.oxygen_total())}
+#[no_mangle]
+pub extern "C" fn inorganic_carbon_total()->f64 {ENGINE.with(|e|e.borrow().world.environment.inorganic_carbon_total())}
+#[no_mangle]
+pub extern "C" fn oxygen_input_total()->f64 {ENGINE.with(|e|e.borrow().world.environment.oxygen_input_total())}
+#[no_mangle]
+pub extern "C" fn oxygen_removed_total()->f64 {ENGINE.with(|e|e.borrow().world.environment.oxygen_output_total())}
+#[no_mangle]
+pub extern "C" fn carbon_input_total()->f64 {ENGINE.with(|e|e.borrow().world.environment.carbon_input_total())}
+#[no_mangle]
+pub extern "C" fn carbon_removed_total()->f64 {ENGINE.with(|e|e.borrow().world.environment.carbon_output_total())}
 
 /// Packed grid/source snapshot; copy immediately using environment_snapshot_len.
 #[no_mangle]
@@ -973,9 +1003,9 @@ mod tests {
         engine.world.cells[0].vy = -1.25;
         engine.world.cells[0].integrity = 0.8;
         engine.world.snapshot(&mut engine.snapshot);
-        assert_eq!(abi_version(), 11);
-        assert_eq!(simulation::CELL_STRIDE, 158);
-        assert_eq!(engine.snapshot.len(), 12 + 22 * 158 + 360 * 5);
+        assert_eq!(abi_version(), 12);
+        assert_eq!(simulation::CELL_STRIDE, 163);
+        assert_eq!(engine.snapshot.len(), 12 + 22 * simulation::CELL_STRIDE + 360 * 5);
         assert_eq!(engine.snapshot[7], simulation::WIDTH as f64);
         assert_eq!(engine.snapshot[8], simulation::HEIGHT as f64);
         assert_eq!(
@@ -1191,10 +1221,10 @@ mod tests {
         let env_pointer = environment_snapshot_ptr();
         let env =
             unsafe { std::slice::from_raw_parts(env_pointer, environment_snapshot_len() as usize) };
-        assert_eq!(env.len(), 11 + environment::PATCHES * 5 + 8);
+        assert_eq!(env.len(), 21 + environment::PATCHES * 7 + 8);
         assert_eq!(&env[..7], &[60.0, 38.0, 0.5, 0.0, 0.0, 1.0, 0.3]);
         assert_eq!(
-            &env[11 + environment::PATCHES * 5..],
+            &env[21 + environment::PATCHES * 7..],
             &[source as f32, 0.0, 1199.0, 1.0, 1.0, 20.0, 0.0, 600.0]
         );
         assert_eq!(

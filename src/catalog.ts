@@ -68,6 +68,7 @@ export const BUILTIN_ENVIRONMENTS: readonly EnvironmentDocument[] = freeze([
   },
 ].map(item => ({ ...item, config: {
   width: 1200, height: 760, barriers: [], ...item.config,
+  gases: { initialOxygen: 1, initialCarbon: 1, mode: 'open', exchangeRate: 0.02, oxygenEquilibrium: 1, carbonEquilibrium: 1 },
   sources: item.config.sources.map(source => ({ angle: 0, length: 600, ...source })),
 } as EnvironmentConfig })));
 

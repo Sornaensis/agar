@@ -4,13 +4,16 @@ import ts from 'typescript';
 export const bytes=await readFile(new URL('../engine/pkg/agar_engine.wasm',import.meta.url));
 export const module=await WebAssembly.compile(bytes);
 export const kinds=['core','photosynthetic','metabolic','digestive','reserve','transporter','phagocyte','flagellum','piercer','cortex','repair','photoreceptor','thermoreceptor','chemoreceptor','mechanoreceptor','optical'];
-export const STRIDE=158;
+export const STRIDE=163;
 export const error=api=>new TextDecoder().decode(new Uint8Array(api.memory.buffer,api.error_ptr(),api.error_len()));
 export async function fresh(config={}){
-  const api=(await WebAssembly.instantiate(module,{})).exports;assert.equal(api.abi_version(),11);
+  const api=(await WebAssembly.instantiate(module,{})).exports;assert.equal(api.abi_version(),12);
   assert.equal(api.set_world_size(config.width??1200,config.height??760),1,error(api));
   api.set_environment(config.ambientTemperature??.5,config.ambientLight??0,config.currentStrength??0);
   api.set_initial_nutrients(config.initialNutrients??.3);api.set_food_rate(config.foodRate??0);api.set_mutation_rate(config.mutationRate??0);
+  const gases=config.gases??{};
+  assert.equal(api.set_initial_gases(gases.initialOxygen??1,gases.initialCarbon??1),1,error(api));
+  assert.equal(api.set_gas_exchange(gases.mode==='open'?1:0,gases.exchangeRate??.02,gases.oxygenEquilibrium??1,gases.carbonEquilibrium??1),1,error(api));
   for(const s of config.sources??[]){const id=api.add_source(s.kind,s.x,s.y,s.strength,s.radius);assert.ok(id,error(api));assert.equal(api.update_source(id,s.kind,s.x,s.y,s.strength,s.radius,s.angle??0,s.length??600),1,error(api));}
   for(const b of config.barriers??[])assert.ok(api.add_barrier(b.x,b.y,b.length,b.width,b.angle,Number(b.floating)),error(api));
   assert.equal(api.reset_empty(config.seed??42,config.initialFood??0),1,error(api));return api;
@@ -30,12 +33,14 @@ export function source(api,id){const p=api.genome_source_ptr(id);return new Text
 export function save(api){const p=api.save_state_ptr(),n=api.save_state_len();assert.ok(p&&n,error(api));return new Uint8Array(api.memory.buffer,p,n).slice();}
 export function restore(api,data){const p=api.alloc_state(data.length);assert.ok(p);try{new Uint8Array(api.memory.buffer,p,data.length).set(data);return api.restore_state(p,data.length);}finally{api.dealloc(p,data.length);}}
 // Historical migration comparisons use the original habitat projection. The
-// ABI11 header and source shape are larger even for an unchanged imported world.
+// Gas channels and geometry are excluded from this historical habitat projection.
 export function legacyEnvironmentProjection(api){
   const p=api.environment_snapshot_ptr(),data=new Float32Array(api.memory.buffer,p,api.environment_snapshot_len()).slice();
   if(api.abi_version()<11)return data;
   assert.equal(data[7],1200);assert.equal(data[8],760);assert.equal(data[9],0);assert.equal(data[10],0);
-  const end=11+data[0]*data[1]*5,values=[...data.slice(0,7),...data.slice(11,end)];
+  const header=api.abi_version()>=12?21:11,stride=api.abi_version()>=12?7:5;
+  const end=header+data[0]*data[1]*stride,values=[...data.slice(0,7)];
+  for(let i=header;i<end;i+=stride)values.push(...data.slice(i,i+5));
   for(let i=0;i<data[5];i++)values.push(...data.slice(end+i*8,end+i*8+6));
   return Float32Array.from(values);
 }
@@ -50,6 +55,7 @@ export function snapshot(api){
       spaceUsed:v[n+33],spaceCapacity:v[n+34],surfaceUsed:v[n+35],surfaceCapacity:v[n+36],divisionReady:v[n+37]!==0,opticalRange:v[n+38],
       gutEnergyByKind:Array.from(v.slice(n+135,n+138)),gutMineralsByKind:Array.from(v.slice(n+138,n+141)),
       proteins:Object.fromEntries(kinds.map((kind,k)=>[kind,v[n+141+k]])),expressionRate:v[n+157],
+      organicCarbon:v[n+158],internalOxygen:v[n+159],internalInorganicCarbon:v[n+160],respirationRate:v[n+161],carbonFixationRate:v[n+162],
       organs:Object.fromEntries(kinds.map((kind,k)=>{const at=n+39+k*6;return[kind,{count:v[at],mass:v[at+1],capacity:v[at+2],damaged:v[at+3],building:v[at+4],functionalMass:v[at+5]}];}))};
     assert.ok(Number.isInteger(c.id)&&c.id>0);assert.ok(c.x>=0&&c.x<v[7]&&c.y>=0&&c.y<v[8]);
     assert.ok(c.energy>0&&c.energy<=c.capacity+1e-8);assert.ok(c.area>=.25&&c.area<185&&Math.abs(c.radius-7*Math.sqrt(c.area))<1e-9);

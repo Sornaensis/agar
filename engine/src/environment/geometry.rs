@@ -30,6 +30,8 @@ impl Environment {
         let mut minerals = vec![0.0; count];
         let mut heat = vec![0.0; count];
         let mut organic = vec![0.0; count];
+        let mut oxygen = vec![0.0; count];
+        let mut carbon = vec![0.0; count];
         for old in 0..self.patch_count() {
             let ox = old % self.columns;
             let oy = old / self.columns;
@@ -47,6 +49,8 @@ impl Environment {
                     }
                     let index = y * columns + x;
                     minerals[index] += self.nutrients[old] * overlap / area;
+                    oxygen[index] += self.gases.oxygen[old] * overlap / area;
+                    carbon[index] += self.gases.carbon[old] * overlap / area;
                     heat[index] += self.temperature[old] * overlap;
                     organic[index] += self.organic[old] * overlap;
                 }
@@ -71,6 +75,8 @@ impl Environment {
         self.columns = columns;
         self.rows = rows;
         self.nutrients = minerals;
+        self.gases.oxygen = oxygen;
+        self.gases.carbon = carbon;
         self.temperature = heat;
         self.organic = organic;
         self.light = vec![0.0; count];
@@ -98,7 +104,7 @@ impl Environment {
         angle: f64,
         length: f64,
     ) -> bool {
-        if kind > 7
+        if kind > 12
             || ![x, y, strength, radius, angle, length]
                 .iter()
                 .all(|n| n.is_finite())
@@ -113,7 +119,14 @@ impl Environment {
             kind,
             x: x.rem_euclid(self.width),
             y: y.rem_euclid(self.height),
-            strength: strength.clamp(if matches!(kind, 0 | 3 | 4) { 0.0 } else { -1.0 }, 1.0),
+            strength: strength.clamp(
+                if matches!(kind, 0 | 3 | 4 | 8..=12) {
+                    0.0
+                } else {
+                    -1.0
+                },
+                1.0,
+            ),
             radius: radius.clamp(20.0, 1000.0),
             angle: angle.rem_euclid(TAU),
             length: length.clamp(40.0, 4800.0),

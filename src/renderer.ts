@@ -16,7 +16,7 @@ function rgba(hex: string, alpha: number): string {
 }
 
 interface TrailPoint { x: number; y: number; time: number }
-export type FieldOverlay = 'none' | 'light' | 'heat' | 'flow' | 'nutrients';
+export type FieldOverlay = 'none' | 'light' | 'heat' | 'flow' | 'nutrients' | 'oxygen' | 'carbon';
 interface RenderOptions { sensors?: boolean; trails?: boolean; overlay?: FieldOverlay }
 export type EnvironmentSelection = { kind: 'source' | 'barrier'; id: number } | null;
 interface CameraPointer { x: number; y: number; startX: number; startY: number; touch: boolean }
@@ -33,7 +33,8 @@ export class Renderer {
   private selection: EnvironmentSelection = null;
   private cameraFrame = 0;
   private renderOptions: RenderOptions = {};
-  private readonly observer: ResizeObserver;
+  private observer: ResizeObserver;
+  private renderWindow: Window & typeof globalThis;
   private readonly sprites = new Map<string, HTMLCanvasElement>();
   private readonly trails = new Map<number, TrailPoint[]>();
   private background: HTMLCanvasElement | null = null;
@@ -61,12 +62,24 @@ export class Renderer {
     const context = canvas.getContext('2d', { alpha: false });
     if (!context) throw new Error('This browser does not support the 2D simulation view.');
     this.context = context;
+    this.renderWindow = (canvas.ownerDocument.defaultView ?? window) as Window & typeof globalThis;
     this.originalTouchAction = canvas.style.touchAction;
     this.originalCursor = canvas.style.cursor;
     canvas.style.touchAction = 'none';
     this.bindCameraInput();
-    this.observer = new ResizeObserver(() => this.resize());
+    this.observer = new this.renderWindow.ResizeObserver(() => this.resize());
     this.observer.observe(canvas);
+    this.resize();
+  }
+
+  /** Rebind rendering/resize delivery after the same canvas moves into or out of PiP. */
+  reparent(): void {
+    const target = (this.canvas.ownerDocument.defaultView ?? window) as Window & typeof globalThis;
+    if (target !== this.renderWindow) {
+      this.renderWindow.cancelAnimationFrame(this.cameraFrame); this.cameraFrame = 0;
+      this.observer.disconnect(); this.renderWindow = target;
+      this.observer = new target.ResizeObserver(() => this.resize()); this.observer.observe(this.canvas);
+    }
     this.resize();
   }
 
@@ -75,7 +88,7 @@ export class Renderer {
     const rect = this.canvas.getBoundingClientRect();
     this.cssWidth = Math.max(1, rect.width);
     this.cssHeight = Math.max(1, rect.height);
-    this.pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    this.pixelRatio = Math.min(this.renderWindow.devicePixelRatio || 1, 2);
     const width = Math.max(1, Math.round(this.cssWidth * this.pixelRatio));
     const height = Math.max(1, Math.round(this.cssHeight * this.pixelRatio));
     if (this.canvas.width !== width) this.canvas.width = width;
@@ -121,7 +134,7 @@ export class Renderer {
 
   private requestRedraw(): void {
     if (this.cameraFrame || !this.lastWorld) return;
-    this.cameraFrame = requestAnimationFrame(() => {
+    this.cameraFrame = this.renderWindow.requestAnimationFrame(() => {
       this.cameraFrame = 0;
       if (this.lastWorld) this.render(this.lastWorld, this.lastSelected, this.renderOptions, this.lastDetails, this.lastBody);
     });
@@ -258,7 +271,7 @@ export class Renderer {
       this.camera.setWorld(world.width, world.height);
       this.updateTransform();
     }
-    if (this.pixelRatio !== Math.min(window.devicePixelRatio || 1, 2)) this.resize();
+    if (this.pixelRatio !== Math.min(this.renderWindow.devicePixelRatio || 1, 2)) this.resize();
     const optionsKey = `${options.overlay ?? 'none'}:${options.trails ?? false}:${options.sensors ?? true}`;
     if (this.lastWorld === world && this.lastSelected === selectedId && this.lastDetails === details && this.lastBody === body
       && this.lastOptions === optionsKey && this.renderedResize === this.resizeVersion) return;
@@ -344,7 +357,7 @@ export class Renderer {
       const pixels = field.createImageData(columns, rows);
       for (let index = 0; index < columns * rows; index += 1) {
         const offset = index * 4;
-        const sample = index * 5;
+        const sample = index * 7;
         if (mode === 'light') {
           pixels.data[offset] = 245; pixels.data[offset + 1] = 203; pixels.data[offset + 2] = 102;
           pixels.data[offset + 3] = Math.round(clamp(samples[sample], 0, 1) * 78);
@@ -354,9 +367,10 @@ export class Renderer {
           pixels.data[offset + 1] = difference >= 0 ? 120 : 155;
           pixels.data[offset + 2] = difference >= 0 ? 84 : 228;
           pixels.data[offset + 3] = Math.round(clamp(Math.abs(difference) * 2, 0, 1) * 108);
-        } else if (mode === 'nutrients') {
-          const level = Math.max(0, samples[sample + 4]);
-          pixels.data[offset] = 104; pixels.data[offset + 1] = 215; pixels.data[offset + 2] = 157;
+        } else if (mode === 'nutrients' || mode === 'oxygen' || mode === 'carbon') {
+          const level = Math.max(0, samples[sample + (mode === 'nutrients' ? 4 : mode === 'oxygen' ? 5 : 6)]);
+          const color = mode === 'oxygen' ? [101, 190, 247] : mode === 'carbon' ? [214, 165, 242] : [104, 215, 157];
+          pixels.data[offset] = color[0]; pixels.data[offset + 1] = color[1]; pixels.data[offset + 2] = color[2];
           // Fixed scale: a fading patch always means depletion, independent of other patches.
           pixels.data[offset + 3] = Math.round(level / (level + 0.5) * 145);
         } else {
@@ -383,7 +397,7 @@ export class Renderer {
       const lastRow = Math.min(rows, Math.ceil((this.cssHeight - this.offsetY) / this.scale / this.worldHeight * rows));
       for (let row = Math.ceil(firstRow / stride) * stride; row < lastRow; row += stride) {
         for (let column = Math.ceil(firstColumn / stride) * stride; column < lastColumn; column += stride) {
-          const offset = (row * columns + column) * 5;
+          const offset = (row * columns + column) * 7;
           const vx = samples[offset + 2], vy = samples[offset + 3];
           const speed = Math.hypot(vx, vy);
           if (speed < 0.1) continue;
@@ -410,11 +424,13 @@ export class Renderer {
     context.save();
     for (const source of sources) {
       const color = source.kind === 0 ? '#efd089' : source.kind === 1 ? (source.strength >= 0 ? '#ed9c82' : '#83c5eb')
-        : source.kind === 3 ? '#81d99d' : source.kind === 4 ? '#e69bcb' : '#a5c4f7';
-      const label = ['L', source.strength >= 0 ? 'H' : 'C', 'V', 'N', 'A', 'J', 'B', 'R'][source.kind];
+        : source.kind === 3 ? '#81d99d' : source.kind === 4 ? '#e69bcb'
+        : source.kind === 8 || source.kind === 9 ? '#65bef7' : source.kind === 10 || source.kind === 11 ? '#d6a5f2' : '#a5c4f7';
+      const label = ['L', source.strength >= 0 ? 'H' : 'C', 'V', 'N', 'A', 'J', 'B', 'R', 'O+', 'O−', 'C+', 'C−', 'Air'][source.kind];
       const selected = this.selection?.kind === 'source' && this.selection.id === source.id;
       const showRadius = selected || (source.kind === 0 && overlay === 'light') || (source.kind === 1 && overlay === 'heat')
-        || ([2,5,6,7].includes(source.kind) && overlay === 'flow') || ([3,4].includes(source.kind) && overlay === 'nutrients');
+        || ([2,5,6,7].includes(source.kind) && overlay === 'flow') || ([3,4].includes(source.kind) && overlay === 'nutrients')
+        || ([8,9,12].includes(source.kind) && overlay === 'oxygen') || ([10,11,12].includes(source.kind) && overlay === 'carbon');
       const directional = source.kind === 5 || source.kind === 6;
       const margin = showRadius ? directional ? Math.hypot(source.length / 2, source.radius) : source.radius : 14 / this.scale;
       for (const point of this.wrappedPositions(source.x, source.y, margin)) {
@@ -787,7 +803,7 @@ export class Renderer {
   dispose(): void {
     this.observer.disconnect();
     this.input.abort();
-    cancelAnimationFrame(this.cameraFrame);
+    this.renderWindow.cancelAnimationFrame(this.cameraFrame);
     this.cameraFrame = 0;
     for (const id of this.pointers.keys()) if (this.canvas.hasPointerCapture(id)) this.canvas.releasePointerCapture(id);
     this.pointers.clear();

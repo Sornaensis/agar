@@ -15,12 +15,14 @@ let need_digest = built.Hydrolase + 0.000001 < 0.04;
 let need_exudate = built.ExudateEnzyme + 0.000001 < 0.02;
 let need_weapon = built.Weapon + 0.000001 < 0.04;
 let need_motor = built.Drive + 0.000001 < 0.025;
-gene walls: Wall = if need_gut && pool.Wall < 0.001 then 1 else 0;
+let need_respiration = built.Breath + 0.000001 < 0.04;
+gene walls: Wall = if (need_gut || need_respiration) && pool.Wall < 0.001 then 1 else 0;
 gene mounts: Mount = if (need_capture || need_weapon || need_motor) && pool.Mount < 0.001 then 1 else 0;
-gene enzymes: Catalyst = if (need_digest || need_exudate || need_weapon) && pool.Catalyst < 0.001 then 1 else 0;
+gene enzymes: Catalyst = if (need_digest || need_exudate || need_weapon || need_respiration) && pool.Catalyst < 0.001 then 1 else 0;
 gene rotors: Rotor = if (need_capture || need_motor) && pool.Rotor < 0.001 then 1 else 0;
 gene filaments: Tail = if (need_weapon || need_motor) && pool.Tail < 0.001 then 1 else 0;
 assembly Gut: store(food) { Wall: 0.06; start_when: need_gut; }
+assembly Breath: respire(oxygen) { Catalyst: 0.025; Wall: 0.015; start_when: need_respiration; activity: if carbon.organic > 0.2 || energy < 20 then 1 else 0; }
 assembly Collector: import(particle) {
   Mount: 0.01; Rotor: 0.02; start_when: need_capture && CAPTURE;
 }
@@ -57,7 +59,7 @@ fn grown_hunter(pierce: bool, capture: bool, digest: bool) -> (World, Vec<Genome
     world.seed_cells(1, 1, 600.0, 380.0);
     let initial_energy = world.cells[0].energy;
     let initial_minerals = world.cells[0].nutrient_stored;
-    let expected = 2 + usize::from(pierce) + usize::from(capture) + 2 * usize::from(digest);
+    let expected = 3 + usize::from(pierce) + usize::from(capture) + 2 * usize::from(digest);
     for _ in 0..600 {
         world.step(&mut genomes);
         assert_eq!(world.cells.len(), 1, "The hunter must fund its own development");
@@ -67,7 +69,8 @@ fn grown_hunter(pierce: bool, capture: bool, digest: bool) -> (World, Vec<Genome
     let hunter = &mut world.cells[0];
     assert_eq!(hunter.body.cellular.as_ref().unwrap().assemblies.iter()
         .filter(|a| a.complete()).count(), expected);
-    assert!(hunter.energy < initial_energy && hunter.nutrient_stored < initial_minerals);
+    assert!(hunter.energy - world.carbon_respired_total * RESPIRATION_ENERGY_PER_CARBON < initial_energy
+        && hunter.nutrient_stored < initial_minerals);
     assert_eq!(hunter.gut_energy, 0.0);
     assert_eq!(world.photosynthesis_total, 0.0);
     // Fix only initial encounter geometry; machinery was built and paid for
@@ -154,7 +157,8 @@ fn both_partitioned_daughters_capture_and_digest_accounted_tissue() {
     use crate::cellular::{AssemblyInstance, Ingredient};
     let source = "assembly FoodTank: store(food) { Wall: 0.04; }\n\
         assembly Hydrolase: digest(tissue) { Catalyst: 0.02; }\n\
-        assembly Collector: import(particle) { Mount: 0.01; Rotor: 0.01; }";
+        assembly Collector: import(particle) { Mount: 0.01; Rotor: 0.01; }\n\
+        assembly Respiration: respire(oxygen) { Catalyst: 0.02; Wall: 0.01; }";
     let (mut world, mut genomes) = super::mechanism_tests::equipped(source);
     // The helper paid for one copy of each recipe from founder reserves. Pay
     // separately for a second physical instance, with a fresh ID and ingredient
@@ -167,6 +171,7 @@ fn both_partitioned_daughters_capture_and_digest_accounted_tissue() {
             let paid = part.required_mass * (part.product.kind.synthesis_cost() + 30.0);
             parent.energy -= paid;
             parent.nutrient_stored -= part.required_mass;
+            parent.organic_carbon -= part.required_mass;
             Ingredient { mass: part.required_mass, embodied_energy: paid * EMBODIED_FRACTION }
         }).collect();
         state.assemblies.push(AssemblyInstance { id: state.next_assembly_id,
@@ -196,6 +201,9 @@ fn both_partitioned_daughters_capture_and_digest_accounted_tissue() {
         child.body = body;
         child.energy = (parent.energy - DIVISION_COST * parent.body.area) * 0.5;
         child.nutrient_stored *= 0.5;
+        child.organic_carbon *= 0.5;
+        child.internal_oxygen *= 0.5;
+        child.internal_inorganic_carbon *= 0.5;
         child.scale_gut(0.5);
         child.x = 500.0 + index as f64 * 200.0;
         child.y = 380.0;
@@ -605,7 +613,8 @@ fn shipped_predator_pays_for_local_heat_sensing_and_escapes_while_fed() {
             // Each .002 anchor + .008 receptor costs .66 to synthesize and
             // .30 to assemble; the normal embodied fraction retains .48 total.
             assert!((heat_embodied - 0.48).abs() < 1e-7);
-            assert!(cell.energy < initial_energy - 1.92);
+            assert!(cell.energy - world.carbon_respired_total * RESPIRATION_ENERGY_PER_CARBON < initial_energy - 1.92,
+                "Respiration can replenish usable energy, but cannot erase paid sensor fabrication");
         } else {
             assert_eq!(heat_mass, 0.0);
             assert_eq!(heat_embodied, 0.0);

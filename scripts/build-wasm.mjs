@@ -30,13 +30,19 @@ const targetDirectory = process.env.CARGO_TARGET_DIR
 const binary = join(targetDirectory, 'wasm32-unknown-unknown', 'release', 'cellarium_engine.wasm');
 // Validate Cargo's exact output before replacing the artifact imported by Vite.
 const validated = await validateEngineArtifact(binary);
-const destination = join(root, 'engine', 'pkg', 'agar_engine.wasm');
-await mkdir(dirname(destination), { recursive: true });
-const temporary = `${destination}.${process.pid}.tmp`;
-try {
-  await writeFile(temporary, validated.bytes);
-  await rename(temporary, destination);
-} finally {
-  await rm(temporary, { force: true });
+// Keep the directly served copy aligned with the module Vite fingerprints.
+// A public copy from an older ABI must never survive a successful rebuild.
+for (const destination of [
+  join(root, 'engine', 'pkg', 'agar_engine.wasm'),
+  join(root, 'public', 'wasm', 'cellarium_engine.wasm'),
+]) {
+  await mkdir(dirname(destination), { recursive: true });
+  const temporary = `${destination}.${process.pid}.tmp`;
+  try {
+    await writeFile(temporary, validated.bytes);
+    await rename(temporary, destination);
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 console.log(`Built and validated Rust simulation: engine/pkg/agar_engine.wasm (ABI ${validated.abi}, ${validated.byteLength.toLocaleString()} bytes)`);

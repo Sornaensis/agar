@@ -70,6 +70,7 @@ pub(super) fn equipped(extra: &str) -> (World, Vec<Genome>) {
                 let paid = part.required_mass * (part.product.kind.synthesis_cost() + installation);
                 cell.energy -= paid;
                 cell.nutrient_stored -= part.required_mass;
+                cell.organic_carbon -= part.required_mass;
                 Ingredient {
                     mass: part.required_mass,
                     embodied_energy: paid * EMBODIED_FRACTION,
@@ -93,6 +94,7 @@ pub(super) fn equipped(extra: &str) -> (World, Vec<Genome>) {
     }
     for core in cell.body.organs.drain(..) {
         cell.nutrient_stored += core.mass;
+        cell.organic_carbon += core.mass;
         cell.energy += core.embodied_energy;
     }
     cell.body.cellular = Some(state);
@@ -113,7 +115,7 @@ fn mixed_meal(world: &mut World) {
             energy: 2.0,
             nutrients: 0.02,
         };
-        cell.energy -= 2.0;
+        cell.organic_carbon -= 2.0 / CHEMICAL_ENERGY_PER_CARBON;
         cell.nutrient_stored -= 0.02;
     }
     cell.refresh_gut_totals();
@@ -310,6 +312,7 @@ fn tissue_digestion_requires_its_enzyme_and_never_processes_other_substrates() {
         let mineral_total = world.nutrient_total();
         let energy_total = world.energy_total();
         let stored_energy = world.cells[0].energy;
+        let stored_carbon = world.cells[0].organic_carbon;
         assert_eq!(world.cells[0].body.capacities().metabolism, 0.0);
         world.step(&mut genomes);
         assert_eq!(
@@ -325,7 +328,8 @@ fn tissue_digestion_requires_its_enzyme_and_never_processes_other_substrates() {
                 world.cells[0].gut[OrganicKind::Tissue as usize].energy
                     < old[OrganicKind::Tissue as usize].energy
             );
-            assert!(world.cells[0].energy > stored_energy);
+            assert!(world.cells[0].organic_carbon > stored_carbon);
+            assert!(world.cells[0].energy < stored_energy);
             assert!(world.cells[0].digestion_rate > 0.0);
         } else {
             assert_eq!(world.cells[0].gut, old);
@@ -415,6 +419,7 @@ fn harvesting_is_independent_of_metabolism_and_light_sensing_never_harvests() {
     ] {
         let (mut world, mut genomes) = equipped(source);
         let initial_energy = world.cells[0].energy;
+        let initial_carbon = world.cells[0].organic_carbon;
         let mineral_total = world.nutrient_total();
         for _ in 0..30 {
             world.step(&mut genomes);
@@ -422,7 +427,8 @@ fn harvesting_is_independent_of_metabolism_and_light_sensing_never_harvests() {
         assert_eq!(world.cells[0].body.capacities().metabolism, 0.0);
         if source == SOLAR {
             assert!(world.photosynthesis_total > 0.0);
-            assert!(world.cells[0].energy > initial_energy);
+            assert!(world.cells[0].organic_carbon > initial_carbon);
+            assert!(world.cells[0].energy < initial_energy, "fixation stores chemical potential; respiration makes usable energy");
             assert_eq!(world.cells[0].body.capacities().light_sensing, 0.0);
         } else {
             assert!(world.cells[0].body.capacities().light_sensing > 0.0);
@@ -468,7 +474,7 @@ fn mechanism_checkpoints_resume_exactly_and_reject_unknown_body_tags_atomically(
     original.world = world;
     original.genomes = genomes;
     let bytes = crate::checkpoint::save(&original).unwrap();
-    assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 8);
+    assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 9);
     let mut restored = crate::checkpoint::restore(&bytes).unwrap();
     assert_eq!(crate::checkpoint::save(&restored).unwrap(), bytes);
     for _ in 0..120 {

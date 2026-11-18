@@ -29,7 +29,8 @@
     "test:worker": "node scripts/check-worker.mjs",
     "test:cellular": "node scripts/check-cellular.mjs",
     "test:camera": "node scripts/check-camera.mjs",
-    "test:environment-controls": "node scripts/check-environment-controls.mjs"
+    "test:environment-controls": "node scripts/check-environment-controls.mjs",
+    "test:player-view": "node scripts/check-player-view.mjs"
   },
   "devDependencies": {
     "typescript": "5.9.3",

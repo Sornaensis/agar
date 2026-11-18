@@ -386,6 +386,9 @@ export class ProgramEditor {
     return promise;
   }
 
+  /** Reconnect CodeMirror's event/measurement root after moving this editor to another window. */
+  reparent(): void { if (!this.destroyed) this.view.setRoot(this.element.ownerDocument); }
+
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true; this.validationSerial++;

@@ -1,8 +1,9 @@
 //! Paid, individually identifiable machinery inside a separately grown envelope.
 //!
-//! Minerals are the conserved structural material proxy. Energy spent on growth
-//! is split into recoverable embodied energy and heat; neither targets nor damage
-//! create or erase material. Storage overflow is deliberately handled by World.
+//! Structural mass carries one mineral quota and one organic-carbon quota.
+//! World pays or recovers the carbon quota around this mineral-conserving worker.
+//! Growth energy is split into embodied fabrication energy and heat; neither
+//! targets nor damage create or erase material. World handles storage overflow.
 use crate::cellular::{AssemblyKind, CellularState, MechanismKind, RecipeIdentity};
 use crate::checkpoint::{ensure, Reader, Result as CheckpointResult, Writer};
 
@@ -260,6 +261,9 @@ pub struct BodyCapacities {
     pub gut_minerals: f64,
     pub photosynthesis: f64,
     pub metabolism: f64,
+    /// Maximum aerobic usable-energy production per second.
+    pub respiration: f64,
+    pub basal_respiration: f64,
     pub digestion: f64,
     pub uptake: f64,
     pub thrust: f64,
@@ -808,6 +812,8 @@ impl Body {
             gut_minerals: 12.0 * digestive,
             photosynthesis: 55.0 * mass[Photosynthetic as usize],
             metabolism: 20.0 * core + 60.0 * mass[Metabolic as usize],
+            respiration: 20.0 * core + 60.0 * mass[Metabolic as usize],
+            basal_respiration: 20.0 * core,
             digestion: 65.0 * digestive,
             uptake: 0.8 * mass[Transporter as usize],
             thrust: 100.0 * flagellum,
@@ -1584,14 +1590,14 @@ impl Body {
     }
     #[cfg(test)]
     pub(crate) fn read_checkpoint(reader: &mut Reader<'_>) -> CheckpointResult<Self> {
-        Self::read_checkpoint_version(reader, 7)
+        Self::read_checkpoint_version(reader, 9)
     }
     pub(crate) fn read_checkpoint_version(
         reader: &mut Reader<'_>,
         version: u32,
     ) -> CheckpointResult<Self> {
         ensure(
-            matches!(version, 3 | 4 | 5 | 6 | 7 | 8),
+            matches!(version, 3 | 4 | 5 | 6 | 7 | 8 | 9),
             "unsupported body checkpoint version",
         )?;
         let area = reader.range(MIN_AREA, MAX_AREA)?;

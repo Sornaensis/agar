@@ -230,6 +230,11 @@ impl ReceptorField {
 /// Absent or invalid measurements carry zero values and empty opaque tokens.
 #[derive(Debug, Clone, Default)]
 pub struct Inputs {
+    pub organic_carbon: f64,
+    pub internal_inorganic_carbon: f64,
+    pub internal_oxygen: f64,
+    pub respiration_rate: f64,
+    pub carbon_fixation_rate: f64,
     pub energy: f64,
     pub energy_fraction: f64,
     pub energy_capacity: f64,
@@ -771,9 +776,10 @@ enum Sensor {
     ProteinChemoreceptor,
     ProteinMechanoreceptor,
     ProteinOptical,
+    OrganicCarbon, InorganicCarbon, Oxygen, RespirationRate, CarbonFixationRate,
 }
 impl Sensor {
-    const ALL: [Self; 169] = [
+    const ALL: [Self; 174] = [
         Self::Energy,
         Self::EnergyFraction,
         Self::EnergyCapacity,
@@ -943,9 +949,15 @@ impl Sensor {
         Self::ProteinChemoreceptor,
         Self::ProteinMechanoreceptor,
         Self::ProteinOptical,
+        Self::OrganicCarbon, Self::InorganicCarbon, Self::Oxygen, Self::RespirationRate, Self::CarbonFixationRate,
     ];
     fn name(self) -> &'static str {
         match self {
+            Self::OrganicCarbon => "carbon.organic",
+            Self::InorganicCarbon => "carbon.inorganic",
+            Self::Oxygen => "oxygen",
+            Self::RespirationRate => "respiration.rate",
+            Self::CarbonFixationRate => "carbon.fixation.rate",
             Self::Energy => "energy",
             Self::EnergyFraction => "energy.fraction",
             Self::EnergyCapacity => "energy.capacity",
@@ -1163,6 +1175,11 @@ impl Sensor {
     }
     fn read(self, i: &Inputs) -> Value {
         match self {
+            Self::OrganicCarbon => Value::Scalar(finite(i.organic_carbon)),
+            Self::InorganicCarbon => Value::Scalar(finite(i.internal_inorganic_carbon)),
+            Self::Oxygen => Value::Scalar(finite(i.internal_oxygen)),
+            Self::RespirationRate => Value::Scalar(finite(i.respiration_rate)),
+            Self::CarbonFixationRate => Value::Scalar(finite(i.carbon_fixation_rate)),
             Self::GutExudateEnergy => Value::Scalar(finite(i.gut_exudate_energy)),
             Self::GutExudateNutrients => Value::Scalar(finite(i.gut_exudate_nutrients)),
             Self::GutTissueEnergy => Value::Scalar(finite(i.gut_tissue_energy)),
@@ -3913,7 +3930,7 @@ mod tests {
             ))
             .is_err());
         }
-        assert_eq!(Sensor::ALL.len(), 169);
+        assert_eq!(Sensor::ALL.len(), 174);
         assert_eq!(
             Sensor::OrganelleFlagellumCount.read(&inputs),
             Value::Integer(7)

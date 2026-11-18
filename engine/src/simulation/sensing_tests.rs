@@ -44,6 +44,7 @@ fn state(world: &World) -> Vec<u8> {
 fn grow_for_division(cell: &mut Cell) {
     let controls = BodyControls::default();
     for _ in 0..32 {
+        let mass = cell.body.structural_mass();
         cell.body.work(
             1.0,
             &controls,
@@ -53,6 +54,7 @@ fn grow_for_division(cell: &mut Cell) {
             1.0,
             MAX_AREA,
         );
+        cell.organic_carbon -= cell.body.structural_mass() - mass;
     }
     cell.cooldown = 0.0;
     assert!(

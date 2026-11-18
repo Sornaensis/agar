@@ -3,8 +3,9 @@ import { ORGANELLE_CATALOG, MECHANISM_CATALOG } from './organelles';
 
 export function showGuide(): void {
   createDialog('Guide', `
-    <p>Start from a simulation preset, or combine an environment and genomes. Only the open simulation advances; hidden browser tabs pause. Runs save automatically and reopen paused.</p>
+    <p>Start from a simulation preset, or combine an environment and genomes. Only the open simulation advances. Runs save automatically and reopen paused.</p>
     <p>Click a cell to inspect its state, physical body, memory or program. <b>Add organism</b> introduces one cell with the chosen genome.</p>
+    <p><b>Pop out</b> keeps the same player running while you edit elsewhere or background the main tab. It keeps advancing when hidden, subject to browser throttling or system sleep; keep the main tab open. <b>Window</b> is the fallback when always-on-top is unavailable. Explicit Pause still stops playback. Without an open player window, a hidden main tab pauses.</p>
     <details class="guide-section" open><summary>Program a cell with products and recipes</summary>
       <p>New genomes begin with <code>cellular;</code>. Declare physical products, express them with named genes, then combine their stock into machines. Every founder has one core and finite reserves. Its program must build an energy route before those reserves run out.</p>
       <pre class="guide-code">cellular;
@@ -104,8 +105,8 @@ scan.width = 6.283185;</pre>
       <p>Chemoreceptors sample local dissolved minerals and organic cues, plus their gradients. Organic cues spread from release, leakage and decay. Following a cue may lead to usable material, competitors, danger, or nothing. The program must learn from actual encounters and its own gut or energy changes.</p>
     </details>
     <details class="guide-section"><summary>Legacy programs: feed, maintain and divide</summary>
-      <p><code>photosynthesize</code> uses built photosynthetic and metabolic machinery to harvest shared local light. <code>absorb</code> uses transporters to take dissolved minerals. <code>feed</code> controls overall intake and digestion. Captured exudate, tissue and waste remain separate in the gut and compete for digestive and metabolic processing.</p>
-      <table><thead><tr><th>Material</th><th>Digestion</th></tr></thead><tbody><tr><th>Exudate</th><td>Readily processed organic releases. Converts 80% of raw energy to usable reserves.</td></tr><tr><th>Cell tissue</th><td>Slower processing converts 65% to usable energy and leaves 20% as refractory waste. Tissue also carries structural minerals.</td></tr><tr><th>Waste</th><td>Slow residual material, with a 32% energy yield. Unassimilated minerals return to water and remaining energy dissipates.</td></tr></tbody></table>
+      <p><code>photosynthesize</code> uses built photosynthetic machinery, shared local light and internal inorganic carbon to fix organic carbon and release oxygen. <code>absorb</code> uses transporters to take dissolved minerals. <code>feed</code> controls overall intake and digestion. Captured exudate, tissue and waste remain separate in the gut and compete for digestive and metabolic processing.</p>
+      <table><thead><tr><th>Material</th><th>Digestion</th></tr></thead><tbody><tr><th>Exudate</th><td>Readily processed organic releases. Accessible carbon enters reserves for respiration.</td></tr><tr><th>Cell tissue</th><td>Slower processing supplies carbon and minerals, leaving refractory waste.</td></tr><tr><th>Waste</th><td>Slow residual material with lower carbon assimilation. Unassimilated minerals return to water; remaining carbon stays in residue.</td></tr></tbody></table>
       <pre class="guide-code">digest.exudate = 1;
 digest.tissue = 0.7;
 digest.waste = if gut.exudate.energy + gut.tissue.energy &lt; 1
@@ -135,6 +136,12 @@ clear rs001 when !object.valid &amp;&amp; ri001 &gt; 60;</pre>
       <p>Cellular programs also offer <b>Silence a gene</b>, <b>Duplicate a gene</b> and <b>Change placement</b>. Placement changes a future recipe’s attachment or direction. Inherited machinery retains its actual geometry and ingredients; changed definitions cannot take control of it. A same-named recycling request can recover its materials.</p>
       <p><b>Graph</b> shows builtins, signals, outputs and registers. Cyan edges read old values, amber edges write, and dashed rose edges clear. Guards are labeled <code>when</code>. Select a node to inspect its dependencies; the graph describes code, not a cell’s physical organs.</p>
     </details>
+    <details class="guide-section"><summary>Floating player and gas exchange</summary>
+      <p>Pop out moves the same simulation into an always-on-top picture-in-picture window. It keeps running while you use other parts of agar or another browser tab. Return to tab or close the floating window to dock it. Keep the main tab open. If this browser lacks picture-in-picture, Window opens a separate window with no guaranteed pinning.</p>
+      <p>Choose Oxygen or Inorganic carbon to inspect the dissolved fields. Gases &amp; atmosphere controls sealed/open water and finite reservoir exchange. The environment builder also sets starting amounts. Place oxygen or carbon emitters and absorbers, or an aerator that connects nearby water to the reservoir.</p>
+      <p>Light harvesting fixes inorganic carbon and releases oxygen. Digestion transfers organic carbon into reserves; <code>respire(oxygen)</code> consumes carbon and oxygen to release usable energy. Producers respire in darkness too. You can read <code>oxygen</code>, <code>carbon.organic</code>, <code>carbon.inorganic</code>, <code>respiration.rate</code> and <code>carbon.fixation.rate</code>. The reaction rates use carbon units per second.</p>
+      <p>Carbon and oxygen accounting in Metrics includes external input and removal, fixation, organism respiration and oxygen-limited background decay. The model uses abstract amounts; it does not yet model pH or anaerobic metabolism.</p>
+    </details>
     <details class="guide-section"><summary>Environment and resource accounting</summary>
       <p>Open Environment in the player to select and tune individual emitters, add or remove objects, and change the world size. The environment builder uses the same object controls. Light, heat, nutrient springs, absorbers, vortices, jets, current bands and radial flows each have their own strength and geometry. Opposite current bands can move water in different directions.</p>
       <p>Fixed barriers stay in place; floating barriers drift with local currents. Both block organisms, particles and field transport as full-depth obstacles in the wrapping 2D world. Flow is prescribed rather than pressure-solved. Absorbers remove only available dissolved minerals and record the removed amount in resource accounting.</p>
@@ -143,7 +150,7 @@ clear rs001 when !object.valid &amp;&amp; ri001 &gt; 60;</pre>
       <p>Minerals circulate through water, bodies and particles. Construction transfers them into structures; recycling and death return them. Usable, raw gut and embodied structural energy remain separate, and maintenance, movement and conversion dissipate energy. Metrics includes introduced resources, total held energy and harvested light.</p>
     </details>
     <details class="guide-section"><summary>Saved files and older versions</summary>
-      <p>IndexedDB holds genomes, environments and full simulation checkpoints; local storage keeps preferences and unfinished drafts. Export genomes and environments from their menus. Existing v3 organelle programs remain executable. Checkpoint 8 saves also preserve world dimensions, per-source geometry, moving barriers and absorbed mineral totals; checkpoints 3 through 7 remain readable. Updated physical rules can change old trajectories, while saving and continuing under the current engine is deterministic. Earlier investment-language documents remain viewable and exportable.</p>
+      <p>IndexedDB holds genomes, environments and full simulation checkpoints; local storage keeps preferences and unfinished drafts. Export genomes and environments from their menus. Existing v3 organelle programs remain executable. Checkpoint 9 saves preserve gas fields, carbon inventories and reaction ledgers as well as world dimensions, per-source geometry and moving barriers; checkpoints 3 through 8 remain readable. Old organic inventories are classified once at import. Updated physical rules can change old trajectories, while saving and continuing under the current engine is deterministic. Earlier investment-language documents remain viewable and exportable.</p>
     </details>
   `, 'guide-dialog');
 }

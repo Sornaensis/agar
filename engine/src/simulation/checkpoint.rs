@@ -24,6 +24,8 @@ impl World {
         ] {
             w.f64(v);
         }
+        for v in [self.carbon_fixed_total, self.carbon_respired_total,
+            self.decay_carbon_respired_total, self.carbon_imports, self.legacy_carbon_imports] { w.f64(v); }
         w.u32(self.next_id);
         w.u64(self.next_food_id);
         w.u32(self.rng.0);
@@ -70,6 +72,8 @@ impl World {
                 w.f64(pool.nutrients);
             }
             w.f64(c.synthesis_rate);
+            for v in [c.organic_carbon, c.internal_oxygen, c.internal_inorganic_carbon,
+                c.respiration_rate, c.carbon_fixation_rate] { w.f64(v); }
             c.body.write_checkpoint(w);
             c.memory.write_checkpoint(w);
             w.text(&c.scan_target);
@@ -116,6 +120,8 @@ impl World {
         let nutrient_imports = r.range(0.0, 1e100)?;
         let energy_imports = r.range(0.0, 1e100)?;
         let food_credit = r.range(0.0, 1.0)?;
+        let mut chemistry = [0.0; 5];
+        if version >= 9 { for value in &mut chemistry { *value = r.range(0.0, 1e100)?; } }
         let next_id = r.u32()?;
         let next_food_id = r.u64()?;
         let rng = r.u32()?;
@@ -201,6 +207,8 @@ impl World {
                 };
                 synthesis_rate = 0.0;
             }
+            let mut gases = [0.0; 5];
+            if version >= 9 { for value in &mut gases { *value = r.range(0.0, 1e12)?; } }
             let body = Body::read_checkpoint_version(r, version)?;
             let memory = Registers::read_checkpoint(r)?;
             let scan_target = Rc::from(r.text(128)?);
@@ -265,6 +273,8 @@ impl World {
                 body,
                 memory,
                 nutrient_stored,
+                organic_carbon: gases[0], internal_oxygen: gases[1], internal_inorganic_carbon: gases[2],
+                respiration_rate: gases[3], carbon_fixation_rate: gases[4],
                 gut_energy,
                 gut_nutrients,
                 gut,
@@ -298,6 +308,7 @@ impl World {
             )?;
             ensure(
                 energy <= caps.energy + 1e-9
+                    && c.organic_carbon <= caps.energy / CHEMICAL_ENERGY_PER_CARBON + 1e-9
                     && nutrient_stored <= caps.minerals + 1e-9
                     && gut_energy <= caps.gut_energy + 1e-9
                     && gut_nutrients <= caps.gut_minerals + 1e-9,
@@ -352,7 +363,7 @@ impl World {
                 nutrients,
             });
         }
-        let world = Self {
+        let mut world = Self {
             cells,
             food,
             ticks: counts[0],
@@ -368,6 +379,8 @@ impl World {
             photosynthesis_total,
             nutrient_imports,
             energy_imports,
+            carbon_fixed_total: chemistry[0], carbon_respired_total: chemistry[1],
+            decay_carbon_respired_total: chemistry[2], carbon_imports: chemistry[3], legacy_carbon_imports: chemistry[4],
             food_credit,
             next_id,
             next_food_id,
@@ -377,6 +390,22 @@ impl World {
             eval_scratch: EvalScratch::default(),
             workspace: TickWorkspace::default(),
         };
+        if version < 9 {
+            // Old files had no carbon chemistry. Classify their existing body,
+            // gut and particle inventories once, without interpreting ATP as C.
+            world.legacy_carbon_imports = world.organic_cell_total() + world.organic_food_total();
+            world.energy_imports += world.cells.iter().map(|c|
+                c.body.structural_mass() * STRUCTURAL_CARBON_PER_MASS * CHEMICAL_ENERGY_PER_CARBON).sum::<f64>();
+        }
+        let introduced_carbon = world.carbon_input_total();
+        let carbon_error = world.carbon_total() + world.environment.carbon_output_total() - introduced_carbon;
+        ensure(carbon_error.abs() <= 1e-6 + introduced_carbon.abs() * 1e-9,
+            "carbon ledger does not match recorded inventories and exchange")?;
+        let oxygen_expected = world.environment.oxygen_input_total() + world.carbon_fixed_total
+            - world.carbon_respired_total - world.decay_carbon_respired_total - world.environment.oxygen_output_total();
+        let oxygen_error = world.environment.oxygen_total() + world.oxygen_cell_total() - oxygen_expected;
+        ensure(oxygen_error.abs() <= 1e-6 + (world.environment.oxygen_input_total() + world.carbon_fixed_total) * 1e-9,
+            "oxygen ledger does not match recorded reactions and exchange")?;
         // Individual compartment bounds cannot detect a forged but locally
         // plausible reserve or particle. Preserve the complete world's ledger.
         // Tolerance accommodates accumulated floating-point transfer rounding,

@@ -12,6 +12,7 @@ import { createDialog, escapeHtml, icon, inputNumber, setDialogError } from './u
 import { ProgramEditor } from './program-editor';
 import { PRESETS } from './presets';
 import { isCellularSource } from './genome-language';
+import { gasFields, readGasConfig } from './gas-controls';
 
 export interface CatalogCallbacks {
   compiler: () => Promise<Engine>;
@@ -24,6 +25,7 @@ export interface CatalogCallbacks {
 
 const DEFAULT_ENVIRONMENT: EnvironmentConfig = {
   width: 1200, height: 760, foodRate: 6, ambientTemperature: 0.5, ambientLight: 0, currentStrength: 0, initialNutrients: 0.3, sources: [], barriers: [],
+  gases: { initialOxygen: 1, initialCarbon: 1, mode: 'sealed', exchangeRate: 0.02, oxygenEquilibrium: 1, carbonEquilibrium: 1 },
 };
 // Use the same authored construction program as the built-in producer.
 const DEFAULT_GENOME = PRESETS.find(preset => preset.name === 'Phototroph')!.source;
@@ -211,7 +213,7 @@ export class CatalogUI {
         <div class="environment-preview">
           <div class="preview-toolbar">
             ${editable ? `<label class="environment-tool-select"><span class="visually-hidden">Environment tool</span><select data-environment-tool aria-label="Environment tool">${toolOptions()}</select></label>` : ''}
-            <select id="preview-overlay" aria-label="Preview field"><option value="light">Light</option><option value="heat">Temperature</option><option value="flow">Water flow</option><option value="nutrients">Nutrients</option><option value="none">No overlay</option></select>
+            <select id="preview-overlay" aria-label="Preview field"><option value="light">Light</option><option value="heat">Temperature</option><option value="flow">Water flow</option><option value="nutrients">Minerals</option><option value="oxygen">Oxygen</option><option value="carbon">Inorganic carbon</option><option value="none">No overlay</option></select>
             ${cameraControls('preview')}
           </div>
           <canvas class="environment-canvas" aria-label="Environment preview. Select an object to edit it." tabindex="0"></canvas>
@@ -223,6 +225,7 @@ export class CatalogUI {
             ${numberField('width', 'Width', config.width, 400, 4800, '20')}${numberField('height', 'Height', config.height, 400, 3040, '20')}
           </section>
           <section class="source-section"><h3>Objects</h3><div class="source-list" aria-label="Environment objects"></div><div class="source-detail"></div></section>
+          <details class="environment-baseline gas-settings"><summary>Gases & atmosphere</summary>${gasFields(config.gases, editable, true)}</details>
           <details class="environment-baseline"><summary>Background & starting conditions</summary><div class="environment-form">
             ${numberField('food', 'Organic input / s', config.foodRate, 0, 60, '0.5')}
             ${numberField('light', 'Ambient light', config.ambientLight, 0, 1, '0.05')}
@@ -259,6 +262,7 @@ export class CatalogUI {
       next.ambientTemperature = inputNumber(query(dialog, '#environment-temperature'), 'Temperature', 0, 1);
       next.currentStrength = inputNumber(query(dialog, '#environment-current'), 'Background flow', 0, 30);
       next.initialNutrients = inputNumber(query(dialog, '#environment-nutrients'), 'Starting nutrients', 0, 5);
+      next.gases = readGasConfig(dialog);
       return validateEnvironmentConfig(next);
     };
     const persist = (): void => {
@@ -284,6 +288,7 @@ export class CatalogUI {
           if (!await worker.setWorldSize(next.width, next.height)) throw new Error('The world size could not be changed.');
           await worker.setEnvironment(next.ambientTemperature, next.ambientLight, next.currentStrength);
           await worker.setInitialNutrients(next.initialNutrients); await worker.setFoodRate(next.foodRate);
+          if (!await worker.setInitialGases(next.gases.initialOxygen, next.gases.initialCarbon) || !await worker.setGasExchange(next.gases)) throw new Error('The gas settings could not be applied.');
           await worker.clearSources();
           for (const source of next.sources) if (!await worker.addSource(source.kind, source.x, source.y, source.strength, source.radius, source.angle, source.length)) throw new Error('An emitter could not be added.');
           // Settle the fields without moving authored geometry. The preview
@@ -429,6 +434,7 @@ export class CatalogUI {
     }
     nameInput!.addEventListener('input', changed);
     dialog.querySelectorAll<HTMLInputElement>('.environment-form input').forEach(input => input.addEventListener('input', changed));
+    dialog.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-gas-field]').forEach(input => input.addEventListener('change', changed));
     query<HTMLButtonElement>(dialog, '[data-save]').addEventListener('click', () => run(async () => {
       config = collect();
       const next = newEnvironment(nameInput!.value, config, document?.description);

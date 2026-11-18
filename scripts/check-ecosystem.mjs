@@ -40,7 +40,7 @@ const study = {
   rateDefinitions: {
     upkeep: 'Body maintenance before temperature scaling; excludes the extra 0.15 ATP/s per area basal cost.',
     metabolism: 'Complete basal maintenance at local temperature; motor, weapon, construction and repair costs are additional.',
-    digestionRate: 'Usable energy gained per simulated second after substrate conversion losses.',
+    digestionRate: 'Assimilated substrate potential per simulated second; usable energy requires oxygen-dependent respiration.',
   },
 };
 const round = n => Math.round(n * 1e6) / 1e6;
@@ -50,9 +50,12 @@ const distance = (a, b) => Math.hypot(Math.min(Math.abs(a.x - b.x), 1200 - Math.
 async function createWorld(config) {
   if (!customModule) return fresh(config);
   const api = (await WebAssembly.instantiate(customModule, {})).exports;
-  assert.equal(api.abi_version(), 11);
+  assert.equal(api.abi_version(), 12);
   api.set_environment(config.ambientTemperature, config.ambientLight, config.currentStrength);
   api.set_initial_nutrients(config.initialNutrients); api.set_food_rate(0); api.set_mutation_rate(config.mutationRate);
+  const gases=config.gases??{};
+  assert.equal(api.set_initial_gases(gases.initialOxygen??1,gases.initialCarbon??1),1);
+  assert.equal(api.set_gas_exchange(gases.mode==='open'?1:0,gases.exchangeRate??.02,gases.oxygenEquilibrium??1,gases.carbonEquilibrium??1),1);
   for (const source of config.sources) assert.ok(api.add_source(source.kind, source.x, source.y, source.strength, source.radius));
   assert.equal(api.reset_empty(config.seed, 0), 1, error(api));
   return api;
@@ -92,6 +95,10 @@ for (const randomSeed of options.seeds) {
       state = seconds === 0 ? snapshot(api) : advance(api, seconds * 30 - ticks);
       ticks = seconds * 30; observeDescendants(state);
     }
+    const metricsPointer = api.metrics_snapshot_ptr();
+    const metrics = new Float64Array(api.memory.buffer, metricsPointer, 51).slice();
+    const carbonDelta = metrics[36] + metrics[49] - metrics[37];
+    const oxygenDelta = metrics[44] + metrics[45] + metrics[48] + metrics[41] + metrics[42] - metrics[40] - metrics[47];
     const accounting = {
       material: state.material, materialIntroduced: state.materialIntroduced,
       materialDelta: state.material - state.materialIntroduced,
@@ -99,9 +106,16 @@ for (const randomSeed of options.seeds) {
       energy: state.energy, energyIntroduced: state.energyIntroduced,
       photosynthesis: state.photosynthesis, energyTolerance: 1e-7,
       energyExcess: state.energy - state.energyIntroduced - state.photosynthesis,
+      carbon: metrics[36], carbonIntroduced: metrics[37], carbonRemoved: metrics[49], carbonDelta,
+      carbonTolerance: Math.max(1e-7, metrics[37] * 1e-10),
+      oxygen: metrics[44] + metrics[45], oxygenIntroduced: metrics[47], oxygenRemoved: metrics[48], oxygenDelta,
+      oxygenTolerance: Math.max(1e-7, (metrics[47] + metrics[40]) * 1e-10),
+      carbonFixed: metrics[40], carbonRespired: metrics[41], carbonDecayed: metrics[42],
     };
     const materialAccounted = Math.abs(accounting.materialDelta) < accounting.materialTolerance;
     const energyAccounted = accounting.energy <= accounting.energyIntroduced + accounting.photosynthesis + accounting.energyTolerance;
+    const carbonAccounted = Math.abs(accounting.carbonDelta) < accounting.carbonTolerance;
+    const oxygenAccounted = Math.abs(accounting.oxygenDelta) < accounting.oxygenTolerance;
     const lineages = founding.map(name => {
       const cells = state.cells.filter(cell => lineage(cell.genome) === name), machinery = new Map();
       for (const cell of cells) {
@@ -112,7 +126,7 @@ for (const randomSeed of options.seeds) {
           entry.mass += machine.mass; machinery.set(machine.name, entry);
         }
       }
-      const totalKeys = ['area', 'mass', 'energy', 'nutrients', 'gutEnergy', 'photosynthesisRate', 'digestionRate', 'growthRate', 'exudationRate', 'upkeep', 'metabolism', 'expressionRate'];
+      const totalKeys = ['area', 'mass', 'energy', 'nutrients', 'gutEnergy', 'photosynthesisRate', 'digestionRate', 'growthRate', 'exudationRate', 'upkeep', 'metabolism', 'expressionRate', 'organicCarbon', 'internalOxygen', 'internalInorganicCarbon', 'respirationRate', 'carbonFixationRate'];
       return {
         name, count: cells.length, ...Object.fromEntries(totalKeys.map(key => [key, round(sum(cells, key))])),
         meanEnergyFraction: cells.length ? round(cells.reduce((total, cell) => total + cell.energy / cell.capacity, 0) / cells.length) : null,
@@ -123,6 +137,7 @@ for (const randomSeed of options.seeds) {
           id: cell.id, generation: cell.generation, x: round(cell.x), y: round(cell.y), angle: round(cell.angle),
           energy: round(cell.energy), capacity: round(cell.capacity), nutrients: round(cell.nutrients), area: round(cell.area),
           integrity: round(cell.integrity), gutEnergy: round(cell.gutEnergy), digestionRate: round(cell.digestionRate),
+          organicCarbon: round(cell.organicCarbon), internalOxygen: round(cell.internalOxygen), respirationRate: round(cell.respirationRate),
           speed: round(Math.hypot(cell.vx, cell.vy)), upkeep: round(cell.upkeep), metabolism: round(cell.metabolism),
           closestParticle: state.food.length ? round(Math.min(...state.food.map(food => distance(cell, food)))) : null,
           closestProducer: state.cells.some(other => lineage(other.genome) === 'Phototroph')
@@ -141,7 +156,7 @@ for (const randomSeed of options.seeds) {
       })), lineages,
     };
     result.samples.push(sample); result.wallSeconds = round((performance.now() - started) / 1000);
-    if (!materialAccounted || !energyAccounted) {
+    if (!materialAccounted || !energyAccounted || !carbonAccounted || !oxygenAccounted) {
       // Preserve the exact failing world before throwing. A large-world error
       // must be inspectable and resumable, not just an unlabelled failed check.
       const outputBase = options.output ? resolve(options.output.replace(/\.json$/i, ''))
@@ -158,6 +173,8 @@ for (const randomSeed of options.seeds) {
     if (options.output) await writeFile(options.output, JSON.stringify(study, null, 2) + '\n');
     assert.ok(materialAccounted, `Material accounting at ${state.seconds}s: delta ${accounting.materialDelta}, introduced ${accounting.materialIntroduced}, tolerance ${accounting.materialTolerance}`);
     assert.ok(energyAccounted, `Energy accounting at ${state.seconds}s: excess ${accounting.energyExcess}, tolerance ${accounting.energyTolerance}`);
+    assert.ok(carbonAccounted, `Carbon accounting at ${state.seconds}s: delta ${accounting.carbonDelta}, tolerance ${accounting.carbonTolerance}`);
+    assert.ok(oxygenAccounted, `Oxygen accounting at ${state.seconds}s: delta ${accounting.oxygenDelta}, tolerance ${accounting.oxygenTolerance}`);
   }
   if (options.assert) {
     const last = result.samples.at(-1);

@@ -2,12 +2,12 @@
 # Genes make stock; start_when permits new machines; activity runs built ones.
 cellular;
 
+product Catalyst = enzyme();
+product Wall = membrane();
 product Mount = anchor();
 product Pigment = pigment();
-product Catalyst = enzyme();
 product Frame = scaffold();
 product Carrier = transporter();
-product Wall = membrane();
 product Replicase = replicase();
 product Rotor = motor();
 product Ring = constrictor();
@@ -20,31 +20,39 @@ fn buffered(stock, effort) = if stock < 0.001 then effort else 0;
 
 let funded = (energy > 10 || gut.energy > 0) && nutrient.stored > 0.001;
 let expanding = body.area > body.birth_area * 1.6;
-let powered = enough(built.Solar, 0.12);
+let powered = enough(built.Solar, 0.12) && enough(built.Respiration, 0.04);
 let equipped = powered;
 let surplus = equipped && energy > 55;
 # This stationary producer spends no material on locomotion.
 
+let need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);
 let need_Solar = funded && (true) && missing(built.Solar, (if expanding then 0.24 else 0.12), 0.12);
 let need_Translation = funded && (powered) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);
 let need_Minerals = funded && (powered) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);
-let need_EnergyStore = funded && (powered) && missing(built.EnergyStore, (if expanding then 0.16 else 0.08), 0.08);
-let need_MineralStore = funded && (powered) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);
+let need_EnergyStore = funded && (powered) && missing(built.EnergyStore, (if expanding then 0.08 else 0.04), 0.04);
+let need_MineralStore = funded && (powered && body.area > 1.2) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);
 let need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);
 let need_Support = funded && (powered && energy > 45) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);
 let need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);
 let need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);
 let need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);
 
+gene supply_Catalyst: Catalyst = buffered(pool.Catalyst, (if need_Respiration then 1 else 0) + (if need_Solar then 0.25 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0));
+gene supply_Wall: Wall = buffered(pool.Wall, (if need_Respiration then 0.6 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0));
 gene supply_Mount: Mount = buffered(pool.Mount, (if need_Solar then 0.25 else 0) + (if need_Minerals then 0.25 else 0) + (if need_Division then 0.5 else 0));
 gene supply_Pigment: Pigment = buffered(pool.Pigment, (if need_Solar then 1 else 0));
-gene supply_Catalyst: Catalyst = buffered(pool.Catalyst, (if need_Solar then 0.25 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0));
 gene supply_Frame: Frame = buffered(pool.Frame, (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0));
 gene supply_Carrier: Carrier = buffered(pool.Carrier, (if need_Minerals then 1 else 0));
-gene supply_Wall: Wall = buffered(pool.Wall, (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0));
 gene supply_Replicase: Replicase = buffered(pool.Replicase, (if need_Replication then 1 else 0));
 gene supply_Rotor: Rotor = buffered(pool.Rotor, (if need_Division then 1 else 0));
 gene supply_Ring: Ring = buffered(pool.Ring, (if need_Division then 1 else 0));
+
+assembly Respiration: respire(oxygen) {
+  Catalyst: 0.025;
+  Wall: 0.015;
+  start_when: need_Respiration;
+  activity: if oxygen > 0 && energy.fraction < 0.98 && (carbon.organic > 0.2 * body.area || energy < 20) then 1 else 0;
+}
 
 assembly Solar: harvest(light) {
   Mount: 0.02;
@@ -69,7 +77,7 @@ assembly Minerals: import(mineral) {
 }
 
 assembly EnergyStore: store(energy) {
-  Wall: 0.08;
+  Wall: 0.04;
   start_when: need_EnergyStore;
   activity: 1;
 }

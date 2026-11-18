@@ -5,7 +5,12 @@ use std::f64::consts::TAU;
 mod checkpoint;
 #[cfg(test)]
 mod control_tests;
+#[cfg(test)]
+mod gas_tests;
+mod gases;
 mod geometry;
+use gases::GasState;
+pub use gases::{DEFAULT_INITIAL_CARBON, DEFAULT_INITIAL_OXYGEN, PATCH_WATER_VOLUME};
 
 pub const COLUMNS: usize = 60;
 pub const ROWS: usize = 38;
@@ -48,6 +53,7 @@ pub struct Barrier {
 struct FieldScratch {
     advected: Vec<f64>,
     patch_flow: Vec<(f64, f64)>,
+    face_flow: Vec<(f64, f64)>,
     transfers: Vec<(usize, usize, f64)>,
     outgoing: Vec<f64>,
     limits: Vec<f64>,
@@ -86,6 +92,7 @@ pub struct Environment {
     next_barrier_id: u32,
     next_source_id: u32,
     scratch: FieldScratch,
+    gases: GasState,
 }
 
 impl Default for Environment {
@@ -117,6 +124,7 @@ impl Default for Environment {
             nutrient_inputs: DEFAULT_INITIAL_NUTRIENTS * PATCHES as f64,
             next_source_id: 1,
             scratch: FieldScratch::default(),
+            gases: GasState::new(PATCHES),
         }
     }
 }
@@ -128,6 +136,7 @@ impl Environment {
         self.organic.fill(0.0);
         self.nutrient_inputs = self.initial_nutrients * self.patch_count() as f64;
         self.nutrient_removed = 0.0;
+        self.gases.reset();
         for barrier in &mut self.barriers {
             barrier.vx = 0.0;
             barrier.vy = 0.0;
@@ -262,7 +271,7 @@ impl Environment {
     }
 
     pub fn add_source(&mut self, kind: u32, x: f64, y: f64, strength: f64, radius: f64) -> u32 {
-        if kind > 7
+        if kind > 12
             || self.sources.len() >= MAX_SOURCES
             || !x.is_finite()
             || !y.is_finite()
@@ -281,7 +290,14 @@ impl Environment {
             kind,
             x: x.rem_euclid(self.width),
             y: y.rem_euclid(self.height),
-            strength: strength.clamp(if matches!(kind, 0 | 3 | 4) { 0.0 } else { -1.0 }, 1.0),
+            strength: strength.clamp(
+                if matches!(kind, 0 | 3 | 4 | 8..=12) {
+                    0.0
+                } else {
+                    -1.0
+                },
+                1.0,
+            ),
             radius: radius.clamp(20.0, 1000.0),
             angle: 0.0,
             length: 600.0,
@@ -313,6 +329,9 @@ impl Environment {
             let mut light = self.ambient_light;
             let mut heating = 0.0;
             for source in &self.sources {
+                if !matches!(source.kind, 0 | 1) {
+                    continue;
+                }
                 let d2 = delta(x - source.x, self.width).powi(2)
                     + delta(y - source.y, self.height).powi(2);
                 let weight = (-2.0 * d2 / source.radius.powi(2)).exp();
@@ -352,6 +371,7 @@ impl Environment {
             }
         }
         self.rebuild_flow_samples();
+        self.rebuild_gas_sources();
     }
 
     fn rebuild_flow_samples(&mut self) {
@@ -509,7 +529,9 @@ impl Environment {
 
     pub fn step(&mut self, time: f64) {
         self.step_barriers(time);
-        self.step_nutrients(time);
+        let has_flow = self.prepare_transport_flow(time);
+        self.step_nutrients(has_flow);
+        self.step_gases(has_flow);
         let organic_active = self.organic.iter().any(|&v| v != 0.0);
         let heat_active = !(self.heating.iter().all(|&v| v == 0.0)
             && self
@@ -562,98 +584,34 @@ impl Environment {
         }
     }
 
-    fn step_nutrients(&mut self, time: f64) {
+    fn prepare_transport_flow(&mut self, time: f64) -> bool {
         let has_flow = self.current_strength > 0.0
             || self
                 .sources
                 .iter()
-                .any(|source| matches!(source.kind, 2 | 5 | 6 | 7) && source.strength != 0.0);
-        let nonuniform = self.nutrients.windows(2).any(|pair| pair[0] != pair[1]);
-        if has_flow || nonuniform {
-            // Paired finite-volume fluxes move mass between wrapped neighbors.
-            // Semi-Lagrangian interpolation is deliberately reserved for heat.
-            self.scratch.transfers.clear();
-            self.scratch.transfers.reserve(self.patch_count() * 2);
-            self.scratch.outgoing.resize(self.patch_count(), 0.0);
-            self.scratch.outgoing.fill(0.0);
-            let diffusion = NUTRIENT_DIFFUSION * DT / PATCH_AREA;
-            let advection = DT / 20.0;
+                .any(|s| matches!(s.kind, 2 | 5 | 6 | 7) && s.strength != 0.0);
+        if has_flow {
+            self.scratch
+                .face_flow
+                .resize(self.patch_count(), (0.0, 0.0));
             for i in 0..self.patch_count() {
-                let column = i % self.columns;
-                let row = i / self.columns;
-                let right = row * self.columns + (column + 1) % self.columns;
-                let down = (row + 1) % self.rows * self.columns + column;
-                let vx = if has_flow {
-                    self.grid_flow(i, 1, time).0
-                } else {
-                    0.0
-                };
-                let vy = if has_flow {
-                    self.grid_flow(i, 2, time).1
-                } else {
-                    0.0
-                };
-                for (neighbor, velocity, blocked) in [
-                    (right, vx, self.blocked_right[i]),
-                    (down, vy, self.blocked_down[i]),
-                ] {
-                    if blocked {
-                        continue;
-                    }
-                    let donor = if velocity >= 0.0 {
-                        self.nutrients[i]
-                    } else {
-                        self.nutrients[neighbor]
-                    };
-                    let flux = velocity * advection * donor
-                        + diffusion * (self.nutrients[i] - self.nutrients[neighbor]);
-                    let (from, to, amount) = if flux >= 0.0 {
-                        (i, neighbor, flux)
-                    } else {
-                        (neighbor, i, -flux)
-                    };
-                    if amount > 0.0 {
-                        self.scratch.outgoing[from] += amount;
-                        self.scratch.transfers.push((from, to, amount));
-                    }
-                }
-            }
-            let patches = self.patch_count();
-            let FieldScratch {
-                transfers,
-                outgoing,
-                limits,
-                remaining,
-                incoming,
-                ..
-            } = &mut self.scratch;
-            limits.clear();
-            limits.extend(
-                outgoing
-                    .iter()
-                    .zip(&self.nutrients)
-                    .map(|(&requested, &available)| {
-                        if requested > available {
-                            available / requested
-                        } else {
-                            1.0
-                        }
-                    }),
-            );
-            remaining.clone_from(&self.nutrients);
-            incoming.resize(patches, 0.0);
-            incoming.fill(0.0);
-            for &(from, to, requested) in transfers.iter() {
-                // Budget against the old donor balance: same-step arrivals
-                // cannot be sent again, and no positivity clamp destroys mass.
-                let actual = (requested * limits[from]).min(remaining[from]);
-                remaining[from] -= actual;
-                incoming[to] += actual;
-            }
-            for i in 0..patches {
-                self.nutrients[i] = remaining[i] + incoming[i];
+                self.scratch.face_flow[i] =
+                    (self.grid_flow(i, 1, time).0, self.grid_flow(i, 2, time).1);
             }
         }
+        has_flow
+    }
+    fn step_nutrients(&mut self, has_flow: bool) {
+        transport_amounts(
+            &mut self.nutrients,
+            self.columns,
+            self.rows,
+            &self.blocked_right,
+            &self.blocked_down,
+            NUTRIENT_DIFFUSION,
+            has_flow,
+            &mut self.scratch,
+        );
         let mut supplied = 0.0;
         for (balance, rate) in self.nutrients.iter_mut().zip(&self.nutrient_injection) {
             let amount = rate * DT;
@@ -682,6 +640,16 @@ impl Environment {
             self.height as f32,
             self.barriers.len() as f32,
             self.nutrient_removed as f32,
+            self.gases.initial_oxygen as f32,
+            self.gases.initial_carbon as f32,
+            u8::from(self.gases.atmosphere_open) as f32,
+            self.gases.exchange_rate as f32,
+            self.gases.oxygen_equilibrium as f32,
+            self.gases.carbon_equilibrium as f32,
+            self.gases.oxygen_inputs as f32,
+            self.gases.oxygen_outputs as f32,
+            self.gases.carbon_inputs as f32,
+            self.gases.carbon_outputs as f32,
         ]);
         for i in 0..self.patch_count() {
             let (vx, vy) = self.grid_flow(i, 0, time);
@@ -691,6 +659,8 @@ impl Environment {
                 vx as f32,
                 vy as f32,
                 self.nutrients[i] as f32,
+                self.gases.oxygen[i] as f32,
+                self.gases.carbon[i] as f32,
             ]);
         }
         for source in &self.sources {
@@ -719,6 +689,96 @@ impl Environment {
                 0.0,
             ]);
         }
+    }
+}
+
+/// One conservative finite-volume solver is shared by every dissolved amount.
+/// All species use the same per-step face velocities and obstacle topology.
+fn transport_amounts(
+    values: &mut [f64],
+    columns: usize,
+    rows: usize,
+    blocked_right: &[bool],
+    blocked_down: &[bool],
+    diffusivity: f64,
+    has_flow: bool,
+    scratch: &mut FieldScratch,
+) {
+    if !has_flow && values.windows(2).all(|pair| pair[0] == pair[1]) {
+        return;
+    }
+    let count = values.len();
+    scratch.transfers.clear();
+    scratch.transfers.reserve(count * 2);
+    scratch.outgoing.resize(count, 0.0);
+    scratch.outgoing.fill(0.0);
+    let diffusion = diffusivity * DT / PATCH_AREA;
+    let advection = DT / PATCH_SIZE;
+    for i in 0..count {
+        let column = i % columns;
+        let row = i / columns;
+        let right = row * columns + (column + 1) % columns;
+        let down = (row + 1) % rows * columns + column;
+        let (vx, vy) = if has_flow {
+            scratch.face_flow[i]
+        } else {
+            (0.0, 0.0)
+        };
+        for (neighbor, velocity, blocked) in
+            [(right, vx, blocked_right[i]), (down, vy, blocked_down[i])]
+        {
+            if blocked {
+                continue;
+            }
+            let donor = if velocity >= 0.0 {
+                values[i]
+            } else {
+                values[neighbor]
+            };
+            let flux = velocity * advection * donor + diffusion * (values[i] - values[neighbor]);
+            let (from, to, amount) = if flux >= 0.0 {
+                (i, neighbor, flux)
+            } else {
+                (neighbor, i, -flux)
+            };
+            if amount > 0.0 {
+                scratch.outgoing[from] += amount;
+                scratch.transfers.push((from, to, amount));
+            }
+        }
+    }
+    let FieldScratch {
+        transfers,
+        outgoing,
+        limits,
+        remaining,
+        incoming,
+        ..
+    } = scratch;
+    limits.clear();
+    limits.extend(
+        outgoing
+            .iter()
+            .zip(values.iter())
+            .map(|(&requested, &available)| {
+                if requested > available {
+                    available / requested
+                } else {
+                    1.0
+                }
+            }),
+    );
+    remaining.clear();
+    remaining.extend_from_slice(values);
+    incoming.resize(count, 0.0);
+    incoming.fill(0.0);
+    for &(from, to, requested) in transfers.iter() {
+        let actual = (requested * limits[from]).min(remaining[from]);
+        remaining[from] -= actual;
+        incoming[to] += actual;
+    }
+    for i in 0..count {
+        values[i] = remaining[i] + incoming[i];
     }
 }
 
@@ -832,7 +892,7 @@ mod tests {
     #[test]
     fn source_bounds_and_wrapped_fields() {
         let mut env = Environment::default();
-        assert_eq!(env.add_source(9, 0.0, 0.0, 1.0, 100.0), 0);
+        assert_eq!(env.add_source(13, 0.0, 0.0, 1.0, 100.0), 0);
         assert_eq!(env.add_source(0, f64::NAN, 0.0, 1.0, 100.0), 0);
         let id = env.add_source(0, 2.0, 2.0, 1.0, 100.0);
         assert!(id > 0);
@@ -915,7 +975,7 @@ mod tests {
 
             let bytes = state(&reused);
             let mut reader = Reader::new(&bytes);
-            let mut fresh = Environment::read_checkpoint(&mut reader, 8).unwrap();
+            let mut fresh = Environment::read_checkpoint(&mut reader, 9).unwrap();
             assert!(reader.finished());
             assert_eq!(state(&fresh), bytes);
 
@@ -940,7 +1000,7 @@ mod tests {
         assert!(a.0.hypot(a.1) <= 60.0);
         let mut snapshot = Vec::new();
         env.snapshot(3.0, &mut snapshot);
-        assert_eq!(snapshot.len(), 11 + PATCHES * 5 + 8);
+        assert_eq!(snapshot.len(), 21 + PATCHES * 7 + 8);
         assert!(snapshot.iter().all(|v| v.is_finite()));
     }
 

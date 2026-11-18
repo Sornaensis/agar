@@ -1,5 +1,5 @@
 import { decodeMetricsSnapshot, decodeRenderSnapshot } from './engine';
-import type { BodyInspection, Cell, EnvironmentSnapshot, GenomeAnalysis, GenomeEvaluation, GenomeGraph, GenomeRecord, LanguageSchema, MetricsSnapshot, MutationKind, MutationResult, RegisterEntry, RenderSnapshot, SimulationSummary, SourceKind, WorldSnapshot } from './engine';
+import type { BodyInspection, Cell, EnvironmentSnapshot, GasExchangeConfig, GenomeAnalysis, GenomeEvaluation, GenomeGraph, GenomeRecord, LanguageSchema, MetricsSnapshot, MutationKind, MutationResult, RegisterEntry, RenderSnapshot, SimulationSummary, SourceKind, WorldSnapshot } from './engine';
 import type { CapturedCheckpoint, Presentation, PresentationOptions, WirePresentation, WorkerMethod, WorkerRequest, WorkerResponse } from './simulation-protocol';
 export type { CapturedCheckpoint, Presentation, PresentationOptions } from './simulation-protocol';
 
@@ -101,6 +101,8 @@ export class WorkerEngine {
   setEnvironment(temperature: number, light: number, current: number): Promise<void> { return this.call('setEnvironment', [temperature, light, current]); }
   setWorldSize(width: number, height: number): Promise<boolean> { return this.call('setWorldSize', [width, height]); }
   setInitialNutrients(level: number): Promise<void> { return this.call('setInitialNutrients', [level]); }
+  setInitialGases(oxygen: number, carbon: number): Promise<boolean> { return this.call('setInitialGases', [oxygen, carbon]); }
+  setGasExchange(config: GasExchangeConfig): Promise<boolean> { return this.call('setGasExchange', [config]); }
   addNutrients(x = -1, y = -1, amount = 25): Promise<number> { return this.call('addNutrients', [x, y, amount]); }
   addSource(kind: SourceKind, x: number, y: number, strength: number, radius: number, angle = 0, length = 600): Promise<number> { return this.call('addSource', [kind, x, y, strength, radius, angle, length]); }
   updateSource(id: number, kind: SourceKind, x: number, y: number, strength: number, radius: number, angle: number, length: number): Promise<boolean> { return this.call('updateSource', [id, kind, x, y, strength, radius, angle, length]); }

@@ -14,6 +14,9 @@ use std::f64::consts::{PI, TAU};
 use std::fmt::Write;
 use std::rc::Rc;
 mod checkpoint;
+mod chemistry;
+#[cfg(test)]
+mod chemistry_tests;
 mod presentation;
 mod receptors;
 mod surface;
@@ -39,13 +42,18 @@ pub const CELL_RADIUS: f64 = 7.0;
 // Geometric safety bound, not a carrying capacity: at most one quarter of the
 // shorter torus dimension across. Broad phases use actual radii up to this bound.
 pub const MAX_AREA: f64 = (HEIGHT / 8.0 / CELL_RADIUS) * (HEIGHT / 8.0 / CELL_RADIUS);
-pub const CELL_STRIDE: usize = 39 + FAMILY_COUNT * 6 + 6 + FAMILY_COUNT + 1;
+pub const CELL_STRIDE: usize = 39 + FAMILY_COUNT * 6 + 6 + FAMILY_COUNT + 1 + 5;
 /// Compatibility signal: zero denotes no age-based death limit.
 pub const LIFESPAN: f64 = 0.0;
 pub const MEMORY_REGISTER_COST: f64 = 0.0025;
 pub const MAX_GENOME_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_GENOMES: usize = 2048;
 const FOOD_NUTRIENTS: f64 = 0.25;
+/// Consistent abstract stoichiometry. Particle/gut energy is chemical potential,
+/// never usable cellular energy. Structural products carry one carbon per mass.
+pub const CHEMICAL_ENERGY_PER_CARBON: f64 = 20.0;
+pub const RESPIRATION_ENERGY_PER_CARBON: f64 = 16.0;
+const STRUCTURAL_CARBON_PER_MASS: f64 = 1.0;
 const ORGANIC_PACKET_ENERGY: f64 = 24.0;
 // Secretions begin beyond the inclusive particle-capture contact surface.
 // The small physical gap prevents rounding-dependent immediate reingestion;
@@ -317,6 +325,11 @@ pub struct Cell {
     pub integrity: f64,
     pub body: Body,
     pub nutrient_stored: f64,
+    pub organic_carbon: f64,
+    pub internal_oxygen: f64,
+    pub internal_inorganic_carbon: f64,
+    pub respiration_rate: f64,
+    pub carbon_fixation_rate: f64,
     pub gut_energy: f64,
     pub gut_nutrients: f64,
     pub gut: [OrganicMatter; 3],
@@ -359,6 +372,12 @@ impl Cell {
     pub fn gut_capacity(&self) -> f64 {
         self.body.gut_capacity()
     }
+    pub fn organic_carbon_total(&self) -> f64 {
+        self.body.structural_mass() * STRUCTURAL_CARBON_PER_MASS + self.organic_carbon
+            + self.gut_energy / CHEMICAL_ENERGY_PER_CARBON
+    }
+    pub fn organic_carbon_capacity(&self) -> f64 { self.energy_capacity() / CHEMICAL_ENERGY_PER_CARBON }
+    pub fn gas_volume(&self) -> f64 { 0.05 * self.body.area }
     pub fn basal_metabolism(&self) -> f64 {
         0.15 * self.body.area + self.body.upkeep()
     }
@@ -587,6 +606,11 @@ pub struct World {
     pub photosynthesis_total: f64,
     nutrient_imports: f64,
     energy_imports: f64,
+    pub carbon_fixed_total: f64,
+    pub carbon_respired_total: f64,
+    pub decay_carbon_respired_total: f64,
+    carbon_imports: f64,
+    pub legacy_carbon_imports: f64,
     food_credit: f64,
     next_id: u32,
     next_food_id: u64,
@@ -615,6 +639,11 @@ impl World {
             photosynthesis_total: 0.0,
             nutrient_imports: 0.0,
             energy_imports: 0.0,
+            carbon_fixed_total: 0.0,
+            carbon_respired_total: 0.0,
+            decay_carbon_respired_total: 0.0,
+            carbon_imports: 0.0,
+            legacy_carbon_imports: 0.0,
             food_credit: 0.0,
             next_id: 1,
             next_food_id: 1,
@@ -699,7 +728,8 @@ impl World {
             + self
                 .cells
                 .iter()
-                .map(|c| c.energy + c.gut_energy + c.body.embodied_energy())
+                .map(|c| c.energy + c.gut_energy + c.body.embodied_energy()
+                    + (c.organic_carbon + c.body.structural_mass() * STRUCTURAL_CARBON_PER_MASS) * CHEMICAL_ENERGY_PER_CARBON)
                 .sum::<f64>()
     }
     pub fn seed_cells(&mut self, id: u32, count: usize, x: f64, y: f64) -> usize {
@@ -771,6 +801,11 @@ impl World {
                 integrity: 1.0,
                 body,
                 nutrient_stored: budget.minerals,
+                organic_carbon: budget.energy / CHEMICAL_ENERGY_PER_CARBON,
+                internal_oxygen: 0.0,
+                internal_inorganic_carbon: 0.0,
+                respiration_rate: 0.0,
+                carbon_fixation_rate: 0.0,
                 gut_energy: 0.0,
                 gut_nutrients: 0.0,
                 gut: [OrganicMatter::default(); 3],
@@ -792,7 +827,9 @@ impl World {
                 tracking: Tracking::default(),
             });
             self.nutrient_imports += budget.introduced_minerals;
-            self.energy_imports += budget.introduced_energy;
+            let founder_carbon = self.cells.last().unwrap().organic_carbon_total();
+            self.carbon_imports += founder_carbon;
+            self.energy_imports += budget.introduced_energy + founder_carbon * CHEMICAL_ENERGY_PER_CARBON;
             self.next_id += 1;
         }
         Ok(count)
@@ -840,6 +877,7 @@ impl World {
             }
             self.nutrient_imports += FOOD_NUTRIENTS;
             self.energy_imports += energy;
+            self.carbon_imports += energy / CHEMICAL_ENERGY_PER_CARBON;
             added += 1;
         }
         Ok(added)
@@ -928,6 +966,11 @@ impl World {
                 products,
                 assemblies,
                 receptors,
+                organic_carbon: cell.organic_carbon,
+                internal_inorganic_carbon: cell.internal_inorganic_carbon,
+                internal_oxygen: cell.internal_oxygen,
+                respiration_rate: cell.respiration_rate,
+                carbon_fixation_rate: cell.carbon_fixation_rate,
                 energy: cell.energy,
                 energy_fraction: fraction(cell.energy, caps.energy),
                 energy_capacity: caps.energy,
@@ -1316,9 +1359,7 @@ impl World {
             .iter()
             .zip(caps.iter())
             .map(|(c, cap)| {
-                c.energy.max(0.0)
-                    + c.gut_energy
-                    + c.body.embodied_energy()
+                c.organic_carbon_total() * CHEMICAL_ENERGY_PER_CARBON
                     + (cap.photosynthesis + cap.light_harvest) * DT
             })
             .sum();
@@ -1344,7 +1385,7 @@ impl World {
             "Simulation paused: not enough memory for organic material.".to_string()
         })?;
         self.environment.step(self.time());
-        self.decay_food();
+        self.decay_food_in(phases);
         // Phase 1: one immutable observation/capability snapshot. Memory and
         // tracking commit only after every cell has observed that same world.
         self.observations_into(None, caps, observations);
@@ -1379,6 +1420,7 @@ impl World {
                 cap.bite_extraction_fraction = action.bite_extraction_fraction;
                 cap.light_harvest = action.light_harvest;
                 cap.substrate_digestion = action.substrate_digestion;
+                cap.respiration = cap.metabolism + action.respiration;
                 motors.push([action.force_x, action.force_y, action.torque, action.motor_cost]);
                 output.photosynthesize = action.photosynthesize;
                 output.absorb = action.absorb;
@@ -1395,11 +1437,14 @@ impl World {
                 motors.push([0.0; 4]);
             }
         }
+        self.exchange_gases_in(phases);
+        self.respire_in(caps);
         let time = self.time();
         for (i, cell) in self.cells.iter_mut().enumerate() {
             let output = &outputs[i];
             let cap = &caps[i];
             cell.photosynthesis_rate = 0.0;
+            cell.carbon_fixation_rate = 0.0;
             cell.uptake_rate = 0.0;
             cell.digestion_rate = 0.0;
             cell.growth_rate = 0.0;
@@ -1500,6 +1545,9 @@ impl World {
                 );
             cell.energy -= repaired * 20.0 * cell.body.area;
             cell.integrity += repaired;
+            let structural_before = cell.body.structural_mass();
+            let withheld_minerals = (cell.nutrient_stored - cell.organic_carbon / STRUCTURAL_CARBON_PER_MASS).max(0.0);
+            cell.nutrient_stored -= withheld_minerals;
             let report = if let (Some(program), Some(controls)) = (
                 genomes[(cell.genome_id - 1) as usize].program.cellular(),
                 &output.cellular,
@@ -1514,6 +1562,9 @@ impl World {
                     &mut cell.energy, &mut cell.nutrient_stored, DT, MAX_AREA,
                 )
             };
+            cell.nutrient_stored += withheld_minerals;
+            let structural_delta = cell.body.structural_mass() - structural_before;
+            cell.organic_carbon = (cell.organic_carbon - structural_delta * STRUCTURAL_CARBON_PER_MASS).max(0.0);
             cell.growth_rate = report.area_grown / DT;
             cell.construction_rate = report.constructed_mass / DT;
             cell.synthesis_rate = report.synthesized_mass / DT;
@@ -1566,6 +1617,11 @@ impl World {
             daughter.birth_area = daughter.body.area;
             daughter.energy = energy;
             daughter.nutrient_stored *= 0.5;
+            daughter.organic_carbon *= 0.5;
+            daughter.internal_oxygen *= 0.5;
+            daughter.internal_inorganic_carbon *= 0.5;
+            daughter.respiration_rate = 0.0;
+            daughter.carbon_fixation_rate = 0.0;
             daughter.scale_gut(0.5);
             daughter.x = wrap(cell.x + dx, self.environment.width);
             daughter.y = wrap(cell.y + dy, self.environment.height);
@@ -1586,6 +1642,9 @@ impl World {
             cell.birth_area = cell.body.area;
             cell.energy = energy;
             cell.nutrient_stored *= 0.5;
+            cell.organic_carbon *= 0.5;
+            cell.internal_oxygen *= 0.5;
+            cell.internal_inorganic_carbon *= 0.5;
             cell.scale_gut(0.5);
             cell.x = wrap(cell.x - dx, self.environment.width);
             cell.y = wrap(cell.y - dy, self.environment.height);
@@ -1607,11 +1666,13 @@ impl World {
             if c.alive() || phases.consumed.get(i).copied().unwrap_or(false) {
                 continue;
             }
+            self.environment.release_oxygen(c.x, c.y, c.internal_oxygen);
+            self.environment.release_inorganic_carbon(c.x, c.y, c.internal_inorganic_carbon);
             phases.emissions.push(OrganicEmission::new(
                 OrganicKind::Tissue,
                 c.x,
                 c.y,
-                c.energy.max(0.0) + c.body.embodied_energy(),
+                (c.body.structural_mass() * STRUCTURAL_CARBON_PER_MASS + c.organic_carbon) * CHEMICAL_ENERGY_PER_CARBON,
                 c.body.structural_mass() + c.nutrient_stored,
             ));
             for kind in OrganicKind::ALL {
@@ -1636,27 +1697,6 @@ impl World {
         self.settle_barriers();
         self.ticks += 1;
         Ok(())
-    }
-    fn decay_food(&mut self) {
-        let retention = ORGANIC_DECAY.map(|decay| (-decay * DT).exp());
-        self.food.retain_mut(|food| {
-            let retained = retention[food.kind as usize];
-            let lost_energy = food.energy * (1.0 - retained);
-            let lost_minerals = food.nutrients * (1.0 - retained);
-            self.environment
-                .emit_organic(food.x, food.y, lost_energy * 0.08);
-            self.environment
-                .recycle_nutrients(food.x, food.y, lost_minerals);
-            food.energy *= retained;
-            food.nutrients *= retained;
-            if food.energy <= 1e-6 {
-                self.environment
-                    .recycle_nutrients(food.x, food.y, food.nutrients);
-                false
-            } else {
-                true
-            }
-        });
     }
     fn absorb_nutrients_in(
         &mut self,
@@ -1701,97 +1741,62 @@ impl World {
         }
     }
     fn digest_in(
-        &mut self,
-        outputs: &[Outputs],
-        caps: &[BodyCapacities],
-        processing: &mut [f64],
+        &mut self, outputs: &[Outputs], caps: &[BodyCapacities], _processing: &mut [f64],
         workspace: &mut PhaseWorkspace,
     ) {
         let residues = &mut workspace.emissions;
         residues.clear();
         for (i, c) in self.cells.iter_mut().enumerate() {
             if !c.alive() || c.gut_energy <= 0.0
-                || (outputs[i].feed <= 0.0 && caps[i].substrate_digestion.iter().all(|rate| *rate <= 0.0)) {
-                continue;
-            }
-            let room = (caps[i].energy - c.energy).max(0.0);
+                || (outputs[i].feed <= 0.0 && caps[i].substrate_digestion.iter().all(|rate| *rate <= 0.0)) { continue; }
+            let room = (caps[i].energy / CHEMICAL_ENERGY_PER_CARBON - c.organic_carbon).max(0.0) * CHEMICAL_ENERGY_PER_CARBON;
             let mineral_room = (caps[i].minerals - c.nutrient_stored).max(0.0);
             let mut demands = [0.0; 3];
             let mut weights = [0.0; 3];
-            for kind in OrganicKind::ALL {
-                let k = kind as usize;
+            for k in 0..3 {
                 let pool = c.gut[k];
-                if pool.energy <= 0.0 || (outputs[i].digest[k] <= 0.0 && caps[i].substrate_digestion[k] <= 0.0) {
-                    continue;
-                }
+                if pool.energy <= 0.0 || (outputs[i].digest[k] <= 0.0 && caps[i].substrate_digestion[k] <= 0.0) { continue; }
                 let mineral_demand = if pool.nutrients > 0.0 {
                     mineral_room / (pool.nutrients * MINERAL_ASSIMILATION[k]) * pool.energy
-                } else {
-                    0.0
-                };
-                let raw = pool
-                    .energy
-                    .min((room / ASSIMILATION_EFFICIENCY[k]).max(mineral_demand));
+                } else { 0.0 };
+                let raw = pool.energy.min((room / ASSIMILATION_EFFICIENCY[k]).max(mineral_demand));
                 demands[k] = raw / DIGESTION_SPEED[k];
                 weights[k] = outputs[i].digest[k].clamp(0.0, 1.0);
             }
-            // Each substrate competes for the same digestive and metabolic work.
-            // Saturated or absent substrates return their share to the others.
-            let budget = (caps[i].digestion * outputs[i].feed * DT).min(processing[i]);
-            let independent = std::array::from_fn::<_, 3, _>(|k|
-                demands[k].min(caps[i].substrate_digestion[k] * DT));
+            let budget = caps[i].digestion * outputs[i].feed * DT;
+            let independent = std::array::from_fn::<_, 3, _>(|k| demands[k].min(caps[i].substrate_digestion[k] * DT));
             let remaining = std::array::from_fn(|k| (demands[k] - independent[k]).max(0.0));
             let mut work = shared_digestive_work(budget, remaining, weights);
-            let metabolic_work = work.iter().sum::<f64>();
             for k in 0..3 { work[k] += independent[k]; }
             let mut remaining_room = room;
             let mut useful_total = 0.0;
             for kind in OrganicKind::ALL {
                 let k = kind as usize;
-                let raw = (work[k] * DIGESTION_SPEED[k]).min(c.gut[k].energy);
-                if raw <= 0.0 {
-                    continue;
-                }
+                // Hydrolysis/processing is paid work, separate from respiration.
+                let raw = (work[k] * DIGESTION_SPEED[k]).min(c.gut[k].energy).min(c.energy / 0.02);
+                if raw <= 0.0 { continue; }
                 let minerals = c.gut[k].nutrients * (raw / c.gut[k].energy);
                 let useful = (raw * ASSIMILATION_EFFICIENCY[k]).min(remaining_room);
                 remaining_room -= useful;
                 useful_total += useful;
+                c.energy = (c.energy - raw * 0.02).max(0.0);
                 c.gut[k].energy = (c.gut[k].energy - raw).max(0.0);
                 c.gut[k].nutrients = (c.gut[k].nutrients - minerals).max(0.0);
                 let assimilated_minerals = minerals * MINERAL_ASSIMILATION[k];
                 let overflow = c.receive_nutrients(assimilated_minerals);
                 self.environment.recycle_nutrients(c.x, c.y, overflow);
-                if kind == OrganicKind::Tissue {
-                    // Undigested tissue becomes low-grade waste. The remaining
-                    // conversion loss is heat, not fresh edible energy.
-                    let waste_energy = raw * 0.2;
-                    let waste_minerals = minerals - assimilated_minerals;
-                    let r = c.radius() + 2.5;
-                    let mut residue = OrganicEmission::new(
-                        OrganicKind::Waste,
-                        c.x - c.angle.cos() * r,
-                        c.y - c.angle.sin() * r,
-                        waste_energy,
-                        waste_minerals,
-                    );
-                    residue.outside = Some((c.x, c.y, c.radius()));
-                    residues.push(residue);
-                    self.environment.emit_organic(
-                        c.x,
-                        c.y,
-                        (raw - useful - waste_energy).max(0.0) * 0.01,
-                    );
-                } else {
-                    self.environment
-                        .recycle_nutrients(c.x, c.y, minerals - assimilated_minerals);
-                    self.environment
-                        .emit_organic(c.x, c.y, (raw - useful) * 0.01);
-                }
+                // Every unassimilated carbon atom remains in physical residue;
+                // digestion does not turn substrate carbon into untracked heat.
+                let r = c.radius() + 2.5;
+                let mut residue = OrganicEmission::new(OrganicKind::Waste,
+                    c.x - c.angle.cos() * r, c.y - c.angle.sin() * r,
+                    raw - useful, minerals - assimilated_minerals);
+                residue.outside = Some((c.x, c.y, c.radius()));
+                residues.push(residue);
             }
             c.refresh_gut_totals();
-            c.energy += useful_total;
+            c.organic_carbon += useful_total / CHEMICAL_ENERGY_PER_CARBON;
             c.digestion_rate = useful_total / DT;
-            processing[i] = (processing[i] - metabolic_work).max(0.0);
         }
         self.emit_organic_pending(workspace);
     }
@@ -1808,12 +1813,14 @@ impl World {
             self.environment.recycle_nutrients(c.x, c.y, excess);
             let energy = (c.energy - cap.energy).max(0.0);
             c.energy -= energy;
-            if energy > 0.0 {
+            let carbon_overflow = (c.organic_carbon - cap.energy / CHEMICAL_ENERGY_PER_CARBON).max(0.0);
+            c.organic_carbon -= carbon_overflow;
+            if carbon_overflow > 0.0 {
                 spills.push(OrganicEmission::new(
                     OrganicKind::Exudate,
                     c.x,
                     c.y,
-                    energy,
+                    carbon_overflow * CHEMICAL_ENERGY_PER_CARBON,
                     0.0,
                 ));
             }
@@ -1842,80 +1849,51 @@ impl World {
         self.emit_organic_pending(workspace);
     }
     fn photosynthesize_in(
-        &mut self,
-        outputs: &[Outputs],
-        caps: &[BodyCapacities],
-        processing: &mut [f64],
+        &mut self, outputs: &[Outputs], caps: &[BodyCapacities], _processing: &mut [f64],
         workspace: &mut PhaseWorkspace,
     ) {
-        let PhaseWorkspace {
-            photo_requests: requests,
-            footprint,
-            totals,
-            gains,
-            exudates,
-            emissions,
-            ..
-        } = workspace;
+        let PhaseWorkspace { photo_requests: requests, footprint, totals, gains, exudates, emissions, .. } = workspace;
         requests.clear();
-        totals.resize(self.environment.patch_count(), 0.0);
-        totals.fill(0.0);
+        totals.resize(self.environment.patch_count(), 0.0); totals.fill(0.0);
         for (i, c) in self.cells.iter().enumerate() {
-            if !c.alive() {
-                continue;
-            }
-            let capacity =
-                (caps[i].photosynthesis * outputs[i].photosynthesize * DT).min(processing[i])
-                + caps[i].light_harvest * DT;
-            if capacity <= 0.0 {
-                continue;
-            }
+            if !c.alive() { continue; }
+            let reserve_room = (caps[i].energy / CHEMICAL_ENERGY_PER_CARBON - c.organic_carbon).max(0.0);
+            let capacity = (caps[i].photosynthesis * outputs[i].photosynthesize + caps[i].light_harvest) * DT;
+            let capacity = capacity.min(c.internal_inorganic_carbon * CHEMICAL_ENERGY_PER_CARBON)
+                .min(reserve_room / (1.0 - PHOTO_EXUDATION) * CHEMICAL_ENERGY_PER_CARBON);
+            if capacity <= 0.0 { continue; }
             photon_footprint_into(&self.environment, c.x, c.y, c.body.area, footprint);
             for &(patch, weight) in footprint.iter() {
                 let request = capacity * weight * self.environment.patch_light(patch);
-                if request > 0.0 {
-                    requests.push((i, patch, request));
-                    totals[patch] += request;
-                }
+                if request > 0.0 { requests.push((i, patch, request)); totals[patch] += request; }
             }
         }
-        gains.resize(self.cells.len(), 0.0);
-        gains.fill(0.0);
+        gains.resize(self.cells.len(), 0.0); gains.fill(0.0);
         for &(i, patch, request) in requests.iter() {
-            let supply =
-                PHOTO_HABITAT_POWER / PATCHES as f64 * self.environment.patch_light(patch) * DT;
+            let supply = PHOTO_HABITAT_POWER / PATCHES as f64 * self.environment.patch_light(patch) * DT;
             gains[i] += request * (supply / totals[patch]).min(1.0);
         }
         exudates.clear();
         for (i, c) in self.cells.iter_mut().enumerate() {
-            let gain = gains[i];
-            if gain <= 0.0 {
-                continue;
-            }
-            let retained =
-                (gain * (1.0 - PHOTO_EXUDATION)).min((caps[i].energy - c.energy).max(0.0));
-            c.energy += retained;
-            c.photosynthesis_rate = gain / DT;
-            let metabolic_gain = if caps[i].light_harvest > 0.0 {
-                let legacy = (caps[i].photosynthesis * outputs[i].photosynthesize * DT).min(processing[i]);
-                gain * legacy / (legacy + caps[i].light_harvest * DT)
-            } else { gain };
-            processing[i] = (processing[i] - metabolic_gain).max(0.0);
-            self.photosynthesis_total += gain;
-            exudates.push((i, c.x, c.y, c.radius(), c.angle, gain - retained));
+            let fixed = (gains[i] / CHEMICAL_ENERGY_PER_CARBON).min(c.internal_inorganic_carbon)
+                .min((caps[i].energy / CHEMICAL_ENERGY_PER_CARBON - c.organic_carbon).max(0.0) / (1.0 - PHOTO_EXUDATION));
+            if fixed <= 0.0 { continue; }
+            let retained = fixed * (1.0 - PHOTO_EXUDATION);
+            c.internal_inorganic_carbon -= fixed;
+            c.internal_oxygen += fixed;
+            c.organic_carbon += retained;
+            c.carbon_fixation_rate = fixed / DT;
+            c.photosynthesis_rate = fixed * CHEMICAL_ENERGY_PER_CARBON / DT;
+            self.carbon_fixed_total += fixed;
+            self.photosynthesis_total += fixed * CHEMICAL_ENERGY_PER_CARBON;
+            exudates.push((i, c.x, c.y, c.radius(), c.angle, (fixed - retained) * CHEMICAL_ENERGY_PER_CARBON));
         }
         emissions.clear();
-        for &(i, x, y, r, a, energy) in exudates.iter() {
-            let mut emission = OrganicEmission::new(
-                OrganicKind::Exudate,
-                x + (r + 2.5) * a.cos(),
-                y + (r + 2.5) * a.sin(),
-                energy,
-                0.0,
-            );
-            emission.outside = Some((x, y, r));
-            emissions.push(emission);
-            self.cells[i].exudation_rate = energy / DT;
+        for &(i, x, y, r, a, potential) in exudates.iter() {
+            let mut emission = OrganicEmission::new(OrganicKind::Exudate,
+                x + (r + 2.5) * a.cos(), y + (r + 2.5) * a.sin(), potential, 0.0);
+            emission.outside = Some((x, y, r)); emissions.push(emission);
+            self.cells[i].exudation_rate = potential / DT;
         }
         self.emit_organic_pending(workspace);
     }
@@ -2029,14 +2007,16 @@ impl World {
                 continue;
             }
             let cost = 8.0 * b.body.area;
-            let energy = b.energy + b.gut_energy + b.body.embodied_energy();
+            let energy = b.organic_carbon_total() * CHEMICAL_ENERGY_PER_CARBON;
             let minerals = b.mass();
             if a.energy <= cost || a.gut_fraction_for(energy, minerals, &caps[i]) < 1.0 {
                 continue;
             }
-            let tissue_energy = b.energy + b.body.embodied_energy();
+            let tissue_energy = (b.body.structural_mass() * STRUCTURAL_CARBON_PER_MASS + b.organic_carbon) * CHEMICAL_ENERGY_PER_CARBON;
             let tissue_minerals = b.body.structural_mass() + b.nutrient_stored;
             let contents = b.gut;
+            self.environment.release_oxygen(b.x, b.y, b.internal_oxygen);
+            self.environment.release_inorganic_carbon(b.x, b.y, b.internal_inorganic_carbon);
             self.cells[i].energy -= cost;
             self.cells[i].ingest(OrganicKind::Tissue, tissue_energy, tissue_minerals);
             for kind in OrganicKind::ALL {
@@ -2045,6 +2025,9 @@ impl World {
             }
             self.cells[i].engulf_cooldown = 2.0;
             self.cells[j].energy = 0.0;
+            self.cells[j].organic_carbon = 0.0;
+            self.cells[j].internal_oxygen = 0.0;
+            self.cells[j].internal_inorganic_carbon = 0.0;
             self.cells[j].integrity = 0.0;
             consumed[j] = true;
             self.predations += 1;
@@ -2136,18 +2119,18 @@ impl World {
                     * victim_cell.body.structural_mass()
                     * outputs[attacker].feed
                     * event.extraction;
-                let minerals = if victim_cell.energy > 0.0 {
-                    victim_cell.nutrient_stored * raw / victim_cell.energy
+                let minerals = if victim_cell.organic_carbon > 0.0 {
+                    victim_cell.nutrient_stored * raw / (victim_cell.organic_carbon * CHEMICAL_ENERGY_PER_CARBON)
                 } else {
                     0.0
                 };
                 raw * self.cells[attacker].gut_fraction_for(raw, minerals, &caps[attacker])
             }));
             let demand: f64 = requests.iter().sum();
-            let pool = demand.min(victim_cell.energy);
+            let pool = demand.min(victim_cell.organic_carbon * CHEMICAL_ENERGY_PER_CARBON);
             let scale = if demand > 0.0 { pool / demand } else { 0.0 };
-            let mineral_ratio = if victim_cell.energy > 0.0 {
-                victim_cell.nutrient_stored / victim_cell.energy
+            let mineral_ratio = if victim_cell.organic_carbon > 0.0 {
+                victim_cell.nutrient_stored / (victim_cell.organic_carbon * CHEMICAL_ENERGY_PER_CARBON)
             } else {
                 0.0
             };
@@ -2166,7 +2149,7 @@ impl World {
             if !c.alive() {
                 continue;
             }
-            c.energy = (c.energy - removed[i].0).max(0.0);
+            c.organic_carbon = (c.organic_carbon - removed[i].0 / CHEMICAL_ENERGY_PER_CARBON).max(0.0);
             c.nutrient_stored = (c.nutrient_stored - removed[i].1).max(0.0);
             c.ingest(OrganicKind::Tissue, meals[i].0, meals[i].1);
             c.integrity = (c.integrity - damage[i]).max(0.0);
@@ -2418,7 +2401,7 @@ impl World {
                 food.energy = (food.energy - energy).max(0.0);
                 food.nutrients = (food.nutrients - minerals).max(0.0);
                 budgets[i] = (budgets[i] - energy).max(0.0);
-                if food.energy <= 1e-6 {
+                if food.energy == 0.0 {
                     self.environment
                         .recycle_nutrients(food.x, food.y, food.nutrients);
                     self.eaten += 1;
@@ -2753,7 +2736,7 @@ mod workspace_tests {
             }
             let bytes = state(&reused);
             let mut reader = Reader::new(&bytes);
-            let mut fresh = World::read_checkpoint(&mut reader, programs.len(), 8).unwrap();
+            let mut fresh = World::read_checkpoint(&mut reader, programs.len(), 9).unwrap();
             assert!(reader.finished());
             assert!(fresh.workspace.capacities.is_empty());
             let mut fresh_programs = programs.clone();

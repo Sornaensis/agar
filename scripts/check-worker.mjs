@@ -259,6 +259,75 @@ try {
   environment = await habitat.environment();
   assert.equal(environment.sources.length + environment.barriers.length, 0);
 
+  const { engine: chemistry } = await fresh();
+  await chemistry.setFoodRate(0); await chemistry.setEnvironment(.5,0,0);
+  assert.equal(await chemistry.setInitialGases(0,2),true);
+  const sealed={mode:'sealed',exchangeRate:.02,oxygenEquilibrium:1,carbonEquilibrium:1};
+  assert.equal(await chemistry.setGasExchange(sealed),true);
+  await chemistry.resetEmpty(901,0);
+  let chemicals=await chemistry.metricsSnapshot();
+  assert.equal(chemicals.oxygenDissolvedTotal,0);
+  assert.equal(chemicals.inorganicCarbonTotal,4560);
+  const gasEnvironment=await chemistry.environment();
+  assert.equal(gasEnvironment.samples.length,gasEnvironment.columns*gasEnvironment.rows*7);
+  assert.equal(gasEnvironment.gases.initialOxygen,0);
+  assert.equal(gasEnvironment.gases.initialCarbon,2);
+  assert.equal(gasEnvironment.samples[5],0);assert.equal(gasEnvironment.samples[6],2);
+  const checkChemicalBudget=metrics=>{
+    assert.ok(Math.abs(metrics.carbonTotal+metrics.carbonRemovedTotal-metrics.carbonInputTotal)<1e-7,'Every external carbon transfer reconciles in the Float64 metrics');
+    assert.ok(Math.abs(metrics.oxygenDissolvedTotal+metrics.oxygenCellTotal+metrics.oxygenRemovedTotal+metrics.carbonRespiredTotal+metrics.decayRespiredTotal-metrics.carbonFixedTotal-metrics.oxygenInputTotal)<1e-7,'Oxygen accounting includes metabolic stoichiometry');
+  };
+  const oxygenEmitter=await chemistry.addSource(8,300,300,1,120);
+  const carbonAbsorber=await chemistry.addSource(11,600,380,.5,120);
+  assert.ok(oxygenEmitter&&carbonAbsorber);
+  const gasStep=await chemistry.advance(30,{metrics:true,environment:true});
+  assert.ok(gasStep.metrics.oxygenDissolvedTotal>0);
+  assert.ok(gasStep.metrics.carbonRemovedTotal>0);checkChemicalBudget(gasStep.metrics);
+  const gasSave=await chemistry.saveState();
+  assert.equal(await chemistry.setInitialGases(NaN,1),false);
+  assert.equal(await chemistry.setGasExchange({...sealed,exchangeRate:-1}),false);
+  assert.equal(await chemistry.setGasExchange({...sealed,mode:'unexpected'}),false);
+  assert.deepEqual(await chemistry.saveState(),gasSave,'Invalid gas settings leave both fields and config unchanged');
+  assert.equal(await chemistry.removeSource(oxygenEmitter),true);
+  assert.equal(await chemistry.removeSource(carbonAbsorber),true);
+  assert.ok(await chemistry.addSource(12,600,380,1,180));
+  const beforeAerator=await chemistry.metricsSnapshot();
+  chemicals=(await chemistry.advance(30,{metrics:true})).metrics;
+  assert.ok(chemicals.oxygenInputTotal>beforeAerator.oxygenInputTotal,'A local aerator admits oxygen even when the rest of the surface is sealed');
+  assert.ok(chemicals.carbonRemovedTotal>beforeAerator.carbonRemovedTotal,'Air exchange can release excess inorganic carbon');checkChemicalBudget(chemicals);
+  const beforeGasResize=chemicals;
+  assert.equal(await chemistry.setWorldSize(2400,1520),true);
+  chemicals=await chemistry.metricsSnapshot();
+  assert.ok(Math.abs(chemicals.carbonTotal-beforeGasResize.carbonTotal)<1e-7);
+  assert.ok(Math.abs(chemicals.oxygenDissolvedTotal-beforeGasResize.oxygenDissolvedTotal)<1e-7);
+  assert.equal(await chemistry.setGasExchange({...sealed,mode:'open'}),true);
+  const gasCheckpoint=await chemistry.saveState();
+  const gasContinuation=await chemistry.advance(12,{metrics:true,environment:true});
+  checkChemicalBudget(gasContinuation.metrics);
+  await chemistry.restoreState(gasCheckpoint);
+  assert.deepEqual(await chemistry.advance(12,{metrics:true,environment:true}),gasContinuation,'Gas pools, external ledgers and boundary configuration replay exactly');
+  const presentBeforeConfig=(await chemistry.metricsSnapshot()).oxygenDissolvedTotal;
+  assert.equal(await chemistry.setInitialGases(12,12),true);
+  assert.equal((await chemistry.metricsSnapshot()).oxygenDissolvedTotal,presentBeforeConfig,'Starting gas settings do not reset a live field');
+
+  const priorEnvironment=new Uint8Array(await readFile(new URL('../engine/fixtures/environment-v8.bin',import.meta.url)));
+  const priorMetadata=JSON.parse(await readFile(new URL('../engine/fixtures/environment-v8.json',import.meta.url),'utf8'));
+  await chemistry.restoreState(priorEnvironment);
+  const migratedGas=await chemistry.presentation({metrics:true,environment:true});
+  assert.equal(migratedGas.frame.tick,priorMetadata.tick);
+  assert.equal(migratedGas.environment.barriers.length,2);
+  assert.equal(migratedGas.environment.sources.length,2);
+  assert.equal(migratedGas.environment.barriers.filter(item=>item.floating).length,1);
+  assert.ok(Math.abs(migratedGas.metrics.nutrientTotal-priorMetadata.material)<1e-8);
+  assert.ok(Math.abs(migratedGas.environment.nutrientRemovedTotal-priorMetadata.materialRemoved)<1e-6);
+  assert.ok(migratedGas.metrics.legacyCarbonImported>0,'Legacy organic inventory is explicitly counted at migration');
+  checkChemicalBudget(migratedGas.metrics);
+  const upgradedGas=await chemistry.saveState();
+  assert.equal(new DataView(upgradedGas.buffer,upgradedGas.byteOffset,upgradedGas.byteLength).getUint32(8,true),9);
+  const migratedFuture=await chemistry.advance(12,{metrics:true,environment:true});
+  await chemistry.restoreState(upgradedGas);
+  assert.deepEqual(await chemistry.advance(12,{metrics:true,environment:true}),migratedFuture);
+
   // A substantial real tick batch runs while the main JS event loop continues.
   await remote.resetEmpty(62, 1500);
   await remote.seed(genome, 256);
@@ -276,7 +345,7 @@ try {
   await assert.rejects(remote.presentation(), /closed/);
   remote.dispose(); // Closing twice is harmless.
 
-  console.log('Worker checks passed: real threaded WASM, ordered commands, compact/full projection parity, aggregate/detail inspection, transferred buffers, atomic checkpoints, restore ownership, recoverable command/partial-tick errors, responsive main loop, environment editing, large worlds, absorber accounting, floating barriers, deterministic replay, and disposal of pending work.');
+  console.log('Worker checks passed: threaded WASM, ordered commands, compact/full parity, transfer ownership, checkpoints, partial errors, responsive main loop, environment editing, gas sources/sinks/aerators, conservative resize, carbon/oxygen budgets, v8 migration, deterministic replay, and disposal.');
 } finally {
   for (const engine of engines) engine.dispose();
   for (const adapter of adapters) adapter.terminate();

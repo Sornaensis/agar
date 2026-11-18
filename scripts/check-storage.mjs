@@ -91,12 +91,12 @@ for (const [field, invalid] of [['foodRate', 61], ['foodRate', NaN], ['foodRate'
   assert.throws(() => storage.validateEnvironmentConfig({ ...baseConfig, [field]: invalid }), field);
 }
 const source = { kind: 0, x: 600, y: 380, strength: 0.8, radius: 200 };
-for (const invalid of [{ ...source, kind: 8 }, { ...source, kind: 1.5 }, { ...source, x: 1200 }, { ...source, y: 760 }, { ...source, x: -1 }, { ...source, radius: 19 }, { ...source, radius: 1001 }, { ...source, strength: -0.1 }, { ...source, angle: NaN }, { ...source, length: 4801 }]) {
+for (const invalid of [{ ...source, kind: 13 }, { ...source, kind: 1.5 }, { ...source, x: 1200 }, { ...source, y: 760 }, { ...source, x: -1 }, { ...source, radius: 19 }, { ...source, radius: 1001 }, { ...source, strength: -0.1 }, { ...source, angle: NaN }, { ...source, length: 4801 }]) {
   assert.throws(() => storage.validateEnvironmentConfig({ ...baseConfig, sources: [invalid] }));
 }
 assert.throws(() => storage.validateEnvironmentConfig({ ...baseConfig, sources: Array(65).fill(source) }), /64/);
 for (const kind of [1, 2, 5, 6, 7]) assert.equal(storage.validateEnvironmentConfig({ ...baseConfig, sources: [{ ...source, kind, strength: -1 }] }).sources[0].strength, -1);
-for (const kind of [0, 3, 4]) assert.throws(() => storage.validateEnvironmentConfig({ ...baseConfig, sources: [{ ...source, kind, strength: -1 }] }), /strength/);
+for (const kind of [0, 3, 4, 8, 9, 10, 11, 12]) assert.throws(() => storage.validateEnvironmentConfig({ ...baseConfig, sources: [{ ...source, kind, strength: -1 }] }), /strength/);
 for (const patch of [{ width: 1221 }, { width: 4820 }, { height: 380 }, { height: 3060 }]) assert.throws(() => storage.validateEnvironmentConfig({ ...baseConfig, ...patch }), /World/);
 const barrier = { x: 1700, y: 900, length: 600, width: 40, angle: Math.PI / 4, floating: true };
 const larger = storage.validateEnvironmentConfig({ ...baseConfig, width: 2400, height: 1520, sources: [{ ...source, x: 2000, y: 1200, kind: 6, angle: Math.PI / 2, length: 2000 }], barriers: [barrier] });
@@ -106,6 +106,12 @@ for (const patch of [{ width: 9 }, { length: 2401 }, { floating: 1 }, { x: 2400 
 assert.throws(() => storage.validateEnvironmentConfig({ ...larger, barriers: Array(65).fill(barrier) }), /64/);
 const legacy = storage.validateEnvironmentConfig({ foodRate: 0, ambientTemperature: 0.5, ambientLight: 0, currentStrength: 0, initialNutrients: 0.3, sources: [source] });
 assert.deepEqual([legacy.width, legacy.height, legacy.barriers.length, legacy.sources[0].angle, legacy.sources[0].length], [1200, 760, 0, 0, 600], 'Previous environment recipes receive explicit geometry defaults');
+assert.deepEqual(legacy.gases, { initialOxygen:1, initialCarbon:1, mode:'sealed', exchangeRate:.02, oxygenEquilibrium:1, carbonEquilibrium:1 }, 'Old recipes receive explicit sealed gas defaults');
+for (const patch of [{mode:'closed'}, {initialOxygen:-1}, {initialCarbon:101}, {exchangeRate:1.1}, {exchangeRate:NaN}, {oxygenEquilibrium:Infinity}, {carbonEquilibrium:'1'}]) {
+  assert.throws(() => storage.validateEnvironmentConfig({...baseConfig,gases:{...baseConfig.gases,...patch}}));
+}
+const gasConfig = storage.validateEnvironmentConfig({...baseConfig, gases:{initialOxygen:0,initialCarbon:3,mode:'open',exchangeRate:.3,oxygenEquilibrium:2,carbonEquilibrium:.5}, sources:[8,9,10,11,12].map(kind=>({...source,kind}))});
+assert.deepEqual(storage.parseEnvironmentImport(storage.exportEnvironment(storage.newEnvironment('Gas habitat', gasConfig))).config,gasConfig,'Gas inventories, boundary and all five gas objects survive export/import');
 
 const summary = { time: 12, population: 22, food: 300, births: 0, deaths: 0, generation: 0 };
 const simulation = {
@@ -186,6 +192,10 @@ assert.equal(storage.loadPreferences().tab, 'simulation');
 storage.savePreferences({ tab: 'genomes', simulationView: 'metrics', activeSimulationId: 'simulation:test', overlay: 'nutrients', sensors: false, trails: true });
 assert.equal(storage.loadPreferences().simulationView, 'metrics');
 assert.equal(storage.loadPreferences().overlay, 'nutrients');
+for (const overlay of ['oxygen','carbon']) {
+  storage.savePreferences({...storage.loadPreferences(),overlay});
+  assert.equal(storage.loadPreferences().overlay,overlay);
+}
 storage.saveGenomeDraft({ name: '', source: '' });
 assert.deepEqual(storage.loadGenomeDraft(), { name: '', source: '' }, 'An unfinished editor can be recovered');
 storage.clearGenomeDraft();

@@ -1,4 +1,6 @@
 import './style.css';
+import './player-view.css';
+import { PlayerView, PlayerFrameLoop, type PlayerCloseReason } from './player-view';
 import { Engine, type Cell, type BodyInspection, type RegisterEntry, type GenomeRecord, type MetricsSnapshot, type SourceKind } from './engine';
 import { WorkerEngine } from './worker-engine';
 import { Renderer, genomeColor } from './renderer';
@@ -15,8 +17,10 @@ import { icon, escapeHtml as esc, createDialog, setDialogError, downloadFile, in
 import { showGuide } from './guide';
 import { ORGANELLE_CATALOG } from './organelles';
 import { renderCellularBody } from './cellular-inspector';
+import { gasFields, readGasExchange } from './gas-controls';
 
-const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
+const $ = <T extends HTMLElement = HTMLElement>(id: string): T => (document.getElementById(id) ?? playerView.document?.getElementById(id)) as T;
+const queryUi = <T extends Element = HTMLElement>(selector: string): T | null => playerView.document?.querySelector<T>(selector) ?? document.querySelector<T>(selector);
 let preferenceWarning: unknown;
 let prefs: UiPreferences;
 try { prefs = loadPreferences(); }
@@ -41,7 +45,11 @@ const pendingEnvironmentInputs = new WeakMap<Element, number>();
 let inspectorView: 'overview' | 'body' | 'memory' | 'program' = 'overview';
 let memoryFilter = '', memoryPage = 0, catalogQuery = '', simulationOpenError = '';
 let lastFrame = 0, lastUi = 0, accumulator = 0, toastTimer = 0;
-let lastMetrics = 0, lastEnvironment = 0;
+let lastMetrics = 0, lastEnvironment = 0, lastCheckpoint = 0;
+let toastWindow: Window = window;
+let playerElement: HTMLElement | null = null, restoringPlayer = false, unloading = false;
+const playerView = new PlayerView(window, { bindDocument: bindUiDocument, changed: playerWindowChanged, visibilityChanged: playerVisibilityChanged });
+const frameLoop = new PlayerFrameLoop(() => playerView.visible ? playerView.window! : !document.hidden ? window : playerView.window ?? window, frame, undefined, () => playerView.isOpen);
 let inspectorEpoch = 0, inspectorPending = false, inspectorStamp = '';
 let cellInspection: { session: SimulationSession; cell: Cell; body?: BodyInspection; memory?: RegisterEntry[] } | null = null;
 const genomeRecords = new WeakMap<SimulationSession, Map<number, Promise<GenomeRecord>>>();
@@ -66,8 +74,10 @@ document.querySelector('#app')!.innerHTML = `
 <div id="toast" class="toast" role="status" aria-live="polite"></div><input id="import-file" type="file" accept=".json,.cell" hidden>`;
 
 function toast(message: string): void {
-  $('toast').textContent = message; $('toast').classList.add('visible');
-  window.clearTimeout(toastTimer); toastTimer = window.setTimeout(() => $('toast').classList.remove('visible'), 4500);
+  const targets = [$('toast'), playerView.document?.getElementById('player-window-toast')].filter((item): item is HTMLElement => Boolean(item));
+  for (const target of targets) { target.textContent = message; target.classList.add('visible'); }
+  toastWindow.clearTimeout(toastTimer); toastWindow = playerView.window ?? window;
+  toastTimer = toastWindow.setTimeout(() => { for (const target of targets) target.classList.remove('visible'); }, 4500);
 }
 function saveStatus(state: 'saving' | 'saved' | 'error', error?: unknown, scope = 'simulation'): void {
   if (state === 'saving') { pendingSaves.add(scope); saveIssues.delete(scope); }
@@ -124,7 +134,7 @@ function menu(kind: 'genome' | 'environment' | 'simulation', id: string, name: s
   </div></details>`;
 }
 function environmentThumb(environment: EnvironmentDocument): string {
-  const config = environment.config, colors = ['#e8c578', '#ef9380', '#84b7ed', '#7cdbad', '#bd9cdd', '#84b7ed', '#84b7ed', '#84b7ed'];
+  const config = environment.config, colors = ['#e8c578', '#ef9380', '#84b7ed', '#7cdbad', '#bd9cdd', '#84b7ed', '#84b7ed', '#84b7ed', '#65bef7', '#65bef7', '#d6a5f2', '#d6a5f2', '#a5c4f7'];
   return `<svg class="environment-thumb" viewBox="0 0 ${config.width} ${config.height}" aria-hidden="true"><rect width="${config.width}" height="${config.height}" fill="#101d22"/>${config.sources.map(source =>
     `<circle cx="${source.x}" cy="${source.y}" r="${source.radius}" fill="${colors[source.kind]}" opacity=".12"/><circle cx="${source.x}" cy="${source.y}" r="10" fill="${colors[source.kind]}"/>`).join('')}${config.barriers.map(barrier => `<rect x="${barrier.x-barrier.length/2}" y="${barrier.y-barrier.width/2}" width="${barrier.length}" height="${barrier.width}" rx="8" transform="rotate(${barrier.angle*180/Math.PI} ${barrier.x} ${barrier.y})" fill="${barrier.floating ? '#b9c5ca' : '#61717b'}"/>`).join('')}</svg>`;
 }
@@ -153,9 +163,12 @@ function renderCatalog(): string {
   return `<div class="page library-page"><header class="page-header"><h1>${genome ? 'Genomes' : 'Environments'}</h1><div class="toolbar"><label class="search-field">${icon('search')}<input class="search-input" id="catalog-search" type="search" placeholder="Search" aria-label="Search ${genome ? 'genomes' : 'environments'}" value="${esc(catalogQuery)}"></label><button class="icon-button import-button" aria-label="Import ${kind}" title="Import ${kind}" data-action="import-${kind}">${icon('upload')}</button><button class="button primary" data-action="new-${kind}">${icon('plus')}New ${kind}</button></div></header><div id="catalog-items"></div></div>`;
 }
 function renderView(): void {
-  inspectorEpoch++;
-  inspectorProgram?.destroy(); inspectorProgram = null;
-  renderer?.dispose(); renderer = null;
+  const retainPlayer = (playerView.isOpen || restoringPlayer) && Boolean(playerElement && renderer);
+  if (!retainPlayer) {
+    inspectorEpoch++;
+    inspectorProgram?.destroy(); inspectorProgram = null;
+    renderer?.dispose(); renderer = null; playerElement = null;
+  }
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-tab]')) {
     const selected = button.dataset.tab === prefs.tab;
     button.classList.toggle('active', selected); button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1;
@@ -165,8 +178,13 @@ function renderView(): void {
   if (!active) { $('workspace').innerHTML = renderSimulationList(); return; }
   $('workspace').innerHTML = `<div class="simulation-shell"><header class="simulation-bar"><div class="simulation-title"><button class="icon-button" data-action="close-simulation" aria-label="All simulations">${icon('back')}</button><h1>${esc(active.metadata.name)}</h1></div>
     <nav class="simulation-tabs" role="tablist" aria-label="Simulation views">${(['player', 'metrics', 'settings', 'genomes'] as const).map(view => `<button role="tab" data-view="${view}" tabindex="${prefs.simulationView === view ? 0 : -1}" aria-selected="${prefs.simulationView === view}" class="${prefs.simulationView === view ? 'active' : ''}">${view[0].toUpperCase() + view.slice(1)}</button>`).join('')}</nav>
-    </header><div class="simulation-content">${prefs.simulationView === 'player' ? playerMarkup() : prefs.simulationView === 'metrics' ? metricsMarkup() : prefs.simulationView === 'settings' ? settingsMarkup() : '<div class="page active-genomes-page"><div class="genome-list" id="active-genomes"></div></div>'}</div></div>`;
-  if (prefs.simulationView === 'player') {
+    </header><div class="simulation-content">${prefs.simulationView === 'player' ? playerView.isOpen ? playerPlaceholderMarkup() : retainPlayer ? '' : playerMarkup() : prefs.simulationView === 'metrics' ? metricsMarkup() : prefs.simulationView === 'settings' ? settingsMarkup() : '<div class="page active-genomes-page"><div class="genome-list" id="active-genomes"></div></div>'}</div></div>`;
+  if (prefs.simulationView === 'player' && !playerView.isOpen && retainPlayer) {
+    document.querySelector('.simulation-content')!.append(playerElement!);
+    renderer!.reparent(); inspectorProgram?.reparent();
+    updatePlayback(); renderLiveEnvironment();
+  } else if (prefs.simulationView === 'player' && !playerView.isOpen) {
+    playerElement = document.querySelector<HTMLElement>('.player-stage');
     const canvas = $<HTMLCanvasElement>('world'); renderer = new Renderer(canvas);
     canvas.addEventListener('click', event => {
       if (!active || !renderer || transitioning || renderer.wasDragging()) return;
@@ -194,6 +212,7 @@ function renderView(): void {
     canvas.closest('.player-stage')!.querySelectorAll<HTMLButtonElement>('[data-camera]').forEach(button=>button.addEventListener('click',()=>{if(button.dataset.camera==='player:fit')renderer?.fitWorld();else renderer?.zoomBy(button.dataset.camera==='player:in'?1.25:.8);}));
     renderInspector(); updatePlayback(); renderer.render(active.world, selectedId, prefs, cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.cell : null, cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.body ?? null : null);
   }
+  if (playerView.isOpen) renderLiveEnvironment();
   updateSimulationUi();
 }
 async function navigate(tab: UiPreferences['tab']): Promise<void> {
@@ -212,6 +231,7 @@ async function applyEnvironment(engine: WorkerEngine, config: EnvironmentConfig)
   if (!await engine.setWorldSize(config.width, config.height)) throw new Error('The environment world size is invalid.');
   await engine.setEnvironment(config.ambientTemperature, config.ambientLight, config.currentStrength);
   await engine.setInitialNutrients(config.initialNutrients); await engine.setFoodRate(config.foodRate); await engine.clearSources(); await engine.clearBarriers();
+  if (!await engine.setInitialGases(config.gases.initialOxygen, config.gases.initialCarbon) || !await engine.setGasExchange(config.gases)) throw new Error('The gas settings could not be applied.');
   for (const source of config.sources) if (!await engine.addSource(source.kind, source.x, source.y, source.strength, source.radius, source.angle, source.length)) throw new Error('Could not create an environment source.');
   for (const barrier of config.barriers) if (!await engine.addBarrier(barrier.x, barrier.y, barrier.length, barrier.width, barrier.angle, barrier.floating)) throw new Error('Could not create an environment barrier.');
 }
@@ -221,6 +241,7 @@ async function makeSession(engine: WorkerEngine, metadata: SimulationMetadata): 
   return new SimulationSession(engine, metadata, initial, storage, saveStatus, upsertMetadata);
 }
 function disposeSession(session: SimulationSession): void {
+  if (session === active) playerView.close(unloading ? 'unload' : 'session');
   for (const inspection of expandedInspections) if (inspection.session === session) {
     inspection.editor.setEvaluationUnavailable('This simulation has been closed.');
     expandedInspections.delete(inspection);
@@ -336,9 +357,36 @@ function newSimulationDialog(template?: BuiltinSimulation, environmentId?: strin
   dialog.addEventListener('cancel', event => { if (dialog.dataset.saving) event.preventDefault(); });
 }
 
+function playerPlaceholderMarkup(): string {
+  return `<section class="player-window-placeholder"><h2>Player is popped out</h2><p>${playerView.mode === 'picture-in-picture' ? 'The simulation stays visible and keeps running while you use the rest of agar or another tab.' : 'The simulation keeps running in its separate window. This browser cannot keep it always on top.'}</p><div class="toolbar"><button class="button subtle" data-action="focus-player">Show player</button><button class="button primary" data-action="return-player">Return player here</button></div><p>Keep this tab open to keep the player running.</p></section>`;
+}
+async function openPlayerWindow(): Promise<void> {
+  if (!active || !playerElement || !renderer || transitioning) return;
+  if (playerView.isOpen) { playerView.focus(); return; }
+  const session = active, element = playerElement, drawing = renderer;
+  await playerView.open(element, session.metadata.name, () => !unloading && active === session && renderer === drawing && playerElement === element);
+}
+function playerWindowChanged(reason?: PlayerCloseReason): void {
+  accumulator = 0; lastFrame = performance.now();
+  if (unloading || reason === 'unload' || reason === 'session') { frameLoop.refresh(); return; }
+  if (playerView.isOpen) {
+    renderer?.reparent(); inspectorProgram?.reparent(); renderView();
+  } else if (active && playerElement && renderer) {
+    prefs.tab = 'simulation'; prefs.simulationView = 'player'; persistPreferences();
+    restoringPlayer = true;
+    try { renderView(); } finally { restoringPlayer = false; }
+    $('world')?.focus({ preventScroll: true });
+  }
+  if (active) {
+    const session = active;
+    void session.refresh({ metrics: true, environment: true }).catch(error => runError(session, error));
+  }
+  frameLoop.refresh();
+}
+
 function playerMarkup(): string {
   return `<section class="player-stage" aria-label="Simulation player"><canvas id="world" tabindex="0" role="img" aria-label="Simulation. Click an organism to inspect it. Scroll to zoom; Shift-drag to pan. Arrow keys select organisms; Space plays or pauses."></canvas>
-    <div class="player-toolbar"><div class="playback"><button class="play-button" id="play-pause" data-action="play"></button><select class="playback-speed" id="playback-speed" aria-label="Playback speed" title="Playback speed">${[1,2,5,10].map(speed => `<option value="${speed}">${speed}×</option>`).join('')}</select></div><button class="button subtle" data-action="toggle-environment" aria-pressed="${environmentOpen}">${icon('flow')}Environment</button><button class="button primary" data-action="add-organism">${icon('plus')}Add organism</button></div>
+    <div class="player-toolbar"><div class="playback"><button class="play-button" id="play-pause" data-action="play"></button><select class="playback-speed" id="playback-speed" aria-label="Playback speed" title="Playback speed">${[1,2,5,10].map(speed => `<option value="${speed}">${speed}×</option>`).join('')}</select></div><button class="button subtle" data-action="toggle-environment" aria-pressed="${environmentOpen}">${icon('flow')}Environment</button><button class="button primary" data-action="add-organism">${icon('plus')}Add organism</button><button type="button" class="player-popout" data-action="popout-player" title="${playerView.supportsAlwaysOnTop ? 'Open an always-on-top player' : 'Open a separate player window; always-on-top is unavailable in this browser'}">${icon('expand')}${playerView.supportsAlwaysOnTop ? 'Pop out' : 'Window'}</button></div>
     <div class="player-view-controls">${cameraControls('player')}<span>Scroll to zoom · Shift-drag to pan</span></div><aside class="live-environment" id="live-environment" aria-label="Environment controls" hidden></aside><div class="player-caption" id="player-caption"></div><aside class="cell-inspector" id="cell-inspector" aria-label="Organism inspector" hidden></aside></section>`;
 }
 function renderLiveEnvironment(): void {
@@ -348,7 +396,7 @@ function renderLiveEnvironment(): void {
   const environment = active.world.environment;
   if (environmentSelection && !(environmentSelection.kind === 'source' ? environment.sources : environment.barriers).some(object => object.id === environmentSelection!.id)) environmentSelection = null;
   renderer?.setEnvironmentSelection(environmentOpen ? environmentSelection : null);
-  document.querySelector('[data-action="toggle-environment"]')?.setAttribute('aria-pressed', String(environmentOpen));
+  queryUi('[data-action="toggle-environment"]')?.setAttribute('aria-pressed', String(environmentOpen));
   if (!environmentOpen) { $('world')?.classList.remove('placing-object'); return; }
   const source = environmentSelection?.kind === 'source' ? environment.sources.find(item => item.id === environmentSelection!.id) : null;
   const barrier = environmentSelection?.kind === 'barrier' ? environment.barriers.find(item => item.id === environmentSelection!.id) : null;
@@ -357,10 +405,11 @@ function renderLiveEnvironment(): void {
   else if (source || barrier) detail = `<div class="source-detail-heading"><h3 data-object-title>${source ? SOURCE_NAMES[source.kind] : barrier!.floating ? 'Floating barrier' : 'Fixed barrier'}</h3><button type="button" class="icon-button" data-live-remove aria-label="Remove selected object">${icon('trash')}</button></div>`
     + (source ? sourceFields(source, environment.width, environment.height) : barrierFields(barrier!, environment.width, environment.height));
   panel.innerHTML = `<header class="inspector-header"><h2>Environment</h2><button class="icon-button" data-action="close-environment" aria-label="Close environment controls">${icon('close')}</button></header>
-    <div class="live-environment-tools"><label class="environment-tool-select"><span class="visually-hidden">Environment tool</span><select data-live-tool aria-label="Environment tool">${toolOptions(environmentTool)}</select></label><label class="environment-overlay-select"><span class="visually-hidden">View field</span><select data-live-overlay aria-label="View field">${[['none','No overlay'],['light','Light'],['heat','Temperature'],['flow','Water flow'],['nutrients','Nutrients']].map(([value,label])=>`<option value="${value}"${prefs.overlay===value?' selected':''}>${label}</option>`).join('')}</select></label></div>
+    <div class="live-environment-tools"><label class="environment-tool-select"><span class="visually-hidden">Environment tool</span><select data-live-tool aria-label="Environment tool">${toolOptions(environmentTool)}</select></label><label class="environment-overlay-select"><span class="visually-hidden">View field</span><select data-live-overlay aria-label="View field">${[['none','No overlay'],['light','Light'],['heat','Temperature'],['flow','Water flow'],['nutrients','Minerals'],['oxygen','Oxygen'],['carbon','Inorganic carbon']].map(([value,label])=>`<option value="${value}"${prefs.overlay===value?' selected':''}>${label}</option>`).join('')}</select></label></div>
     <p class="environment-hint environment-placement-hint">${environmentTool === 'select' ? 'Select an object to edit it. Changes apply to this simulation.' : 'Click the world to place this object. Enter places it at the view center.'}</p>
     <div class="source-list" aria-label="Live environment objects">${objectList(environment.sources, environment.barriers, environmentSelection, true)}</div>
     <div class="source-detail">${detail}</div>
+    <details class="environment-baseline gas-settings"><summary>Gases & atmosphere</summary>${gasFields(environment.gases)}<button type="button" class="button subtle small" data-live-gases>Apply gas boundary</button><p class="environment-hint" data-live-gas-readout></p></details>
     <details class="environment-baseline"><summary data-live-size-summary>World size · ${environment.width} × ${environment.height}</summary><div class="source-fields"><label>Width<input type="number" data-live-width value="${environment.width}" min="400" max="4800" step="20"></label><label>Height<input type="number" data-live-height value="${environment.height}" min="400" max="3040" step="20"></label></div><button class="button subtle small" data-live-resize>Apply size</button></details>
     <p class="environment-hint environment-accounting">Minerals absorbed: <span data-absorbed-total>${environment.nutrientRemovedTotal.toFixed(2)}</span></p>`;
   $('world')?.classList.toggle('placing-object', environmentTool !== 'select');
@@ -371,6 +420,13 @@ function updateLiveEnvironmentReadout(): void {
   if (!active || !environmentOpen || !panel || panel.hidden) return;
   const environment = active.world.environment;
   const absorbed = panel.querySelector('[data-absorbed-total]'); if (absorbed) absorbed.textContent = environment.nutrientRemovedTotal.toFixed(2);
+  const gases = panel.querySelector('[data-live-gas-readout]');
+  if (gases) {
+    let oxygen = 0, carbon = 0;
+    for (let index = 0; index < environment.samples.length; index += 7) { oxygen += environment.samples[index + 5]; carbon += environment.samples[index + 6]; }
+    const patches = environment.columns * environment.rows;
+    gases.textContent = `Average in water: ${ (oxygen / patches).toFixed(3) } oxygen · ${ (carbon / patches).toFixed(3) } inorganic carbon`;
+  }
   const list = panel.querySelector<HTMLElement>('.source-list');
   const signature = environment.sources.map(object=>`s${object.id}:${object.kind}`).join(',') + '|' + environment.barriers.map(object=>`b${object.id}:${object.floating}`).join(',') + `|${environmentSelection?.kind}:${environmentSelection?.id}`;
   if (list && list.dataset.signature !== signature) { list.innerHTML = objectList(environment.sources, environment.barriers, environmentSelection, true); list.dataset.signature = signature; }
@@ -388,7 +444,7 @@ function updateLiveEnvironmentReadout(): void {
     const key = input.dataset.objectField!;
     if (key === 'x') (input as HTMLInputElement).max = String(environment.width - Number.EPSILON * environment.width);
     if (key === 'y') (input as HTMLInputElement).max = String(environment.height - Number.EPSILON * environment.height);
-    if (document.activeElement === input || pendingEnvironmentInputs.has(input) || input.getAttribute('aria-invalid') === 'true') return;
+    if (input.ownerDocument.activeElement === input || pendingEnvironmentInputs.has(input) || input.getAttribute('aria-invalid') === 'true') return;
     const value = (current as unknown as Record<string, number | boolean>)[key];
     if (value === undefined) return;
     input.value = typeof value === 'boolean' ? String(value) : formatEnvironmentNumber(key === 'angle' ? value * 180 / Math.PI : value, key, Number((input as HTMLInputElement).min), Number((input as HTMLInputElement).max));
@@ -486,6 +542,15 @@ function bindLiveEnvironment(): void {
     const target = (event.target as Element).closest<HTMLButtonElement>('button'); if (!target) return;
     if (target.dataset.objectKind) { selectEnvironmentObject({ kind: target.dataset.objectKind as 'source' | 'barrier', id: Number(target.dataset.objectId) }); return; }
     const session = active;
+    if (target.hasAttribute('data-live-gases')) {
+      try {
+        const config = readGasExchange(panel);
+        target.disabled = true;
+        void session.mutate(async engine => { if (!await engine.setGasExchange(config)) throw new Error('The gas boundary could not be updated.'); })
+          .then(() => session.checkpoint()).catch(error => toast(readableError(error))).finally(() => { target.disabled = false; });
+      } catch (error) { toast(readableError(error)); }
+      return;
+    }
     if (target.hasAttribute('data-live-remove') && environmentSelection) {
       const selection = environmentSelection;
       void session.mutate(async engine => {
@@ -510,7 +575,7 @@ function bindLiveEnvironment(): void {
               const currentPanel=$('live-environment');
               for(const [key,value] of [['width',width],['height',height]] as const){
                 const field=currentPanel?.querySelector<HTMLInputElement>(`[data-live-${key}]`);
-                if(field && document.activeElement!==field)field.value=String(value);
+                if(field && field.ownerDocument.activeElement!==field)field.value=String(value);
               }
             }
             await session.checkpoint();
@@ -655,13 +720,13 @@ function paintInspector(): void {
   if (!active || selectedId === null || !$('inspector-content')) return;
   const cell = cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.cell : null;
   if (!cell) return;
-  const name = document.querySelector<HTMLElement>('.inspector-header .muted');
+  const name = queryUi<HTMLElement>('.inspector-header .muted');
   if (name) name.textContent = genomeName(cell.genomeId);
   if (inspectorView === 'overview') {
-    $('inspector-content').innerHTML = `<div class="inspector-metrics">${metricRow('Capabilities',trophicRole(cell))}${metricRow('Energy',cell.energy.toFixed(1)+' / '+cell.energyCapacity.toFixed(1))}${metricRow('Envelope area',cell.bodyArea.toFixed(3))}${metricRow('Material mass',cell.bodyMass.toFixed(3))}${metricRow('Division',cell.divisionReady ? 'Ready' : Math.round(cell.maturity*100)+'% grown')}${metricRow('Growth',cell.growthRate.toFixed(3)+' area / s')}${metricRow('Gut',cell.gutEnergy.toFixed(1)+' / '+cell.gutCapacity.toFixed(1))}${metricRow('Gut exudate',cell.gutExudateEnergy.toFixed(1)+' energy')}${metricRow('Gut tissue',cell.gutTissueEnergy.toFixed(1)+' energy')}${metricRow('Gut waste',cell.gutWasteEnergy.toFixed(1)+' energy')}${metricRow('Digestion',cell.digestionRate.toFixed(2)+' energy / s')}${metricRow('Photosynthesis',cell.photosynthesisRate.toFixed(2)+' energy / s')}${metricRow('Integrity',Math.round(cell.integrity*100)+'%')}${metricRow('Minerals',cell.nutrientStored.toFixed(2)+' / '+cell.nutrientCapacity.toFixed(2))}${metricRow('Age',clock(cell.age))}${metricRow('Generation',String(cell.generation))}${metricRow('Upkeep',(cell.basalMetabolism+cell.memoryCost).toFixed(2)+' energy / s')}</div>`;
+    $('inspector-content').innerHTML = `<div class="inspector-metrics">${metricRow('Capabilities',trophicRole(cell))}${metricRow('Energy',cell.energy.toFixed(1)+' / '+cell.energyCapacity.toFixed(1))}${metricRow('Envelope area',cell.bodyArea.toFixed(3))}${metricRow('Material mass',cell.bodyMass.toFixed(3))}${metricRow('Division',cell.divisionReady ? 'Ready' : Math.round(cell.maturity*100)+'% grown')}${metricRow('Growth',cell.growthRate.toFixed(3)+' area / s')}${metricRow('Gut',cell.gutEnergy.toFixed(1)+' / '+cell.gutCapacity.toFixed(1))}${metricRow('Gut exudate',cell.gutExudateEnergy.toFixed(1)+' energy')}${metricRow('Gut tissue',cell.gutTissueEnergy.toFixed(1)+' energy')}${metricRow('Gut waste',cell.gutWasteEnergy.toFixed(1)+' energy')}${metricRow('Digestion',cell.digestionRate.toFixed(2)+' substrate / s')}${metricRow('Carbon fixation',cell.carbonFixationRate.toFixed(3)+' C / s')}${metricRow('Respiration',cell.respirationRate.toFixed(3)+' C / s')}${metricRow('Organic carbon reserve',cell.organicCarbon.toFixed(3))}${metricRow('Internal oxygen',cell.internalOxygen.toFixed(3))}${metricRow('Internal inorganic carbon',cell.internalInorganicCarbon.toFixed(3))}${metricRow('Integrity',Math.round(cell.integrity*100)+'%')}${metricRow('Minerals',cell.nutrientStored.toFixed(2)+' / '+cell.nutrientCapacity.toFixed(2))}${metricRow('Age',clock(cell.age))}${metricRow('Generation',String(cell.generation))}${metricRow('Upkeep',(cell.basalMetabolism+cell.memoryCost).toFixed(2)+' energy / s')}</div>`;
   } else if (inspectorView === 'body') {
     const target = $('inspector-content'), expanded = new Set([...target.querySelectorAll<HTMLDetailsElement>('details[open]')].map(item => item.dataset.kind));
-    const focusedFamily = target.contains(document.activeElement) ? document.activeElement?.closest<HTMLDetailsElement>('details[data-kind]')?.dataset.kind : undefined;
+    const focusedFamily = target.contains(target.ownerDocument.activeElement) ? target.ownerDocument.activeElement?.closest<HTMLDetailsElement>('details[data-kind]')?.dataset.kind : undefined;
     try {
       const body = cellInspection?.body; if (!body) return;
       const meter = (name: string, used: number, capacity: number): string => `<div class="body-meter"><div><span>${name}</span><strong>${used.toFixed(3)} / ${capacity.toFixed(3)}</strong></div><meter min="0" max="${Math.max(capacity,0.000001)}" value="${used}" aria-label="${name}"></meter></div>`;
@@ -695,8 +760,8 @@ function paintInspector(): void {
       || `<tr><td colspan="2">${regulators ? regulators.length?'No matching regulators.':'No regulatory products declared. Product stocks and machinery are shown in Body.' : entries.length ? 'No matching registers.' : 'Memory is empty.'}</td></tr>`;
     $('memory-page').textContent = (memoryPage+1)+' / '+pageCount;
     $('memory-page').closest<HTMLElement>('.memory-footer')!.hidden = pageCount === 1;
-    document.querySelector<HTMLButtonElement>('[data-action="memory-previous"]')!.disabled = memoryPage === 0;
-    document.querySelector<HTMLButtonElement>('[data-action="memory-next"]')!.disabled = memoryPage === pageCount-1;
+    queryUi<HTMLButtonElement>('[data-action="memory-previous"]')!.disabled = memoryPage === 0;
+    queryUi<HTMLButtonElement>('[data-action="memory-next"]')!.disabled = memoryPage === pageCount-1;
   } else if (inspectorView === 'program' && inspectorProgram) {
     updateProgramEvaluation(inspectorProgram, active, cell.id);
   }
@@ -760,8 +825,12 @@ function metricsMarkup(): string {
   const cards = (definitions: ReadonlyArray<readonly [string,string]>): string => definitions.map(([key,label]) => `<article class="metric-card"><span>${label}</span><strong id="metric-${key}">—</strong></article>`).join('');
   return `<div class="page metrics-page"><div class="metrics-grid">${cards(metricDefinitions.slice(0,4))}</div>
     <section class="chart-panel"><div class="section-heading"><h2>Population</h2><span id="history-duration"></span></div><svg class="metrics-chart" id="history-chart" viewBox="0 0 1000 240" preserveAspectRatio="none" role="img" aria-label="Population history"></svg></section>
-    <section class="trophic-panel"><div class="section-heading"><h2>Food chain</h2><span title="Based on functional organs that have actually been built.">Current capabilities</span></div><div class="metrics-grid">${cards([['autotrophs','Autotrophs'],['heterotrophs','Heterotrophs'],['mixotrophs','Mixotrophs'],['hunters','Attack-capable']])}</div><div class="energy-flow">${[['production','Photosynthesis'],['digestion','Digestion'],['exudation','Organic release']].map(([key,label])=>`<div><span>${label}</span><strong id="flow-${key}">—</strong></div>`).join('')}</div><div class="energy-flow">${[['exudate','Exudate'],['tissue','Cell tissue'],['waste','Waste']].map(([key,label])=>`<div><span>${label}</span><strong id="organic-${key}">—</strong></div>`).join('')}</div><p class="muted">Exudate is readily digested. Cell tissue yields energy and waste; refractory waste takes more processing and returns minerals to the water.</p></section>
+    <section class="trophic-panel"><div class="section-heading"><h2>Food chain</h2><span title="Based on functional organs that have actually been built.">Current capabilities</span></div><div class="metrics-grid">${cards([['autotrophs','Autotrophs'],['heterotrophs','Heterotrophs'],['mixotrophs','Mixotrophs'],['hunters','Attack-capable']])}</div><div class="energy-flow">${[['production','Fixed chemical energy'],['digestion','Assimilated substrate'],['exudation','Organic release']].map(([key,label])=>`<div><span>${label}</span><strong id="flow-${key}">—</strong></div>`).join('')}</div><div class="energy-flow">${[['exudate','Exudate'],['tissue','Cell tissue'],['waste','Waste']].map(([key,label])=>`<div><span>${label}</span><strong id="organic-${key}">—</strong></div>`).join('')}</div><p class="muted">Digestion releases organic carbon and minerals. Respiration uses oxygen to release usable energy from that carbon. Tissue also produces refractory waste, which takes more processing.</p></section>
+    <section class="gas-panel"><div class="section-heading"><h2>Gases & carbon</h2><span>Abstract chemical units</span></div><div class="metrics-grid">${cards([['oxygen-water','Oxygen in water'],['carbon-water','Inorganic carbon in water'],['carbon-cells','Organic carbon in organisms'],['carbon-food','Organic carbon in particles']])}</div><p class="muted">Photosynthesis fixes inorganic carbon and produces oxygen. Respiration consumes organic carbon and oxygen. Producers also respire in darkness; minerals remain a separate growth resource.</p></section>
     <section class="nutrient-panel"><h2>Minerals</h2><div class="metrics-grid nutrient-metrics">${[['water','Water'],['food','Organic particles'],['cells','Organisms & guts'],['total','Total']].map(([key,label])=>`<div class="metric-card"><span>${label}</span><strong id="nutrient-${key}">—</strong></div>`).join('')}</div></section>
+    <details class="metrics-secondary"><summary>Carbon & oxygen accounting</summary><div class="inspector-metrics">${[
+      ['carbon-total','Carbon currently held'],['carbon-input','Carbon introduced'],['carbon-removed','Carbon removed'],['carbon-legacy','Carbon in imported legacy bodies'],['carbon-fixed','Carbon fixed by photosynthesis'],['carbon-respired','Carbon respired by organisms'],['carbon-decayed','Carbon respired by background decay'],['carbon-balance','Carbon balance error'],['oxygen-total','Oxygen in water & organisms'],['oxygen-input','Oxygen introduced'],['oxygen-removed','Oxygen removed'],['oxygen-balance','Oxygen balance error'],
+    ].map(([key,label])=>metricRow(label,`<span id="gas-${key}">—</span>`)).join('')}</div><p class="muted">Carbon balance: present + removed − introduced. Oxygen balance also includes production by fixation and consumption by respiration and decay. Atmospheric inflow and outflow are recorded.</p></details>
     <details class="metrics-secondary"><summary>Resource accounting</summary><div class="inspector-metrics">${metricRow('Material introduced','<span id="introduced-material">—</span>')}${metricRow('Minerals absorbed','<span id="removed-material">—</span>')}${metricRow('Organic energy introduced','<span id="introduced-energy">—</span>')}${metricRow('Energy currently held','<span id="held-energy">—</span>')}${metricRow('Light energy collected','<span id="light-energy">—</span>')}</div></details>
     <details class="metrics-secondary"><summary>Evolution & interactions</summary><div class="metrics-grid">${cards(metricDefinitions.slice(4))}</div></details></div>`;
 }
@@ -773,6 +842,15 @@ function renderMetrics(world: MetricsSnapshot): void {
   const organicCounts = world.organicCounts;
   ['exudate','tissue','waste'].forEach((kind,index) => { $('organic-'+kind).textContent = organicCounts[index]+' particles'; });
   for (const [key,value] of Object.entries({water:world.nutrientDissolvedTotal,food:world.nutrientFoodTotal,cells:world.nutrientCellTotal,total:world.nutrientTotal})) $('nutrient-'+key).textContent=value.toFixed(1);
+  for (const [key,value] of Object.entries({ 'oxygen-water':world.oxygenDissolvedTotal,'carbon-water':world.inorganicCarbonTotal,'carbon-cells':world.organicCellTotal,'carbon-food':world.organicFoodTotal })) $('metric-'+key).textContent=value.toFixed(2);
+  const oxygenTotal = world.oxygenDissolvedTotal + world.oxygenCellTotal;
+  const carbonBalance = world.carbonTotal + world.carbonRemovedTotal - world.carbonInputTotal;
+  const oxygenBalance = oxygenTotal + world.oxygenRemovedTotal + world.carbonRespiredTotal + world.decayRespiredTotal - world.oxygenInputTotal - world.carbonFixedTotal;
+  for (const [key,value] of Object.entries({
+    'carbon-total':world.carbonTotal,'carbon-input':world.carbonInputTotal,'carbon-removed':world.carbonRemovedTotal,'carbon-legacy':world.legacyCarbonImported,
+    'carbon-fixed':world.carbonFixedTotal,'carbon-respired':world.carbonRespiredTotal,'carbon-decayed':world.decayRespiredTotal,'carbon-balance':carbonBalance,
+    'oxygen-total':oxygenTotal,'oxygen-input':world.oxygenInputTotal,'oxygen-removed':world.oxygenRemovedTotal,'oxygen-balance':oxygenBalance,
+  })) $('gas-'+key).textContent = key.endsWith('balance') ? Math.abs(value) < 1e-7 ? '0.000000' : value.toExponential(3) : value.toFixed(3);
   $('introduced-material').textContent = world.nutrientInputTotal.toFixed(2);
   $('removed-material').textContent = active!.world.environment.nutrientRemovedTotal.toFixed(2);
   $('introduced-energy').textContent = world.energyInputTotal.toFixed(2);
@@ -797,7 +875,7 @@ function settingsMarkup(): string {
     <section class="settings-panel"><h2>Simulation</h2><div class="form-field"><label for="setting-name">Name</label><input id="setting-name" data-setting="name" maxlength="80" value="${esc(active!.metadata.name)}"></div>
     ${rangeField('mutation','Mutation chance',Math.round(world.mutationRate*100),0,100,1,'%')}
     <p class="muted">Seed ${active!.metadata.seed} · ${esc(active!.metadata.environmentName)}</p></section>
-    <section class="settings-panel"><h2>Display</h2><div class="form-field"><label for="setting-overlay">Field</label><select id="setting-overlay" data-setting="overlay">${[['none','None'],['light','Light'],['heat','Temperature'],['flow','Water flow'],['nutrients','Dissolved nutrients']].map(([value,label])=>`<option value="${value}"${prefs.overlay===value?' selected':''}>${label}</option>`).join('')}</select></div>
+    <section class="settings-panel"><h2>Display</h2><div class="form-field"><label for="setting-overlay">Field</label><select id="setting-overlay" data-setting="overlay">${[['none','None'],['light','Light'],['heat','Temperature'],['flow','Water flow'],['nutrients','Minerals'],['oxygen','Oxygen'],['carbon','Inorganic carbon']].map(([value,label])=>`<option value="${value}"${prefs.overlay===value?' selected':''}>${label}</option>`).join('')}</select></div>
     <label class="toggle-field"><span>Organelle highlights</span><input type="checkbox" role="switch" data-setting="sensors"${prefs.sensors?' checked':''}></label><label class="toggle-field"><span>Movement trails</span><input type="checkbox" role="switch" data-setting="trails"${prefs.trails?' checked':''}></label></section>
     <section class="settings-panel"><h2>Environment</h2><p class="muted">${world.width} × ${world.height} · ${world.environment.sources.length} emitters · ${world.environment.barriers.length} barriers</p><p class="muted">Select emitters and barriers in the player to adjust their strength, size, direction and position.</p><button class="button subtle" data-action="edit-live-environment">${icon('flow')}Edit environment</button></section>
   </div></div>`;
@@ -816,14 +894,15 @@ function renderActiveGenomes(): void {
   }
 }
 function updateSimulationUi(): void {
-  if(!active||prefs.tab!=='simulation') return;
+  if(!active) return;
   for (const inspection of expandedInspections) updateProgramEvaluation(inspection.editor, inspection.session, inspection.cellId);
-  if(prefs.simulationView==='player') {
+  if(playerView.visible || !playerView.isOpen && !document.hidden && prefs.tab==='simulation' && prefs.simulationView==='player') {
     $('player-caption').textContent=active.world.cells.length+' organisms · '+clock(active.world.time);
     updateLiveEnvironmentReadout();
     updateInspector();
-  } else if(prefs.simulationView==='metrics') renderMetrics(active.metrics);
-  else if(prefs.simulationView==='genomes') renderActiveGenomes();
+  }
+  if(prefs.tab==='simulation' && prefs.simulationView==='metrics') renderMetrics(active.metrics);
+  else if(prefs.tab==='simulation' && prefs.simulationView==='genomes') renderActiveGenomes();
 }
 
 
@@ -892,6 +971,9 @@ $<HTMLInputElement>('import-file').addEventListener('change',()=>{
   })();
 });
 async function action(name:string,id?:string,genomeId?:number):Promise<void>{
+  if(name==='popout-player'){await openPlayerWindow();return;}
+  if(name==='return-player'){playerView.close();return;}
+  if(name==='focus-player'){playerView.focus();return;}
   if(name==='guide'){showGuide();return;}
   if(!ready||transitioning)return;
   if(name==='home'){await navigate('simulation');await closeSimulation();return;}
@@ -931,7 +1013,7 @@ async function action(name:string,id?:string,genomeId?:number):Promise<void>{
   if(name.startsWith('rename-')&&id){await renameItem(name.slice(7) as 'genome'|'environment'|'simulation',id);return;}
   if(name.startsWith('delete-')&&id)deleteItem(name.slice(7) as 'genome'|'environment'|'simulation',id);
 }
-document.addEventListener('click',event=>{
+function handleUiClick(event: MouseEvent): void {
   const target=(event.target as Element).closest<HTMLButtonElement>('button');if(!target)return;
   if(transitioning&&(target.dataset.tab||target.dataset.view||target.dataset.inspectorView||target.dataset.action)){event.preventDefault();return;}
   if(target.dataset.tab){void navigate(target.dataset.tab as UiPreferences['tab']);return;}
@@ -945,14 +1027,15 @@ document.addEventListener('click',event=>{
   }
   if(target.dataset.inspectorView){
     inspectorView=target.dataset.inspectorView as typeof inspectorView;renderInspector();
-    document.querySelector<HTMLButtonElement>('[data-inspector-view="'+inspectorView+'"]')?.focus({preventScroll:true});return;
+    queryUi<HTMLButtonElement>('[data-inspector-view="'+inspectorView+'"]')?.focus({preventScroll:true});return;
   }
   if(target.dataset.action){
+    if ((event.target as Element).ownerDocument !== document && ['add-organism','cell-program','cell-graph','live-program','live-graph'].includes(target.dataset.action)) window.focus();
     target.closest('details')?.removeAttribute('open');
     void action(target.dataset.action,target.dataset.id,Number(target.dataset.genome)).catch(error=>toast(readableError(error)));
   }
-});
-document.addEventListener('input',event=>{
+}
+function handleUiInput(event: Event): void {
   const input=event.target as HTMLInputElement;
   if(input.id==='catalog-search'){catalogQuery=input.value;renderCatalogCards();}
   if(input.id==='memory-filter'){memoryFilter=input.value;memoryPage=0;updateInspector();}
@@ -960,8 +1043,8 @@ document.addEventListener('input',event=>{
     const output=$('value-'+input.dataset.setting);
     if(output)output.textContent=input.value+(input.dataset.setting==='light'||input.dataset.setting==='mutation'?'%':'');
   }
-});
-document.addEventListener('change',event=>{
+}
+function handleUiChange(event: Event): void {
   const input=event.target as HTMLInputElement,key=input.dataset.setting;
   if(input.id==='playback-speed'){
     if(!active||transitioning){updatePlayback();return;}
@@ -988,8 +1071,8 @@ document.addEventListener('change',event=>{
     void session.mutate(async engine=>{await engine.setMutationRate(value);})
       .then(()=>session.checkpoint()).catch(error=>runError(session,error));
   }catch(error){toast(readableError(error));renderView();}
-});
-document.addEventListener('keydown',event=>{
+}
+function handleUiKeydown(event: KeyboardEvent): void {
   if(event.key==='Escape')for(const details of document.querySelectorAll<HTMLDetailsElement>('.item-menu[open]')){details.open=false;details.querySelector<HTMLElement>('summary')?.focus();}
   const current=(event.target as HTMLElement).closest<HTMLButtonElement>('button[role="tab"]');
   if(!current||transitioning||!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
@@ -997,41 +1080,53 @@ document.addEventListener('keydown',event=>{
   if(!tabs.length)return;
   event.preventDefault();const next=tabs[event.key==='Home'?0:event.key==='End'?tabs.length-1:(index+(event.key==='ArrowRight'?1:tabs.length-1))%tabs.length];
   if(next.dataset.tab)void navigate(next.dataset.tab as UiPreferences['tab']).then(()=>document.querySelector<HTMLButtonElement>('[data-tab="'+next.dataset.tab+'"]')?.focus());
-  else {const selector=next.dataset.view?'[data-view="'+next.dataset.view+'"]':'[data-inspector-view="'+next.dataset.inspectorView+'"]';next.click();document.querySelector<HTMLButtonElement>(selector)?.focus();}
-});
-document.addEventListener('click',event=>{
+  else {const selector=next.dataset.view?'[data-view="'+next.dataset.view+'"]':'[data-inspector-view="'+next.dataset.inspectorView+'"]';next.click();queryUi<HTMLButtonElement>(selector)?.focus();}
+}
+function handleUiDismissMenus(event: MouseEvent): void {
   for(const details of document.querySelectorAll<HTMLDetailsElement>('.item-menu[open]'))if(!details.contains(event.target as Node))details.open=false;
-});
+}
+function bindUiDocument(doc: Document): () => void {
+  doc.addEventListener('click', handleUiClick);
+  doc.addEventListener('input', handleUiInput);
+  doc.addEventListener('change', handleUiChange);
+  doc.addEventListener('keydown', handleUiKeydown);
+  doc.addEventListener('click', handleUiDismissMenus);
+  return () => {
+    doc.removeEventListener('click', handleUiClick); doc.removeEventListener('input', handleUiInput);
+    doc.removeEventListener('change', handleUiChange); doc.removeEventListener('keydown', handleUiKeydown);
+    doc.removeEventListener('click', handleUiDismissMenus);
+  };
+}
+bindUiDocument(document);
 function frame(now:number):void{
   const elapsed=Math.max(0,Math.min((now-lastFrame)/1000,.2));lastFrame=now;
   try{
-    if(active&&prefs.tab==='simulation'){
-      const session=active;
-      if(!session.metadata.paused&&!transitioning&&!lifecycleFlushes&&!document.hidden){
+    if(active&&(prefs.tab==='simulation'||playerView.isOpen)){
+      const session=active, playerVisible=playerView.isOpen ? playerView.visible : !document.hidden && prefs.simulationView==='player';
+      const uiVisible=!document.hidden||playerView.visible;
+      if(!session.metadata.paused&&!transitioning&&!lifecycleFlushes&&(!document.hidden||playerView.isOpen)){
         accumulator=Math.min(accumulator+elapsed*session.metadata.speed,1);
         // At most one advancing batch is in flight. Small batches bound the
         // wait for pause, settings, inspection and checkpoint commands.
         const steps=session.busy?0:Math.min(8,Math.floor(accumulator*30));
         if(steps){
-          const metrics=now-lastMetrics>=250&&(prefs.simulationView==='metrics'||prefs.simulationView==='genomes');
-          const environment=now-lastEnvironment>=(prefs.simulationView==='player'?100:250)&&(prefs.simulationView==='player'||prefs.simulationView==='metrics');
+          const metrics=!document.hidden&&now-lastMetrics>=250&&prefs.tab==='simulation'&&(prefs.simulationView==='metrics'||prefs.simulationView==='genomes');
+          const environment=now-lastEnvironment>=(playerVisible?100:250)&&(playerVisible||!document.hidden&&prefs.simulationView==='metrics');
           if(metrics)lastMetrics=now;if(environment)lastEnvironment=now;
           void session.advance(steps,{metrics,environment}).catch(error=>runError(session,error));
           accumulator-=steps/30;
         }
       }
-      if(renderer&&prefs.simulationView==='player')renderer.render(active.world,selectedId,prefs,cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.cell : null,cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.body ?? null : null);
-      if(!transitioning&&!lifecycleFlushes&&now-lastUi>250){updateSimulationUi();lastUi=now;}
+      if(renderer&&playerVisible)renderer.render(active.world,selectedId,prefs,cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.cell : null,cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.body ?? null : null);
+      playerView.setTitle(session.metadata.name);
+      if(now-lastCheckpoint>=2000){lastCheckpoint=now;if(!transitioning&&!saveFailed&&!session.pending&&session.revision!==session.savedRevision)void session.checkpoint().catch(()=>{});}
+      if(uiVisible&&!transitioning&&!lifecycleFlushes&&now-lastUi>250){updateSimulationUi();lastUi=now;}
     }
   }catch(error){
     if(active){active.metadata.paused=true;active.touch();updatePlayback();}
     toast(readableError(error));
   }
-  requestAnimationFrame(frame);
 }
-window.setInterval(()=>{
-  if(active&&!transitioning&&!saveFailed&&!active.pending&&active.revision!==active.savedRevision)void active.checkpoint().catch(()=>{});
-},2000);
 async function flushLifecycle(session: SimulationSession): Promise<void> {
   lifecycleFlushes++;
   try {
@@ -1041,16 +1136,25 @@ async function flushLifecycle(session: SimulationSession): Promise<void> {
   catch (error) { runError(session, error); }
   finally { lifecycleFlushes--; accumulator = 0; lastFrame = performance.now(); }
 }
+function playerVisibilityChanged(): void {
+  accumulator=0;lastFrame=performance.now();frameLoop.refresh();
+  if(document.hidden&&!playerView.visible&&active)void flushLifecycle(active);
+  else if(active&&playerView.isOpen){
+    // Hidden stepping omits field projections. Refresh them even if playback
+    // paused in the background, so returning never leaves a stale overlay.
+    const session=active;
+    void session.refresh({metrics:true,environment:true}).catch(error=>runError(session,error));
+  }
+}
 document.addEventListener('visibilitychange',()=>{
-  accumulator=0;lastFrame=performance.now();
-  if(document.hidden&&active)void flushLifecycle(active);
+  playerVisibilityChanged();
   if(!document.hidden&&ready&&!transitioning)void refreshCatalogs().catch(error=>toast(readableError(error)));
 });
 window.addEventListener('pagehide',event=>{
-  accumulator=0;
+  unloading=true;accumulator=0;frameLoop.stop();playerView.close('unload');
   if(active){const session=active;void flushLifecycle(session).finally(()=>{if(!event.persisted)disposeSession(session);});}
 });
-window.addEventListener('pageshow',()=>{lastFrame=performance.now();accumulator=0;renderer?.resize();});
+window.addEventListener('pageshow',()=>{unloading=false;lastFrame=performance.now();accumulator=0;if(ready){renderView();frameLoop.start();}renderer?.resize();});
 libraryChannel?.addEventListener('message',()=>{if(ready&&!transitioning)void refreshCatalogs().catch(error=>toast(readableError(error)));});
 window.addEventListener('focus',()=>{if(ready&&!transitioning)void refreshCatalogs().catch(error=>toast(readableError(error)));});
 async function recoverPreviousDraft():Promise<void>{
@@ -1073,7 +1177,7 @@ async function start():Promise<void>{
     if(id&&simulations.some(item=>item.id===id)){
       await openSimulation(id);prefs.tab=tab;prefs.simulationView=view;persistPreferences();renderView();
     }else{prefs.activeSimulationId=null;persistPreferences();}
-    lastFrame=performance.now();requestAnimationFrame(frame);
+    lastFrame=performance.now();frameLoop.start();
   }catch(error){
     $('save-state').textContent='Unavailable';
     $('workspace').innerHTML=`<div class="empty-state"><h1>agar could not open</h1><p>${esc(readableError(error))}</p><button class="button" id="retry-start">Try again</button></div>`;

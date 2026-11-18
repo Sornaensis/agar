@@ -219,7 +219,7 @@ fn cellular_tick_buffers_reuse_allocations_and_v7_continuation_is_exact() {
     assert_eq!(control_ptrs, (controls.expression.as_ptr(), controls.activity.as_ptr(), controls.start.as_ptr(), controls.recycle.as_ptr()));
     let mut original = crate::Engine { world, genomes, ..crate::Engine::new() };
     let saved = crate::checkpoint::save(&original).unwrap();
-    assert_eq!(u32::from_le_bytes(saved[8..12].try_into().unwrap()), 8);
+    assert_eq!(u32::from_le_bytes(saved[8..12].try_into().unwrap()), 9);
     let mut restored = crate::checkpoint::restore(&saved).unwrap();
     assert_eq!(crate::checkpoint::save(&restored).unwrap(), saved);
     for _ in 0..60 {
