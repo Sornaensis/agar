@@ -12,17 +12,23 @@ impl FoodPotential {
     pub fn total(&self) -> f64 { self.body + self.reserve + self.gut + self.atp }
 }
 impl Cell {
+    pub(super) fn chemical_body_mass(&self)->f64 {
+        if self.counted.is_some() {crate::counts::units(self.body.count_material())} else {self.body.structural_mass()}
+    }
+    pub(super) fn chemical_body_investment(&self)->f64 {
+        if self.counted.is_some() {crate::counts::units(self.body.count_investment())} else {self.body.embodied_energy()}
+    }
     pub(super) fn food_potential(&self) -> FoodPotential {
         FoodPotential {
-            body: self.body.structural_mass() * STRUCTURAL_CARBON_PER_MASS * CHEMICAL_ENERGY_PER_CARBON
-                + self.body.embodied_energy() + self.structural_enrichment,
+            body: self.chemical_body_mass() * STRUCTURAL_CARBON_PER_MASS * CHEMICAL_ENERGY_PER_CARBON
+                + self.chemical_body_investment() + self.structural_enrichment,
             reserve: self.organic_carbon * CHEMICAL_ENERGY_PER_CARBON + self.reserve_enrichment,
             gut: self.gut_energy,
             atp: self.energy,
         }
     }
     pub(super) fn tissue_extra_energy(&self) -> f64 {
-        self.body.embodied_energy() + self.structural_enrichment + self.reserve_enrichment + self.energy
+        self.chemical_body_investment() + self.structural_enrichment + self.reserve_enrichment + self.energy
     }
     pub(super) fn reserve_extra_for(&self, carbon: f64) -> f64 {
         if self.organic_carbon == 0.0 { 0.0 } else {

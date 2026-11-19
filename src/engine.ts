@@ -41,7 +41,7 @@ export interface BodyInspection {
   organs: { id:number; kind:OrganelleKind; mass:number; integrity:number; functional:boolean; minimumMass:number; embodiedEnergy:number }[];
   requested: { kind:OrganelleKind; count:number; size:number; build:number; recycle:number; proteinMass:number }[];
   cellular?:CellularBodyInspection|null;
-  colony?: { neighbors:number; neighborIds:number[]; energyNet:number; mineralNet:number; carbonNet:number };
+  colony?: { neighbors:number; neighborIds:number[]; colonyNeighborIds:number[]; feedingNeighborIds:number[]; contactNeighborIds:number[]; energyNet:number; mineralNet:number; carbonNet:number };
 }
 
 /** Physical inventories are validated before use in the inspector or canvas. */
@@ -59,11 +59,17 @@ export function validateBodyInspection(value: unknown, expectedCellId: number): 
   const pools = body.foodPotential;
   if (!pools || ![pools.body,pools.reserve,pools.gut,pools.atp,pools.total].every(n => Number.isFinite(n) && n >= 0)
     || Math.abs(pools.total - (pools.body+pools.reserve+pools.gut+pools.atp)) > 1e-8*Math.max(1,pools.total)) return fail();
-  if (body.colony !== undefined && (!body.colony || !Number.isSafeInteger(body.colony.neighbors)
-    || !Array.isArray(body.colony.neighborIds) || body.colony.neighbors !== body.colony.neighborIds.length
-    || !body.colony.neighborIds.every((id,i,ids)=>Number.isSafeInteger(id) && id>0 && id<=0xffffffff
-      && id!==body.cellId && (i===0 || ids[i-1]<id))
-    || ![body.colony.energyNet,body.colony.mineralNet,body.colony.carbonNet].every(angle))) return fail();
+  if (body.colony !== undefined) {
+    const group = body.colony;
+    const validIds = (ids: number[]) => Array.isArray(ids) && ids.every((id,i) =>
+      Number.isSafeInteger(id) && id>0 && id<=0xffffffff && id!==body.cellId && (i===0 || ids[i-1]<id));
+    if (!group || !validIds(group.neighborIds) || group.neighbors!==group.neighborIds.length
+      || ![group.energyNet,group.mineralNet,group.carbonNet].every(angle)) return fail();
+    const kinds = [group.colonyNeighborIds,group.feedingNeighborIds,group.contactNeighborIds];
+    if (!kinds.every(validIds)) return fail();
+    const classified = kinds.flat().sort((a,b)=>a-b);
+    if (classified.length !== group.neighbors || classified.some((id,i)=>id!==group.neighborIds[i])) return fail();
+  }
   if (body.cellular != null) {
     const cellular = body.cellular;
     const roles = new Set(['scaffold','anchor','motor','filament','pigment','enzyme','membrane','transporter','receptor','regulator','replicase','constrictor','adhesin']);
@@ -93,7 +99,7 @@ export interface LanguageSchema {
   version:3; signals:{name:string;type:GenomeValueType}[]; outputs:{name:string;type:GenomeValueType;required:boolean;default:GenomeValue}[];
   functions?:{name:string;arity:number}[];
   maxNodes:number;maxSourceBytes:number;registersPerType:number;
-  cellular?: { marker:'cellular;'; products:{name:string;arguments:string[]}[]; assemblies:{name:string;requiredRoles:string[]}[];
+  cellular?: { marker:'cellular;'; counts:{marker:'cellular counts;';perUnit:number;integerSignals:string[]}; products:{name:string;arguments:string[]}[]; assemblies:{name:string;requiredRoles:string[]}[];
     mechanisms?:{name:string;constructor:string;target:string|null;requiredRoles:string[];description:string;receptorFields?:{name:string;type:GenomeValueType;requiresValid:boolean}[]}[];
     recipeControls?:{name:string;type:GenomeValueType;default:GenomeValue}[];
     registers:{prefixes:string[];addressesPerType:number;upkeepPerSecond:number;clearWins:boolean};
@@ -145,7 +151,7 @@ export interface EnvironmentSnapshot extends EnvironmentMetadata {
   samples: Float32Array;
 }
 export interface RegisterEntry { name: string; type: string; value: unknown }
-export type GenomeValueType = 'integer' | 'scalar' | 'boolean' | 'string' | 'vec2';
+export type GenomeValueType = 'integer' | 'count' | 'scalar' | 'boolean' | 'string' | 'vec2';
 export interface GenomeDiagnostic {
   severity: 'error'; message: string;
   /** One-based line and UTF-16 column. */
@@ -210,7 +216,7 @@ export function validateGenomeEvaluation(value: unknown, expectedCellId?: number
   if (!value || typeof value !== 'object') return fail();
   const trace = value as GenomeEvaluation;
   const cellular = trace.mode === 'cellular';
-  const types = new Set<GenomeValueType>(['integer', 'scalar', 'boolean', 'string', 'vec2']);
+  const types = new Set<GenomeValueType>(['integer', 'count', 'scalar', 'boolean', 'string', 'vec2']);
   const positiveId = (id: number): boolean => Number.isInteger(id) && id >= 1 && id <= 0xffff_ffff;
   if (trace.version !== 1 || trace.semantics !== 'current-snapshot'
     || (trace.mode !== undefined && trace.mode !== 'legacy' && !cellular)
@@ -244,6 +250,7 @@ export function validateGenomeEvaluation(value: unknown, expectedCellId?: number
   const typed = (type: GenomeValueType, item: unknown): boolean => {
     if (!types.has(type)) return false;
     switch (type) {
+      case 'count': return typeof item === 'number' && Number.isInteger(item) && item >= 0 && item <= 0xffff_ffff;
       case 'integer': return typeof item === 'number' && Number.isInteger(item) && item >= -2147483648 && item <= 2147483647;
       case 'scalar': return scalar(item);
       case 'boolean': return typeof item === 'boolean';
@@ -309,7 +316,7 @@ export function validateGenomeGraph(value: unknown): GenomeGraph {
   if (graph.version !== 1 || (graph.mode!==undefined && graph.mode!=='legacy' && graph.mode!=='cellular') || !Array.isArray(graph.nodes) || graph.nodes.length > 8192
     || !Array.isArray(graph.roots) || graph.roots.length > 9990 + (graph.mode === 'cellular' ? 256 + 64 * 3 : WRITE_SIGNAL_COUNT)
     || (graph.contactMessages !== undefined && (graph.mode !== 'cellular' || !validMessagePolicy(graph.contactMessages)))) return fail();
-  const types = new Set(['integer', 'scalar', 'boolean', 'string', 'vec2']);
+  const types = new Set(['integer', 'count', 'scalar', 'boolean', 'string', 'vec2']);
   const kinds = new Set(['constant', 'sensor', 'register', 'populated', 'reference', 'unary', 'binary', 'conditional', 'call']);
   for (let index = 0; index < graph.nodes.length; index++) {
     const node = graph.nodes[index];
@@ -349,7 +356,12 @@ export interface WorldSnapshot {
   nutrientTotal: number; nutrientInputTotal: number; nutrientDissolvedTotal: number; nutrientFoodTotal: number; nutrientCellTotal: number;
   environment: EnvironmentSnapshot;
 }
+const BOND_KINDS = ['feeding','colony','contact'] as const;
+const BOND_NEIGHBORS = {feeding:'feedingNeighborIds',colony:'colonyNeighborIds',contact:'contactNeighborIds'} as const;
+export type BondKind = typeof BOND_KINDS[number];
+export type RenderBond = [RenderCell,RenderCell,BondKind];
 export interface RenderCell {
+  colonyNeighborIds?:number[]; feedingNeighborIds?:number[]; contactNeighborIds?:number[];
   attachedNeighbors?:number; neighborIds?:number[]; colonySize?:number; contactSignal?:number;
   id:number; genomeId:number; x:number; y:number; vx:number; vy:number; angle:number; radius:number;
   energy:number; energyCapacity:number; gutEnergy:number; gutCapacity:number; integrity:number; photosynthesisRate:number;
@@ -358,14 +370,27 @@ export interface RenderCell {
 }
 export interface RenderSnapshot {
   tick:number; time:number; width:number; height:number; births:number; deaths:number; eaten:number;
-  mutationRate:number; generation:number; cells:RenderCell[]; food:Food[]; bonds:[RenderCell,RenderCell][];
+  mutationRate:number; generation:number; cells:RenderCell[]; food:Food[]; bonds:RenderBond[];
 }
 export type RenderWorldSnapshot = RenderSnapshot & { environment: EnvironmentSnapshot };
 export interface SimulationSummary {
   time:number; population:number; food:number; births:number; deaths:number; generation:number;
 }
 export interface SimulationStatus { tick: number; summary: SimulationSummary }
+/** Native u64s remain decimal strings across the worker and UI boundary. */
+export type CountBudget = { held: string; added: string; removed: string };
+export type CountAudit = Record<'mineral' | 'carbon' | 'oxygen' | 'energy', CountBudget>;
+
+export function decodeCountAudit(words: BigUint64Array): CountAudit {
+  if (words.length !== 12) throw new Error('The count audit must contain four budgets.');
+  const budget = (offset: number): CountBudget => ({
+    held: words[offset].toString(), added: words[offset + 1].toString(), removed: words[offset + 2].toString(),
+  });
+  return { mineral: budget(0), carbon: budget(3), oxygen: budget(6), energy: budget(9) };
+}
+
 export interface MetricsSnapshot extends SimulationSummary {
+  countAudit?: CountAudit;
   tick:number; eaten:number; mutationRate:number; mutatedBirths:number; mutationSkipped:number;
   genomeCount:number; genomeLimit:number; genomeBytes:number; genomeByteLimit:number;
   predationCount:number; attackCount:number; photosynthesisTotal:number; energyTotal:number; energyInputTotal:number;
@@ -392,7 +417,7 @@ export function decodeRenderSnapshot(data: Float64Array): RenderSnapshot {
   if (data.length < RENDER_HEADER || !Number.isSafeInteger(data[2]) || data[2] < 0
     || !Number.isSafeInteger(data[3]) || data[3] < 0
     || !Number.isSafeInteger(signalCount) || signalCount < 0 || signalCount > data[2]
-    || data.length < bondsStart || (data.length - bondsStart) % 2 !== 0) {
+    || data.length < bondsStart || (data.length - bondsStart) % 3 !== 0) {
     throw new Error('The render snapshot has an invalid layout.');
   }
   const cells: RenderCell[] = [];
@@ -421,14 +446,14 @@ export function decodeRenderSnapshot(data: Float64Array): RenderSnapshot {
     previous = index;
     cells[index].contactSignal = value;
   }
-  const bonds:[RenderCell,RenderCell][] = [];
+  const bonds:RenderBond[] = [];
   if (bondsStart < data.length) {
     const byId = new Map(cells.map(cell=>[cell.id,cell]));
     if (byId.size!==cells.length || cells.some(cell=>!Number.isSafeInteger(cell.id) || cell.id<=0 || cell.id>0xffffffff)) {
       throw new Error('The render snapshot contains an invalid colony endpoint.');
     }
     let previousA = 0, previousB = 0;
-    for (let n = bondsStart; n < data.length; n += 2) {
+    for (let n = bondsStart; n < data.length; n += 3) {
       const a = byId.get(data[n]), b = byId.get(data[n+1]);
       if (!a || !b || a.id >= b.id || a.id < previousA || (a.id === previousA && b.id <= previousB)) {
         throw new Error('The render snapshot contains an invalid colony bond.');
@@ -436,17 +461,22 @@ export function decodeRenderSnapshot(data: Float64Array): RenderSnapshot {
       previousA = a.id; previousB = b.id;
       (a.neighborIds ??= []).push(b.id);
       (b.neighborIds ??= []).push(a.id);
-      bonds.push([a,b]);
+      const code = data[n+2];
+      if (code !== 0 && code !== 1 && code !== 2) throw new Error('The render snapshot contains an invalid bond kind.');
+      const kind = BOND_KINDS[code];
+      const key = BOND_NEIGHBORS[kind];
+      (a[key] ??= []).push(b.id);
+      (b[key] ??= []).push(a.id);
+      bonds.push([a,b,kind]);
     }
-    // A direct neighbor and a member reached through another cell are distinct.
-    // Each bonded cell is visited once, even for cycles and branched colonies.
+    // Only bonds retained at division join a multicellular colony.
     for (const cell of cells) {
-      if (!cell.neighborIds || cell.colonySize) continue;
+      if (cell.neighborIds) cell.attachedNeighbors = cell.neighborIds.length;
+      if (!cell.colonyNeighborIds || cell.colonySize) continue;
       const members = [cell];
       cell.colonySize = 1;
       for (const member of members) {
-        member.attachedNeighbors = member.neighborIds!.length;
-        for (const peerId of member.neighborIds!) {
+        for (const peerId of member.colonyNeighborIds!) {
           const peer = byId.get(peerId)!;
           if (!peer.colonySize) { peer.colonySize = 1; members.push(peer); }
         }
@@ -496,6 +526,8 @@ interface WasmExports extends WebAssembly.Exports {
   restore_state(ptr: number, len: number): number;
   place_cell(genomeId:number, x:number, y:number):number;
   move_cell(id:number, x:number, y:number, colony:number):number;
+  set_count_chemistry(enabled:number):number;
+  uses_count_chemistry():number;
   set_cell_stores(id:number, mask:number, energy:number, minerals:number):number;
   energy_withdrawn_total():number; mineral_withdrawn_total():number;
   seed_cells(genomeId: number, count: number, x: number, y: number): number;
@@ -511,7 +543,8 @@ interface WasmExports extends WebAssembly.Exports {
   genome_count(): number; genome_limit(): number;
   tick(steps: number): number;
   snapshot_ptr(): number; snapshot_len(): number;
-  render_snapshot_ptr(): number; metrics_snapshot_ptr(): number; cell_snapshot_ptr(id: number): number;
+  render_snapshot_ptr(): number; render_links_snapshot_ptr(): number; metrics_snapshot_ptr(): number; cell_snapshot_ptr(id: number): number;
+  count_audit_ptr(): number;
   summary_snapshot_ptr(): number; presentation_len(): number;
   set_environment(temperature: number, light: number, current: number): void;
   set_world_size(width: number, height: number): number;
@@ -591,7 +624,7 @@ export class Engine {
       if (!value || typeof value !== 'object') throw new Error('The engine returned invalid genome analysis.');
       const analysis = value as GenomeAnalysis;
       const range = (from: number, to: number): boolean => Number.isInteger(from) && Number.isInteger(to) && from >= 0 && to >= from && to <= source.length;
-      const types = new Set<GenomeValueType>(['integer', 'scalar', 'boolean', 'string', 'vec2']);
+      const types = new Set<GenomeValueType>(['integer', 'count', 'scalar', 'boolean', 'string', 'vec2']);
       if (typeof analysis.valid !== 'boolean' || analysis.sourceBytes !== bytes.length
         || !Number.isInteger(analysis.nodeCount) || analysis.nodeCount < 0 || analysis.nodeCount > 8192
         || !Array.isArray(analysis.diagnostics) || analysis.diagnostics.length !== (analysis.valid ? 0 : 1)
@@ -625,6 +658,11 @@ export class Engine {
     if (this.wasm.reset(seed >>> 0, genomeId) !== 1) throw new Error(this.readError() || 'The simulation could not be reset.');
   }
   /** Fresh dynamics and no cells; the configured environment and rates are retained. */
+  setCountChemistry(enabled:boolean): void {
+    if (!this.wasm.set_count_chemistry(Number(enabled))) throw new Error(this.readError());
+  }
+  usesCountChemistry(): boolean { return this.wasm.uses_count_chemistry() === 1; }
+
   resetEmpty(seed: number): void {
     if (this.wasm.reset_empty(seed >>> 0) !== 1) throw new Error(this.readError() || 'The simulation could not be reset.');
   }
@@ -826,7 +864,7 @@ export class Engine {
       if (![0, 1].includes(data[n + 6]) || !data.subarray(n, n + 10).every(Number.isFinite)) throw new Error('The environment contains an invalid barrier.');
       barriers.push({ id: data[n], x: data[n + 1], y: data[n + 2], length: data[n + 3], width: data[n + 4], angle: data[n + 5], floating: data[n + 6] === 1, vx: data[n + 7], vy: data[n + 8] });
     }
-    const metadata: EnvironmentMetadata = { columns, rows, width, height, ambientTemperature: data[2], ambientLight: data[3], currentStrength: data[4], initialNutrients: data[6], nutrientRemovedTotal: data[10],
+    const metadata: EnvironmentMetadata = { columns, rows, width, height, ambientTemperature: data[2], ambientLight: data[3], currentStrength: data[4], initialNutrients: data[6], nutrientRemovedTotal: this.wasm.nutrient_removed_total(),
       gases: { initialOxygen: data[11], initialCarbon: data[12], mode: data[13] === 1 ? 'open' : 'sealed', exchangeRate: data[14], oxygenEquilibrium: data[15], carbonEquilibrium: data[16] },
       oxygenInputTotal: data[17], oxygenRemovedTotal: data[18], carbonInputTotal: data[19], carbonRemovedTotal: data[20], sources, barriers };
     return fields ? { ...metadata, samples: data.slice(21, sampleEnd) } : metadata;
@@ -834,7 +872,7 @@ export class Engine {
 
   /** Owned compact bytes can be transferred to the UI without cloning cell objects. */
   renderSnapshotData(): Float64Array {
-    const pointer = this.wasm.render_snapshot_ptr();
+    const pointer = this.wasm.render_links_snapshot_ptr();
     return new Float64Array(this.wasm.memory.buffer, pointer, this.wasm.presentation_len()).slice();
   }
   renderSnapshot(): RenderSnapshot { return decodeRenderSnapshot(this.renderSnapshotData()); }
@@ -842,7 +880,16 @@ export class Engine {
     const pointer = this.wasm.metrics_snapshot_ptr();
     return new Float64Array(this.wasm.memory.buffer, pointer, this.wasm.presentation_len()).slice();
   }
-  metricsSnapshot(): MetricsSnapshot { return decodeMetricsSnapshot(this.metricsSnapshotData()); }
+  countAudit(): CountAudit | undefined {
+    const pointer = this.wasm.count_audit_ptr();
+    return pointer ? decodeCountAudit(new BigUint64Array(this.wasm.memory.buffer, pointer, 12)) : undefined;
+  }
+  metricsSnapshot(): MetricsSnapshot {
+    const metrics = decodeMetricsSnapshot(this.metricsSnapshotData());
+    const audit = this.countAudit();
+    if (audit) metrics.countAudit = audit;
+    return metrics;
+  }
   cellSnapshot(id: number): Cell | null {
     if (!Number.isInteger(id) || id < 1 || id > 0xffff_ffff) return null;
     const pointer = this.wasm.cell_snapshot_ptr(id);

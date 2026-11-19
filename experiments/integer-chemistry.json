@@ -1,0 +1,54 @@
+{
+  "wasmSha256": "71db568e8d25982599c849c545b6f1a9da5c5c3335c209390a838aca3744b4ac",
+  "countsPerFormerUnit": 10000,
+  "slowEmitterCountsInTenSeconds": 10,
+  "adhesion": {
+    "tick": 37,
+    "remainingATP": 657517,
+    "worldMineralDriftCounts": 0,
+    "carbonAllocatedToBody": 250,
+    "energyDissipated": 5955
+  },
+  "finalLedger": {
+    "mineral": {
+      "held": "3788100",
+      "supplied": "3788100",
+      "removedOrConsumed": "0"
+    },
+    "carbon": {
+      "held": "5595773",
+      "supplied": "6043276",
+      "removedOrConsumed": "447503"
+    },
+    "oxygen": {
+      "held": "4661984",
+      "supplied": "9590546",
+      "removedOrConsumed": "4928562"
+    },
+    "energy": {
+      "held": "71096457",
+      "supplied": "123678780",
+      "removedOrConsumed": "0"
+    }
+  },
+  "sameSeed120Seconds": {
+    "continuous": {
+      "population": 24,
+      "births": 13,
+      "deaths": 8,
+      "successfulKills": 8,
+      "firstObservedKillSeconds": 36,
+      "firstObservedBirthSeconds": 86,
+      "steppingMilliseconds": 2212
+    },
+    "counts": {
+      "population": 20,
+      "births": 13,
+      "deaths": 12,
+      "successfulKills": 12,
+      "firstObservedKillSeconds": 35,
+      "firstObservedBirthSeconds": 84,
+      "steppingMilliseconds": 2230
+    }
+  }
+}

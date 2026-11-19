@@ -152,7 +152,7 @@ assert.equal(occupancyOnly.nodes.find(node => node.id === 'register:rf999').type
 assert.equal(occupancyOnly.nodes.find(node => node.id === 'register:rf999').sourceIds.length, 0, 'An occupancy check is not a value read');
 
 const contact=project('cellular; publish rf999=0; avoid_message rf002; adhere_message rf999; signal rf098=7; rf002=rf001 when populated(rf001);');
-assert.deepEqual(contact.graph.contactMessages,{publish:'rf999',avoid:'rf002',adhere:'rf999',initial:0,signal:'rf098',signalInitial:7});
+assert.deepEqual(contact.graph.contactMessages,{publish:'rf999',avoid:'rf002',adhere:'rf999',formation:'daughters',initial:0,signal:'rf098',signalInitial:7});
 assert.ok(contact.network.nodes.some(node=>node.id==='register:rf999'),'A published address exists even with no reads or tick writes');
 assert.ok(!contact.network.edges.some(edge=>edge.to==='register:rf999'),'A birth initializer creates no tick-update edge');
 assert.ok(contact.network.edges.some(edge=>edge.from==='register:rf001' && edge.to==='register:rf002' && edge.temporal));

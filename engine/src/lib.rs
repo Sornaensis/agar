@@ -4,6 +4,7 @@
 pub mod body;
 pub mod cellular;
 mod checkpoint;
+pub mod counts;
 pub mod environment;
 pub mod genome;
 mod material_allocation;
@@ -20,6 +21,7 @@ struct Engine {
     snapshot: Vec<f64>,
     presentation_buffer: Vec<f64>,
     environment_snapshot: Vec<f32>,
+    audit_buffer: [u64;12],
     source_buffer: Vec<u8>,
     memory_buffer: Vec<u8>,
     graph_buffer: Vec<u8>,
@@ -39,6 +41,7 @@ impl Engine {
             snapshot: Vec::new(),
             presentation_buffer: Vec::new(),
             environment_snapshot: Vec::new(),
+            audit_buffer: [0;12],
             source_buffer: Vec::new(),
             memory_buffer: Vec::new(),
             graph_buffer: Vec::new(),
@@ -127,7 +130,7 @@ thread_local! { static ENGINE: RefCell<Engine> = RefCell::new(Engine::new()); }
 
 #[no_mangle]
 pub extern "C" fn abi_version() -> u32 {
-    20
+    21
 }
 
 /// Allocate a writable, zero-initialized byte buffer. The caller must deallocate
@@ -793,6 +796,31 @@ pub extern "C" fn reset(seed: u32, genome_id: u32) -> u32 {
     })
 }
 
+/// Twelve exact u64 ledger counters. The four triples are mineral, carbon,
+/// oxygen and usable/chemical energy. A zero pointer identifies continuous mode.
+#[no_mangle]
+pub extern "C" fn count_audit_ptr() -> *const u64 {
+    ENGINE.with(|engine| {
+        let mut engine=engine.borrow_mut();
+        let Some(ledger)=engine.world.count_audit() else { return std::ptr::null(); };
+        engine.audit_buffer=ledger;
+        engine.audit_buffer.as_ptr()
+    })
+}
+/// Resource arithmetic is chosen on a fresh, empty world before founders enter.
+#[no_mangle]
+pub extern "C" fn set_count_chemistry(enabled:u32) -> u32 {
+    edit_world(|world,_| {
+        if enabled>1 { return Err("Unknown chemistry mode".into()); }
+        world.set_count_chemistry(enabled!=0)?;
+        Ok(1)
+    })
+}
+#[no_mangle]
+pub extern "C" fn uses_count_chemistry() -> u32 {
+    ENGINE.with(|engine| u32::from(engine.borrow().world.uses_count_chemistry()))
+}
+
 /// Start a new organism-free habitat with the current chemical recipe.
 #[no_mangle]
 pub extern "C" fn reset_empty(seed: u32) -> u32 {
@@ -903,6 +931,16 @@ pub extern "C" fn snapshot_len() -> u32 {
 /// Additive ABI 10 projections. Copy the buffer before another engine call.
 #[no_mangle]
 pub extern "C" fn render_snapshot_ptr() -> *const f64 {
+    render_projection(false)
+}
+
+/// Same compact cell, particle, and signal records; each bond adds its kind.
+#[no_mangle]
+pub extern "C" fn render_links_snapshot_ptr() -> *const f64 {
+    render_projection(true)
+}
+
+fn render_projection(typed: bool) -> *const f64 {
     ENGINE.with(|engine| {
         let mut engine = engine.borrow_mut();
         let Engine {
@@ -912,7 +950,7 @@ pub extern "C" fn render_snapshot_ptr() -> *const f64 {
             ..
         } = &mut *engine;
         world.render_snapshot(presentation_buffer);
-        world.append_colony_activity(genomes, presentation_buffer);
+        world.append_colony_activity(genomes, presentation_buffer, typed);
         presentation_buffer.as_ptr()
     })
 }
@@ -1081,7 +1119,7 @@ mod tests {
         engine.world.cells[0].vy = -1.25;
         engine.world.cells[0].integrity = 0.8;
         engine.world.snapshot(&mut engine.snapshot);
-        assert_eq!(abi_version(), 20);
+        assert_eq!(abi_version(), 21);
         assert_eq!(simulation::CELL_STRIDE, 163);
         assert_eq!(engine.snapshot.len(), 12 + 22 * simulation::CELL_STRIDE);
         assert_eq!(engine.snapshot[7], simulation::WIDTH as f64);

@@ -157,8 +157,8 @@
     ]
   },
   "after": {
-    "abi": 20,
-    "wasmSha256": "69bd748d3c7575391329d32239cab375a2e15a334b903fe6b71f4a878747655b",
+    "abi": 21,
+    "wasmSha256": "71db568e8d25982599c849c545b6f1a9da5c5c3335c209390a838aca3744b4ac",
     "sources": {
       "Phototroph": "9bdcc6244261d12ba9046822b43360e625d07ca7f8d68fe64089e55cbc6d1ac0",
       "Predator": "4b1e4d029061936de8d5eee21fd4f88a65cae4d0fb4003270b3d451faedf5603"

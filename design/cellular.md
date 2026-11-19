@@ -1,25 +1,45 @@
 # Cellular programs
 
-Start a source file with `cellular;` to use products, genes and assembly recipes.
-The primary built-in genomes use this mode. Existing programs without the marker
-keep the previous action/register language and physical bodies.
+Start a new program with `cellular counts;`. Its resource stocks and recipe
+ingredients use whole counts. The earlier `cellular;` header keeps the original
+resource units, including when a saved genome runs in a count-based world.
+Programs without either header use the action/register language.
+
+## Quantities in a counted program
+
+10,000 counts equal one physical unit. A recipe that needs 0.02 units of
+membrane specifies `Skin: 200;`. Ingredient amounts must be positive whole
+counts. A stock can hold 0 through 4,294,967,295 counts.
+
+| Whole resource counts | Continuous readings |
+| --- | --- |
+| `energy`, `energy.capacity`, `nutrient.stored`, `nutrient.capacity` | Storage fractions such as `energy.fraction` |
+| `gut.energy`, `gut.capacity`, and each substrate’s `.energy` and `.nutrients` | Digestion, respiration, and other rates |
+| `oxygen`, `carbon.organic`, `carbon.inorganic` | Receptor concentrations, readings, motion and angles |
+| `pool.Name` | `concentration.Name` in mass per area, `built.Name` in functional mass, body area and replication progress |
+
+With a count operand, whole-number addition, subtraction and multiplication
+saturate at the count bounds. Comparisons between counts and integers are exact.
+Division gives a scalar ratio. Use a decimal operand when a calculation needs
+a fractional result. Scalar registers can hold every count exactly. Signed
+integer registers and `int()` clamp to the signed 32-bit range.
 
 ## Declarations and controls
 
 ```text
-cellular;
+cellular counts;
 product Mount = anchor();
 product Rotor = motor();
 product Tail = filament();
 
-gene mounts: Mount = if built.Swimmer + 0.000001 < 0.04 && pool.Mount < 0.002 then 1 else 0;
-gene rotors: Rotor = if built.Swimmer + 0.000001 < 0.04 && pool.Rotor < 0.002 then 1 else 0;
-gene tails: Tail = if built.Swimmer + 0.000001 < 0.04 && pool.Tail < 0.002 then 1 else 0;
+gene mounts: Mount = if built.Swimmer + 0.000001 < 0.04 && pool.Mount < 20 then 1 else 0;
+gene rotors: Rotor = if built.Swimmer + 0.000001 < 0.04 && pool.Rotor < 20 then 1 else 0;
+gene tails: Tail = if built.Swimmer + 0.000001 < 0.04 && pool.Tail < 20 then 1 else 0;
 
 assembly Swimmer: propel() {
-  Mount: 0.01;
-  Rotor: 0.01;
-  Tail: 0.02;
+  Mount: 100;
+  Rotor: 100;
+  Tail: 200;
   at: 3.141592653589793;
   direction: 0;
   activity: 0.25;
@@ -31,7 +51,7 @@ assembly Swimmer: propel() {
 | `product Name = kind();` | A named material type; declaration creates no stock. |
 | `gene name: Product = expression;` | Requested synthesis effort. Genes share paid translation capacity, energy, minerals and space. |
 | `assembly Name: operation(target) { ... }` | A physical recipe for one mechanism. Each ingredient specifies actual mass per complete machine. |
-| `pool.Name` | Uninstalled mass of the named product in the cell. |
+| `pool.Name` | Uninstalled stock of the named product, in whole counts. |
 | `concentration.Name` | Uninstalled product mass divided by current envelope area. Growth dilutes this value. |
 | `built.Name` | Functional mass of completed machines matching that recipe, reduced by damage. Unfinished machines contribute zero. |
 | `sensed.Name.field` | A measurement from the named, physically built receptor. Available fields depend on its mechanism. |
@@ -110,11 +130,11 @@ product Blank = scaffold();
 product Glue = adhesin(Blank);
 product Mount = anchor();
 product Skin = membrane();
-gene blanks: Blank = if pool.Blank < 0.001 then 1 else 0;
-gene finish: Glue = if pool.Glue < 0.001 then 1 else 0;
-gene mounts: Mount = if pool.Mount < 0.001 then 1 else 0;
-gene skins: Skin = if pool.Skin < 0.001 then 1 else 0;
-assembly Coat: adhere() { Mount: 0.008; Skin: 0.008; Glue: 0.004; }
+gene blanks: Blank = if pool.Blank < 10 then 1 else 0;
+gene finish: Glue = if pool.Glue < 10 then 1 else 0;
+gene mounts: Mount = if pool.Mount < 10 then 1 else 0;
+gene skins: Skin = if pool.Skin < 10 then 1 else 0;
+assembly Coat: adhere() { Mount: 80; Skin: 80; Glue: 40; }
 ```
 
 Fully active, intact surfaces provide one binding site per 0.0015 installed
@@ -173,8 +193,8 @@ The daughter-retention route models clonal growth observed in the choanoflagella
 product Skin = membrane();
 product Carrier = transporter();
 assembly CarbonPort: junction(carbon) {
-  Skin: 0.01;
-  Carrier: 0.01;
+  Skin: 100;
+  Carrier: 100;
   activity: if carbon.organic > 0 then 1 else 0.5;
 }
 ```
@@ -193,25 +213,25 @@ The fractional imbalance and the weaker side’s active mass limit the amount on
 
 A named `junction(signal)` uses membrane and receptor material. Both cells must be attached and operate signal junctions. For a junction named `Bus`, `sensed.Bus.count` counts directly attached partners with a populated signal register, and `sensed.Bus.value` gives their arithmetic mean. An occupied zero contributes to the mean. With no contributing partners, `sensed.Bus.valid` is false, and count and value are zero. Each cell reads the same start-of-tick publications, so a relay needs a new tick for each hop.
 
-[Crown rosette](../examples/crown-rosette.cell) uses this count to recognize a cell with two or more signaling neighbors. It publishes 1. A cell with one signaling neighbor and an incoming mean above 0.5 activates a second light harvester. The player shows these readings under **Body → Incoming colony signals**.
+[Crown rosette](../examples/crown-rosette.cell) uses this count to recognize a cell with two or more signaling neighbors. It publishes 1. A cell with one signaling neighbor and an incoming mean above 0.5 activates a second light harvester. The player shows these readings under **Body → Incoming signals**.
 
 ## Physical memory and pure functions
 
 ```text
 product Brake = regulator(8);
 gene conserve: Brake =
-  if energy.fraction < 0.45 && pool.Brake < 0.02 then 0.2 else 0;
+  if energy.fraction < 0.45 && pool.Brake < 200 then 0.2 else 0;
 ```
 
 `regulator(8)` has an eight-second half-life. Synthesis costs real material and
 energy; decay returns its material and dissipates retained energy. Use its stock
-in an activity expression, for example `clamp(1 - pool.Brake / 0.02, 0, 1)`.
+in an activity expression, for example `clamp(1 - pool.Brake / 200, 0, 1)`.
 The stock persists through ticks and is partitioned at division. Read
-`concentration.Brake` for mass per envelope area; `pool` itself reports mass.
+`concentration.Brake` for mass per envelope area; `pool` itself reports whole counts.
 Other declared products are stable while uninstalled, and still occupy space and
 incur upkeep.
 
-`concentration.Brake` directly reads `pool.Brake / body.area`. For a smooth
+In a counted program, `concentration.Brake` measures `pool.Brake / 10000 / body.area`. For a smooth
 response, `activate(c, k)` computes `max(c, 0) / (max(c, 0) + max(k, 0))`, with a
 zero result when the denominator is zero. `repress(c, k)` is `1 - activate(c, k)`.
 These helpers have no state or implicit synthesis. For example:

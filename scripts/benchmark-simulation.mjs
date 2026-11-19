@@ -82,7 +82,7 @@ function advance(api, count) {
 }
 async function create(engine, scenario) {
   const api = (await WebAssembly.instantiate(engine.module, {})).exports;
-  assert.equal(api.abi_version(), 20, `${engine.name}: this benchmark requires a compatible ABI20 engine`);
+  assert.equal(api.abi_version(), 21, `${engine.name}: this benchmark requires a compatible ABI21 engine`);
   const c = scenario.config;
   assert.equal(api.set_world_size(c.width ?? 1200, c.height ?? 760), 1, error(api));
   api.set_environment(c.ambientTemperature, c.ambientLight, c.currentStrength);
@@ -100,6 +100,7 @@ async function create(engine, scenario) {
   for (const barrier of c.barriers ?? []) assert.ok(api.add_barrier(barrier.x, barrier.y,
     barrier.length, barrier.width, barrier.angle, Number(barrier.floating)), error(api));
   assert.equal(api.reset_empty(42), 1, error(api));
+  assert.equal(api.set_count_chemistry(1), 1, error(api));
   const donorFounders = scenario.tissueTarget ? produceTissue(api, scenario.tissueTarget) : 0;
   if (donorFounders) setBoundary(gases.mode === 'open');
   for (const [name, count] of scenario.populations) {
@@ -123,7 +124,7 @@ function produceTissue(api, target) {
     const ptr = api.render_snapshot_ptr();
     const rows = new Float64Array(api.memory.buffer, ptr + 12 * 8, batch * 21);
     const ids = Array.from({ length: batch }, (_, i) => rows[i * 21]);
-    for (const cell of ids) assert.equal(api.set_cell_stores(cell, 1, 1e-7, 0), 1, error(api));
+    for (const cell of ids) assert.equal(api.set_cell_stores(cell, 1, 0.0001, 0), 1, error(api));
     advance(api, 1);
     donors += batch;
     const summary = projection(api, 'summary_snapshot_ptr');
@@ -267,9 +268,9 @@ function exportMeasurements(api, selectedId) {
 }
 const report = {
   runtime: process.version, runtimeFlags: process.execArgv, platform: process.platform, architecture: process.arch,
-  abi: 20, seed: 42, measuredTicks: ticks, samples, scratchWarmTicks: 5, warmupCheckInterval: 120, exportCallsPerSample: 30,
+  abi: 21, resourceArithmetic: 'whole counts', seed: 42, measuredTicks: ticks, samples, scratchWarmTicks: 5, warmupCheckInterval: 120, exportCallsPerSample: 30,
   note: 'Release WASM in Node/V8. Tick and Rust export timings exclude JS hydration/copies, worker transfer/scheduling, main-thread rendering and setup. Medians of identical trajectories with alternating engine order.',
-  tissuePreparation: 'Scattered ordinary founders start in anoxic water with a sealed surface. Their ATP is withdrawn to 1e-7 before one upkeep tick per cohort. The scenario surface boundary is restored before seeding resident populations and warming the world.',
+  tissuePreparation: 'Scattered ordinary founders start in anoxic water with a sealed surface. Their ATP is withdrawn to one ATP count before one upkeep tick per cohort. The scenario surface boundary is restored before seeding resident populations and warming the world.',
   equivalence: 'Canonical checkpoints and legacy world/environment buffers must match exactly. Compact projections match those legacy values; only metrics header[13] (genomeBytes) is normalized because derived execution-plan storage is now counted.',
   engines: engines.map(({ name, sha256 }) => ({ name, sha256 })), scenarios: [],
 };

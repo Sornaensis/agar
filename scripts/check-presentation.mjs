@@ -23,6 +23,7 @@ const settle = async () => { for (let i = 0; i < 16; i++) await Promise.resolve(
     status() { calls.status++; return { tick: this.tickValue, summary: this.summary() }; },
     tick(steps) { this.tickValue += this.fail ? 2 : steps; if (this.fail) throw new Error('Partial tick failure'); },
     renderSnapshotData() { calls.frame++; const data = new Float64Array(12); data[0] = this.tickValue; data[1] = this.tickValue / 30; data[4] = 2; data[5] = 2; data[11] = 1; return data; },
+    countAudit() { return undefined; },
     metricsSnapshotData() { calls.metrics++; return Float64Array.of(this.tickValue); },
     environmentMetadata() { calls.metadata++; return { sources: [], barriers: [], columns: 1, rows: 1 }; },
     environment() { calls.fields++; return { sources: [], barriers: [], columns: 1, rows: 1, samples: new Float32Array(7) }; },
@@ -57,6 +58,33 @@ const appFunction = name => {
   const node = app.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
   assert.ok(node); return compile(node.getText(app));
 };
+
+// Exercise exact u64 decoding and rendering above JavaScript's safe integer
+// range. A one-count imbalance or energy dissipation remains observable.
+{
+  const source = await readFile(new URL('../src/engine.ts',import.meta.url),'utf8');
+  const ast = ts.createSourceFile('engine.ts',source,ts.ScriptTarget.ES2022,true);
+  const fn = ast.statements.find(node=>ts.isFunctionDeclaration(node) && node.name?.text==='decodeCountAudit');
+  const {decodeCountAudit} = await import(url(fn.getText(ast)));
+  const large = 9007199254740993n;
+  const audit = decodeCountAudit(BigUint64Array.of(large,large+1n,1n,large,large,0n,large,large+3n,3n,large,large+8n,7n));
+  assert.equal(audit.carbon.held,'9007199254740993');
+  assert.throws(()=>decodeCountAudit(new BigUint64Array(11)),/four budgets/);
+  const elements = new Map();
+  const context = vm.createContext({COUNT_SCALE:10000,metricDefinitions:[],clock:String,
+    active:{world:{environment:{nutrientRemovedTotal:0}},metadata:{history:[]}},
+    $:id=>{if(!elements.has(id)) elements.set(id,{});return elements.get(id);}
+  });
+  vm.runInContext(appFunction('renderMetrics'),context);
+  const metrics = new Proxy({countAudit:audit,flow:{production:.0001},organicCounts:[0,0,0],trophic:{}},{get:(obj,key)=>obj[key]??0});
+  context.renderMetrics(metrics);
+  assert.equal(elements.get('count-oxygen-held').textContent,'9007199254740993');
+  assert.equal(elements.get('count-oxygen-difference').textContent,'0');
+  assert.equal(elements.get('count-energy-difference').textContent,'1');
+  assert.equal(elements.get('dissipated-energy').textContent,'1');
+  assert.equal(elements.get('introduced-material').textContent,'9007199254740994');
+  assert.equal(elements.get('flow-production').textContent,'1 energy counts/s');
+}
 
 // The actual inspector refresh paints once after fresh data, never once before
 // and again after. Paused unchanged state and hidden documents do no work.

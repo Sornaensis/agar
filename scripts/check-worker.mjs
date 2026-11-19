@@ -496,10 +496,28 @@ try {
   assert.ok(migratedGas.metrics.legacyCarbonImported>0,'Legacy organic inventory is explicitly counted at migration');
   checkChemicalBudget(migratedGas.metrics);
   const upgradedGas=await chemistry.saveState();
-  assert.equal(new DataView(upgradedGas.buffer,upgradedGas.byteOffset,upgradedGas.byteLength).getUint32(8,true),16);
+  assert.equal(new DataView(upgradedGas.buffer,upgradedGas.byteOffset,upgradedGas.byteLength).getUint32(8,true),17);
   const migratedFuture=await chemistry.advance(12,{metrics:true,environment:true});
   await chemistry.restoreState(upgradedGas);
   assert.deepEqual(await chemistry.advance(12,{metrics:true,environment:true}),migratedFuture);
+
+  // A native whole-count basin can hold more than a u32 in aggregate.
+  // F64 projection stays available; the exact u64 budget crosses the worker
+  // as decimal strings and survives the normal saved-state entry point.
+  await chemistry.resetEmpty(17);
+  await chemistry.clearBarriers();
+  await chemistry.clearSources();
+  assert.ok(await chemistry.setWorldSize(1920,1920));
+  assert.ok(await chemistry.setInitialGases(100,0));
+  await chemistry.resetEmpty(17);
+  await chemistry.setCountChemistry(true);
+  const expectedOxygen = String(96n * 96n * 100n * 10000n);
+  const counted = await chemistry.presentation({frame:false,metrics:true});
+  assert.deepEqual(counted.metrics.countAudit.oxygen, {held:expectedOxygen,added:expectedOxygen,removed:'0'});
+  assert.deepEqual((await chemistry.metricsSnapshot()).countAudit,counted.metrics.countAudit);
+  const wholeSave=await chemistry.saveState();
+  await chemistry.restoreState(wholeSave);
+  assert.deepEqual((await chemistry.metricsSnapshot()).countAudit,counted.metrics.countAudit);
 
   // A substantial real tick batch runs while the main JS event loop continues.
   await remote.resetEmpty(62);

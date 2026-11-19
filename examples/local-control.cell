@@ -1,6 +1,6 @@
 # Light receptors steer two motors. Shade expresses a decaying brake;
 # paid recycling reclaims the motors, and brighter conditions permit regrowth.
-cellular;
+cellular counts;
 
 product Mount = anchor();
 product Pigment = pigment();
@@ -11,7 +11,7 @@ product Tail = filament();
 product Brake = regulator(6);
 
 fn missing(installed, required) = installed + 0.000001 < required;
-fn buffered(stock, effort) = if stock < 0.001 then effort else 0;
+fn buffered(stock, effort) = if stock < 10 then effort else 0;
 
 let powered = !missing(built.Solar, 0.04);
 let eyes = sensed.LeftEye.valid && sensed.RightEye.valid;
@@ -36,32 +36,32 @@ gene filaments: Tail = buffered(pool.Tail, if need_motors then 1 else 0);
 gene braking: Brake = if eyes && brightness < 0.3 && concentration.Brake < 0.02 then 0.15 else 0;
 
 assembly Solar: harvest(light) {
-  Mount: 0.005;
-  Pigment: 0.03;
-  Catalyst: 0.005;
+  Mount: 50;
+  Pigment: 300;
+  Catalyst: 50;
   start_when: need_solar;
 }
 
 assembly LeftEye: sense(light) {
-  Mount: 0.002;
-  Detector: 0.006;
-  Pigment: 0.002;
+  Mount: 20;
+  Detector: 60;
+  Pigment: 20;
   start_when: need_left_eye;
   at: 1.5707963267948966;
 }
 
 assembly RightEye: sense(light) {
-  Mount: 0.002;
-  Detector: 0.006;
-  Pigment: 0.002;
+  Mount: 20;
+  Detector: 60;
+  Pigment: 20;
   start_when: need_right_eye;
   at: -1.5707963267948966;
 }
 
 assembly LeftMotor: propel() {
-  Mount: 0.005;
-  Rotor: 0.01;
-  Tail: 0.01;
+  Mount: 50;
+  Rotor: 100;
+  Tail: 100;
   start_when: need_left_motor;
   activity: clamp(0.12 - difference, 0, 0.3) * repress(concentration.Brake, 0.005);
   recycle: if resting then activate(concentration.Brake, 0.005) else 0;
@@ -70,9 +70,9 @@ assembly LeftMotor: propel() {
 }
 
 assembly RightMotor: propel() {
-  Mount: 0.005;
-  Rotor: 0.01;
-  Tail: 0.01;
+  Mount: 50;
+  Rotor: 100;
+  Tail: 100;
   start_when: need_right_motor;
   activity: clamp(0.12 + difference, 0, 0.3) * repress(concentration.Brake, 0.005);
   recycle: if resting then activate(concentration.Brake, 0.005) else 0;
@@ -81,7 +81,7 @@ assembly RightMotor: propel() {
 }
 
 assembly Recycler: recycle() {
-  Catalyst: 0.02;
+  Catalyst: 200;
   start_when: need_recycler;
   activity: 1;
 }

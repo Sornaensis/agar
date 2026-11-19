@@ -1,5 +1,5 @@
 import type { Cell, FoodPotential, RenderCell } from './engine';
-import { clock } from './ui';
+import { COUNT_SCALE, clock } from './ui';
 
 const amount = (value: number) => Number(value.toFixed(2)).toString();
 const precise = (value: number) => Number(value.toPrecision(3)).toString();
@@ -20,7 +20,7 @@ export function organismOverview(): string {
   return `<div class="organism-overview">
     <div class="organism-reserves">${reserve('energy','Available ATP')}${reserve('minerals','Minerals')}${reserve('integrity','Integrity')}${reserve('gut','Gut contents')}</div>
     <dl class="organism-facts inspector-metrics">
-      ${[['feeding','Feeding'],['age','Age'],['maturity','Growth to division size'],['attachment','Colony']].map(([key,label]) => `<div><dt>${label}</dt><dd data-value="${key}"></dd></div>`).join('')}
+      ${[['feeding','Feeding'],['age','Age'],['maturity','Growth to division size'],['attachment','Connections']].map(([key,label]) => `<div><dt>${label}</dt><dd data-value="${key}"></dd></div>`).join('')}
       <div class="organism-signal" hidden><dt>Outgoing signal</dt><dd data-value="signal"></dd></div>
     </dl>
     <details class="organism-physiology" data-food-potential><summary>Food energy if consumed</summary>
@@ -41,15 +41,28 @@ function feeding(cell: Cell): string {
   return 'No feeding organs';
 }
 
-export function updateOrganismOverview(root: HTMLElement, cell: Cell, visible?: RenderCell, food?: FoodPotential): void {
+function connections(cell?: RenderCell): string {
+  if (!cell) return 'Unavailable';
+  const parts: string[] = [];
+  if (cell.colonySize) parts.push(`${cell.colonySize}-cell colony`);
+  const feeding = cell.feedingNeighborIds?.length ?? 0;
+  if (feeding) parts.push(`${feeding} feeding link${feeding === 1 ? '' : 's'}`);
+  const contacts = cell.contactNeighborIds?.length ?? 0;
+  if (contacts) parts.push(`${contacts} contact link${contacts === 1 ? '' : 's'}`);
+  return parts.length ? parts.join(' · ') : 'Unattached';
+}
+
+export function updateOrganismOverview(root: HTMLElement, cell: Cell, visible?: RenderCell, food?: FoodPotential, counted=false): void {
+  const quantity = (n:number) => counted ? Math.round(n*COUNT_SCALE).toLocaleString() : amount(n);
+  const flux = (n:number) => precise(n*(counted ? COUNT_SCALE : 1));
   const values: Record<string, string> = {
     feeding: feeding(cell), age: clock(cell.age), maturity: cell.divisionReady ? 'Ready to divide' : percent(cell.maturity),
-    attachment: !visible ? 'Unavailable' : visible.colonySize ? `${visible.colonySize}-cell colony · bonded to ${visible.neighborIds!.map(id=>'#'+id).join(', ')}` : 'Unattached',
+    attachment: connections(visible),
     signal: visible?.contactSignal === undefined ? '' : precise(visible.contactSignal),
-    area: precise(cell.bodyArea), mass: precise(cell.bodyMass), growth: precise(cell.growthRate), upkeep: precise(cell.basalMetabolism+cell.memoryCost),
-    digestion: precise(cell.digestionRate), fixation: precise(cell.carbonFixationRate), respiration: precise(cell.respirationRate),
-    carbon: precise(cell.organicCarbon), oxygen: precise(cell.internalOxygen), inorganic: precise(cell.internalInorganicCarbon),
-    exudate: amount(cell.gutExudateEnergy), tissue: amount(cell.gutTissueEnergy), waste: amount(cell.gutWasteEnergy),
+    area: precise(cell.bodyArea), mass: precise(cell.bodyMass), growth: precise(cell.growthRate), upkeep: flux(cell.basalMetabolism+cell.memoryCost),
+    digestion: flux(cell.digestionRate), fixation: flux(cell.carbonFixationRate), respiration: flux(cell.respirationRate),
+    carbon: quantity(cell.organicCarbon), oxygen: quantity(cell.internalOxygen), inorganic: quantity(cell.internalInorganicCarbon),
+    exudate: quantity(cell.gutExudateEnergy), tissue: quantity(cell.gutTissueEnergy), waste: quantity(cell.gutWasteEnergy),
   };
   const stores: Record<string, [number,number]> = {
     energy:[cell.energy,cell.energyCapacity], minerals:[cell.nutrientStored,cell.nutrientCapacity],
@@ -61,11 +74,12 @@ export function updateOrganismOverview(root: HTMLElement, cell: Cell, visible?: 
     const meter = row.querySelector('meter')!;
     meter.max = Math.max(capacity, 1e-9);
     meter.value = value;
-    values[key] = key === 'integrity' ? percent(value) : amount(value) + ' / ' + amount(capacity);
+    const limit = counted ? Math.floor(capacity*COUNT_SCALE + 1e-8).toLocaleString() : amount(capacity);
+    values[key] = key === 'integrity' ? percent(value) : quantity(value) + ' / ' + limit;
     meter.setAttribute('aria-valuetext',values[key]);
   }
   if (food) for (const field of root.querySelectorAll<HTMLElement>('[data-food-pool]')) {
-    const text = amount(food[field.dataset.foodPool as keyof FoodPotential]);
+    const text = quantity(food[field.dataset.foodPool as keyof FoodPotential]);
     if (field.textContent !== text) field.textContent = text;
   }
   root.querySelector<HTMLElement>('.organism-signal')!.hidden = visible?.contactSignal === undefined;

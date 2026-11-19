@@ -3,6 +3,8 @@
 use crate::simulation::{DT, HEIGHT, WIDTH};
 use std::f64::consts::TAU;
 mod checkpoint;
+mod counted;
+use counted::{CountWater, units};
 #[cfg(test)]
 mod control_tests;
 mod flow;
@@ -179,6 +181,7 @@ pub struct Environment {
     next_source_id: u32,
     scratch: FieldScratch,
     gases: GasState,
+    counted: Option<CountWater>,
 }
 
 impl Default for Environment {
@@ -213,6 +216,7 @@ impl Default for Environment {
             next_source_id: 1,
             scratch: FieldScratch::default(),
             gases: GasState::new(PATCHES),
+            counted: None,
         }
     }
 }
@@ -220,11 +224,8 @@ impl Default for Environment {
 impl Environment {
     pub fn reset_dynamic(&mut self) {
         self.temperature.fill(self.ambient_temperature);
-        self.nutrients.fill(self.initial_nutrients);
         self.organic.fill(0.0);
-        self.nutrient_inputs = self.initial_nutrients * self.patch_count() as f64;
-        self.nutrient_removed = 0.0;
-        self.gases.reset();
+        self.reset_chemistry_mode(self.uses_count_chemistry());
         for barrier in &mut self.barriers {
             barrier.vx = 0.0;
             barrier.vy = 0.0;
@@ -237,7 +238,7 @@ impl Environment {
     }
 
     pub fn nutrient_at(&self, x: f64, y: f64) -> f64 {
-        self.sample(&self.nutrients, x, y)
+        self.sample_with(x, y, |i| self.nutrient_patch(i))
     }
     pub fn nutrient_gradient(&self, x: f64, y: f64) -> (f64, f64) {
         (
@@ -291,13 +292,14 @@ impl Environment {
         }
     }
     pub fn nutrient_patch(&self, index: usize) -> f64 {
+        if self.uses_count_chemistry() {return units(u64::from(self.mineral_count(index)))}
         self.nutrients.get(index).copied().unwrap_or(0.0)
     }
     pub fn nutrient_total(&self) -> f64 {
-        self.nutrients.iter().sum()
+        self.counted.as_ref().map_or_else(|| self.nutrients.iter().sum(), |w|units(w.stocks[0].iter().map(|&v|u64::from(v)).sum()))
     }
     pub fn nutrient_input_total(&self) -> f64 {
-        self.nutrient_inputs
+        self.counted.as_ref().map_or(self.nutrient_inputs,|w|units(w.inputs[0]))
     }
 
     pub fn take_nutrients(&mut self, index: usize, requested: f64) -> f64 {
@@ -335,6 +337,7 @@ impl Environment {
             return 0.0;
         }
         let amount = amount.min(1000.0);
+        if self.uses_count_chemistry() {return self.add_counted_minerals(x,y,amount)}
         if x < 0.0 || y < 0.0 || !x.is_finite() || !y.is_finite() {
             let share = amount / self.patch_count() as f64;
             for balance in &mut self.nutrients {
@@ -477,6 +480,7 @@ impl Environment {
         }
         self.rebuild_flow_samples();
         self.rebuild_gas_sources();
+        self.rebuild_count_ports();
     }
 
     /// Compact, smoothly tapered weights over patch centers in the displayed
@@ -549,8 +553,9 @@ impl Environment {
     pub fn step(&mut self, time: f64) {
         self.step_barriers(time);
         let has_flow = self.prepare_transport_flow(time);
-        self.step_nutrients(has_flow);
-        self.step_gases(has_flow);
+        if self.uses_count_chemistry(){self.step_counted(has_flow);} else {
+            self.step_nutrients(has_flow);self.step_gases(has_flow);
+        }
         let organic_active = self.organic.iter().any(|&v| v != 0.0);
         let heat_active = !(self.heating.iter().all(|&v| v == 0.0)
             && self
@@ -644,17 +649,17 @@ impl Environment {
             self.width as f32,
             self.height as f32,
             self.barriers.len() as f32,
-            self.nutrient_removed as f32,
+            self.nutrient_removed_total() as f32,
             self.gases.initial_oxygen as f32,
             self.gases.initial_carbon as f32,
             u8::from(self.gases.atmosphere_open) as f32,
             self.gases.exchange_rate as f32,
             self.gases.oxygen_equilibrium as f32,
             self.gases.carbon_equilibrium as f32,
-            self.gases.oxygen_inputs as f32,
-            self.gases.oxygen_outputs as f32,
-            self.gases.carbon_inputs as f32,
-            self.gases.carbon_outputs as f32,
+            self.oxygen_input_total() as f32,
+            self.oxygen_output_total() as f32,
+            self.carbon_input_total() as f32,
+            self.carbon_output_total() as f32,
         ]);
     }
 
@@ -677,9 +682,9 @@ impl Environment {
                 self.temperature[i] as f32,
                 vx as f32,
                 vy as f32,
-                self.nutrients[i] as f32,
-                self.gases.oxygen[i] as f32,
-                self.gases.carbon[i] as f32,
+                self.nutrient_patch(i) as f32,
+                self.oxygen_patch(i) as f32,
+                self.inorganic_carbon_patch(i) as f32,
             ]);
         }
         self.snapshot_objects(target);
@@ -817,7 +822,7 @@ impl Environment {
         self.columns * self.rows
     }
     pub fn nutrient_removed_total(&self) -> f64 {
-        self.nutrient_removed
+        self.counted.as_ref().map_or(self.nutrient_removed,|w|units(w.outputs[0]))
     }
     /// Compatibility helpers for default-sized fixtures. Runtime always uses instance geometry.
     #[cfg(test)]
@@ -846,6 +851,9 @@ impl Environment {
         }
     }
     fn sample(&self, values: &[f64], x: f64, y: f64) -> f64 {
+        self.sample_with(x,y,|i|values[i])
+    }
+    fn sample_with(&self, x:f64, y:f64, read: impl Fn(usize)->f64)->f64 {
         let gx = x.rem_euclid(self.width) / PATCH_SIZE - 0.5;
         let gy = y.rem_euclid(self.height) / PATCH_SIZE - 0.5;
         let ix = gx.floor() as isize;
@@ -853,8 +861,8 @@ impl Environment {
         let fx = gx - gx.floor();
         let fy = gy - gy.floor();
         let at = |x: isize, y: isize| {
-            values[y.rem_euclid(self.rows as isize) as usize * self.columns
-                + x.rem_euclid(self.columns as isize) as usize]
+            read(y.rem_euclid(self.rows as isize) as usize * self.columns
+                + x.rem_euclid(self.columns as isize) as usize)
         };
         let a = at(ix, iy) * (1.0 - fx) + at(ix + 1, iy) * fx;
         let b = at(ix, iy + 1) * (1.0 - fx) + at(ix + 1, iy + 1) * fx;
@@ -952,7 +960,7 @@ mod tests {
 
             let bytes = state(&reused);
             let mut reader = Reader::new(&bytes);
-            let mut fresh = Environment::read_checkpoint(&mut reader, 9).unwrap();
+            let mut fresh = Environment::read_checkpoint(&mut reader, 17).unwrap();
             assert!(reader.finished());
             assert_eq!(state(&fresh), bytes);
 

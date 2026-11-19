@@ -3,6 +3,26 @@
 use super::*;
 use std::collections::HashMap;
 
+/// Origin determines colony membership. A recruited pair with compatible
+/// installed resource ports can exchange food even when flux is currently zero.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub(in crate::simulation) enum BondKind { Feeding = 0, Colony = 1, Contact = 2 }
+
+fn resource_ports(cell: &Cell) -> u8 {
+    let mut mask = 0;
+    for assembly in cell.body.cellular.iter().flat_map(|state| &state.assemblies) {
+        let bit = match assembly.recipe.kind {
+            AssemblyKind::Mechanism(MechanismKind::JunctionEnergy) => 1,
+            AssemblyKind::Mechanism(MechanismKind::JunctionMineral) => 2,
+            AssemblyKind::Mechanism(MechanismKind::JunctionCarbon) => 4,
+            _ => continue,
+        };
+        if assembly.functional_mass() > 0.0 { mask |= bit; }
+    }
+    mask
+}
+
 /// Cell rows are stable throughout one tick's fission pass (only daughters
 /// append). Create the sparse incidence lists once if a bonded parent divides.
 pub(in crate::simulation) struct DivisionBonds {
@@ -28,6 +48,33 @@ impl DivisionBonds {
 impl World {
     pub(crate) fn bond_pairs(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
         self.contacts.iter().filter_map(|(&pair, &ticks)| (ticks >= MATURE).then_some(pair))
+    }
+    pub(in crate::simulation) fn presented_bonds(&self, endpoint: Option<u32>)
+        -> impl Iterator<Item = (u32, u32, BondKind)> + '_ {
+        let edges = self.contacts.iter().filter_map(move |(&(a, b), &stage)| {
+            (stage >= MATURE && endpoint.is_none_or(|id| a == id || b == id))
+                .then_some((a, b, stage))
+        });
+        let mut ports = HashMap::new();
+        for (a, b, stage) in edges.clone() {
+            if stage == MATURE {
+                ports.insert(a, 0);
+                ports.insert(b, 0);
+            }
+        }
+        if !ports.is_empty() {
+            for cell in &self.cells {
+                if let Some(mask) = ports.get_mut(&cell.id) {
+                    *mask = resource_ports(cell);
+                }
+            }
+        }
+        edges.map(move |(a, b, stage)| {
+            let kind = if stage == CLONAL { BondKind::Colony }
+                else if ports[&a] & ports[&b] != 0 { BondKind::Feeding }
+                else { BondKind::Contact };
+            (a, b, kind)
+        })
     }
     pub(in crate::simulation) fn has_bond(&self, a: u32, b: u32) -> bool {
         self.contacts.get(&(a.min(b), a.max(b))).is_some_and(|&stage| stage >= MATURE)

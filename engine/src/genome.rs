@@ -399,6 +399,7 @@ impl Default for Outputs {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum Type {
     Integer,
+    Count,
     Number,
     Bool,
     String,
@@ -406,11 +407,12 @@ enum Type {
 }
 impl Type {
     fn numeric(self) -> bool {
-        matches!(self, Self::Integer | Self::Number)
+        matches!(self, Self::Integer | Self::Count | Self::Number)
     }
     fn description(self) -> &'static str {
         match self {
             Self::Integer => "an integer",
+            Self::Count => "a count",
             Self::Number => "a scalar",
             Self::Bool => "a boolean",
             Self::String => "a string",
@@ -420,6 +422,7 @@ impl Type {
     fn prefix(self) -> &'static str {
         match self {
             Self::Integer => "ri",
+            Self::Count => unreachable!("counts have no register bank"),
             Self::Number => "rf",
             Self::Bool => "rb",
             Self::String => "rs",
@@ -429,6 +432,7 @@ impl Type {
     fn label(self) -> &'static str {
         match self {
             Self::Integer => "integer",
+            Self::Count => "count",
             Self::Number => "scalar",
             Self::Bool => "boolean",
             Self::String => "string",
@@ -440,6 +444,7 @@ impl Type {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Integer(i32),
+    Count(u32),
     Scalar(f64),
     Boolean(bool),
     Text(Rc<str>),
@@ -449,6 +454,7 @@ impl Value {
     fn ty(&self) -> Type {
         match self {
             Self::Integer(_) => Type::Integer,
+            Self::Count(_) => Type::Count,
             Self::Scalar(_) => Type::Number,
             Self::Boolean(_) => Type::Bool,
             Self::Text(_) => Type::String,
@@ -458,6 +464,7 @@ impl Value {
     fn zero(ty: Type) -> Self {
         match ty {
             Type::Integer => Self::Integer(0),
+            Type::Count => Self::Count(0),
             Type::Number => Self::Scalar(0.0),
             Type::Bool => Self::Boolean(false),
             Type::String => Self::Text(Rc::from("")),
@@ -467,10 +474,15 @@ impl Value {
     fn number(&self) -> f64 {
         match self {
             Self::Integer(x) => *x as f64,
+            Self::Count(x) => *x as f64,
             Self::Scalar(x) => *x,
             _ => 0.0,
         }
     }
+    fn whole(&self) -> Option<i64> {
+        match self { Self::Integer(n) => Some(i64::from(*n)), Self::Count(n) => Some(i64::from(*n)), _ => None }
+    }
+    fn bounded_count(n: i64) -> Self { Self::Count(n.clamp(0,i64::from(u32::MAX)) as u32) }
     fn boolean(&self) -> bool {
         matches!(self, Self::Boolean(true))
     }
@@ -487,6 +499,9 @@ impl Value {
             // through floating-point clamping and truncation on every evaluation.
             (Type::Integer, value @ Self::Integer(_)) => value,
             (Type::Number, Self::Integer(value)) => Self::Scalar(value as f64),
+            (Type::Number, Self::Count(value)) => Self::Scalar(f64::from(value)),
+            (Type::Integer, Self::Count(value)) => Self::Integer(value.min(i32::MAX as u32) as i32),
+            (Type::Count, Self::Integer(value)) => Self::Count(value.max(0) as u32),
             (Type::Number, Self::Scalar(value)) => Self::Scalar(finite(value)),
             (Type::Integer, Self::Scalar(value)) => Self::Integer(
                 finite(value)
@@ -501,6 +516,7 @@ impl Value {
     fn source(&self) -> String {
         match self {
             Self::Integer(n) => n.to_string(),
+            Self::Count(n) => n.to_string(),
             Self::Scalar(n) => scalar_literal(*n),
             Self::Boolean(b) => b.to_string(),
             Self::Text(s) => quote(s),
@@ -1198,6 +1214,21 @@ impl Sensor {
             _ => Type::Number,
         }
     }
+    fn is_resource_amount(self) -> bool {
+        matches!(self, Self::Energy | Self::EnergyCapacity | Self::NutrientStored | Self::NutrientCapacity
+            | Self::GutEnergy | Self::GutCapacity | Self::GutExudateEnergy | Self::GutExudateNutrients
+            | Self::GutTissueEnergy | Self::GutTissueNutrients | Self::GutWasteEnergy | Self::GutWasteNutrients
+            | Self::OrganicCarbon | Self::InorganicCarbon | Self::Oxygen)
+    }
+    fn program_type(self, counts: bool) -> Type {
+        if counts && self.is_resource_amount() { Type::Count } else { self.ty() }
+    }
+    fn read_typed(self, inputs: &Inputs, ty: Type) -> Value {
+        let value = self.read(inputs);
+        if ty == Type::Count {
+            Value::Count(resource_count(value.number()))
+        } else { value }
+    }
     fn lookup(name: &str) -> Option<(Self, Type)> {
         Self::ALL
             .into_iter()
@@ -1449,6 +1480,8 @@ fn numeric_type(types: &[Type]) -> Option<Type> {
     if types.iter().all(|t| t.numeric()) {
         Some(if types.contains(&Type::Number) {
             Type::Number
+        } else if types.contains(&Type::Count) {
+            Type::Count
         } else {
             Type::Integer
         })
@@ -1474,6 +1507,20 @@ fn binary_type(op: Binary, a: Type, b: Type) -> Option<Type> {
 }
 fn binary_value(op: Binary, a: &Value, b: &Value, ty: Type) -> Value {
     use Binary::*;
+    if let (Some(x), Some(y)) = (a.whole(),b.whole()) {
+        match op {
+            Add if ty == Type::Count => return Value::bounded_count(x+y),
+            Subtract if ty == Type::Count => return Value::bounded_count(x-y),
+            Multiply if ty == Type::Count => return Value::bounded_count(x.saturating_mul(y)),
+            Equal => return Value::Boolean(x == y),
+            NotEqual => return Value::Boolean(x != y),
+            Less => return Value::Boolean(x < y),
+            LessEqual => return Value::Boolean(x <= y),
+            Greater => return Value::Boolean(x > y),
+            GreaterEqual => return Value::Boolean(x >= y),
+            _ => {}
+        }
+    }
     if matches!(op, Equal | NotEqual) {
         let same = if a.ty().numeric() && b.ty().numeric() {
             a.number() == b.number()
@@ -1686,8 +1733,38 @@ impl Function {
             },
         }
     }
-    fn eval(self, args: &[usize; 3], values: &[Value], _ty: Type) -> Value {
+    fn eval(self, args: &[usize; 3], values: &[Value], ty: Type) -> Value {
         let a = &values[args[0]];
+        if ty == Type::Count {
+            let x = a.whole().expect("typed whole argument");
+            match self {
+                Self::Abs | Self::Identity => return Value::bounded_count(x.abs()),
+                Self::Min | Self::Max | Self::Clamp => {
+                    let y = values[args[1]].whole().expect("typed whole argument");
+                    return Value::bounded_count(match self {
+                        Self::Min => x.min(y), Self::Max => x.max(y),
+                        _ => { let z = values[args[2]].whole().expect("typed whole bound"); x.clamp(y.min(z),y.max(z)) }
+                    });
+                }
+                _ => {}
+            }
+        }
+        if ty == Type::Integer {
+            if let Value::Integer(x) = a {
+                if self == Self::Abs { return Value::Integer(x.saturating_abs()); }
+                if matches!(self, Self::Min | Self::Max | Self::Clamp) {
+                    let Value::Integer(y) = values[args[1]] else { unreachable!() };
+                    return Value::Integer(match self {
+                        Self::Min => (*x).min(y),
+                        Self::Max => (*x).max(y),
+                        _ => {
+                            let Value::Integer(z) = values[args[2]] else { unreachable!() };
+                            (*x).clamp(y.min(z), y.max(z))
+                        }
+                    });
+                }
+            }
+        }
         let n = a.number();
         let second = || values[args[1]].number();
         let third = || values[args[2]].number();
@@ -1821,6 +1898,12 @@ impl Op {
     }
 }
 
+fn resource_count(quantity: f64) -> u32 {
+    // Count-world snapshots are exact integer units divided by SCALE. Legacy
+    // inventories are measured at the same resolution at this boundary.
+    crate::counts::nearest(quantity)
+}
+
 /// Shared typed semantics for authored evaluation, constant folding and compact
 /// execution. Constant folding never substitutes algebraic identities that could
 /// change saturation, bounded strings, floating-point order or signed zeros.
@@ -1833,9 +1916,11 @@ fn evaluate_operation(
 ) -> Value {
     let value = match op {
         Op::Constant(value) => value.clone(),
-        Op::Sensor(sensor) => sensor.read(inputs),
+        Op::Sensor(sensor) => sensor.read_typed(inputs,ty),
         Op::Pool(index) => {
-            Value::Scalar(finite(inputs.products.get(*index).copied().unwrap_or(0.0)).max(0.0))
+            let stock = inputs.products.get(*index).copied().unwrap_or(0.0);
+            if ty == Type::Count { Value::Count(resource_count(stock)) }
+            else { Value::Scalar(finite(stock).max(0.0)) }
         }
         Op::Concentration(index) => {
             let mass = finite(inputs.products.get(*index).copied().unwrap_or(0.0)).max(0.0);
@@ -1855,6 +1940,7 @@ fn evaluate_operation(
         Op::Not(i) => Value::Boolean(!values[*i].boolean()),
         Op::Negate(i) => match &values[*i] {
             Value::Integer(v) => Value::Integer(v.saturating_neg()),
+            Value::Count(_) => Value::Count(0),
             Value::Vector(v) => Value::Vector([-v[0], -v[1]]),
             v => Value::Scalar(-v.number()),
         },
@@ -2650,7 +2736,7 @@ impl Program {
         let current = self.reference_root(index);
         let mut options = Vec::new();
         for s in Sensor::ALL {
-            if s.ty() == node.ty
+            if s.program_type(self.uses_count_units()) == node.ty
                 && self.nodes[current].op != Op::Sensor(s)
                 && (self.cellular.is_none() || s.cellular_allowed())
             {
@@ -2670,16 +2756,15 @@ impl Program {
                 options.push(op);
             }
         }
-        if node.ty == Type::Number {
+        if node.ty.numeric() {
             if let Some(cellular) = self.cellular() {
                 for op in (0..cellular.products.len())
                     .map(Op::Pool)
                     .chain((0..cellular.products.len()).map(Op::Concentration))
                     .chain((0..cellular.assemblies.len()).map(Op::Built))
                 {
-                    if self.nodes[current].op != op {
-                        options.push(op);
-                    }
+                    let ty = if self.uses_count_units() && matches!(op,Op::Pool(_)) { Type::Count } else { Type::Number };
+                    if ty == node.ty && self.nodes[current].op != op { options.push(op); }
                 }
             }
         }
@@ -2861,6 +2946,7 @@ fn mutate_constant(value: &Value, rng: &mut MutationRng) -> Value {
     match value {
         Value::Boolean(v) => Value::Boolean(!v),
         Value::Scalar(v) => Value::Scalar(perturb(*v)),
+        Value::Count(v) => Value::Count(perturb(f64::from(*v)).round().clamp(f64::from(i32::MAX) + 1.0, f64::from(u32::MAX)) as u32),
         Value::Integer(v) => {
             let step = ((*v as f64).abs() * fraction).round().max(1.0) as i64;
             let next = (*v as i64 + if sign < 0.0 { -step } else { step })
@@ -3199,6 +3285,7 @@ struct Parser {
     write_locations: Vec<Location>,
     message_locations: [Option<Location>; 4],
     cellular_mode: bool,
+    count_units: bool,
     product_names: HashMap<String, usize>,
     assembly_names: HashMap<String, usize>,
     gene_locations: Vec<cellular::GeneLocation>,
@@ -3221,6 +3308,7 @@ impl Parser {
             write_locations: Vec::new(),
             message_locations: [None; 4],
             cellular_mode: false,
+            count_units: false,
             product_names: HashMap::new(),
             assembly_names: HashMap::new(),
             gene_locations: Vec::new(),
@@ -3297,7 +3385,8 @@ impl Parser {
         expected: Type,
         location: Location,
     ) -> Result<(), CompileError> {
-        if expected == Type::Number && self.nodes[index].ty == Type::Integer {
+        if expected == Type::Number && self.nodes[index].ty.numeric()
+            || expected == Type::Integer && self.nodes[index].ty == Type::Count {
             Ok(())
         } else {
             self.require(index, expected, location)
@@ -3485,6 +3574,8 @@ impl Parser {
                         Type::Integer,
                         location,
                     )?
+                } else if self.count_units && u32::try_from(value).is_ok() {
+                    self.add(Op::Constant(Value::Count(value as u32)), Type::Count, location)?
                 } else {
                     self.add(
                         Op::Constant(Value::Scalar(finite(value as f64))),
@@ -3559,7 +3650,7 @@ impl Parser {
                     let index = self.product_names.get(&name[5..]).copied().ok_or_else(|| {
                         location.error(format!("unknown product stock '{name}'."))
                     })?;
-                    self.add(Op::Pool(index), Type::Number, location)?
+                    self.add(Op::Pool(index), if self.count_units { Type::Count } else { Type::Number }, location)?
                 } else if self.cellular_mode && name.starts_with("concentration.") {
                     let index = self
                         .product_names
@@ -3596,11 +3687,11 @@ impl Parser {
                     return Err(Self::register(&name, location).unwrap_err());
                 } else if let Some(&target) = self.bindings.get(&name) {
                     self.add(Op::Reference(target), self.nodes[target].ty, location)?
-                } else if let Some((sensor, ty)) = Sensor::lookup(&name) {
+                } else if let Some((sensor, _)) = Sensor::lookup(&name) {
                     if self.cellular_mode && !sensor.cellular_allowed() {
                         return Err(location.error(format!("'{name}' is not a cellular measurement; read named pool.* or built.* stocks and local sensors.")));
                     }
-                    self.add(Op::Sensor(sensor), ty, location)?
+                    self.add(Op::Sensor(sensor), sensor.program_type(self.count_units), location)?
                 } else {
                     return Err(location.error(format!(
                         "unknown signal '{name}'. Define signals with 'let' before using them."
@@ -4608,7 +4699,8 @@ mod tests {
                         _ => {}
                     }
                 }
-                Op::Sensor(sensor) => assert_eq!(node.ty, sensor.ty()),
+                Op::Sensor(sensor) => assert_eq!(node.ty, sensor.program_type(program.uses_count_units())),
+                Op::Pool(_) if program.uses_count_units() => assert_eq!(node.ty, Type::Count),
                 Op::Pool(_) | Op::Concentration(_) | Op::Built(_) => {
                     assert_eq!(node.ty, Type::Number)
                 }
@@ -5092,6 +5184,7 @@ mod register_tests {
             let register = Register::parse(name).unwrap();
             let v = match register.ty {
                 Type::Integer => Value::Integer(7),
+                Type::Count => unreachable!(),
                 Type::Number => Value::Scalar(0.375),
                 Type::Bool => Value::Boolean(false),
                 Type::String => Value::Text(Rc::from("巡航")),

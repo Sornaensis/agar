@@ -71,7 +71,10 @@ export class WorkerEngine {
   private decodePresentation(value: WirePresentation): Presentation {
     const result: Presentation = { tick: value.tick, summary: value.summary };
     if (value.frame) result.frame = decodeRenderSnapshot(value.frame);
-    if (value.metrics) result.metrics = decodeMetricsSnapshot(value.metrics);
+    if (value.metrics) {
+      result.metrics = decodeMetricsSnapshot(value.metrics);
+      if (value.countAudit) result.metrics.countAudit = value.countAudit;
+    }
     if (value.environment) result.environment = value.environment;
     if (value.error) result.error = value.error;
     return result;
@@ -88,6 +91,8 @@ export class WorkerEngine {
   analyze(source: string): Promise<GenomeAnalysis> { return this.call('analyze', [source]); }
   compile(source: string): Promise<number> { return this.call('compile', [source]); }
   reset(seed: number, genomeId: number): Promise<void> { return this.call('reset', [seed, genomeId]); }
+  setCountChemistry(enabled:boolean):Promise<void> { return this.call('setCountChemistry',[enabled]); }
+  usesCountChemistry():Promise<boolean> { return this.call('usesCountChemistry',[]); }
   resetEmpty(seed: number): Promise<void> { return this.call('resetEmpty', [seed]); }
   saveState(): Promise<Uint8Array> { return this.call('saveState'); }
   restoreState(bytes: Uint8Array): Promise<void> {

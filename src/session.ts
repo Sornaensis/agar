@@ -32,7 +32,7 @@ export class SimulationSession {
   constructor(readonly engine: WorkerEngine, metadata: SimulationMetadata, initial: Presentation,
     private readonly storage: Storage,
     private readonly status: (state: 'saving' | 'saved' | 'error', error?: unknown) => void,
-    private readonly committed: (metadata: SimulationMetadata) => void) {
+    private readonly committed: (metadata: SimulationMetadata) => void, readonly counted = false) {
     if (!initial.frame || !initial.environment || !('samples' in initial.environment) || !initial.metrics) throw new Error('The initial simulation snapshot is incomplete.');
     this.metadata = structuredClone(metadata);
     this.world = { ...initial.frame, environment: initial.environment };

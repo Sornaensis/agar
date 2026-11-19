@@ -1,22 +1,22 @@
 # Build a motor, then regulate its activity using a decaying product.
 # This machinery demonstration has no energy-harvesting pathway.
-cellular;
+cellular counts;
 
 product Mount = anchor();
 product Rotor = motor();
 product Tail = filament();
 product Brake = regulator(8);
 
-gene mounts: Mount = if built.Swimmer + 0.000001 < 0.04 && pool.Mount < 0.002 then 1 else 0;
-gene rotors: Rotor = if built.Swimmer + 0.000001 < 0.04 && pool.Rotor < 0.002 then 1 else 0;
-gene tails: Tail = if built.Swimmer + 0.000001 < 0.04 && pool.Tail < 0.002 then 1 else 0;
-gene conserve: Brake = if energy.fraction < 0.45 && pool.Brake < 0.02 then 0.2 else 0;
+gene mounts: Mount = if built.Swimmer + 0.000001 < 0.04 && pool.Mount < 20 then 1 else 0;
+gene rotors: Rotor = if built.Swimmer + 0.000001 < 0.04 && pool.Rotor < 20 then 1 else 0;
+gene tails: Tail = if built.Swimmer + 0.000001 < 0.04 && pool.Tail < 20 then 1 else 0;
+gene conserve: Brake = if energy.fraction < 0.45 && pool.Brake < 200 then 0.2 else 0;
 
 assembly Swimmer: propel() {
-  Mount: 0.01;
-  Rotor: 0.01;
-  Tail: 0.02;
+  Mount: 100;
+  Rotor: 100;
+  Tail: 200;
   at: 3.141592653589793;
   direction: 0;
-  activity: clamp(1 - pool.Brake / 0.02, 0, 1);
+  activity: clamp(1 - pool.Brake / 200, 0, 1);
 }

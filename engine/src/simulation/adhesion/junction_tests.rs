@@ -321,6 +321,8 @@ fn fission_passes_one_existing_interface_to_the_touching_daughter_and_persists_i
     let bytes=checkpoint::save(&engine).unwrap();
     let mut restored=checkpoint::restore(&bytes).unwrap();
     assert_eq!(checkpoint::save(&restored).unwrap(),bytes);
+    assert_eq!(restored.world.presented_bonds(None).collect::<Vec<_>>(),
+        [(1,3,BondKind::Colony),(2,3,BondKind::Colony)]);
     for _ in 0..10 {
         engine.world.step(&mut engine.genomes);
         restored.world.step(&mut restored.genomes);
@@ -346,6 +348,16 @@ fn recruited_interface_handoff_requires_matching_recruiter_hardware_on_the_new_h
     let mut index=DivisionBonds::new(&world);
     world.inherit_bond_interfaces(0,2,&genomes,&mut index);
     assert_eq!(world.contacts.get(&(2,3)),Some(&MATURE));
+    assert_eq!(world.presented_bonds(None).collect::<Vec<_>>(),[(2,3,BondKind::Feeding)]);
+    // Differential port expression changes feeding capability, not the origin.
+    for assembly in &mut world.cells[2].body.cellular.as_mut().unwrap().assemblies {
+        if matches!(assembly.recipe.kind, AssemblyKind::Mechanism(
+            MechanismKind::JunctionEnergy | MechanismKind::JunctionMineral | MechanismKind::JunctionCarbon)) {
+            assembly.integrity = 0.0;
+        }
+    }
+    assert_eq!(world.presented_bonds(Some(2)).collect::<Vec<_>>(),[(2,3,BondKind::Contact)]);
+    assert_eq!(world.presented_bonds(Some(1)).count(),0);
 }
 
 #[test]

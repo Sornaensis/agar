@@ -1,3 +1,4 @@
+export const COUNT_SCALE = 10_000;
 export const escapeHtml = (value: string): string => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
 const paths: Record<string, string> = {
   cell: '<circle cx="12" cy="12" r="9"/><circle cx="11" cy="12" r="3"/><path d="m17 7 1 1"/>',

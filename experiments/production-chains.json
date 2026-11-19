@@ -1,5 +1,5 @@
 {
-  "wasmSha256": "69bd748d3c7575391329d32239cab375a2e15a334b903fe6b71f4a878747655b",
+  "wasmSha256": "71db568e8d25982599c849c545b6f1a9da5c5c3335c209390a838aca3744b4ac",
   "ticksPerSecond": 30,
   "knockoutObservationTicks": 360,
   "controls": {

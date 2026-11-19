@@ -8,6 +8,7 @@ fn write_type(ty: Type, w: &mut Writer) {
         Type::Bool => 2,
         Type::String => 3,
         Type::Vector => 4,
+        Type::Count => 5,
     });
 }
 fn read_type(r: &mut Reader<'_>) -> Result<Type> {
@@ -17,6 +18,7 @@ fn read_type(r: &mut Reader<'_>) -> Result<Type> {
         2 => Ok(Type::Bool),
         3 => Ok(Type::String),
         4 => Ok(Type::Vector),
+        5 => Ok(Type::Count),
         _ => Err("Invalid simulation save: unknown primitive type.".into()),
     }
 }
@@ -26,6 +28,7 @@ fn write_register(register: Register, w: &mut Writer) {
 }
 fn read_register(r: &mut Reader<'_>) -> Result<Register> {
     let ty = read_type(r)?;
+    ensure(ty != Type::Count, "invalid register type")?;
     let index = r.u16()?;
     ensure(
         index > 0 && index <= REGISTER_COUNT as u16,
@@ -37,6 +40,7 @@ fn write_value(value: &Value, w: &mut Writer) {
     write_type(value.ty(), w);
     match value {
         Value::Integer(n) => w.i32(*n),
+        Value::Count(n) => w.u32(*n),
         Value::Scalar(n) => w.f64(*n),
         Value::Boolean(b) => w.u8(u8::from(*b)),
         Value::Text(s) => w.text(s),
@@ -49,6 +53,7 @@ fn write_value(value: &Value, w: &mut Writer) {
 fn read_value(r: &mut Reader<'_>) -> Result<Value> {
     Ok(match read_type(r)? {
         Type::Integer => Value::Integer(r.i32()?),
+        Type::Count => Value::Count(r.u32()?),
         Type::Number => Value::Scalar(r.range(-MAX_SIGNAL, MAX_SIGNAL)?),
         Type::Bool => {
             let b = r.u8()?;
@@ -108,6 +113,7 @@ impl Program {
 
     pub(crate) fn write_checkpoint(&self, w: &mut Writer) {
         if let Some(cellular) = &self.cellular {
+            if cellular.count_units { w.u32(u32::MAX - 5); }
             // An impossible legacy node count introduces the v5 extension.
             // Legacy programs retain their original byte representation.
             if let Some(messages) = &cellular.messages {
@@ -262,7 +268,13 @@ impl Program {
     }
 
     pub(crate) fn read_checkpoint_version(r: &mut Reader<'_>, version: u32) -> Result<Self> {
-        let header = r.u32()?;
+        let mut header = r.u32()?;
+        let count_units = header == u32::MAX - 5;
+        if count_units {
+            ensure(version >= 17, "counted cellular programs need checkpoint version 17")?;
+            header = r.u32()?;
+            ensure(header >= u32::MAX - 4, "invalid counted cellular graph header")?;
+        }
         let recruits = header == u32::MAX - 3 || header == u32::MAX - 4;
         let has_signal = header == u32::MAX - 2 || header == u32::MAX - 4;
         let messages = if header == u32::MAX - 1 || has_signal || recruits {
@@ -351,7 +363,14 @@ impl Program {
                 let count = r.count(cellular::MAX_PRODUCTS)?;
                 let mut parts = Vec::with_capacity(count);
                 for _ in 0..count {
-                    parts.push((r.index(products.len())?, r.range(0.0, 1.0e6)?));
+                    let product = r.index(products.len())?;
+                    let amount = r.range(0.0, 1.0e6)?;
+                    if count_units {
+                        let count = resource_count(amount);
+                        ensure(count > 0 && count as f64 / crate::counts::SCALE as f64 == amount,
+                            "invalid counted recipe ingredient")?;
+                    }
+                    parts.push((product, amount));
                 }
                 let at = r.range(-MAX_SIGNAL, MAX_SIGNAL)?;
                 let direction = r.range(-MAX_SIGNAL, MAX_SIGNAL)?;
@@ -382,6 +401,7 @@ impl Program {
         let mut nodes: Vec<Node> = Vec::with_capacity(count);
         for index in 0..count {
             let ty = read_type(r)?;
+            ensure(ty != Type::Count || count_units, "count type requires a counted program")?;
             let scope = r.count(MAX_NODES)?;
             let op = match r.u8()? {
                 0 => Op::Constant(read_value(r)?),
@@ -445,7 +465,8 @@ impl Program {
             let child_type = |child: usize| nodes[child].ty;
             let actual_type = match &op {
                 Op::Constant(value) => Some(value.ty()),
-                Op::Sensor(sensor) => Some(sensor.ty()),
+                Op::Sensor(sensor) => Some(sensor.program_type(count_units)),
+                Op::Pool(_) if count_units => Some(Type::Count),
                 Op::Pool(_) | Op::Concentration(_) | Op::Built(_) => Some(Type::Number),
                 Op::Receptor(_, field) => Some(field.ty()),
                 Op::Register(register) => Some(register.ty),
@@ -564,7 +585,8 @@ impl Program {
             if let Some(id) = value {
                 ensure(
                     nodes[id].ty == register.ty
-                        || (register.ty == Type::Number && nodes[id].ty == Type::Integer),
+                        || (register.ty == Type::Number && nodes[id].ty.numeric())
+                        || (register.ty == Type::Integer && nodes[id].ty == Type::Count),
                     "write type mismatch",
                 )?;
             }
@@ -639,6 +661,7 @@ impl Program {
                 bindings,
                 writes,
                 cellular::CellularGraph {
+                    count_units,
                     definition,
                     genes,
                     activity,

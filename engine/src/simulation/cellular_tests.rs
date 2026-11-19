@@ -45,9 +45,10 @@ fn cellular_expression_precedes_physical_assembly_and_light_harvesting() {
 #[test]
 fn a_missing_typed_ingredient_prevents_physical_function() {
     let source = SOLAR.replace(
-        "if built.Solar + 0.000001 < 0.04 && pool.Pigment < 0.002 then 1 else 0",
+        "if built.Solar + 0.000001 < 0.04 && pool.Pigment < 20 then 1 else 0",
         "0",
     );
+    assert_ne!(source, SOLAR, "the pigment knockout must edit the shipped program");
     let (mut world, _) = solar_world();
     let mut genomes = vec![Genome::new(source.clone(), Program::compile(&source).unwrap(), 0, 0)];
     for _ in 0..600 { world.step(&mut genomes); }

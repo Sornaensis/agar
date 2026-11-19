@@ -8,7 +8,7 @@ fn state(env: &Environment) -> Vec<u8> {
     writer.0
 }
 fn resume(env: &Environment) -> Environment {
-    Environment::read_checkpoint(&mut Reader::new(&state(env)), 9).unwrap()
+    Environment::read_checkpoint(&mut Reader::new(&state(env)), 17).unwrap()
 }
 fn bits(pair: (f64, f64)) -> (u64, u64) {
     (pair.0.to_bits(), pair.1.to_bits())

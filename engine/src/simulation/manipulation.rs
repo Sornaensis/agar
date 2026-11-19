@@ -128,6 +128,10 @@ impl World {
         if minerals.is_some_and(|n| !valid(n, caps.minerals)) {
             return Err(format!("Stored minerals must be between 0 and {}.", caps.minerals));
         }
+        let counted=cell.counted.is_some();
+        let encode=|n:f64,cap:f64| crate::counts::units(crate::counts::nearest(n).min(crate::counts::floor(cap)));
+        let energy=if counted {energy.map(|n|encode(n,caps.energy))} else {energy};
+        let minerals=if counted {minerals.map(|n|encode(n,caps.minerals))} else {minerals};
         if energy == Some(0.0) {
             // The normal tick preflights packet storage and IDs before mutating
             // the world. The same guarantee applies when an edit triggers death.
@@ -139,11 +143,15 @@ impl World {
         if let Some(n) = energy {
             self.energy_imports += (n - cell.energy).max(0.0);
             self.energy_withdrawn += (cell.energy - n).max(0.0);
+            if let Some(q)=cell.counted.as_mut(){let v=crate::counts::nearest(n);
+                self.count_flux.energy_in+=u64::from(v.saturating_sub(q.atp));self.count_flux.energy_out+=u64::from(q.atp.saturating_sub(v));q.atp=v;}
             cell.energy = n;
         }
         if let Some(n) = minerals {
             self.nutrient_imports += (n - cell.nutrient_stored).max(0.0);
             self.mineral_withdrawn += (cell.nutrient_stored - n).max(0.0);
+            if let Some(q)=cell.counted.as_mut(){let v=crate::counts::nearest(n);
+                self.count_flux.mineral_in+=u64::from(v.saturating_sub(q.mineral));self.count_flux.mineral_out+=u64::from(q.mineral.saturating_sub(v));q.mineral=v;}
             cell.nutrient_stored = n;
         }
         if !cell.alive() {
@@ -151,6 +159,7 @@ impl World {
             self.remove_dead_in(&mut PhaseWorkspace::default());
             self.prune_contacts(None);
         }
+        if counted{self.project_flows();}
         Ok(())
     }
 }

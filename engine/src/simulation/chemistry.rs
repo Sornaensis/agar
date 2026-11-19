@@ -5,9 +5,9 @@ impl World {
     pub fn organic_cell_total(&self) -> f64 { self.cells.iter().map(Cell::organic_carbon_total).sum() }
     pub fn organic_food_total(&self) -> f64 { self.food.iter().map(Food::carbon).sum() }
     pub fn internal_inorganic_carbon_total(&self) -> f64 { self.cells.iter().map(|c| c.internal_inorganic_carbon).sum() }
-    pub fn oxygen_cell_total(&self) -> f64 { self.cells.iter().map(|c| c.internal_oxygen).sum() }
+    pub fn oxygen_cell_total(&self) -> f64 { self.cells.iter().map(|c| c.internal_oxygen).sum::<f64>() + crate::counts::wide_units(self.deposits.iter().map(|d|u64::from(d.quantities[1])).sum()) }
     pub fn carbon_total(&self) -> f64 {
-        self.environment.inorganic_carbon_total() + self.internal_inorganic_carbon_total()
+        crate::counts::wide_units(self.deposits.iter().map(|d|u64::from(d.quantities[2])).sum()) + self.environment.inorganic_carbon_total() + self.internal_inorganic_carbon_total()
             + self.organic_cell_total() + self.organic_food_total()
     }
     pub fn carbon_input_total(&self) -> f64 {
@@ -18,6 +18,7 @@ impl World {
     /// committed together before proportional, supply-limited inward transfers.
     /// O2/DIC diffuse passively; neither pumps nor a species identity are needed.
     pub(super) fn exchange_gases_in(&mut self, workspace: &mut PhaseWorkspace) {
+        if self.uses_count_chemistry() { return self.count_exchange(workspace); }
         for oxygen in [true, false] {
             workspace.clear_groups(self.environment.patch_count());
             for (index, cell) in self.cells.iter().enumerate() {
@@ -64,6 +65,7 @@ impl World {
     }
 
     pub(super) fn respire_in(&mut self, caps: &[BodyCapacities]) {
+        if self.uses_count_chemistry() { return self.count_respire(caps); }
         for (cell, cap) in self.cells.iter_mut().zip(caps) {
             cell.respiration_rate = 0.0;
             if !cell.alive() { continue; }
@@ -99,6 +101,7 @@ impl World {
     /// An explicit background aerobic decay reaction. No oxygen means no decay;
     /// particles retain their carbon. Its extent and O2 demand are accounted.
     pub(super) fn decay_food_in(&mut self, workspace: &mut PhaseWorkspace) {
+        if self.uses_count_chemistry() { return self.count_decay(workspace); }
         workspace.clear_groups(self.environment.patch_count());
         let fractions = ORGANIC_DECAY.map(|rate| -(-rate * DT).exp_m1());
         for (index, food) in self.food.iter().enumerate() {

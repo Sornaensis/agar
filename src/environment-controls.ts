@@ -1,7 +1,7 @@
 import type { SourceKind } from './engine';
 import type { EnvironmentConfig } from './storage';
 import type { FieldOverlay } from './renderer';
-import { escapeHtml, icon, inputNumber } from './ui';
+import { COUNT_SCALE, escapeHtml, icon, inputNumber } from './ui';
 
 export type SourceConfig = EnvironmentConfig['sources'][number];
 export type BarrierConfig = EnvironmentConfig['barriers'][number];
@@ -42,6 +42,7 @@ export function toolName(tool: EnvironmentTool): string {
   if (tool.startsWith('source:')) return SOURCE_NAMES[Number(tool.split(':')[1])];
   return tool === 'barrier:fixed' ? 'Fixed barrier' : tool === 'barrier:floating' ? 'Floating barrier' : 'Select object';
 }
+const COUNTS_PER_SECOND = 1.5 * COUNT_SCALE;
 const degrees = (radians: number): number => radians * 180 / Math.PI;
 export function formatEnvironmentNumber(value: number, key: string, min = -Infinity, max = Infinity): string {
   const places = key === 'x' || key === 'y' ? 2 : 4, factor = 10 ** places;
@@ -50,19 +51,34 @@ export function formatEnvironmentNumber(value: number, key: string, min = -Infin
   if (rounded < min) rounded = Math.ceil(min * factor) / factor;
   return String(rounded);
 }
-const field = (key: string, label: string, value: number, min: number, max: number, step: string, editable: boolean): string => {
+const field = (key: string, label: string, value: number, min: number, max: number, step: string, editable: boolean, countScale = 1): string => {
   const displayed = formatEnvironmentNumber(value, key, min, max);
-  return `<label>${label}<input type="number" data-object-field="${key}" data-presented-value="${displayed}" aria-label="${escapeHtml(label)}" value="${displayed}" min="${min}" max="${max}" step="${step}"${editable ? '' : ' readonly'}></label>`;
+  return `<label>${label}<input type="number" data-object-field="${key}" data-presented-value="${displayed}" data-count-scale="${countScale}" aria-label="${escapeHtml(label)}" value="${displayed}" min="${min}" max="${max}" step="${step}"${editable ? '' : ' readonly'}></label>`;
 };
-export function sourceFields(source: SourceConfig, width: number, height: number, editable = true, position = true): string {
+export function sourceFields(source: SourceConfig, width: number, height: number, editable = true, position = true, counted = false): string {
   const spatial = position ? field('x', 'X', source.x, 0, width - Number.EPSILON * width, 'any', editable) + field('y', 'Y', source.y, 0, height - Number.EPSILON * height, 'any', editable) : '';
   const chemical = [3,4,8,9,10,11].includes(source.kind);
-  const rateHint = chemical ? ' Full strength transfers up to 1.5 units per simulated second within the radius.' : '';
-  return `<div class="source-fields">${spatial}${field('strength', 'Strength', source.strength, sourceMinimum(source.kind), 1, '0.05', editable)}${field('radius', source.kind === 5 || source.kind === 6 ? 'Half-width' : 'Radius', source.radius, 20, 1000, '10', editable)}${source.kind === 5 || source.kind === 6 ? field('angle', 'Direction (°)', degrees(source.angle), -360, 360, '5', editable) + field('length', 'Length', source.length, 40, 4800, '20', editable) : ''}</div><p class="environment-hint">${SOURCE_HINTS[source.kind]}${rateHint}</p>`;
+  const rateField = chemical && counted
+    ? field('strength', 'Rate (counts/s)', Math.round(source.strength * COUNTS_PER_SECOND), 0, COUNTS_PER_SECOND, '1', editable, COUNTS_PER_SECOND)
+    : field('strength', 'Strength', source.strength, sourceMinimum(source.kind), 1, '0.05', editable);
+  const rateHint = chemical && !counted ? ' Full strength transfers up to 1.5 units per simulated second within the radius.' : '';
+  return `<div class="source-fields">${spatial}${rateField}${field('radius', source.kind === 5 || source.kind === 6 ? 'Half-width' : 'Radius', source.radius, 20, 1000, '10', editable)}${source.kind === 5 || source.kind === 6 ? field('angle', 'Direction (°)', degrees(source.angle), -360, 360, '5', editable) + field('length', 'Length', source.length, 40, 4800, '20', editable) : ''}</div><p class="environment-hint">${SOURCE_HINTS[source.kind]}${rateHint}</p>`;
 }
 export function barrierFields(barrier: BarrierConfig, width: number, height: number, editable = true, position = true): string {
   const spatial = position ? field('x', 'X', barrier.x, 0, width - Number.EPSILON * width, 'any', editable) + field('y', 'Y', barrier.y, 0, height - Number.EPSILON * height, 'any', editable) : '';
   return `<div class="source-fields">${spatial}${field('length', 'Length', barrier.length, 20, 2400, '20', editable)}${field('width', 'Thickness', barrier.width, 10, 400, '10', editable)}${field('angle', 'Angle (°)', degrees(barrier.angle), -360, 360, '5', editable)}<label>Motion<select data-object-field="floating" aria-label="Barrier motion"${editable ? '' : ' disabled'}><option value="false"${barrier.floating ? '' : ' selected'}>Fixed</option><option value="true"${barrier.floating ? ' selected' : ''}>Floating</option></select></label></div><p class="environment-hint">${barrier.floating ? 'Drifts with the local current and obstructs organisms, particles and field transport.' : 'Stays in place and obstructs organisms, particles and field transport.'}</p>`;
+}
+export function readEnvironmentNumber(input: HTMLInputElement, min: number, max: number): number {
+  const label = input.getAttribute('aria-label') || input.dataset.objectField || 'Amount';
+  const value = inputNumber(input, label, min, max);
+  const scale = Number(input.dataset.countScale || 1);
+  if (scale > 1 && !Number.isInteger(value)) throw new Error(`${label} must be a whole number.`);
+  return value / scale;
+}
+export function displayedObjectValue(input: HTMLInputElement, key: string, value: number): string {
+  const scale = Number(input.dataset.countScale || 1);
+  const shown = scale > 1 ? Math.round(value * scale) : key === 'angle' ? degrees(value) : value;
+  return formatEnvironmentNumber(shown, key, Number(input.min), Number(input.max));
 }
 export function readObjectFields<T extends SourceConfig | BarrierConfig>(container: Element, original: T, width: number, height: number): T {
   const result = { ...original };
@@ -75,7 +91,7 @@ export function readObjectFields<T extends SourceConfig | BarrierConfig>(contain
     const numberInput = input as HTMLInputElement;
     const min = key === 'x' || key === 'y' ? 0 : Number(numberInput.min);
     const max = key === 'x' ? width - Number.EPSILON * width : key === 'y' ? height - Number.EPSILON * height : Number(numberInput.max);
-    const value = inputNumber(numberInput, input.getAttribute('aria-label') || key, min, max);
+    const value = readEnvironmentNumber(numberInput, min, max);
     values[key] = key === 'angle' ? value * Math.PI / 180 : value;
   });
   return result;

@@ -5,24 +5,25 @@ export function showGuide(): void {
   createDialog('Guide', `
     <p>Start with <b>Hunting ground</b> to follow a hunter, or <b>Sunlit food web</b> to see where its food comes from. In the food web, Foragers can dock with Phototrophs to exchange carbon and minerals. Each preset lists its founders. You can edit the starting populations, environment and seed. Runs save automatically and reopen paused.</p>
     <p><b>Add organism</b> lets you choose a genome and click its starting position. Turn on <b>Place several</b> to add more. Press Escape to finish.</p>
-    <p>Select a cell to see its reserves and colony contacts. Drag it to move it, or use <b>Move cell</b> or <b>Move colony</b> and choose a destination. <b>Edit reserves</b> lets you add or remove energy and minerals while running or paused. Zero energy kills the cell.</p>
+    <p>Select a cell to see its reserves, colony membership and feeding links. Drag it to move it, or use <b>Move cell</b> or <b>Move linked group</b> and choose a destination. <b>Edit reserves</b> lets you add or remove energy and minerals while running or paused. Zero energy kills the cell.</p>
     <p><b>Pop out</b> keeps the same player running while you edit elsewhere or background the main tab. It keeps advancing when hidden, subject to browser throttling or system sleep; keep the main tab open. <b>Window</b> is the fallback when always-on-top is unavailable. Explicit Pause still stops playback. Without an open player window, a hidden main tab pauses.</p>
+    <p>New simulations use whole counts for ATP, minerals, carbon and oxygen. Set emitter and absorber throughput in counts per second. A founder starts with 680,000 ATP counts. Choose <b>Continuous</b> when starting a simulation to compare the earlier resource model. Existing saves reopen in their original mode.</p>
     <details class="guide-section"><summary>Program a cell with products and recipes</summary>
-      <p>New genomes begin with <code>cellular;</code>. Declare physical products, express them with named genes, then combine their stock into machines. Every founder has one core and finite reserves. Its program must build an energy route before those reserves run out.</p>
-      <pre class="guide-code">cellular;
+      <p>New genomes begin with <code>cellular counts;</code>. Declare physical products, express them with named genes, then combine their stock into machines. Every founder has one core and finite reserves. Its program must build an energy route before those reserves run out.</p>
+      <pre class="guide-code">cellular counts;
 product Anchor = anchor();
 product Chlorophyll = pigment();
 product Catalyst = enzyme();
 
 let need_solar = built.Solar + 0.000001 &lt; 0.04;
-gene anchors: Anchor = if need_solar &amp;&amp; pool.Anchor &lt; 0.002 then 0.2 else 0;
-gene pigment_supply: Chlorophyll = if need_solar &amp;&amp; pool.Chlorophyll &lt; 0.004 then 1 else 0;
-gene catalysts: Catalyst = if need_solar &amp;&amp; pool.Catalyst &lt; 0.002 then 0.2 else 0;
+gene anchors: Anchor = if need_solar &amp;&amp; pool.Anchor &lt; 20 then 0.2 else 0;
+gene pigment_supply: Chlorophyll = if need_solar &amp;&amp; pool.Chlorophyll &lt; 40 then 1 else 0;
+gene catalysts: Catalyst = if need_solar &amp;&amp; pool.Catalyst &lt; 20 then 0.2 else 0;
 
 assembly Solar: harvest(light) {
-  Anchor: 0.005;
-  Chlorophyll: 0.03;
-  Catalyst: 0.005;
+  Anchor: 50;
+  Chlorophyll: 300;
+  Catalyst: 50;
   start_when: need_solar;
   activity: 1;
 }</pre>
@@ -30,7 +31,7 @@ assembly Solar: harvest(light) {
         <tr><th><code>product</code></th><td>A named material with one role, such as motor, pigment, enzyme or membrane.</td></tr>
         <tr><th><code>gene</code></th><td>Requested expression effort from 0 to 1. Actual synthesis is limited by shared translation work, minerals, energy and space.</td></tr>
         <tr><th><code>assembly</code></th><td>A recipe for one operation with positive component masses. Missing ingredients leave a physical, incomplete machine.</td></tr>
-        <tr><th><code>pool.Name</code></th><td>Available product mass. Recipes share this stock, and daughters inherit a partition of it.</td></tr>
+        <tr><th><code>pool.Name</code></th><td>Available whole product counts. Recipes share this stock, and daughters inherit a partition of it.</td></tr>
         <tr><th><code>concentration.Name</code></th><td>Product mass divided by envelope area. Growth dilutes regulatory signals.</td></tr>
         <tr><th><code>built.Name</code></th><td>Functional mass in complete matching assemblies, reduced by damage. Incomplete machines contribute zero.</td></tr>
         <tr><th><code>sensed.Name.field</code></th><td>A typed reading from the named receptor at its actual attachment point.</td></tr>
@@ -134,21 +135,21 @@ digest.waste = if gut.exudate.energy + gut.tissue.energy &lt; 1
 clear ri001 when object.valid;
 rs001 = object.token when object.valid;
 clear rs001 when !object.valid &amp;&amp; ri001 &gt; 60;</pre>
-      <p>Each organism has its own registers. All reads see the start of the tick. Writes commit together afterward, and clear wins when both fire. Empty registers read as zero, false, empty string or zero vector. <code>populated()</code> distinguishes an empty register from a stored zero. Every occupied register costs 0.0025 energy per second. The Memory tab shows occupied registers alongside regulator stocks.</p>
-      <pre class="guide-code">cellular;
+      <p>Each organism has its own registers. All reads see the start of the tick. Writes commit together afterward, and clear wins when both fire. Empty registers read as zero, false, empty string or zero vector. <code>populated()</code> distinguishes an empty register from a stored zero. Each occupied register costs 25 ATP counts per second in a whole-count world. The Memory tab shows occupied registers alongside regulator stocks.</p>
+      <pre class="guide-code">cellular counts;
 publish rf001 = 17;
 avoid_message rf001;
 adhere_message rf001 daughters;
 product Frame = scaffold(); product Glue = adhesin(Frame);
 product Mount = anchor(); product Skin = membrane();
-gene backbone: Frame = if pool.Frame &lt; 0.01 then 0.2 else 0;
-gene finish: Glue = if pool.Glue &lt; 0.01 then 0.2 else 0;
-gene mounts: Mount = if pool.Mount &lt; 0.04 then 0.2 else 0;
-gene skins: Skin = if pool.Skin &lt; 0.04 then 0.2 else 0;
-assembly Link: adhere() { Mount: 0.008; Skin: 0.008; Glue: 0.004; }</pre>
+gene backbone: Frame = if pool.Frame &lt; 100 then 0.2 else 0;
+gene finish: Glue = if pool.Glue &lt; 100 then 0.2 else 0;
+gene mounts: Mount = if pool.Mount &lt; 400 then 0.2 else 0;
+gene skins: Skin = if pool.Skin &lt; 400 then 0.2 else 0;
+assembly Link: adhere() { Mount: 80; Skin: 80; Glue: 40; }</pre>
       <p><code>publish</code> exposes one scalar register. The optional number sets it once at birth. Writing the register updates the message on the next tick. Clearing it withdraws the message. A working <code>sense(contact)</code> recipe named <code>Touch</code> reads the touched cell’s <code>sensed.Touch.message</code> when <code>sensed.Touch.message_valid</code> is true. A published zero is valid.</p>
       <p><code>signal rf002 = 0;</code> selects a second scalar address. Change it to request supplies or relay a pulse while keeping the recognition marker steady. A receptor reads its contact’s <code>signal_valid</code> and <code>signal</code> from the same tick as the marker.</p>
-      <p>Attached cells with matching <code>junction(energy)</code>, <code>junction(mineral)</code> or <code>junction(carbon)</code> machinery exchange that resource toward equal storage fractions. Both sides must build and activate the port. Open <b>Body → Colony exchange</b> to see signed transfers. Try <b>Nurse rosette</b> for resource sharing or <b>Pulse swimmers</b> for relayed movement. In <b>Crown rosette</b>, cells with at least two signaling partners send a beacon. Edge cells that receive it activate an extra light harvester. Open <b>Body → Incoming colony signals</b> to see what a signal junction reads.</p>
+      <p>Attached cells with matching <code>junction(energy)</code>, <code>junction(mineral)</code> or <code>junction(carbon)</code> machinery exchange that resource toward equal storage fractions. A feeding link forms when cells dock on contact and have matching functional resource ports. Both sides must activate their ports for a transfer. Open <b>Body → Resource exchange</b> to see signed transfers. Try <b>Nurse rosette</b> for resource sharing or <b>Pulse swimmers</b> for relayed movement. In <b>Crown rosette</b>, cells with at least two signaling partners send a beacon. Edge cells that receive it activate an extra light harvester. Open <b>Body → Incoming signals</b> to see what a signal junction reads.</p>
       <p><code>avoid_message</code> skips an attack on each candidate whose published value exactly matches the chosen occupied register. <code>adhere_message</code> selects a value for adhesion. With <code>daughters</code>, a cell can keep its newly divided daughter attached if both recognize each other and have a free site on a working <code>adhere()</code> surface. Each cell first makes scaffold, finishes it into adhesin, and installs the adhesin with membrane and anchors. With <code>recruit</code>, two free cells can also join after both opt in and stay in compatible contact for 15 consecutive ticks (half a simulation second). Separation interrupts recruitment. A contact receptor’s <code>bonded</code> field tells the program whether that particular neighbor has an established bond.</p>
     </details>
     <details class="guide-section"><summary>Mutation and dependency graph</summary>

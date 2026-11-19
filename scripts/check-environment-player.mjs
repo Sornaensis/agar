@@ -7,7 +7,7 @@ const context=await browser.newContext({viewport:{width:1250,height:920},hasTouc
 const errors=[];
 context.on('page',surface=>surface.on('pageerror',error=>errors.push(error.message)));
 const page=await context.newPage();
-page.setDefaultTimeout(6000);
+context.setDefaultTimeout(10000);
 const field=(key)=>page.locator(`[data-object-field="${key}"]:visible`);
 const action=(name,surface=page)=>surface.locator(`[data-action="${name}"]`).click();
 const read=async(key)=>Number(await field(key).inputValue());
@@ -37,6 +37,7 @@ const pairLabels=['Mineral emitter','Mineral absorber','Oxygen emitter','Oxygen 
 try{
   await page.goto(process.env.UI_TEST_URL || 'http://127.0.0.1:4173/');
   await page.locator('[data-id="builtin:simulation:nurse-rosette"][data-action="start-template"]').click();
+  assert.equal(await page.locator('#resource-arithmetic').inputValue(),'counts');
   await page.locator('[data-count="0"]').fill('0');
   await page.getByRole('button',{name:/Start simulation/}).click();
   await page.getByRole('button',{name:'Pause simulation'}).click();
@@ -112,7 +113,15 @@ try{
   await page.locator('[data-live-remove]').click();await page.locator('[data-object-kind="barrier"]').waitFor({state:'detached'});
 
   // Dissolved gas readout advances even with no field overlay. A running touch drag uses the same world coordinates.
-  await tool.selectOption('source:8');await player.press('Enter');
+  await tool.selectOption('source:8');
+  const rateField=page.getByLabel('Rate (counts/s)',{exact:true});
+  assert.equal(await rateField.getAttribute('step'),'1');
+  assert.equal(await rateField.getAttribute('max'),'15000');
+  await enter('strength',1);
+  await player.press('Enter');
+  await expectValue('strength',1);
+  // Restore a visible flux for the existing live gas-readout exercise.
+  await enter('strength',10500);
   await page.locator('[data-object-title]').filter({hasText:'Oxygen emitter'}).waitFor();
   await page.locator('#live-environment .gas-settings summary').click();
   const gasReadout=page.locator('[data-live-gas-readout]');
@@ -134,16 +143,20 @@ try{
   // Repeat the same actual gestures against the worker-backed design preview.
   await page.locator('[data-tab="environments"]').click();await action('new-environment');
   await page.locator('#environment-name').fill('Chemical field test');await readyPreview();
+  const initialMinerals=page.locator('#environment-nutrients');
+  assert.equal(await initialMinerals.inputValue(),'3000');
+  assert.equal(await initialMinerals.getAttribute('step'),'1');
+  assert.equal(await page.locator('[data-gas-field="initialOxygen"]').inputValue(),'10000');
   const preview=page.locator('.environment-canvas'),builderOverlay=page.locator('#preview-overlay');
   await watch(preview);await builderOverlay.selectOption('carbon');
   const builderTool=page.locator('[data-environment-tool]');
-  await builderTool.selectOption('source:9');await enter('strength',.45);await enter('radius',137);
+  await builderTool.selectOption('source:9');await enter('strength',1);await enter('radius',137);
   await preview.press('Enter');await readyPreview();
   await page.locator('[data-camera="preview:in"]').click();
   const a=await position(preview,1200,760,600,380),z={x:a.x+63,y:a.y-29};
   await drag(a,z);await readyPreview();
   await expectValue('x',600+63/a.scale);await expectValue('y',380-29/a.scale);
-  near(await read('strength'),.45);near(await read('radius'),137);assert.equal(await builderOverlay.inputValue(),'carbon');
+  near(await read('strength'),1);near(await read('radius'),137);assert.equal(await builderOverlay.inputValue(),'carbon');
   await preview.press('ArrowUp');await readyPreview();near(await read('y'),380-29/a.scale-1);
   await builderTool.selectOption('barrier:fixed');await enter('length',152);await enter('width',20);await enter('angle',-25);
   await preview.press('Enter');await readyPreview();
@@ -153,12 +166,12 @@ try{
   const sourcePoint=await position(preview,1200,760,600+63/a.scale,380-29/a.scale-1);
   await page.touchscreen.tap(sourcePoint.x,sourcePoint.y);await page.getByRole('heading',{name:'Oxygen absorber'}).waitFor();
   assert.equal(await builderOverlay.inputValue(),'carbon');assert.equal(await page.locator('#environment-food').count(),0);
-  await enter('strength',.62);
+  await enter('strength',9300);
   await page.waitForFunction(()=>JSON.parse(localStorage.getItem('cellarium.environment-draft.v1'))?.config.sources[0].strength===.62);
-  await enter('strength',.45);
+  await enter('strength',1);
   await page.locator('[data-save]').click();await page.locator('dialog[open]').waitFor({state:'detached'});
   await page.reload();await page.getByRole('button',{name:'Open environment Chemical field test'}).click();await readyPreview();
-  assert.equal(await builderOverlay.inputValue(),'carbon');near(await read('radius'),137);near(await read('strength'),.45);
+  assert.equal(await builderOverlay.inputValue(),'carbon');near(await read('radius'),137);near(await read('strength'),1);
   await page.locator('dialog [data-close]').click();await page.locator('[data-tab="simulation"]').click();
   assert.equal(await overlay.inputValue(),'none');
   assert.deepEqual(errors,[]);

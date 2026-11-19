@@ -130,6 +130,7 @@ impl World {
             w.u32(c.adhered_neighbors);
             for amount in c.junction_net { w.f64(amount); }
             c.body.write_checkpoint(w);
+            if let Some(q)=&c.counted{q.write(w);c.body.count_funding.as_ref().expect("counted body funding").write(w);}
             c.memory.write_checkpoint(w);
             w.text(&c.scan_target);
             for i in 0..FAMILY_COUNT {
@@ -158,10 +159,19 @@ impl World {
             }
             w.u8(f.kind as u8);
             w.f64(f.extra_energy);
+            if let Some(q)=f.counted {q.meal.write(w);w.u32(q.decay_credit);}
         }
         w.count(self.contacts.len());
         for (&(a,b),&ticks) in &self.contacts {
             w.u32(a); w.u32(b); w.u8(ticks);
+        }
+        if self.uses_count_chemistry(){
+            let f=self.count_flux;
+            for n in [f.mineral_in,f.carbon_in,f.energy_in,f.energy_out,f.mineral_out,f.fixed,f.respired,f.decay]{w.u64(n);}
+            w.count(self.photon_credit.len());
+            for &credit in &self.photon_credit { w.u32(credit); }
+            w.count(self.deposits.len());
+            for d in &self.deposits {w.f64(d.x);w.f64(d.y);for n in d.quantities {w.u32(n);}}
         }
     }
     pub(crate) fn read_checkpoint(
@@ -286,7 +296,25 @@ impl World {
                 for amount in &mut junction_net { *amount = r.range(-1e12, 1e12)?; }
                 ensure(version >= 15 || adhered_neighbors > 0 || junction_net == [0.0; 3], "junction transfer without a contact")?;
             }
-            let body = Body::read_checkpoint_version(r, version)?;
+            let mut body = Body::read_checkpoint_version(r, version)?;
+            let counted=if environment.uses_count_chemistry() {
+                let q=crate::counts::CellCounts::read(r)?;
+                body.count_funding=Some(crate::body::BodyFunding::read(r)?);
+                body.validate_count_funding()?;
+                let raw=[q.atp,q.mineral,q.carbon,q.oxygen,q.dic,q.reserve_extra,q.structural_extra];
+                let views=[energy,nutrient_stored,gases[0],gases[1],gases[2],reserve_enrichment,structural_enrichment];
+                ensure(raw.iter().zip(views).all(|(&n,v)|crate::counts::units(n)==v),"counted cell projections disagree with inventory")?;
+                for (q,v) in q.gut.iter().zip(&gut){
+                    ensure(crate::counts::wide_units(q.energy())==v.energy && crate::counts::units(q.mineral)==v.nutrients
+                        &&crate::counts::units(q.extra)==v.extra_energy,"counted gut projection disagrees with inventory")?;
+                }
+                Some(q)
+            } else {
+                if version >= 17 {
+                    body.validate()?;
+                }
+                None
+            };
             ensure(body.structural_mass() > 0.0 || structural_enrichment == 0.0, "stored energy without body material")?;
             let memory = Registers::read_checkpoint(r)?;
             let scan_target = Rc::from(r.text(128)?);
@@ -335,6 +363,7 @@ impl World {
                 });
             }
             let c = Cell {
+                counted,
                 id,
                 genome_id,
                 generation,
@@ -416,7 +445,7 @@ impl World {
             let id = r.u64()?;
             let x = r.range(0.0, environment.width)?;
             let y = r.range(0.0, environment.height)?;
-            let energy = r.range(0.0, 24.0)?;
+            let energy = r.range(0.0, if environment.uses_count_chemistry() {crate::counts::wide_units(u64::from(u32::MAX)*21)} else {24.0})?;
             let nutrients = r.range(0.0, 1e100)?;
             let kind = if version >= 4 {
                 OrganicKind::from_index(r.u8()?)
@@ -434,7 +463,14 @@ impl World {
                 "invalid particle",
             )?;
             let extra_energy = read_substrate_enrichment(r, version, energy)?;
+            let counted=if environment.uses_count_chemistry(){
+                let q=crate::counts::CountMeal::read(r)?;
+                ensure(q.carbon>0 && energy==crate::counts::wide_units(q.energy()) && nutrients==crate::counts::units(q.mineral)
+                    &&extra_energy==crate::counts::units(q.extra),"counted particle projections disagree with inventory")?;
+                Some(crate::counts::FoodCounts{meal:q,decay_credit:r.u32()?})
+            }else{None};
             food.push(Food {
+                counted,
                 id,
                 kind,
                 x,
@@ -458,7 +494,28 @@ impl World {
                 previous=pair;
             }
         }
+        let mut count_flux=counted::Flux::default();
+        let mut deposits=Vec::new();
+        let mut photon_credit = Vec::new();
+        if environment.uses_count_chemistry(){
+            let f=&mut count_flux;
+            for v in [&mut f.mineral_in,&mut f.carbon_in,&mut f.energy_in,&mut f.energy_out,&mut f.mineral_out,&mut f.fixed,&mut f.respired,&mut f.decay]{
+                *v=r.u64()?;ensure(*v<=u64::MAX/128,"count reaction ledger outside safe range")?;
+            }
+            let patch_count = environment.patch_count();
+            let light_columns = r.count(patch_count)?;
+            ensure(light_columns == 0 || light_columns == patch_count, "invalid light credit geometry")?;
+            for _ in 0..light_columns { photon_credit.push(r.u32()?); }
+            let n=r.u32()? as usize;ensure(n<=r.remaining()/28,"invalid delayed material deposit count")?;
+            for _ in 0..n{
+                let x=r.range(0.0,environment.width)?;let y=r.range(0.0,environment.height)?;
+                let quantities=[r.u32()?,r.u32()?,r.u32()?];
+                ensure(x<environment.width&&y<environment.height&&quantities!=[0;3],"invalid delayed material deposit")?;
+                deposits.push(counted::LocalDeposit{x,y,quantities});
+            }
+        }
         let mut world = Self {
+            count_flux, deposits, photon_credit,
             contacts,
             had_adhesive_contacts: cells.iter().any(|c| c.adhered_neighbors != 0),
             cells,
@@ -523,6 +580,16 @@ impl World {
             energy.is_finite() && supplied.is_finite() && energy + world.energy_withdrawn <= supplied + energy_tolerance,
             "stored energy exceeds recorded introductions and photosynthesis",
         )?;
+        if let Some(a)=world.count_audit(){
+            for axis in [0,3,6] {ensure(a[axis].checked_add(a[axis+2])==Some(a[axis+1]),"integer chemical inventory does not balance")?;}
+            ensure(a[9].checked_add(a[11]).is_some_and(|held|held<=a[10]),"integer energy exceeds its inputs")?;
+            let f=world.count_flux;
+            for (n,v) in [(f.mineral_in,world.nutrient_imports),(f.carbon_in,world.carbon_imports),(f.energy_in,world.energy_imports),
+                (f.energy_out,world.energy_withdrawn),(f.mineral_out,world.mineral_withdrawn),(f.fixed,world.carbon_fixed_total),
+                (f.respired,world.carbon_respired_total),(f.decay,world.decay_carbon_respired_total)] {
+                ensure(crate::counts::wide_units(n)==v,"projected count-flow ledger disagrees with raw ledger")?;
+            }
+        }
         Ok(world)
     }
 }
@@ -539,6 +606,21 @@ fn read_substrate_enrichment(reader: &mut Reader<'_>, version: u32, energy: f64)
 mod tests {
     use super::*;
     use crate::{checkpoint, Engine};
+
+    #[test]
+    fn continuous_v17_rejects_an_ingredient_rounded_up_to_a_whole_count() {
+        let mut engine = Engine::new();
+        let id = engine.compile("cellular; product Wall=membrane(); product Trace=scaffold();
+            gene make: Wall=1; assembly E: store(energy) { Wall:0.04; Trace:0.00001; }");
+        engine.world.reset_empty(41);
+        engine.world.place_cell(id, 200.0, 100.0, &engine.genomes).unwrap();
+        for _ in 0..100 { engine.world.step(&mut engine.genomes); }
+        let body = &mut engine.world.cells[0].body;
+        let assembly = &mut body.cellular.as_mut().unwrap().assemblies[0];
+        assembly.ingredients[1].mass = 0.0001;
+        let bytes = checkpoint::save(&engine).unwrap();
+        assert!(checkpoint::restore(&bytes).err().unwrap().contains("assembly ingredient exceeds recipe"));
+    }
 
     #[test]
     fn v15_trace_storage_validates_historical_capacity_and_moves_only_real_contents() {
@@ -566,9 +648,21 @@ mod tests {
         c.nutrient_stored = mineral;
         c.ingest_enriched(OrganicKind::Tissue, 3.0, 0.01, 1.0);
         let as_v15 = |engine: &Engine| {
-            // This source uses no v16 graph or body tags; the old wire payload is identical.
+            // This fixture uses only pre-v16 graph/body tags. Version 17 adds
+            // one environment mode byte to the continuous-world payload.
             let mut bytes = checkpoint::save(engine).unwrap();
+            let mut world = Writer::new();
+            engine.world.write_checkpoint(&mut world);
+            let mut env = Writer::new();
+            engine.world.environment.write_checkpoint(&mut env);
+            let offset = world.0.windows(env.0.len()).position(|w| w == env.0).unwrap();
+            let position = bytes.len() - world.0.len() + offset;
+            assert_eq!(bytes.remove(position), 0);
             bytes[8..12].copy_from_slice(&15_u32.to_le_bytes());
+            let length = bytes.len() as u32;
+            bytes[12..16].copy_from_slice(&length.to_le_bytes());
+            let checksum = checkpoint::checksum(&bytes[20..]);
+            bytes[16..20].copy_from_slice(&checksum.to_le_bytes());
             bytes
         };
         let mut migrated = checkpoint::restore(&as_v15(&old)).unwrap();

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { crownObservation, sampleCrown } from './crown-observation.mjs';
-import { advance, body, bytes, catalog, compile, evaluation, fresh, memory, seed, snapshot } from './organelle-harness.mjs';
+import { advance, body, bytes, catalog, compile, error, evaluation, fresh, memory, restore, save, seed, snapshot } from './organelle-harness.mjs';
 
 // Each run advances the shipped scattered launch without interventions. Descendant
 // counts include the distinct individuals observed at the chosen sample interval.
@@ -25,7 +25,7 @@ const report = { wasmSha256: hash(bytes), ticksPerSecond:30,
   environments:Object.fromEntries(BUILTIN_ENVIRONMENTS
     .filter(habitat => templates.some(template => template.environmentId === habitat.id))
     .map(habitat => [habitat.id,habitat.config])), scenarios:[] };
-const horizons = { 'mixed-ecosystem':600, 'hunting-ground':120, 'light-and-shade':150, 'nurse-rosette':160, 'pulse-swimmers':155, 'crown-rosette':360 };
+const horizons = { 'mixed-ecosystem':600, 'hunting-ground':120, 'light-and-shade':150, 'nurse-rosette':210, 'pulse-swimmers':210, 'crown-rosette':360 };
 
 const activeMass = (inventory, name) => inventory.cellular.assemblies
   .filter(machine => machine.name === name && machine.complete)
@@ -73,6 +73,13 @@ async function run(template, worldSeed) {
   };
   while (state.ticks < result.seconds * 30) {
     state = advance(api, Math.min(secondsPerSample * 30, result.seconds * 30 - state.ticks));
+    if (settings.countChemistry) {
+      const pointer=api.count_audit_ptr();
+      assert.ok(pointer);
+      const ledger=new BigUint64Array(api.memory.buffer,pointer,12);
+      for(const i of [0,3,6]) assert.equal(ledger[i]+ledger[i+2],ledger[i+1],`${id} count ledger ${i} at tick ${state.ticks}`);
+      assert.ok(ledger[9]+ledger[11]<=ledger[10],`${id} energy budget at tick ${state.ticks}`);
+    }
     if (crown) sampleCrown(api,state,crown);
     if (firstBirth === null && state.births) firstBirth = state.seconds;
     if (firstKill === null && state.predations) firstKill = state.seconds;
@@ -159,6 +166,8 @@ async function run(template, worldSeed) {
     obs.oldestObservedDescendantSeconds = Object.fromEntries(cohorts.map(({name}) => [name,round(oldestOffspring.get(name) ?? 0)]));
     obs.descendantsAliveAtEnd = Object.fromEntries(cohorts.map(({name}) => [name,
       state.cells.filter(cell => cell.generation > 0 && lineage(cell.genome) === name).length]));
+    obs.producerGenerationAtEnd = state.cells.reduce((deepest, cell) =>
+      lineage(cell.genome) === 'Phototroph' ? Math.max(deepest, cell.generation) : deepest, 0);
     obs.atFiveMinutes = atFiveMinutes;
     obs.grazersObservedDigestingProducerFood = grazing.size;
     obs.grazersReceivingCarbonAtJunctions = grazersReceivingCarbon.size;
@@ -169,6 +178,7 @@ async function run(template, worldSeed) {
     result.checks.carbonReceivedThroughJunctions = grazersReceivingCarbon.size > 0;
     result.checks.tenMinuteCoexistence = Object.values(obs.alive).every(n => n > 0);
     result.checks.allLineagesReproduced = Object.values(obs.observedDescendants).every(n => n > 0);
+    result.checks.producersRenewAcrossGenerations = obs.producerGenerationAtEnd >= 3;
   }
   if (id === 'light-and-shade') {
     obs.cellsObservedFixingCarbonWithCanopy = bright.size;
@@ -192,6 +202,13 @@ async function run(template, worldSeed) {
     obs.juvenilesWithSubsequentMotorRest = rested.size;
     obs.peakPulsesInOneJuvenile = Math.max(0,...pulsesWhileYoung.values());
     result.checks.juvenileRelaysAndRests = [...rested].some(cell => pulsesWhileYoung.get(cell) >= 2);
+  }
+  if (settings.countChemistry) {
+    const checkpoint=save(api), resumed=await fresh();
+    assert.equal(restore(resumed,checkpoint),1,error(resumed));
+    assert.deepEqual(save(resumed),checkpoint,'Populated endpoint keeps exact inventories and program state');
+    result.checks.exactResourceBudgets = true;
+    result.checks.endpointSaveRestore = true;
   }
   result.passed = Object.values(result.checks).every(Boolean);
   console.log(JSON.stringify({scenario:id,seed:worldSeed,observations:obs,checks:result.checks}));

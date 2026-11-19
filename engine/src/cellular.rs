@@ -580,6 +580,11 @@ pub struct AssemblyInstance {
 }
 // A tolerance scaled to this particular ingredient permits rounding at full
 // installation without treating a small, explicitly declared ingredient as free.
+fn counted_quota(mass:f64) -> f64 {
+    let n=mass*f64::from(crate::counts::SCALE);
+    let whole=if (n-n.round()).abs()<1e-9 { n.round() } else { n.ceil() };
+    crate::counts::units((whole as u32).max(1))
+}
 fn ingredient_complete(mass: f64, required: f64) -> bool {
     mass > 0.0 && required - mass <= required * EPS
 }
@@ -1069,7 +1074,7 @@ impl CellularState {
             bindings: DerivedBindings::default(),
         }
     }
-    pub(crate) fn validate(&self, retention: f64) -> CheckpointResult<()> {
+    pub(crate) fn validate_material(&self, retention: f64, whole_quota: bool) -> CheckpointResult<()> {
         ensure(
             self.pools.len() <= MAX_POOLS && self.assemblies.len() <= MAX_INSTANCES,
             "too many cellular material records",
@@ -1145,7 +1150,8 @@ impl CellularState {
                     retention,
                 )?;
                 ensure(
-                    ingredient.mass <= part.required_mass + EPS,
+                    ingredient.mass <= part.required_mass + EPS || whole_quota &&
+                        (ingredient.mass - (part.required_mass*f64::from(crate::counts::SCALE)).ceil()/f64::from(crate::counts::SCALE)).abs() <= EPS,
                     "assembly ingredient exceeds recipe",
                 )?;
             }
@@ -1319,7 +1325,7 @@ impl CellularState {
                 });
             }
         }
-        state.validate(crate::body::max_embodied_fraction(version))?;
+        state.validate_material(crate::body::max_embodied_fraction(version), version >= 17)?;
         Ok(state)
     }
 }
@@ -1564,6 +1570,23 @@ impl Body {
         scratch: &mut CellularWorkScratch,
     ) -> WorkReport {
         let mut report = WorkReport::default();
+        let counted = self.has_count_funding();
+        // The body view also serves continuous worlds. In a counted world
+        // update its product and ingredient stocks with exact integer arithmetic.
+        let change_stock = |stock: &mut f64, amount: f64| {
+            if counted {
+                let before = crate::counts::nearest(*stock);
+                let change = crate::counts::nearest(amount.abs());
+                let after = if amount < 0.0 {
+                    before.checked_sub(change).expect("funded material transfer")
+                } else {
+                    before.checked_add(change).expect("available product space")
+                };
+                *stock = crate::counts::units(after);
+            } else {
+                *stock = (*stock + amount).max(0.0);
+            }
+        };
         if !dt.is_finite() || dt <= 0.0 || !energy.is_finite() || !minerals.is_finite() {
             return report;
         }
@@ -1602,14 +1625,17 @@ impl Body {
             report.recycle_requested = effort(controls.recycle.get(index).copied().unwrap_or(0.0));
             report.recycle_rate = 0.0;
         }
-        for pool in &mut state.pools {
+        for (index, pool) in state.pools.iter_mut().enumerate() {
             pool.expression_requested = 0.0;
             pool.expression_rate = 0.0;
             if pool.product.half_life > 0.0 {
                 let fraction = -(-std::f64::consts::LN_2 * dt / pool.product.half_life).exp_m1();
-                let mass = pool.mass * fraction;
-                let embodied = pool.embodied_energy * fraction;
-                pool.mass = (pool.mass - mass).max(0.0);
+                let (mass, embodied) = if let Some(funding) = &mut self.count_funding {
+                    let n = crate::counts::nearest(pool.mass);
+                    let done = funding.complete_work((4u64 << 56) | index as u64, pool.mass * fraction).min(n);
+                    (crate::counts::units(done), if n==0 { 0.0 } else { pool.embodied_energy * (f64::from(done) / f64::from(n)) })
+                } else { (pool.mass * fraction, pool.embodied_energy * fraction) };
+                change_stock(&mut pool.mass, -mass);
                 pool.embodied_energy = (pool.embodied_energy - embodied).max(0.0);
                 report.minerals_recovered += mass;
                 report.dissipated_energy += embodied;
@@ -1724,7 +1750,8 @@ impl Body {
                 continue;
             }
             for (part, recipe) in assembly.recipe.parts.iter().enumerate() {
-                let needed = (recipe.required_mass - assembly.ingredients[part].mass).max(0.0);
+                let target = if self.count_funding.is_some() { counted_quota(recipe.required_mass) } else { recipe.required_mass };
+                let needed = (target - assembly.ingredients[part].mass).max(0.0);
                 if ingredient_complete(assembly.ingredients[part].mass, recipe.required_mass) {
                     continue;
                 }
@@ -1812,26 +1839,53 @@ impl Body {
                 }
             }
         }
-        let amounts = allocation.allocate(demands, [
-            // Energy reserves are an authored regulation decision. Empty
-            // storage must not lock usable energy away from essential work,
-            // such as building the enzyme for an already captured meal.
-            energy.max(0.0),
-            minerals.max(0.0),
-            snapshot.free_space,
-            snapshot.free_surface,
-            core_work,
-        ], stock);
-        for (demand, &amount) in demands.iter().zip(amounts) {
-            if amount <= 0.0 {
-                continue;
+        let mut remaining = [energy.max(0.0), minerals.max(0.0), snapshot.free_space, snapshot.free_surface, core_work];
+        let amounts = allocation.allocate(demands, remaining, stock);
+        for (demand, &planned) in demands.iter().zip(amounts) {
+            let mut amount=planned;
+            if let Some(funding)=&mut self.count_funding {
+                // The allocator apportions continuous work. A finished molecule
+                // may use work accumulated over earlier ticks, but its inputs,
+                // space and ATP must all still be available when it commits.
+                let mut limit=f64::INFINITY;
+                for (&cost, &budget) in demand.common[..4].iter().zip(&remaining) {
+                    if cost>0.0 { limit=limit.min(budget/cost); }
+                }
+                if let Some(i)=demand.stock { limit=limit.min(stock[i]); }
+                let key=match demand.operation {
+                    CellOperation::Synthesis(i) => Some(i as u64),
+                    CellOperation::Finish(_,i) => Some((1u64<<56) | i as u64),
+                    CellOperation::Install(i,p,_) => {
+                        let a=&state.assemblies[i];
+                        
+                        // Old recipes can specify sub-molecule quotas. Installing
+                        // a molecule satisfies its physical requirement.
+                        let need=a.recipe.parts[p].required_mass;
+                        let target=crate::counts::nearest(counted_quota(need));
+                        limit=limit.min(crate::counts::units(target.saturating_sub(crate::counts::nearest(a.ingredients[p].mass))));
+                        Some((2u64<<56) | ((i as u64)<<16) | p as u64)
+                    }
+                    CellOperation::RecycleAssembly(i) => {
+                        limit=limit.min(measures[i].mass);
+                        Some((3u64<<56) | i as u64)
+                    }
+                    _=>None,
+                };
+                amount=if let Some(key)=key {
+                    crate::counts::units(funding.complete_work(key,planned).min(crate::counts::floor(limit)))
+                } else { planned.min(limit) };
+                for (budget,&cost) in remaining[..4].iter_mut().zip(&demand.common) {
+                    *budget=(*budget-amount*cost).max(0.0);
+                }
+                if let Some(i)=demand.stock { change_stock(&mut stock[i], -amount); }
             }
+            if amount<=0.0 { continue; }
             let spent = amount * demand.common[0];
             report.energy_spent += spent;
             report.minerals_spent += amount * demand.common[1];
             match demand.operation {
                 CellOperation::Synthesis(pool) => {
-                    state.pools[pool].mass += amount;
+                    change_stock(&mut state.pools[pool].mass, amount);
                     state.pools[pool].embodied_energy += spent * EMBODIED_FRACTION;
                     state.pools[pool].expression_rate += amount / dt;
                     report.synthesized_mass += amount;
@@ -1840,10 +1894,10 @@ impl Body {
                 CellOperation::Finish(input, output) => {
                     let carried = amount * density[input];
                     let source = &mut state.pools[input];
-                    source.mass = (source.mass - amount).max(0.0);
+                    change_stock(&mut source.mass, -amount);
                     source.embodied_energy = (source.embodied_energy - carried).max(0.0);
                     let finished = &mut state.pools[output];
-                    finished.mass += amount;
+                    change_stock(&mut finished.mass, amount);
                     finished.embodied_energy += carried + spent * EMBODIED_FRACTION;
                     finished.expression_rate += amount / dt;
                     report.synthesized_mass += amount;
@@ -1851,14 +1905,14 @@ impl Body {
                 }
                 CellOperation::Install(index, part, pool) => {
                     let substrate_energy = amount * density[pool];
-                    state.pools[pool].mass = (state.pools[pool].mass - amount).max(0.0);
+                    change_stock(&mut state.pools[pool].mass, -amount);
                     state.pools[pool].embodied_energy =
                         (state.pools[pool].embodied_energy - substrate_energy).max(0.0);
                     let assembly = &mut state.assemblies[index];
                     let old_mass = assembly.mass();
                     assembly.integrity =
                         (old_mass * assembly.integrity + amount) / (old_mass + amount);
-                    assembly.ingredients[part].mass += amount;
+                    change_stock(&mut assembly.ingredients[part].mass, amount);
                     assembly.ingredients[part].embodied_energy +=
                         substrate_energy + spent * EMBODIED_FRACTION;
                     report.constructed_mass += amount;
@@ -1898,12 +1952,20 @@ impl Body {
                     let assembly = &mut state.assemblies[index];
                     let fraction = (amount / measures[index].mass).min(1.0);
                     let mut recovered = 0.0;
+                    let whole = crate::counts::nearest(measures[index].mass);
+                    let dismantled = crate::counts::nearest(amount);
+                    let mut prefix = 0u32;
                     for (part_index, (ingredient, part)) in assembly.ingredients.iter_mut()
                         .zip(&assembly.recipe.parts).enumerate()
                     {
-                        let mass = ingredient.mass * fraction;
-                        let embodied = ingredient.embodied_energy * fraction;
-                        ingredient.mass = (ingredient.mass - mass).max(0.0);
+                        let (mass, embodied) = if self.count_funding.is_some() {
+                            let available=crate::counts::nearest(ingredient.mass);
+                            let first=crate::counts::proportional(dismantled,prefix,whole);
+                            prefix+=available;
+                            let part=crate::counts::proportional(dismantled,prefix,whole)-first;
+                            (crate::counts::units(part), if available==0 {0.0} else {ingredient.embodied_energy*(f64::from(part)/f64::from(available))})
+                        } else { (ingredient.mass*fraction, ingredient.embodied_energy*fraction) };
+                        change_stock(&mut ingredient.mass, -mass);
                         ingredient.embodied_energy = (ingredient.embodied_energy - embodied).max(0.0);
                         recovered += mass;
                         if mass <= 0.0 { continue; }
@@ -1926,7 +1988,7 @@ impl Body {
                             // Installation energy is dissipated, never refunded as
                             // usable energy or inflated product energy density.
                             let retained = embodied.min(mass * part.product.kind.synthesis_cost() * EMBODIED_FRACTION);
-                            state.pools[pool].mass += mass;
+                            change_stock(&mut state.pools[pool].mass, mass);
                             state.pools[pool].embodied_energy += retained;
                             report.dissipated_energy += embodied - retained;
                         } else {

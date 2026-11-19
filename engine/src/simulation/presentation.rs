@@ -83,7 +83,7 @@ impl World {
 
     /// Outgoing signals and physical bonds are separate observations. A signal
     /// may come from a solitary cell; only the accepted registry supplies links.
-    pub(crate) fn append_colony_activity(&self, genomes: &[Genome], target: &mut Vec<f64>) {
+    pub(crate) fn append_colony_activity(&self, genomes: &[Genome], target: &mut Vec<f64>, typed: bool) {
         let mut signal_count = 0;
         if genomes.iter().any(|g| g.program.participates_in_contact_signaling()) {
             for (index, cell) in self.cells.iter().enumerate() {
@@ -95,8 +95,14 @@ impl World {
             }
         }
         target[9] = signal_count as f64;
-        for (a, b) in self.bond_pairs() {
-            target.extend_from_slice(&[a as f64, b as f64]);
+        if typed {
+            for (a, b, kind) in self.presented_bonds(None) {
+                target.extend_from_slice(&[a as f64, b as f64, kind as u8 as f64]);
+            }
+        } else {
+            for (a, b) in self.bond_pairs() {
+                target.extend_from_slice(&[a as f64, b as f64]);
+            }
         }
     }
 

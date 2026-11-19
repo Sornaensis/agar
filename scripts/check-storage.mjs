@@ -59,7 +59,7 @@ for (const simulation of simulations) {
   const total = simulation.populations.reduce((sum, population) => sum + population.count, 0);
   assert.ok(simulation.populations.length > 0 && simulation.populations.every(row => Number.isSafeInteger(row.count) && row.count > 0));
   assert.ok(Number.isSafeInteger(total) && total > 0);
-  assert.deepEqual(catalog.simulationStartSettings(), {mutationRate: 0.1});
+  assert.deepEqual(catalog.simulationStartSettings(), {mutationRate: 0.1, countChemistry: true});
 }
 
 const portable = JSON.parse(storage.exportGenome(genomes[0]));

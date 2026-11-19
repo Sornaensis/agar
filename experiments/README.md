@@ -1,6 +1,10 @@
 # Ecosystem measurements
 
-[Curated ecology](curated-ecology.md) records the current predator investigation and preset outcomes. Older runs below used the catalogs and engines identified in each section.
+[Curated ecology](curated-ecology.md) records earlier predator and preset investigations. Older runs below used the catalogs and engines identified in each section.
+
+## Whole-count chemistry
+
+Run `npm run test:integer-chemistry` for a one-count-per-second emitter, staged adhesin production, conservation through death, migration of a genuine v16 save and exact continuation of a hunting run. The comparison uses the same seed, habitat and genome sources with each resource model. Timings cover engine stepping only and the two populations can diverge. [Whole-count comparison](integer-chemistry.json) · [Seeded preset trials](scenarios.json)
 
 ## Production and adhesion
 

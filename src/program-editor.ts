@@ -17,7 +17,7 @@ import { searchKeymap } from '@codemirror/search';
 import { tags } from '@lezer/highlight';
 import type { Engine, GenomeAnalysis, GenomeBinding, GenomeDiagnostic, GenomeEvaluation } from './engine';
 import {
-  cellularDeclarations, genomeCompletions, genomeSignalCatalog, genomeSymbolDocumentation, isCellularSource,
+  cellularDeclarations, genomeCompletions, genomeSignalCatalog, genomeSymbolDocumentation, isCellularSource, usesCountUnits,
   lookupCellularSymbol, lookupGenomeSymbol, tokenizeGenome, unwrapGenomeSelection,
   type GenomeSymbol, type GenomeToken, type GenomeTokenKind,
 } from './genome-language';
@@ -463,7 +463,7 @@ export class ProgramEditor {
     this.element.classList.toggle('cellular-program', cellular);
     if (cellular) {
       const declarations = cellularDeclarations(this.source);
-      const label = document.createElement('strong'); label.textContent = 'Cellular program';
+      const label = document.createElement('strong'); label.textContent = usesCountUnits(this.source) ? 'Cellular program · whole counts' : 'Cellular program';
       const detail = document.createElement('span');
       const mechanisms = declarations.assemblies.filter(item=>item.kind.includes('(')).length;
       detail.textContent = `${declarations.products.length} products · ${declarations.genes.length} genes · ${mechanisms ? `${mechanisms} mechanisms${mechanisms<declarations.assemblies.length?` · ${declarations.assemblies.length-mechanisms} family recipes`:''}` : `${declarations.assemblies.length} recipes`}${declarations.functions.length ? ` · ${declarations.functions.length} functions` : ''}`;
@@ -478,7 +478,7 @@ export class ProgramEditor {
     const summary = symbolHelp(symbol); summary.classList.add('program-reference-summary');
     const usage = document.createElement('div'); usage.className = 'program-reference-usage';
     const liveValue = document.createElement('div'); liveValue.className = 'program-reference-live-value'; liveValue.hidden = true; usage.append(liveValue);
-    const documentation = genomeSymbolDocumentation(symbol);
+    const documentation = genomeSymbolDocumentation(symbol,usesCountUnits(this.source));
     const example = document.createElement('pre'); example.className = 'program-reference-example'; example.textContent = documentation.example;
     usage.append(example);
     for (const text of documentation.notes) { const note = document.createElement('p'); note.textContent = text; summary.append(note); }

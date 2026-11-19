@@ -50,11 +50,16 @@ impl Environment {
         let columns = (width / PATCH_SIZE) as usize;
         let rows = (height / PATCH_SIZE) as usize;
         let count = columns * rows;
-        let mut minerals = vec![0.0; count];
+        let count_stocks = if let Some(water)=&self.counted {
+            let Some(stocks)=water.resized(self.columns,self.rows,columns,rows) else {return false};
+            Some(stocks)
+        } else {None};
+        let continuous = if count_stocks.is_some(){0}else{count};
+        let mut minerals = vec![0.0; continuous];
         let mut heat = vec![0.0; count];
         let mut organic = vec![0.0; count];
-        let mut oxygen = vec![0.0; count];
-        let mut carbon = vec![0.0; count];
+        let mut oxygen = vec![0.0; continuous];
+        let mut carbon = vec![0.0; continuous];
         for old in 0..self.patch_count() {
             let ox = old % self.columns;
             let oy = old / self.columns;
@@ -71,9 +76,11 @@ impl Environment {
                         continue;
                     }
                     let index = y * columns + x;
+                    if continuous!=0 {
                     minerals[index] += self.nutrients[old] * overlap / area;
                     oxygen[index] += self.gases.oxygen[old] * overlap / area;
                     carbon[index] += self.gases.carbon[old] * overlap / area;
+                    }
                     heat[index] += self.temperature[old] * overlap;
                     organic[index] += self.organic[old] * overlap;
                 }
@@ -98,6 +105,7 @@ impl Environment {
         self.columns = columns;
         self.rows = rows;
         self.grid = PatchGeometry::new(width, height, columns, rows);
+        if let Some(stocks)=count_stocks {self.counted.as_mut().unwrap().install_resized(stocks)}
         self.nutrients = minerals;
         self.gases.oxygen = oxygen;
         self.gases.carbon = carbon;

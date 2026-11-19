@@ -212,12 +212,15 @@ try {
   await toggle(trial.founder).click();
   await node(trial.ancestor).waitFor({state:'hidden'});
   const newest=page.locator('[data-lineage-newest]');
-  assert.match(await newest.innerText(),new RegExp('Newest variant #'+trial.grandchild));
+  const latestVariant=trial.initial.filter(entry=>entry.parent).at(-1);
+  assert.match(await newest.innerText(),new RegExp('Newest variant #'+latestVariant.id+'$'));
   await newest.click();
-  assert.equal(await toggle(trial.founder).getAttribute('aria-expanded'),'true');
-  assert.equal(await toggle(trial.ancestor).getAttribute('aria-expanded'),'true');
+  for(let parent=latestVariant.parent;parent;parent=trial.initial[parent-1].parent)
+    assert.equal(await toggle(parent).getAttribute('aria-expanded'),'true');
+  await node(latestVariant.id).waitFor();
+  assert.ok(await page.locator(`[data-action="live-program"][data-genome="${latestVariant.id}"]`).evaluate(el=>el===document.activeElement));
+  if(await toggle(trial.ancestor).getAttribute('aria-expanded')==='false') await toggle(trial.ancestor).click();
   await node(trial.grandchild).waitFor();
-  assert.ok(await page.locator(`[data-action="live-program"][data-genome="${trial.grandchild}"]`).evaluate(el=>el===document.activeElement));
   await assertTree(trial.initial);
 
   // Full editor clipboard contents must match the actual mutated program,

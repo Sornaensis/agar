@@ -20,8 +20,7 @@ const engineSource = (await readFile(new URL('../src/engine.ts',import.meta.url)
   .replace("import engineContract from './engine-contract.json';",`const engineContract=${JSON.stringify(contract)};`);
 const engineCode = ts.transpileModule(engineSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
 const { Engine,decodeRenderSnapshot,validateBodyInspection,validateGenomeEvaluation } = await import(`data:text/javascript;base64,${Buffer.from(engineCode).toString('base64')}`);
-// Only explicit edges belong to a colony. Coincident cells, shared genome and
-// outgoing signals have no effect on the graph, including across a world seam.
+// Contact links can bridge two colonies while leaving each colony's membership intact.
 {
   const base=new Float64Array(12+5*21);
   base[2]=5; base[7]=400; base[8]=400; base[9]=1;
@@ -29,15 +28,22 @@ const { Engine,decodeRenderSnapshot,validateBodyInspection,validateGenomeEvaluat
     base.set([id,1,x,110,0,0,0,7],12+row*21);
   }
   const wire=edges=>Float64Array.of(...base,4,0,...edges.flat());
-  const raw=wire([[2,8],[5,8],[5,13],[8,13]]);
+  const raw=wire([[2,8,1],[5,8,0],[5,13,1],[8,13,2]]);
   const projected=decodeRenderSnapshot(raw);
   const peers=id=>projected.cells.find(c=>c.id===id);
   assert.deepEqual(peers(8).neighborIds,[2,5,13]);
   assert.equal(peers(2).attachedNeighbors,1);
-  assert.equal(peers(2).colonySize,4);
+  assert.deepEqual(peers(8).colonyNeighborIds,[2]);
+  assert.deepEqual(peers(8).feedingNeighborIds,[5]);
+  assert.deepEqual(peers(8).contactNeighborIds,[13]);
+  assert.equal(peers(2).colonySize,2);
+  assert.equal(peers(13).colonySize,2);
   assert.equal(peers(21).colonySize,undefined);
   assert.equal(peers(21).contactSignal,0);
-  for (const edges of [[[8,2]],[[2,2]],[[2,99]],[[2,8],[2,8]],[[5,8],[2,8]]]) {
+  const docked=decodeRenderSnapshot(wire([[2,8,0]]));
+  assert.equal(docked.cells.find(c=>c.id===2).colonySize,undefined);
+  assert.equal(docked.bonds[0][2],'feeding');
+  for (const edges of [[[8,2,1]],[[2,2,1]],[[2,99,1]],[[2,8,0],[2,8,1]],[[5,8,0],[2,8,1]],[[2,8,3]]]) {
     assert.throws(()=>decodeRenderSnapshot(wire(edges)),/bond/);
   }
   for (const badCount of [-1,0.5,6]) {
@@ -51,12 +57,15 @@ const { Engine,decodeRenderSnapshot,validateBodyInspection,validateGenomeEvaluat
   }));
   const visibility=new PeriodicVisibility();
   visibility.width=visibility.right=400;visibility.height=visibility.bottom=400;
-  const segments=[];
-  const context={save(){},restore(){},stroke(){},beginPath(){},moveTo(x,y){segments.push([x,y]);},lineTo(x,y){segments.at(-1).push(x,y);}};
-  Renderer.prototype.drawColonyBonds.call({context,visibility},{...projected,bonds:[projected.bonds[0]]});
+  const segments=[],rings=[];
+  const context={save(){},restore(){},stroke(){},beginPath(){},moveTo(x,y){segments.push([x,y]);},lineTo(x,y){segments.at(-1).push(x,y);},arc(x,y,r){rings.push({x,y,r,color:this.strokeStyle});}};
+  Renderer.prototype.drawBonds.call({context,visibility},{...projected,bonds:[projected.bonds[0]]});
   assert.equal(segments.length,2,'Both images of a cross-seam bond are drawn');
   assert.ok(segments.some(([x])=>Math.abs(x)<3) && segments.some(([x])=>Math.abs(x-400)<3));
   assert.ok(segments.every(([xa,ya,xb,yb])=>Math.hypot(xa-xb,ya-yb)<3),'Neither segment crosses the middle of the world');
+  Renderer.prototype.drawBonds.call({context,visibility},docked);
+  assert.equal(rings.length,2,'Both images of a feeding link across the seam are rings');
+  assert.ok(rings.some(({x})=>x===0) && rings.some(({x})=>x===400));
 }
 const originalFetch = globalThis.fetch, bytes = await readFile(new URL('../engine/pkg/agar_engine.wasm',import.meta.url));
 globalThis.fetch = async()=>new Response(bytes);
@@ -155,6 +164,30 @@ for (const mechanism of MECHANISM_CATALOG) {
   const symbol=language.CELLULAR_MECHANISMS.find(item=>item.name===mechanism.kind);
   engine.compile('cellular;\n'+language.genomeSymbolDocumentation(symbol).example);
 }
+const counted = "cellular counts; product Skin=membrane(); assembly Tank:store(energy){ Skin:200; } let available=energy; let material=pool.Skin; let activity_now=built.Tank; ri001=energy;";
+assert.equal(language.isCellularSource(counted),true);
+assert.equal(language.isCellularSource("cellularcounts;"),false);
+assert.equal(language.usesCountUnits(source),false);
+assert.equal(language.usesCountUnits(counted),true);
+assert.deepEqual([...schema.cellular.counts.integerSignals].sort(),[...language.COUNT_RESOURCE_SIGNALS].sort());
+assert.equal(schema.cellular.counts.perUnit,10000);
+for (const [name,type] of [['energy','count'],['pool.Skin','count'],['built.Tank','scalar'],['energy.fraction','scalar']]) {
+  assert.equal(language.genomeSignalCatalog('read',counted).find(s=>s.name===name).type,type);
+}
+for (const sym of language.CELLULAR_MECHANISMS) engine.compile('cellular counts;\n'+language.genomeSymbolDocumentation(sym,true).example);
+const countedId=engine.compile(counted);
+for (const countChemistry of [false,true]) {
+  engine.resetEmpty(42);
+  engine.setCountChemistry(countChemistry);
+  engine.seed(countedId,1,120,100);
+  const countedTrace=engine.getCellEvaluation(1);
+  assert.equal(countedTrace.bindings.find(b=>b.name==='available').value,Math.round(engine.cellSnapshot(1).energy*10000));
+  assert.equal(countedTrace.bindings.find(b=>b.name==='available').type,'count');
+  assert.equal(countedTrace.bindings.find(b=>b.name==='material').type,'count');
+  assert.equal(countedTrace.bindings.find(b=>b.name==='activity_now').type,'scalar');
+}
+engine.resetEmpty(42);
+engine.setCountChemistry(false);
 const genome = engine.compile(source);
 engine.resetEmpty(42,0); engine.seed(genome,1);
 const id = engine.snapshot().cells[0].id;
@@ -300,12 +333,12 @@ const planMarkup=renderCellularBody(blueprint);
 assert.ok(planMarkup.includes('Unbuilt recipes'));
 assert.ok(!planMarkup.includes('data-kind="colony-reception"')&&!planMarkup.includes('class="colony-exchange"'),
   'An unbuilt junction has neither a live receiver nor membership');
-const signedExchanges={...inventory,colony:{neighbors:2,neighborIds:[7,9],energyNet:0.25,mineralNet:-0.001,carbonNet:0}};
+const signedExchanges={...inventory,colony:{neighbors:3,neighborIds:[7,9,11],colonyNeighborIds:[7],feedingNeighborIds:[9],contactNeighborIds:[11],energyNet:0.25,mineralNet:-0.001,carbonNet:0}};
 assert.doesNotThrow(()=>validateBodyInspection(signedExchanges,founder));
 const exchangePanel=renderCellularBody(signedExchanges);
-for (const label of ['Colony exchange','Directly bonded to #7, #9','+0.25','−0.001']) assert.ok(exchangePanel.includes(label));
+for (const label of ['Resource exchange','Colony bonds · #7','Feeding links · #9','Contact links · #11','+0.25','−0.001']) assert.ok(exchangePanel.includes(label));
 assert.throws(()=>validateBodyInspection({...inventory,colony:{...signedExchanges.colony,carbonNet:Infinity}},founder));
-for (const neighborIds of [[7],[9,7],[7,7],[founder,9]]) {
+for (const neighborIds of [[7],[9,7,11],[7,7,11],[founder,9,11]]) {
   assert.throws(()=>validateBodyInspection({...inventory,colony:{...signedExchanges.colony,neighborIds}},founder));
 }
 const checkpoint=engine.saveState();
@@ -388,6 +421,7 @@ let family=engine.renderSnapshot();
 assert.equal(family.bonds.length,0);
 while (!family.bonds.length && family.time<150) { engine.tick(30); family=engine.renderSnapshot(); }
 assert.equal(family.bonds.length,1,'An actual fission establishes an observable bond');
+assert.equal(family.bonds[0][2],'colony');
 const [[mother,daughter]]=family.bonds;
 assert.equal(engine.cellSnapshot(daughter.id).parentId,mother.id);
 assert.equal(mother.colonySize,2);
@@ -395,6 +429,8 @@ const motherBody=engine.cellBody(mother.id);
 assert.equal(motherBody.cellular.products.find(p=>p.name==='Glue').precursor,'CoatPrecursor');
 assert.match(renderCellularBody(motherBody,new Set(['cellular-products'])),/adhesin from CoatPrecursor/);
 assert.deepEqual(motherBody.colony.neighborIds,[daughter.id]);
+assert.deepEqual(motherBody.colony.colonyNeighborIds,[daughter.id]);
+assert.deepEqual(motherBody.colony.feedingNeighborIds,[]);
 const attached=engine.saveState();
 assert.equal(engine.moveCell(daughter.id,35,35),1);
 assert.equal(engine.renderSnapshot().bonds.length,0,'Single-cell relocation immediately removes the edge on the paused frame');

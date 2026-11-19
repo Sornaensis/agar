@@ -1,9 +1,12 @@
 import {prepareBloom, placeByTissue} from './feeding-culture.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { fresh, compile, seed, snapshot, advance, graph, body, evaluation, save, restore, source, error, catalog } from './organelle-harness.mjs';
+import { fresh as newWorld, compile, seed, snapshot, advance, graph, body, evaluation, save, restore, source, error, catalog } from './organelle-harness.mjs';
 
 const { PRESETS, CELLULAR_FAMILY_PRESETS, MECHANISM_PRESETS_V6 } = await catalog();
+const countChemistry = !process.argv.includes('--continuous');
+const fresh = config => newWorld({ ...config, countChemistry });
+
 const conserved = state => {
   assert.ok(Math.abs(state.material - state.materialIntroduced) < Math.max(1e-7, state.materialIntroduced * 1e-10), 'Material transfers remain conserved');
   assert.ok(state.energy <= state.energyIntroduced + state.photosynthesis + 1e-7, 'Fabrication and metabolism cannot create energy');
@@ -199,7 +202,7 @@ for (const preset of PRESETS) {
   assert.ok(state.cells[0].energy < 68 && state.cells[0].nutrients < 0.6);
 
   // The consumer has one finite producer-derived patch and receives no later inputs.
-  const cycleSeconds = preset.name === 'Predator' ? 900 : 150;
+  const cycleSeconds = ({ Predator:900, Rememberer:210 })[preset.name] ?? 150;
   let previous;
   while (!state.births && state.ticks-startTick < cycleSeconds * 30) {
     const parent = state.cells.find(cell => cell.id === founder);
@@ -231,7 +234,7 @@ for (const preset of PRESETS) {
   }
   if (preset.name === 'Forager' || preset.name === 'Predator') {
     const essential = ['Gut', 'ExudateEnzyme', 'Capture', 'LeftMotor', 'RightMotor', 'Vision', 'Touch',
-      ...(preset.name === 'Predator' ? ['TissueEnzyme', 'Piercer', 'LeftHeat', 'RightHeat'] : [])];
+      ...(preset.name === 'Predator' ? ['TissueEnzyme', 'Piercer', 'LeftHeat', 'RightHeat'] : ['Translation'])];
     for (const name of essential) {
       assert.ok(machines.filter(machine => machine.name === name && machine.functionalMass > 0).length >= 2,
         `${preset.name} paid for duplicate ${name} machinery before division`);
@@ -249,11 +252,21 @@ for (const preset of PRESETS) {
 
   const firstDivisionSeconds = (state.ticks-startTick)/30;
   const bytes = save(api), resumed = await fresh();
-  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 16);
+  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 17);
   assert.equal(restore(resumed, bytes), 1, error(resumed));
   assert.deepEqual(save(resumed), bytes);
   advance(api, 90); advance(resumed, 90);
   assert.deepEqual(save(resumed), save(api), 'Products, progress, inherited recipes and subsequent dynamics resume exactly');
+  if (['Phototroph', 'Mixotroph', 'Forager'].includes(preset.name)) {
+    const daughter = state.cells.find(cell => cell.parentId === founder);
+    assert.ok(daughter, 'Follow the first daughter after she inherits her own machinery');
+    const hasGranddaughter = () => state.cells.some(cell => cell.parentId === daughter.id);
+    while (!hasGranddaughter() && state.ticks - startTick < 300 * 30) {
+      state = advance(api, 60);
+      conserved(state);
+    }
+    assert.ok(hasGranddaughter(), `The first ${preset.name} daughter must grow and divide in the same habitat as her founder`);
+  }
   for (const kind of [4, 5, 6]) {
     const mutant = api.mutate_genome(genome, 17, kind);
     assert.ok(mutant !== genome && mutant > 0, error(api));
@@ -265,5 +278,5 @@ for (const preset of PRESETS) {
     firstDivisionSeconds: Math.round(firstDivisionSeconds * 100) / 100, timeLimitSeconds: cycleSeconds });
 }
 
-console.log(`Cellular checks passed: ${PRESETS.length} authored genomes, ${importable.length} importable examples, local receptor separation, bright/shade motor recycling and regrowth, paid development, frozen inspection, resource conservation, whole-machine fission with functioning consumer daughters, gene/placement mutations, and exact v16 continuation.`);
+console.log(`Cellular checks passed in ${countChemistry ? 'counted' : 'continuous'} chemistry: ${PRESETS.length} authored genomes, ${importable.length} importable examples, local receptor separation, bright/shade motor recycling and regrowth, paid development, frozen inspection, resource conservation, whole-machine fission with functioning consumer daughters, gene/placement mutations, and exact v17 continuation.`);
 console.log(JSON.stringify({ conditions: 'One founder in lit water. Consumer trials start beside a finite patch of tissue and exudate from a bloom of 25 Phototrophs grown for 60 seconds and killed by thermal stress. No subsequent inputs.', cycles }));

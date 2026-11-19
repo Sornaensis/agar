@@ -257,6 +257,11 @@ canvas#world { display: block; position: absolute; inset: 0; width: 100%; height
 .chart-panel .section-heading > span { color: #8f9394; font: 11px var(--mono); }
 .metrics-chart { display: block; width: 100%; height: 230px; }
 .metrics-secondary { margin: 3px 0 28px; border-top: 1px solid #333637; }
+.count-budget-scroll { overflow-x: auto; }
+.count-budget-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.count-budget-table th, .count-budget-table td { padding: 7px 10px; border-bottom: 1px solid #333637; text-align: right; }
+.count-budget-table th { color: #a3a8a9; font-weight: 500; }
+.count-budget-table th:first-child { text-align: left; }
 .metrics-secondary > summary { padding: 15px 0; color: #a3a8a9; font-size: 12px; cursor: pointer; }
 .metrics-secondary .metrics-grid { margin-top: 4px; margin-bottom: 13px; }
 .metrics-secondary .metric-card { background: transparent; border: 0; padding: 8px 0; }

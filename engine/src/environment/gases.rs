@@ -6,8 +6,8 @@ use crate::checkpoint::{ensure, Reader, Result, Writer};
 pub const PATCH_WATER_VOLUME: f64 = 1.0;
 pub const DEFAULT_INITIAL_OXYGEN: f64 = 1.0;
 pub const DEFAULT_INITIAL_CARBON: f64 = 1.0;
-const OXYGEN_DIFFUSION: f64 = 80.0;
-const CARBON_DIFFUSION: f64 = 60.0;
+pub(super) const OXYGEN_DIFFUSION: f64 = 80.0;
+pub(super) const CARBON_DIFFUSION: f64 = 60.0;
 const GAS_SOURCE_RATE: f64 = 1.5;
 // A unit-strength aerator exchanges five abstract water volumes per second,
 // distributed over its normalized spatial footprint.
@@ -33,7 +33,7 @@ pub(super) struct GasState {
     carbon_absorption: Vec<f64>,
     aeration: Vec<f64>,
     /// Derived from the atmosphere and aerators, never serialized.
-    exchange_fraction: Vec<f64>,
+    pub(super) exchange_fraction: Vec<f64>,
 }
 impl GasState {
     pub fn new(patches: usize) -> Self {
@@ -88,7 +88,7 @@ impl GasState {
             }
         }
     }
-    pub fn read_checkpoint(r: &mut Reader<'_>, patches: usize) -> Result<Self> {
+    pub fn read_checkpoint(r: &mut Reader<'_>, patches: usize, counted:bool) -> Result<Self> {
         let mut result = Self::new(patches);
         result.initial_oxygen = r.range(0.0, 100.0)?;
         result.initial_carbon = r.range(0.0, 100.0)?;
@@ -103,6 +103,7 @@ impl GasState {
         ensure(open <= 1, "invalid atmosphere boundary")?;
         result.atmosphere_open = open == 1;
         for field in [&mut result.oxygen, &mut result.carbon] {
+            if counted { field.clear();ensure(r.count(0)?==0,"unexpected continuous gas stock")?;continue }
             ensure(r.count(patches)? == patches, "incorrect gas field size")?;
             for n in field {
                 *n = r.range(0.0, 1e100)?;
@@ -148,40 +149,42 @@ impl Environment {
         true
     }
     pub fn oxygen_patch(&self, index: usize) -> f64 {
+        if self.uses_count_chemistry() {return units(u64::from(self.oxygen_count(index)))}
         self.gases.oxygen.get(index).copied().unwrap_or(0.0)
     }
     pub fn inorganic_carbon_patch(&self, index: usize) -> f64 {
+        if self.uses_count_chemistry() {return units(u64::from(self.inorganic_carbon_count(index)))}
         self.gases.carbon.get(index).copied().unwrap_or(0.0)
     }
     pub fn oxygen_at(&self, x: f64, y: f64) -> f64 {
-        self.sample(&self.gases.oxygen, x, y) / PATCH_WATER_VOLUME
+        self.sample_with(x,y,|i|self.oxygen_patch(i)) / PATCH_WATER_VOLUME
     }
     pub fn inorganic_carbon_at(&self, x: f64, y: f64) -> f64 {
-        self.sample(&self.gases.carbon, x, y) / PATCH_WATER_VOLUME
+        self.sample_with(x,y,|i|self.inorganic_carbon_patch(i)) / PATCH_WATER_VOLUME
     }
     pub fn oxygen_total(&self) -> f64 {
-        self.gases.oxygen.iter().sum()
+        self.counted.as_ref().map_or_else(||self.gases.oxygen.iter().sum(),|w|units(w.stocks[1].iter().map(|&v|u64::from(v)).sum()))
     }
     pub fn inorganic_carbon_total(&self) -> f64 {
-        self.gases.carbon.iter().sum()
+        self.counted.as_ref().map_or_else(||self.gases.carbon.iter().sum(),|w|units(w.stocks[2].iter().map(|&v|u64::from(v)).sum()))
     }
     pub fn oxygen_input_total(&self) -> f64 {
-        self.gases.oxygen_inputs
+        self.counted.as_ref().map_or(self.gases.oxygen_inputs,|w|units(w.inputs[1]))
     }
     pub fn oxygen_output_total(&self) -> f64 {
-        self.gases.oxygen_outputs
+        self.counted.as_ref().map_or(self.gases.oxygen_outputs,|w|units(w.outputs[1]))
     }
     pub fn carbon_input_total(&self) -> f64 {
-        self.gases.carbon_inputs
+        self.counted.as_ref().map_or(self.gases.carbon_inputs,|w|units(w.inputs[2]))
     }
     pub fn carbon_output_total(&self) -> f64 {
-        self.gases.carbon_outputs
+        self.counted.as_ref().map_or(self.gases.carbon_outputs,|w|units(w.outputs[2]))
     }
     pub fn oxygen_removed_total(&self) -> f64 {
-        self.gases.oxygen_outputs
+        self.counted.as_ref().map_or(self.gases.oxygen_outputs,|w|units(w.outputs[1]))
     }
     pub fn carbon_removed_total(&self) -> f64 {
-        self.gases.carbon_outputs
+        self.counted.as_ref().map_or(self.gases.carbon_outputs,|w|units(w.outputs[2]))
     }
     /// Internal transfers leave external ledgers unchanged. Callers collect and
     /// jointly allocate competing requests before committing these withdrawals.
@@ -253,7 +256,7 @@ impl Environment {
     }
     fn rebuild_exchange_fractions(&mut self) {
         let gas = &mut self.gases;
-        gas.exchange_fraction.resize(gas.oxygen.len(), 0.0);
+        gas.exchange_fraction.resize(gas.aeration.len(), 0.0);
         let ambient = if gas.atmosphere_open {
             gas.exchange_rate
         } else {
@@ -380,7 +383,7 @@ mod cache_tests {
                 4 => {
                     let mut writer = Writer::new();
                     env.write_checkpoint(&mut writer);
-                    env = Environment::read_checkpoint(&mut Reader::new(&writer.0), 9).unwrap();
+                    env = Environment::read_checkpoint(&mut Reader::new(&writer.0), 17).unwrap();
                 }
                 5 => {
                     env.configure_gas_exchange(false, 0.0, 1.0, 1.0);

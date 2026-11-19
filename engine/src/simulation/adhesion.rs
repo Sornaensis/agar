@@ -8,7 +8,7 @@ pub(super) const MATURE: u8 = 15; // Recruited after consecutive ticks.
 pub(super) const CLONAL: u8 = 16; // Retained at fission, possibly passed to a later daughter.
 
 mod topology;
-pub(super) use topology::DivisionBonds;
+pub(super) use topology::{BondKind, DivisionBonds};
 const GAP_RELAXATION: f64 = 4.0;
 const SHEAR_DAMPING: f64 = 0.5;
 // A site is a reusable quantity of installed, intact, exposed material.
@@ -189,6 +189,28 @@ impl JunctionWorkspace {
                 let transfer = (amount.abs() * donor.scale_out.min(recipient.scale_in))
                     .min((donor.stock - donor.sent).max(0.0))
                     .min((recipient.room() - recipient.received).max(0.0));
+                if cells[self.accounts[from].cell].counted.is_some() {
+                    use crate::counts::{units,nearest,floor,proportional,rate};
+                    let from_cell=self.accounts[from].cell;
+                    // Remainders represent sub-count transfer work. The donor
+                    // and recipient are both limited by their pre-junction stocks.
+                    let q=cells[from_cell].counted.as_mut().unwrap();
+                    let mut n=rate(&mut q.rate_credit[17+k],transfer)
+                        .min(nearest(donor.stock).saturating_sub(nearest(donor.sent)))
+                        .min(floor(recipient.capacity).saturating_sub(nearest(recipient.stock)).saturating_sub(nearest(recipient.received)));
+                    if k==2 {
+                        let left=nearest(self.accounts[from].enrichment).saturating_sub(nearest(self.accounts[from].extra_sent));
+                        let remaining=nearest(donor.stock).saturating_sub(nearest(donor.sent));
+                        let extra_room=u32::MAX-nearest(self.accounts[to].enrichment)-nearest(self.accounts[to].extra_received);
+                        if left>0 && proportional(left,n,remaining)>extra_room {
+                            n=n.min((u64::from(extra_room)*u64::from(remaining)/u64::from(left)) as u32);
+                        }
+                        let extra=proportional(left,n,remaining);
+                        self.accounts[from].extra_sent+=units(extra);self.accounts[to].extra_received+=units(extra);
+                    }
+                    self.accounts[from].stores[k].sent+=units(n);self.accounts[to].stores[k].received+=units(n);
+                    continue;
+                }
                 if k == 2 && transfer > 0.0 && self.accounts[from].enrichment > 0.0 {
                     let donor = &self.accounts[from];
                     let left = (donor.enrichment - donor.extra_sent).max(0.0);
@@ -204,6 +226,15 @@ impl JunctionWorkspace {
         }
         for account in &self.accounts {
             let cell = &mut cells[account.cell];
+            if let Some(q)=cell.counted.as_mut() {
+                use crate::counts::{nearest,units};
+                q.reserve_extra=q.reserve_extra-nearest(account.extra_sent)+nearest(account.extra_received);
+                for (k,(stock,store)) in [&mut q.atp,&mut q.mineral,&mut q.carbon].into_iter().zip(&account.stores).enumerate(){
+                    let sent=nearest(store.sent);let received=nearest(store.received);
+                    *stock=*stock-sent+received;cell.junction_net[k]=units(received)-units(sent);
+                }
+                cell.project_counts();if cell.energy==0.0{geometry.alive[account.cell]=false;}continue;
+            }
             cell.reserve_enrichment = (account.enrichment - account.extra_sent).max(0.0) + account.extra_received;
             let balances = [&mut cell.energy, &mut cell.nutrient_stored, &mut cell.organic_carbon];
             for (k, (balance, store)) in balances.into_iter().zip(&account.stores).enumerate() {

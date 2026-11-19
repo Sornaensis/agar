@@ -4,6 +4,8 @@
 //! World pays or recovers the carbon quota around this mineral-conserving worker.
 //! Growth energy is split into embodied fabrication energy and heat; neither
 //! targets nor damage create or erase material. World handles storage overflow.
+mod funding;
+pub(crate) use funding::BodyFunding;
 use crate::cellular::{AssemblyInstance, AssemblyKind, CellularState, MechanismKind, RecipeIdentity};
 use crate::checkpoint::{ensure, Reader, Result as CheckpointResult, Writer};
 
@@ -354,6 +356,7 @@ pub struct WorkReport {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Body {
+    pub(crate) count_funding: Option<BodyFunding>,
     pub area: f64,
     pub organs: Vec<Organelle>,
     pub next_organelle_id: u32,
@@ -388,6 +391,7 @@ impl Body {
         let kind = OrganelleKind::Core;
         let mass = kind.min_mass();
         let body = Self {
+            count_funding: None,
             area: FOUNDER_AREA,
             organs: vec![Organelle {
                 id: 1,
@@ -414,6 +418,7 @@ impl Body {
     pub(crate) fn fixture(recipe: BodyFixture) -> (Self, FounderBudget) {
         use OrganelleKind::*;
         let mut body = Self {
+            count_funding: None,
             area: 1.0,
             organs: Vec::new(),
             next_organelle_id: 1,
@@ -1250,6 +1255,7 @@ impl Body {
     /// the envelope, so redistributing it preserves its paid material/energy.
     pub fn partition(&self) -> Option<(Self, Self)> {
         let blank = Self {
+            count_funding: None,
             area: self.area * 0.5,
             organs: Vec::new(),
             next_organelle_id: self.next_organelle_id,
@@ -1281,7 +1287,8 @@ impl Body {
                 state.assemblies.sort_by_key(|a| a.id);
             }
         }
-        let [a, b] = daughters;
+        let [mut a, mut b] = daughters;
+        self.partition_counts(&mut a, &mut b);
         Some((a, b))
     }
 
@@ -1509,9 +1516,9 @@ impl Body {
     }
 
     pub fn validate(&self) -> CheckpointResult<()> {
-        self.validate_with_retention(EMBODIED_FRACTION)
+        self.validate_with_retention(EMBODIED_FRACTION, self.has_count_funding())
     }
-    fn validate_with_retention(&self, retention: f64) -> CheckpointResult<()> {
+    fn validate_with_retention(&self, retention: f64, allow_whole_quota: bool) -> CheckpointResult<()> {
         ensure(
             self.area.is_finite() && self.area >= MIN_AREA && self.area <= MAX_AREA + EPS,
             "body area outside geometric bounds",
@@ -1520,11 +1527,13 @@ impl Body {
             self.next_organelle_id > 0,
             "invalid next organelle identifier",
         )?;
+        // Growth accumulates scaffold area and its paid investment independently.
+        // Even at MAX_AREA this roundoff allowance is below one thousandth of an ATP count.
+        let scaffold_limit = self.scaffold_mass() * SCAFFOLD_ENERGY_PER_MASS * retention;
         ensure(
             self.scaffold_energy.is_finite()
                 && self.scaffold_energy >= 0.0
-                && self.scaffold_energy
-                    <= self.scaffold_mass() * SCAFFOLD_ENERGY_PER_MASS * retention + EPS,
+                && self.scaffold_energy <= scaffold_limit + scaffold_limit * 1e-11,
             "invalid scaffold energy ledger",
         )?;
         ensure(
@@ -1552,7 +1561,7 @@ impl Body {
             )?;
         }
         if let Some(state) = &self.cellular {
-            state.validate(retention)?;
+            state.validate_material(retention, allow_whole_quota)?;
         }
         let mut ids = std::collections::HashSet::with_capacity(self.organs.len());
         let mut incomplete = [false; FAMILY_COUNT];
@@ -1677,6 +1686,7 @@ impl Body {
             None
         };
         let body = Self {
+            count_funding: None,
             area,
             organs,
             next_organelle_id,
@@ -1685,7 +1695,7 @@ impl Body {
             precursor_energy,
             cellular,
         };
-        body.validate_with_retention(max_embodied_fraction(version))?;
+        body.validate_with_retention(max_embodied_fraction(version), version >= 17)?;
         Ok(body)
     }
 }
@@ -1830,6 +1840,23 @@ fn allocate(demands: &[Demand], mut resources: [f64; RESOURCE_COUNT]) -> Vec<f64
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn checkpoint_preserves_scaffold_accumulation_roundoff_and_rejects_unpaid_energy() {
+        let (mut body, _) = Body::founder();
+        // Independently accumulated area and energy from a growing counted cell.
+        body.area = 1.299066564987566;
+        body.scaffold_energy = 32.736477437689956;
+        let mut encoded = Writer::new();
+        body.write_checkpoint(&mut encoded);
+        let restored = Body::read_checkpoint(&mut Reader::new(&encoded.0)).unwrap();
+        let mut again = Writer::new();
+        restored.write_checkpoint(&mut again);
+        assert_eq!(again.0, encoded.0);
+
+        body.scaffold_energy += 1.0 / f64::from(crate::counts::SCALE);
+        assert!(body.validate().unwrap_err().contains("invalid scaffold energy ledger"));
+    }
+
     #[test]
     fn fused_processing_capacity_sums_preserve_family_order_and_float_bits() {
         use crate::cellular::{AssemblyInstance, Ingredient, ProductDef, ProductKind, Recipe, RecipePart};

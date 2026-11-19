@@ -17,7 +17,11 @@ export function createSimulationWorkerHandler(send: Send, load: () => Promise<En
     const result: WirePresentation = frame
       ? { tick: frame[0], summary: { time: frame[1], population: frame[2], food: frame[3], births: frame[4], deaths: frame[5], generation: frame[11] }, frame }
       : engine!.status();
-    if (options.metrics) result.metrics = engine!.metricsSnapshotData();
+    if (options.metrics) {
+      result.metrics = engine!.metricsSnapshotData();
+      const audit = engine!.countAudit();
+      if (audit) result.countAudit = audit;
+    }
     if (options.environment) result.environment = options.environment === 'metadata' ? engine!.environmentMetadata() : engine!.environment();
     return result;
   }

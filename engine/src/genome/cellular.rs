@@ -61,6 +61,7 @@ impl ContactMessages {
 
 #[derive(Debug, Clone)]
 pub(super) struct CellularGraph {
+    pub count_units: bool,
     pub definition: CellularProgram,
     pub genes: Vec<GeneRoot>,
     pub activity: Vec<Option<usize>>,
@@ -96,6 +97,8 @@ impl CellularGraph {
 
     pub(super) fn allocated_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
+            // The mode occupies a pointer-aligned slot; legacy graphs keep their historical budget.
+            - if self.count_units { 0 } else { std::mem::size_of::<usize>() }
             - std::mem::size_of::<CellularProgram>() + CellularProgram::authored_inline_bytes()
             + self.definition.products.capacity() * std::mem::size_of::<ProductDef>()
             + self.definition.precursors.capacity() * std::mem::size_of::<Option<usize>>()
@@ -252,6 +255,9 @@ impl Program {
         })
     }
 
+    pub fn uses_count_units(&self) -> bool {
+        self.cellular.as_ref().is_some_and(|graph| graph.count_units)
+    }
     pub(super) fn contact_messages(&self) -> Option<&ContactMessages> {
         self.cellular.as_ref()?.messages.as_deref()
     }
@@ -518,6 +524,8 @@ impl Parser {
     pub(super) fn cellular_program(&mut self, stored: bool) -> Result<Program, CompileError> {
         self.cellular_mode = true;
         self.keyword("cellular")?;
+        self.count_units = matches!(&self.peek().kind, Kind::Name(name) if name == "counts");
+        if self.count_units { self.take(); }
         self.expect(Kind::Semicolon, "';' after cellular")?;
         self.cellular_names()?;
         let mut products = Vec::new();
@@ -634,7 +642,13 @@ impl Parser {
                             }
                             _ => {
                                 let product = self.product_names.get(field_name).copied().ok_or_else(|| field.location.error(format!("unknown recipe product '{field_name}'.")))?;
-                                let amount = self.material_number()?;
+                                let amount = if self.count_units {
+                                    let token = self.take();
+                                    match token.kind {
+                                        Kind::Integer(n) if n > 0 && n <= u32::MAX as i64 => n as f64 / crate::counts::SCALE as f64,
+                                        _ => return Err(token.location.error("recipe ingredients in cellular counts mode require a positive 32-bit integer literal.")),
+                                    }
+                                } else { self.material_number()? };
                                 if !(0.0..=1.0e6).contains(&amount) || amount == 0.0 {
                                     return Err(field.location.error("recipe material amounts must be positive and no more than 1000000."));
                                 }
@@ -769,6 +783,7 @@ impl Parser {
             std::mem::take(&mut self.binding_order),
             writes,
             CellularGraph {
+                count_units: self.count_units,
                 definition,
                 genes,
                 activity,
@@ -860,7 +875,10 @@ pub(super) fn schema_json() -> String {
         })
         .collect::<Vec<_>>()
         .join(",");
-    format!("{{\"marker\":\"cellular;\",\"products\":[{products}],\"assemblies\":[{assemblies}],\"mechanisms\":[{mechanisms}],\"reads\":[{reads}],\"maxProducts\":{MAX_PRODUCTS},\"maxAssemblies\":{MAX_ASSEMBLIES},\"maxGenes\":{MAX_GENES},\"registers\":{{\"prefixes\":[\"ri\",\"rf\",\"rb\",\"rs\",\"rv\"],\"addressesPerType\":{REGISTER_COUNT},\"upkeepPerSecond\":{REGISTER_ENERGY_COST},\"clearWins\":true}},\"contactMessages\":{{\"declarations\":[\"publish\",\"avoid_message\",\"adhere_message\",\"signal\"],\"registerType\":\"scalar\",\"receptor\":\"sense(contact)\",\"validField\":\"message_valid\",\"valueField\":\"message\",\"signalValidField\":\"signal_valid\",\"signalValueField\":\"signal\",\"bondedField\":\"bonded\",\"formationModes\":[\"daughters\",\"recruit\"],\"defaultFormation\":\"daughters\",\"initializerLimit\":{MAX_SIGNAL}}},\"recipeControls\":[{{\"name\":\"activity\",\"type\":\"scalar\",\"default\":1}},{{\"name\":\"start_when\",\"type\":\"boolean\",\"default\":true}},{{\"name\":\"recycle\",\"type\":\"scalar\",\"default\":0}}],\"concentration\":\"pool mass / body.area\",\"userFunctions\":{{\"keyword\":\"fn\",\"maxParameters\":8,\"parameterType\":\"scalar\",\"maxFunctions\":64,\"recursive\":false}}}}")
+    let count_signals = Sensor::ALL.iter().filter(|s| s.is_resource_amount())
+        .map(|s| quote(s.name())).collect::<Vec<_>>().join(",");
+    let scale = crate::counts::SCALE;
+    format!("{{\"marker\":\"cellular;\",\"counts\":{{\"marker\":\"cellular counts;\",\"perUnit\":{scale},\"integerSignals\":[{count_signals}]}},\"products\":[{products}],\"assemblies\":[{assemblies}],\"mechanisms\":[{mechanisms}],\"reads\":[{reads}],\"maxProducts\":{MAX_PRODUCTS},\"maxAssemblies\":{MAX_ASSEMBLIES},\"maxGenes\":{MAX_GENES},\"registers\":{{\"prefixes\":[\"ri\",\"rf\",\"rb\",\"rs\",\"rv\"],\"addressesPerType\":{REGISTER_COUNT},\"upkeepPerSecond\":{REGISTER_ENERGY_COST},\"clearWins\":true}},\"contactMessages\":{{\"declarations\":[\"publish\",\"avoid_message\",\"adhere_message\",\"signal\"],\"registerType\":\"scalar\",\"receptor\":\"sense(contact)\",\"validField\":\"message_valid\",\"valueField\":\"message\",\"signalValidField\":\"signal_valid\",\"signalValueField\":\"signal\",\"bondedField\":\"bonded\",\"formationModes\":[\"daughters\",\"recruit\"],\"defaultFormation\":\"daughters\",\"initializerLimit\":{MAX_SIGNAL}}},\"recipeControls\":[{{\"name\":\"activity\",\"type\":\"scalar\",\"default\":1}},{{\"name\":\"start_when\",\"type\":\"boolean\",\"default\":true}},{{\"name\":\"recycle\",\"type\":\"scalar\",\"default\":0}}],\"concentration\":\"pool mass / body.area\",\"userFunctions\":{{\"keyword\":\"fn\",\"maxParameters\":8,\"parameterType\":\"scalar\",\"maxFunctions\":64,\"recursive\":false}}}}")
 }
 
 #[cfg(test)]
@@ -1397,6 +1415,52 @@ clear rf001 when ri001 == 1;
                 "corruption {corruption}"
             );
         }
+    }
+
+    #[test]
+    fn counted_resources_are_unsigned_and_preserve_continuous_signals() {
+        let source = "cellular counts; product Skin=membrane(); assembly Tank: store(energy){ Skin:200; }
+            let stock=pool.Skin; let atp=energy; let half=energy/2; let fraction=energy.fraction;
+            let high=energy>2147483647; let next=energy+1; let missing=pool.Skin-10;
+            let limited=clamp(energy,0,4294967295); let scaled=energy*4294967295;
+            let bounded=min(energy,2); let mass=built.Tank; let concentration_now=concentration.Skin;
+            ri001=energy; rf001=energy;";
+        let program=Program::compile(source).unwrap();
+        let inputs=Inputs { energy:f64::from(u32::MAX)/crate::counts::SCALE as f64, energy_fraction:0.75,
+            body_area:2.0, products:vec![0.0007], assemblies:vec![0.0195], ..Inputs::default() };
+        let mut values=Vec::new();
+        program.evaluate_nodes(&inputs,&Registers::default(),&mut values);
+        let read = |name: &str| values[program.bindings.iter().find(|b| b.name==name).unwrap().node].clone();
+        assert!(program.uses_count_units());
+        assert_eq!(program.cellular().unwrap().assemblies[0].parts,[(0,0.02)]);
+        assert_eq!(read("atp"), Value::Count(u32::MAX));
+        assert_eq!(read("stock"), Value::Count(7));
+        assert_eq!(read("next"), Value::Count(u32::MAX));
+        assert_eq!(read("missing"), Value::Count(0));
+        assert_eq!(read("high"), Value::Boolean(true));
+        assert_eq!(read("half"), Value::Scalar(2147483647.5));
+        assert_eq!(read("fraction"), Value::Scalar(0.75));
+        assert_eq!(read("mass"), Value::Scalar(0.0195));
+        assert_eq!(read("concentration_now"), Value::Scalar(0.00035));
+        assert_eq!(read("limited"), Value::Count(u32::MAX));
+        assert_eq!(read("scaled"), Value::Count(u32::MAX));
+        assert_eq!(read("bounded"), Value::Count(2));
+        let mut regs=Registers::default();
+        program.evaluate_cell(&inputs,&mut regs,&mut EvalScratch::default());
+        assert_eq!(regs.read(Register::parse("ri001").unwrap()),Value::Integer(i32::MAX));
+        assert_eq!(regs.read(Register::parse("rf001").unwrap()),Value::Scalar(f64::from(u32::MAX)));
+        let mut writer=Writer::new();
+        program.write_checkpoint(&mut writer);
+        let restored=Program::read_checkpoint_version(&mut Reader::new(&writer.0),17).unwrap();
+        assert!(restored.checkpoint_source_matches(&program,source,true));
+        assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0),16).is_err());
+        for wrong in ["0.02","1.5","0","-1","4294967296"] {
+            assert!(Program::compile(&source.replace("Skin:200",&format!("Skin:{wrong}"))).is_err());
+        }
+        let legacy=Program::compile("cellular; let original=energy;").unwrap();
+        assert!(!legacy.uses_count_units());
+        legacy.evaluate_nodes(&inputs,&Registers::default(),&mut values);
+        assert_eq!(values[legacy.bindings[0].node],Value::Scalar(inputs.energy));
     }
 
     #[test]

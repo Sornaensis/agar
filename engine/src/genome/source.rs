@@ -101,6 +101,7 @@ fn expression_changes(program: &Program, index: usize) -> Vec<ExpressionChange> 
     }
     match node.ty {
         Type::Bool => options.push(ExpressionChange::Wrap("!")),
+        Type::Count => {}, // Saturating unsigned negation supplies no useful mutation.
         Type::Integer | Type::Number | Type::Vector => options.push(ExpressionChange::Wrap("-")),
         Type::String => {} // identity(text) would only add a redundant wrapper.
     }
@@ -484,12 +485,13 @@ impl Program {
             .map(|sensor| {
                 (
                     sensor.name().to_string(),
-                    sensor.ty(),
-                    sensor.read(inputs).convert(sensor.ty()),
+                    sensor.program_type(program.uses_count_units()),
+                    sensor.read_typed(inputs,sensor.program_type(program.uses_count_units())),
                 )
             })
             .collect::<Vec<_>>();
         if let Some(cellular) = program.cellular() {
+            let stock_type = if program.uses_count_units() { Type::Count } else { Type::Number };
             signals.extend(
                 cellular
                     .products
@@ -498,8 +500,8 @@ impl Program {
                     .map(|(index, product)| {
                         (
                             format!("pool.{}", product.name),
-                            Type::Number,
-                            evaluate_operation(&Op::Pool(index), Type::Number, inputs, memory, &[]),
+                            stock_type,
+                            evaluate_operation(&Op::Pool(index), stock_type, inputs, memory, &[]),
                         )
                     }),
             );

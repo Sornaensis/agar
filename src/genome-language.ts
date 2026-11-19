@@ -1,7 +1,7 @@
 import { ORGANELLE_CATALOG, MECHANISM_CATALOG } from './organelles';
 
 /** Editor assistance for the language in engine/src/genome.rs; the Rust compiler remains authoritative. */
-export type PrimitiveType = 'integer' | 'scalar' | 'boolean' | 'string' | 'vec2';
+export type PrimitiveType = 'count' | 'integer' | 'scalar' | 'boolean' | 'string' | 'vec2';
 export type GenomeSymbolCategory = 'function' | 'signal' | 'output' | 'keyword' | 'register' | 'binding';
 export interface GenomeSymbol {
   readonly name: string;
@@ -27,17 +27,17 @@ const symbol = (name: string, category: GenomeSymbolCategory, type: string, sign
 const fn = (name: string, parameters: string, type: string, description: string): GenomeSymbol =>
   symbol(name, 'function', type, `${name}(${parameters}) → ${type}`, description);
 
-/** In signatures, number accepts integer or scalar; T accepts any one primitive type. */
+/** In signatures, number accepts a signed integer, unsigned count or scalar; T accepts any one primitive type. */
 export const BUILTIN_FUNCTIONS: readonly GenomeSymbol[] = Object.freeze([
   fn('sin', 'angle: number', 'scalar', 'Sine of an angle in radians.'),
   fn('cos', 'angle: number', 'scalar', 'Cosine of an angle in radians.'),
-  fn('abs', 'value: number', 'integer | scalar', 'Absolute value. Preserves the input numeric type.'),
-  fn('min', 'a: number, b: number', 'integer | scalar', 'Smaller value. Returns integer when both inputs are integers; otherwise scalar.'),
-  fn('max', 'a: number, b: number', 'integer | scalar', 'Larger value. Returns integer when both inputs are integers; otherwise scalar.'),
-  fn('clamp', 'value: number, a: number, b: number', 'integer | scalar', 'Limits a value between a and b; either bound order is accepted. Returns integer only when all three inputs are integers.'),
+  fn('abs', 'value: number', 'integer | count | scalar', 'Absolute value. Preserves the input numeric type.'),
+  fn('min', 'a: number, b: number', 'integer | count | scalar', 'Smaller value. Whole operands stay integral. A scalar operand gives a scalar result.'),
+  fn('max', 'a: number, b: number', 'integer | count | scalar', 'Larger value. Whole operands stay integral. A scalar operand gives a scalar result.'),
+  fn('clamp', 'value: number, a: number, b: number', 'integer | count | scalar', 'Limits a value between a and b in either order. Whole operands stay integral. A scalar operand gives a scalar result.'),
   fn('int', 'value: number', 'integer', 'Converts a number to a signed 32-bit integer by truncating toward zero and clamping to its range.'),
-  fn('float', 'value: number', 'scalar', 'Converts an integer or scalar to a scalar number.'),
-  fn('vec', 'x: number, y: number', 'vec2', 'Constructs a two-component vector. Both components accept integers or scalars.'),
+  fn('float', 'value: number', 'scalar', 'Converts a numeric value to a scalar. Every unsigned 32-bit count is exactly representable.'),
+  fn('vec', 'x: number, y: number', 'vec2', 'Constructs a two-component vector. Both components accept numeric values.'),
   symbol('length', 'function', 'scalar | integer', 'length(value: vec2) → scalar; length(value: string) → integer', 'Vector magnitude, or the number of Unicode characters in a string. String length counts characters, not UTF-8 bytes.'),
   fn('dot', 'a: vec2, b: vec2', 'scalar', 'Dot product of two vectors.'),
   fn('normalize', 'value: vec2', 'vec2', 'Returns a unit vector with the same direction. The zero vector remains zero.'),
@@ -203,7 +203,7 @@ const FORMATION_MODES: readonly GenomeSymbol[] = [
   symbol('recruit','keyword','formation mode','adhere_message rf001 recruit;','Also form a new bond with a compatible cell on encounter. Both partners must permit recruitment.'),
 ];
 export const CELLULAR_KEYWORDS: readonly GenomeSymbol[] = Object.freeze([
-  { ...symbol('cellular', 'keyword', 'mode', 'cellular;', 'Starts a cellular program. Declare products, express them with genes, and combine their stocks into physical assemblies.'), insertText: 'cellular;\n' },
+  { ...symbol('cellular', 'keyword', 'mode', 'cellular counts;', 'Starts a cellular program with whole resource counts. The earlier cellular; header uses continuous units. Declare products, express them with genes, and combine their stocks into physical assemblies.'), insertText: 'cellular counts;\n' },
   { ...symbol('product', 'keyword', 'declaration', 'product Name = motor();', 'Names a typed material product. Product roles determine which physical recipes it can satisfy.'), insertText: 'product ' },
   { ...symbol('gene', 'keyword', 'expression', 'gene drive: Motor = expression;', 'Allocates synthesis effort to a named product. Effort is bounded to 0–1; actual production shares finite translation work, minerals, energy and space.'), insertText: 'gene ' },
   { ...symbol('assembly', 'keyword', 'recipe', 'assembly Swim: propel() { components; }', 'Names a physical recipe. Its product masses determine composition; stocks from the start of the tick are consumed as components are installed.'), insertText: 'assembly ' },
@@ -279,9 +279,18 @@ export function cellularDeclarations(source: string): CellularDeclarations {
   return result;
 }
 
-export function isCellularSource(source: string): boolean {
-  return /^(?:\s|#[^\r\n]*(?:\r?\n|$))*cellular\s*;/.test(source);
-}
+const cellularHeader = /^(?:\s|#[^\r\n]*(?:\r?\n|$))*cellular\b(?:\s|#[^\r\n]*(?:\r?\n|$))*(?:(counts)(?:\s|#[^\r\n]*(?:\r?\n|$))*)?;/;
+export function isCellularSource(source: string): boolean { return cellularHeader.test(source); }
+export function usesCountUnits(source: string): boolean { return cellularHeader.exec(source)?.[1] === 'counts'; }
+
+export const COUNT_RESOURCE_SIGNALS = Object.freeze([
+  'energy','energy.capacity','nutrient.stored','nutrient.capacity','gut.energy','gut.capacity',
+  'gut.exudate.energy','gut.exudate.nutrients','gut.tissue.energy','gut.tissue.nutrients','gut.waste.energy','gut.waste.nutrients',
+  'carbon.organic','carbon.inorganic','oxygen',
+]);
+const countSignals = CELLULAR_READ_SIGNALS.map(item => COUNT_RESOURCE_SIGNALS.includes(item.name)
+  ? symbol(item.name,'signal','count',`${item.name}: count`,`${item.description} One unit equals 10,000 whole counts.`) : item);
+const readSignals = (source:string) => usesCountUnits(source) ? countSignals : CELLULAR_READ_SIGNALS;
 
 export interface ReceptorFieldSymbol { name: string; type: PrimitiveType; description: string }
 const measured = (name: string, type: PrimitiveType, description: string): ReceptorFieldSymbol => ({ name, type, description });
@@ -308,14 +317,15 @@ const receptorMechanisms: Readonly<Record<string, string>> = {
 
 function declaredFunctionSymbol(item: CellularDeclarations['functions'][number]): GenomeSymbol {
   return symbol(item.name, 'function', 'T', `${item.name}(${item.parameters.map(name => `${name}: number`).join(', ')})`,
-    'Pure expression function declared in this program. Numeric arguments are evaluated from the same snapshot; calls create no persistent state.');
+    'Pure expression function declared in this program. Numeric arguments are promoted to scalars from the same snapshot. Calls create no persistent state.');
 }
 
 export function cellularDynamicSymbols(source: string): GenomeSymbol[] {
   const declarations = cellularDeclarations(source);
+  const stockType = usesCountUnits(source) ? 'count' : 'scalar';
   return [
-    ...declarations.products.map(item => symbol(`pool.${item.name}`, 'signal', 'scalar', `pool.${item.name}: scalar`,
-      `Available ${item.role} product mass before this tick. Stock persists, occupies space and is shared by all recipes that name ${item.name}. Regulator stocks decay according to their half-life.`)),
+    ...declarations.products.map(item => symbol(`pool.${item.name}`, 'signal', stockType, `pool.${item.name}: ${stockType}`,
+      `Available ${item.role} product ${stockType === 'count' ? 'count' : 'mass'} before this tick. Stock persists, occupies space and is shared by all recipes that name ${item.name}. Regulator stocks decay according to their half-life.`)),
     ...declarations.products.map(item => symbol(`concentration.${item.name}`, 'signal', 'scalar', `concentration.${item.name}: scalar`,
       `Available ${item.role} product mass divided by current envelope area. Growth dilutes this value; synthesis, decay and inheritance change the underlying physical stock.`)),
     ...declarations.assemblies.map(item => symbol(`built.${item.name}`, 'signal', 'scalar', `built.${item.name}: scalar`,
@@ -327,11 +337,12 @@ export function cellularDynamicSymbols(source: string): GenomeSymbol[] {
 }
 
 export function lookupCellularSymbol(name: string, source: string): GenomeSymbol | undefined {
+  if (usesCountUnits(source) && COUNT_RESOURCE_SIGNALS.includes(name)) return countSignals.find(item => item.name === name);
   const dynamic = cellularDynamicSymbols(source).find(item => item.name === name);
   if (dynamic) return dynamic;
   const declarations = cellularDeclarations(source);
   const product = declarations.products.find(item => item.name === name);
-  if (product) return symbol(name, 'binding', `${product.role} product`, `${name}: ${product.role}`, `${product.precursor ? `Finishing consumes an equal mass of existing ${product.precursor} stock.` : 'Physical product declared by this genome.'} Use pool.${name} to read its available mass, or name it in an assembly recipe with a positive material amount.`);
+  if (product) return symbol(name, 'binding', `${product.role} product`, `${name}: ${product.role}`, `${product.precursor ? `Finishing consumes an equal mass of existing ${product.precursor} stock.` : 'Physical product declared by this genome.'} Use pool.${name} to read its available stock, or name it in an assembly recipe with a positive material amount.`);
   const gene = declarations.genes.find(item => item.name === name);
   if (gene) return symbol(name, 'binding', 'gene', `gene ${name}: ${gene.product}`, `Expression effort for ${gene.product}. The Body inspector compares requested expression with actual material synthesized.`);
   const declaredFunction = declarations.functions.find(item => item.name === name);
@@ -352,8 +363,8 @@ const compatibilityOutputs = new Map(ORGANELLE_CATALOG.map(({kind}) => {
 }));
 
 export const LANGUAGE_RULES = Object.freeze([
-  'number in a signature means integer or scalar. Integers promote to scalar when mixed with scalars, and integer values may be assigned to scalar outputs or registers. Scalar-to-integer assignment needs int().',
-  'Numeric +, -, and * preserve integers only when both inputs are integers; numeric / always returns scalar. Comparisons return boolean. Boolean &&, ||, and ! require booleans.',
+  'A number can be a signed integer, an unsigned resource count or a scalar. Counts and integers convert exactly to scalar registers. Assigning a count to ri clamps it to the signed 32-bit range. Use int() to convert a scalar.',
+  'Addition, subtraction and multiplication of whole operands stay integral. A count operand gives an unsigned result bounded from 0 through 4,294,967,295. A scalar operand or division gives a scalar. Comparisons return booleans.',
   'Strings support concatenation with + and equality comparisons. Vectors support +, -, unary -, multiplication by a number on either side, and division by a number.',
   'Statements end with semicolons. # starts a line comment. Strings use double quotes and cannot contain physical newlines; use escaped characters instead.',
   'Every register read sees old memory. Writes commit together after evaluation; clear wins. Each populated register costs 0.0025 energy per second, including a stored zero, false, or empty string.',
@@ -396,6 +407,7 @@ export interface GenomeToken {
 
 /** Tolerant highlighting scanner, not a second validator. Ranges use JavaScript/CodeMirror UTF-16 offsets. */
 export function tokenizeGenome(source: string): GenomeToken[] {
+  const counted = usesCountUnits(source);
   const tokens: GenomeToken[] = [];
   let pos = 0;
   while (pos < source.length) {
@@ -440,11 +452,11 @@ export function tokenizeGenome(source: string): GenomeToken[] {
       else if (register) { kind = 'register'; type = register.type as PrimitiveType; }
       else if (known) {
         kind = known.category as 'keyword' | 'signal' | 'function' | 'output';
-        if (known.category === 'signal' || known.category === 'output') type = known.type as PrimitiveType;
-      } else if (/^(pool|built|concentration)\.[A-Za-z_][A-Za-z0-9_]*$/.test(name)) { kind = 'signal'; type = 'scalar'; }
+        if (known.category === 'signal' || known.category === 'output') type = counted && COUNT_RESOURCE_SIGNALS.includes(name) ? 'count' : known.type as PrimitiveType;
+      } else if (/^(pool|built|concentration)\.[A-Za-z_][A-Za-z0-9_]*$/.test(name)) { kind = 'signal'; type = counted && name.startsWith('pool.') ? 'count' : 'scalar'; }
       else if (/^sensed\.[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_]+$/.test(name)) {
         kind = 'signal';
-        type = name.endsWith('.valid') || name.endsWith('.available') ? 'boolean' : /\.(offset|flow|motion)$/.test(name) ? 'vec2' : 'scalar';
+        type = /\.(?:valid|available|message_valid|signal_valid|bonded)$/.test(name) ? 'boolean' : /\.(offset|flow|motion)$/.test(name) ? 'vec2' : 'scalar';
       }
       else if (/^\s*\(/.test(source.slice(pos))) kind = 'function';
       else kind = 'identifier';
@@ -637,14 +649,14 @@ export function genomeCompletionContext(source: string, position: number, bindin
   if (last && ['==', '!=', '+', '-'].includes(last)) {
     const previous = expressionTokens.at(-2);
     const known = previous && (lookupGenomeSymbol(previous.text, bindings)?.type ?? (previous.kind === 'string' ? 'string' : previous.kind === 'number' ? 'number' : undefined));
-    if (known && ['integer', 'scalar', 'boolean', 'string', 'vec2', 'number'].includes(known)) {
-      return { kind: 'expression', expected: known === 'integer' || known === 'scalar' ? 'number' : known as PrimitiveType | 'number' };
+    if (known && ['integer', 'count', 'scalar', 'boolean', 'string', 'vec2', 'number'].includes(known)) {
+      return { kind: 'expression', expected: known === 'integer' || known === 'count' || known === 'scalar' ? 'number' : known as PrimitiveType | 'number' };
     }
   }
   // A branch or operator can change the required operand type. Do not infer through it.
   if (expressionTokens.length) return { kind: 'expression' };
   const target = assignment > 0 && tokens[0].text !== 'let' ? lookupGenomeSymbol(tokens[0].text, bindings) : undefined;
-  return { kind: 'expression', ...(target && ['integer', 'scalar', 'boolean', 'string', 'vec2'].includes(target.type) ? { expected: target.type as PrimitiveType } : {}) };
+  return { kind: 'expression', ...(target && ['integer', 'count', 'scalar', 'boolean', 'string', 'vec2'].includes(target.type) ? { expected: target.type as PrimitiveType } : {}) };
 }
 
 /** Blank completion is deliberately split into writable statements and readable expressions. */
@@ -691,7 +703,7 @@ export function genomeCompletions(source: string, position: number, prefix = '',
     return [...available.values()];
   }
   (cellular
-    ? [...CELLULAR_READ_SIGNALS, ...cellularDynamicSymbols(source), ...BUILTIN_FUNCTIONS, ...registers]
+    ? [...readSignals(source), ...cellularDynamicSymbols(source), ...BUILTIN_FUNCTIONS, ...registers]
     : [...BUILTIN_SIGNALS, ...BUILTIN_FUNCTIONS, ...registers]).forEach(add);
   bindings.forEach(binding => add(lookupGenomeSymbol(binding.name, [binding])!));
   if (cellular) {
@@ -705,7 +717,8 @@ export function genomeCompletions(source: string, position: number, prefix = '',
   const accepts = (item: GenomeSymbol): boolean => {
     if (!expected || item.type === 'T' || item.type === 'not checked') return true;
     const types = item.type.split(' | ');
-    if (expected === 'number' || expected === 'scalar') return types.includes('integer') || types.includes('scalar');
+    if (expected === 'number' || expected === 'scalar') return types.includes('integer') || types.includes('count') || types.includes('scalar');
+    if (expected === 'integer' && types.includes('count')) return true;
     // Any primitive may begin a comparison. Prefer booleans without hiding useful comparison operands.
     if (expected === 'boolean') return true;
     if (expected === 'vec2 | string') return types.includes('vec2') || types.includes('string');
@@ -731,11 +744,11 @@ const outputExamples: Readonly<Record<string, string>> = Object.freeze({
 });
 
 export interface GenomeSymbolDocumentation { example: string; notes: readonly string[] }
-export function genomeSymbolDocumentation(item: GenomeSymbol): GenomeSymbolDocumentation {
+export function genomeSymbolDocumentation(item: GenomeSymbol, counted = false): GenomeSymbolDocumentation {
   const mechanism = MECHANISM_CATALOG.find(entry=>entry.kind===item.name);
   if (mechanism) {
     const parts=mechanism.roles.map(role=>({name:role[0].toUpperCase()+role.slice(1)+'Part',role}));
-    return {example:`${parts.map(part=>part.role === 'adhesin' ? `product Precursor = scaffold();\nproduct ${part.name} = adhesin(Precursor);` : `product ${part.name} = ${part.role}();`).join('\n')}\nassembly Machine: ${mechanism.kind} {\n${parts.map(part=>`  ${part.name}: 0.04;`).join('\n')}\n  activity: 1;\n}`,
+    return {example:`${parts.map(part=>part.role === 'adhesin' ? `product Precursor = scaffold();\nproduct ${part.name} = adhesin(Precursor);` : `product ${part.name} = ${part.role}();`).join('\n')}\nassembly Machine: ${mechanism.kind} {\n${parts.map(part=>`  ${part.name}: ${counted ? '400' : '0.04'};`).join('\n')}\n  activity: 1;\n}`,
       notes:[mechanism.description,'Build separate mechanisms for the other operations the organism needs. Each recipe retains its physical ingredients and identity.']};
   }
   if (item.name === 'signal' && item.category === 'keyword') {
@@ -744,19 +757,21 @@ export function genomeSymbolDocumentation(item: GenomeSymbol): GenomeSymbolDocum
   }
   if (item.name==='adhere_message' || item.type==='formation mode') {
     const mode=item.name==='recruit'?'recruit':'daughters';
-    return {example:`publish rf001 = 17;\nadhere_message rf001 ${mode};`,notes:['Use sensed.Touch.bonded on a paid contact receptor to check whether the touched cell is a direct colony partner.']};
+    return {example:`publish rf001 = 17;\nadhere_message rf001 ${mode};`,notes:['Use sensed.Touch.bonded on a paid contact receptor to check whether the touched cell is directly attached.']};
   }
   if (item.type === 'contact message') {
     return { example: ['publish rf001 = 17;', ...(item.name === 'publish' ? [] : [`${item.name} rf001;`])].join('\n'),
       notes: ['Each declaration accepts one scalar address from rf001 through rf999. Registers use their start-of-tick values. A stored zero counts as a message.'] };
   }
   if (CELLULAR_KEYWORDS.some(keyword=>keyword.name===item.name) || item.category==='function' && item.type==='product') {
+    const marker = counted ? 'cellular counts;' : 'cellular;';
+    const stock = counted ? '100' : '0.01';
     const snippets:Record<string,string> = {
-      cellular:'cellular;\nproduct Memory = regulator(8);\ngene remember: Memory = if energy > 50 then 0.1 else 0;',
+      cellular:`${marker}\nproduct Memory = regulator(8);\ngene remember: Memory = if energy > ${counted ? '500000' : '50'} then 0.1 else 0;`,
       product:'product Rotor = motor();\nproduct Memory = regulator(8);',
-      adhesin:'product Precursor = scaffold();\nproduct Glue = adhesin(Precursor);\ngene make_precursor: Precursor = if pool.Precursor < 0.01 then 1 else 0;\ngene finish: Glue = if pool.Glue < 0.01 then 1 else 0;',
-      gene:'product Rotor = motor();\ngene drive: Rotor = if pool.Rotor < 0.01 then 0.5 else 0;',
-      assembly:'product Anchor = anchor();\nproduct Rotor = motor();\nproduct Tail = filament();\nassembly Swim: propel() {\n  Anchor: 0.005;\n  Rotor: 0.01;\n  Tail: 0.025;\n  activity: 0.6;\n  at: 1.570796;\n  direction: 0;\n}',
+      adhesin:`product Precursor = scaffold();\nproduct Glue = adhesin(Precursor);\ngene make_precursor: Precursor = if pool.Precursor < ${stock} then 1 else 0;\ngene finish: Glue = if pool.Glue < ${stock} then 1 else 0;`,
+      gene:`product Rotor = motor();\ngene drive: Rotor = if pool.Rotor < ${stock} then 0.5 else 0;`,
+      assembly:`product Anchor = anchor();\nproduct Rotor = motor();\nproduct Tail = filament();\nassembly Swim: propel() {\n  Anchor: ${counted ? '50' : '0.005'};\n  Rotor: ${stock};\n  Tail: ${counted ? '250' : '0.025'};\n  activity: 0.6;\n  at: 1.570796;\n  direction: 0;\n}`,
       fn:'fn response(value, threshold) = activate(value, threshold);\nlet response_now = response(energy.fraction, 0.4);',
       start_when:'start_when: concentration.GrowthSignal > 0.01;',
       recycle:'recycle: if concentration.Brake > 0.02 then 0.5 else 0;',
@@ -765,13 +780,13 @@ export function genomeSymbolDocumentation(item: GenomeSymbol): GenomeSymbolDocum
       direction:'at: -1.570796;\ndirection: 0;',
     };
     return { example: snippets[item.name] ?? `product ${item.name[0].toUpperCase()+item.name.slice(1)} = ${item.name}(${item.name==='regulator'?'8':''});`,
-      notes: ['Use these declarations in a program beginning with cellular;. The compiler checks roles, recipe masses and expression types.',
+      notes: [`Use these declarations in a program beginning with ${marker} The compiler checks roles, recipe ingredients and expression types.`,
         item.name==='at'||item.name==='direction' ? 'Angles are body-relative radians. Off-center motor force produces torque; placement is part of the physical recipe.'
           : 'Products are paid material. Synthesis and assembly share finite core work; only stock present at the start of a tick can be installed.'] };
   }
   if (item.category === 'register') {
     return { example: `${item.name} = ${REGISTER_FAMILIES.find(family => family.type === item.type)?.empty ?? '0'};\nclear ${item.name} when age > 10;`,
-      notes: ['Addresses run from 001 to 999 for each of the five primitive types.', 'Reads use memory from the start of the evaluation. Writes commit together after a real tick; clear wins when both rules fire.'] };
+      notes: ['Addresses run from 001 to 999 in each of the five register banks.', 'Reads use memory from the start of the evaluation. Writes commit together after a real tick; clear wins when both rules fire.'] };
   }
   if (item.category === 'output') {
     const family = ORGANELLE_CATALOG.find(entry => item.name.includes(`.${entry.kind}`));
@@ -804,7 +819,7 @@ export function genomeSymbolDocumentation(item: GenomeSymbol): GenomeSymbolDocum
 export function genomeSignalCatalog(direction: 'read' | 'write', source = ''): readonly GenomeSymbol[] {
   const registers = REGISTER_FAMILIES.map(family => registerSymbol(`${family.prefix}001`)!);
   if (isCellularSource(source)) return direction === 'read'
-    ? [...cellularDynamicSymbols(source), ...CELLULAR_READ_SIGNALS, ...registers]
+    ? [...cellularDynamicSymbols(source), ...readSignals(source), ...registers]
     : [...CELLULAR_KEYWORDS.filter(item => item.name !== 'cellular'), ...CELLULAR_CONSTRUCTORS, ...CELLULAR_MECHANISMS, ...registers, lookupGenomeSymbol('clear')!];
   return [...(direction === 'read' ? BUILTIN_SIGNALS : BUILTIN_OUTPUTS), ...registers];
 }

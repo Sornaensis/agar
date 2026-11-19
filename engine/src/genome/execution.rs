@@ -8,12 +8,13 @@ const SENSOR_WORDS: usize = (Sensor::ALL.len() + 63) / 64;
 // These keys describe exact typed operations, never algebraic equivalence.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum ConstantKey {
-    Integer(i32), Scalar(u64), Boolean(bool), Text(Rc<str>), Vector([u64; 2]),
+    Integer(i32), Count(u32), Scalar(u64), Boolean(bool), Text(Rc<str>), Vector([u64; 2]),
 }
 impl From<&Value> for ConstantKey {
     fn from(value: &Value) -> Self {
         match value {
             Value::Integer(v) => Self::Integer(*v),
+            Value::Count(v) => Self::Count(*v),
             Value::Scalar(v) => Self::Scalar(v.to_bits()),
             Value::Boolean(v) => Self::Boolean(*v),
             Value::Text(v) => Self::Text(v.clone()),

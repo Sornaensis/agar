@@ -216,9 +216,9 @@ assembly Weapon: pierce() {{
     };
     for tick in 0..60 * 30 {
         let Some(cell) = world.cells.iter().find(|cell| cell.id == 1) else { break; };
-        // Stop supplying the finite meal once either policy first experiences
-        // injury. Both attacked worlds have identical paid history to that tick.
-        if result.first_injury.is_none() && tick % 15 == 0 && cell.gut[1].energy < 30.0 {
+        // Keep a finite tissue meal within reach while the attacker develops.
+        // Stop at the first wound; all later digestion comes from that same meal.
+        if result.first_injury.is_none() && tick % 15 == 0 {
             let nearby: f64 = world.food.iter().filter(|food| food.kind == OrganicKind::Tissue
                 && delta(food.x - cell.x, WIDTH).hypot(delta(food.y - cell.y, HEIGHT))
                     <= cell.radius() + 2.5).map(|food| food.energy).sum();
@@ -277,7 +277,9 @@ fn shipped_forager_pays_to_escape_injury_while_fed_and_preserves_healthy_rest() 
     assert_eq!(passive.first_injury, escaping.first_injury);
     assert!(passive.first_injury.is_some_and(|first| first[1] > 30.0 && first[2] > 25.0));
     assert!(!passive.alive && passive.last_energy > 20.0 && passive.last_gut > 2.0,
-        "The disabled reflex leaves a solvent, fed organism exposed to the actual weapon");
+        "Disabled reflex: alive={}, ATP={}, gut={}, attack ticks={}",
+        passive.alive, passive.last_energy, passive.last_gut, passive.attacks);
+    assert_eq!(passive.motor_energy, 0.0, "The wounded negative control stays at rest while fed");
     assert!(escaping.alive && escaping.minimum_integrity > 0.8 && escaping.final_integrity > 0.99,
         "escaped alive={} integrity={}..{} energy={} gut={} motors={} first={:?} cleared={:?}",
         escaping.alive,escaping.minimum_integrity,escaping.final_integrity,escaping.last_energy,escaping.last_gut,

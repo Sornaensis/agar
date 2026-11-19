@@ -5,6 +5,11 @@ import type { BodyInspection, Cell, Food, RenderCell, EnvironmentSnapshot, Envir
 import type { RenderWorldSnapshot } from './session';
 
 const PALETTE = ['#5ce1ba', '#aaa2ff', '#efa66b', '#6dcbea', '#ed9db7', '#d7d889'];
+const BOND_STYLES = [
+  {kind:'contact', color:'#a9b0ae', width:1},
+  {kind:'feeding', color:'#e8b871', width:1.15},
+  {kind:'colony', color:'#60c7ba', width:2.2},
+] as const;
 const clamp = (value: number, low: number, high: number): number => Math.max(low, Math.min(high, value));
 
 /** A genome keeps its visual identity across all of its descendants. */
@@ -440,7 +445,7 @@ export class Renderer {
         this.drawCell(cell, this.visibility.points[image], this.visibility.points[image + 1], cell.id === selectedId);
       }
     }
-    if (options.colonyActivity !== false && world.bonds.length) this.drawColonyBonds(world);
+    if (options.colonyActivity !== false && world.bonds.length) this.drawBonds(world);
     if (selected && details?.id===selected.id && body?.cellId===selected.id && body.cellular && options.sensors!==false) {
       const count = this.visibility.collect(selected.x,selected.y,selected.radius+32/this.scale);
       for (let image = 0; image < count; image += 2) this.drawCellularDetails(details,body,this.visibility.points[image],this.visibility.points[image + 1]);
@@ -848,26 +853,36 @@ export class Renderer {
   }
 
   /** Paint the junction across the two surfaces, including both images at a world seam. */
-  private drawColonyBonds(world:RenderWorldSnapshot):void {
+  private drawBonds(world:RenderWorldSnapshot):void {
     const ctx=this.context;
     ctx.save();
-    ctx.strokeStyle='#60c7ba';
-    ctx.lineWidth=2.2;
     ctx.lineCap='round';
-    ctx.beginPath();
-    for (const [a,b] of world.bonds) {
-      const x=b.x-a.x, y=b.y-a.y;
-      const dx=x-Math.round(x/world.width)*world.width, dy=y-Math.round(y/world.height)*world.height;
-      const contact=a.radius/(a.radius+b.radius);
-      const cx=(a.x+contact*dx+world.width)%world.width, cy=(a.y+contact*dy+world.height)%world.height;
-      const count=this.visibility.collect(cx,cy,Math.hypot(dx,dy)*0.3+ctx.lineWidth);
-      for (let i=0;i<count;i+=2) {
-        const px=this.visibility.points[i], py=this.visibility.points[i+1];
-        ctx.moveTo(px-dx*contact*0.3,py-dy*contact*0.3);
-        ctx.lineTo(px+dx*(1-contact)*0.3,py+dy*(1-contact)*0.3);
+    for (const {kind,color,width} of BOND_STYLES) {
+      ctx.strokeStyle=color;
+      ctx.lineWidth=width;
+      ctx.beginPath();
+      for (const [a,b,bondKind] of world.bonds) {
+        if (kind!==bondKind) continue;
+        const x=b.x-a.x, y=b.y-a.y;
+        const dx=x-Math.round(x/world.width)*world.width, dy=y-Math.round(y/world.height)*world.height;
+        const contact=a.radius/(a.radius+b.radius);
+        const cx=(a.x+contact*dx+world.width)%world.width, cy=(a.y+contact*dy+world.height)%world.height;
+        const ringRadius=1.6;
+        const extent=kind==='feeding' ? ringRadius : Math.hypot(dx,dy)*0.3;
+        const count=this.visibility.collect(cx,cy,extent+ctx.lineWidth);
+        for (let i=0;i<count;i+=2) {
+          const px=this.visibility.points[i], py=this.visibility.points[i+1];
+          if (kind==='feeding') {
+            ctx.moveTo(px+ringRadius,py);
+            ctx.arc(px,py,ringRadius,0,Math.PI*2);
+          } else {
+            ctx.moveTo(px-dx*contact*0.3,py-dy*contact*0.3);
+            ctx.lineTo(px+dx*(1-contact)*0.3,py+dy*(1-contact)*0.3);
+          }
+        }
       }
+      ctx.stroke();
     }
-    ctx.stroke();
     ctx.restore();
   }
 

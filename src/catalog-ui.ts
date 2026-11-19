@@ -8,7 +8,7 @@ import {
   newEnvironment, newGenome, saveEnvironmentDraft, saveGenomeDraft, validateEnvironmentConfig,
   type EnvironmentConfig, type EnvironmentDocument, type GenomeDocument,
 } from './storage';
-import { createDialog, escapeHtml, icon, inputNumber, setDialogError } from './ui';
+import { COUNT_SCALE, createDialog, escapeHtml, icon, inputNumber, setDialogError } from './ui';
 import { ProgramEditor } from './program-editor';
 import { PRESETS } from './presets';
 import { isCellularSource } from './genome-language';
@@ -227,12 +227,12 @@ export class CatalogUI {
             ${numberField('width', 'Width', config.width, 400, 4800, '20')}${numberField('height', 'Height', config.height, 400, 3040, '20')}
           </section>
           <section class="source-section"><h3>Objects</h3><div class="source-list" aria-label="Environment objects"></div><div class="source-detail"></div></section>
-          <details class="environment-baseline gas-settings"><summary>Gases & atmosphere</summary>${gasFields(config.gases, editable, true)}</details>
+          <details class="environment-baseline gas-settings"><summary>Gases & atmosphere</summary>${gasFields(config.gases, editable, true, true)}</details>
           <details class="environment-baseline"><summary>Background & starting conditions</summary><div class="environment-form">
             ${numberField('light', 'Ambient light', config.ambientLight, 0, 1, '0.05')}
             ${numberField('temperature', 'Temperature', config.ambientTemperature, 0, 1, '0.05')}
             ${numberField('current', 'Background flow', config.currentStrength, 0, 30, '1')}
-            ${numberField('nutrients', 'Starting minerals', config.initialNutrients, 0, 5, '0.1')}
+            ${numberField('nutrients', 'Starting minerals (counts/patch)', Math.round(config.initialNutrients * COUNT_SCALE), 0, 5 * COUNT_SCALE, '1')}
           </div></details>
         </aside>
       </div>
@@ -261,7 +261,10 @@ export class CatalogUI {
       next.ambientLight = inputNumber(query(dialog, '#environment-light'), 'Ambient light', 0, 1);
       next.ambientTemperature = inputNumber(query(dialog, '#environment-temperature'), 'Temperature', 0, 1);
       next.currentStrength = inputNumber(query(dialog, '#environment-current'), 'Background flow', 0, 30);
-      next.initialNutrients = inputNumber(query(dialog, '#environment-nutrients'), 'Starting minerals', 0, 5);
+      const mineralInput = query<HTMLInputElement>(dialog, '#environment-nutrients');
+      const mineralCount = inputNumber(mineralInput, 'Starting minerals', 0, 5 * COUNT_SCALE);
+      if (!Number.isInteger(mineralCount)) throw new Error('Starting minerals must be a whole number.');
+      if (mineralCount !== Math.round(config.initialNutrients * COUNT_SCALE)) next.initialNutrients = mineralCount / COUNT_SCALE;
       next.gases = readGasConfig(dialog);
       return validateEnvironmentConfig(next);
     };
@@ -299,6 +302,7 @@ export class CatalogUI {
             barrierIds.push(id);
           }
           await worker.resetEmpty(42);
+          await worker.setCountChemistry(true);
           const settled = await worker.advance(60, { frame: false });
           if (settled.error) throw new Error(settled.error);
           if (!alive(dialog) || engine !== worker) return;
@@ -321,13 +325,13 @@ export class CatalogUI {
     const renderDetail = (): void => {
       if (tool !== 'select') {
         const sourceKind = tool.startsWith('source:') ? Number(tool.split(':')[1]) as SourceKind : null;
-        detail.innerHTML = `<div class="source-detail-heading"><h4>Place ${toolName(tool).toLowerCase()}</h4></div>` + (sourceKind !== null ? sourceFields(sourceDefaults[sourceKind], config.width, config.height, true, false) : barrierFields(barrierDefault, config.width, config.height, true, false));
+        detail.innerHTML = `<div class="source-detail-heading"><h4>Place ${toolName(tool).toLowerCase()}</h4></div>` + (sourceKind !== null ? sourceFields(sourceDefaults[sourceKind], config.width, config.height, true, false, true) : barrierFields(barrierDefault, config.width, config.height, true, false));
       } else if (selected) {
         const source = selected.kind === 'source' ? config.sources[selected.id] : null;
         const barrier = selected.kind === 'barrier' ? config.barriers[selected.id] : null;
         const label = source ? SOURCE_NAMES[source.kind] : barrier!.floating ? 'Floating barrier' : 'Fixed barrier';
         detail.innerHTML = `<div class="source-detail-heading"><h4>${label}</h4>${editable ? `<button type="button" class="icon-button source-remove" data-remove-object aria-label="Remove selected object">${icon('trash')}</button>` : ''}</div>`
-          + (source ? sourceFields(source, config.width, config.height, editable) : barrierFields(barrier!, config.width, config.height, editable));
+          + (source ? sourceFields(source, config.width, config.height, editable, true, true) : barrierFields(barrier!, config.width, config.height, editable));
       } else detail.innerHTML = '<p class="environment-hint">Select an emitter or barrier to tune it.</p>';
       caption.textContent = tool === 'select' ? `${config.width} × ${config.height} world · ${config.sources.length + config.barriers.length} objects` : `Click the world to place ${toolName(tool).toLowerCase()}. Enter places it at the view center.`;
       if (toolInput) toolInput.value = tool;

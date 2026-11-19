@@ -16,10 +16,10 @@ import { Storage, loadPreferences, savePreferences, newGenome, validateName, par
   exportGenome, exportEnvironment, GENOME_LANGUAGE_VERSION, MAX_GENOME_IMPORT_BYTES, MAX_ENVIRONMENT_IMPORT_BYTES,
   type GenomeDocument, type EnvironmentDocument, type EnvironmentConfig, type SimulationMetadata, type UiPreferences } from './storage';
 import { CatalogUI } from './catalog-ui';
-import { SOURCE_NAMES, fieldOptions, arrowNudge, defaultSource, defaultBarrier, toolOptions, toolName, sourceFields, barrierFields, readObjectFields, objectList, cameraControls, formatEnvironmentNumber, type EnvironmentTool, type ObjectSelection, type SourceConfig, type BarrierConfig } from './environment-controls';
+import { SOURCE_NAMES, fieldOptions, arrowNudge, defaultSource, defaultBarrier, toolOptions, toolName, sourceFields, barrierFields, readObjectFields, objectList, cameraControls, displayedObjectValue, readEnvironmentNumber, type EnvironmentTool, type ObjectSelection, type SourceConfig, type BarrierConfig } from './environment-controls';
 import { ProgramEditor } from './program-editor';
 import { SimulationSession, claimSimulation } from './session';
-import { icon, escapeHtml as esc, createDialog, setDialogError, downloadFile, inputNumber, clock, readableError } from './ui';
+import { COUNT_SCALE, icon, escapeHtml as esc, createDialog, setDialogError, downloadFile, inputNumber, clock, readableError } from './ui';
 import { showGuide } from './guide';
 import { ORGANELLE_CATALOG } from './organelles';
 import { renderCellularBody } from './cellular-inspector';
@@ -239,7 +239,11 @@ function renderView(): void {
       selectedId = hit?.object.id ?? null;
       if (selectedId === null) {
         const food = renderer.pickFood(active.world,event.clientX,event.clientY);
-        if (food) toast(`${['Exudate','Tissue','Waste'][food.kind]} particle · ${Number(food.energy.toPrecision(4))} food energy · ${Number(food.nutrients.toPrecision(4))} minerals`);
+        if (food) {
+          const quantity = (value: number) => active!.counted
+            ? Math.round(value * COUNT_SCALE).toLocaleString() : Number(value.toPrecision(4));
+          toast(`${['Exudate','Tissue','Waste'][food.kind]} particle · ${quantity(food.energy)} food energy · ${quantity(food.nutrients)} minerals`);
+        }
       }
       inspectorView = 'overview'; memoryPage = 0; memoryFilter = ''; renderInspector();
     });
@@ -294,7 +298,7 @@ async function applyEnvironment(engine: WorkerEngine, config: EnvironmentConfig)
 
 async function makeSession(engine: WorkerEngine, metadata: SimulationMetadata): Promise<SimulationSession> {
   const initial = await engine.presentation({ metrics: true, environment: true });
-  return new SimulationSession(engine, metadata, initial, storage, saveStatus, upsertMetadata);
+  return new SimulationSession(engine, metadata, initial, storage, saveStatus, upsertMetadata, await engine.usesCountChemistry());
 }
 function disposeSession(session: SimulationSession): void {
   if (session === active) { cellTool = null; cellEditPending = false; playerView.close(unloading ? 'unload' : 'session'); }
@@ -355,6 +359,7 @@ function newSimulationDialog(template?: BuiltinSimulation, environmentId?: strin
   const dialog = createDialog('New simulation', `<form>
     <div class="form-field"><label for="simulation-name">Name</label><input id="simulation-name" maxlength="80" required value="${esc(template?.name || 'New simulation')}"></div>
     <div class="form-row"><div class="form-field"><label for="simulation-environment">Environment</label><select id="simulation-environment">${allEnvironments().map(item => `<option value="${esc(item.id)}"${item.id === chosenEnvironment ? ' selected' : ''}>${esc(item.name)}</option>`).join('')}</select></div><div class="form-field"><label for="simulation-seed">Seed</label><input id="simulation-seed" type="number" min="0" max="4294967295" step="1" value="${startingTemplate?.seed ?? 42}"></div></div>
+    <div class="form-field"><label for="resource-arithmetic">Resource arithmetic</label><select id="resource-arithmetic"><option value="counts" ${simulationStartSettings().countChemistry ? 'selected':''}>Whole counts · 32-bit</option><option value="continuous" ${simulationStartSettings().countChemistry ? '':'selected'}>Continuous</option></select></div>
     <h3>Starting organisms</h3><div class="population-labels" aria-hidden="true"><span>Genome</span><span>Count</span></div><div id="starting-populations"></div><button type="button" class="button subtle" id="add-population">${icon('plus')}Add genome</button>
     <p class="form-error" role="alert" hidden></p><footer class="dialog-actions"><button class="button primary" type="submit">Start simulation ${icon('arrow')}</button></footer></form>`, 'new-simulation-dialog');
   const rows = dialog.querySelector<HTMLElement>('#starting-populations')!;
@@ -405,6 +410,7 @@ function newSimulationDialog(template?: BuiltinSimulation, environmentId?: strin
         await applyEnvironment(engine, environmentConfig);
         await engine.setMutationRate(mutationRate);
         await engine.resetEmpty(seed);
+        await engine.setCountChemistry(dialog.querySelector<HTMLSelectElement>('#resource-arithmetic')!.value === 'counts');
         const names: Record<string, string> = {};
         for (const item of startingGenomes) {
           const id = await engine.compile(item.source); names[String(id)] = item.name;
@@ -468,17 +474,17 @@ function renderLiveEnvironment(): void {
   const source = environmentSelection?.kind === 'source' ? environment.sources.find(item => item.id === environmentSelection!.id) : null;
   const barrier = environmentSelection?.kind === 'barrier' ? environment.barriers.find(item => item.id === environmentSelection!.id) : null;
   let detail = '<p class="environment-hint">Choose an object in the list or click it in the world to tune it.</p>';
-  if (environmentTool !== 'select') detail = `<h3>Place ${toolName(environmentTool).toLowerCase()}</h3>` + (environmentTool.startsWith('source:') ? sourceFields(liveSourceDraft!, environment.width, environment.height, true, false) : barrierFields(liveBarrierDraft!, environment.width, environment.height, true, false));
+  if (environmentTool !== 'select') detail = `<h3>Place ${toolName(environmentTool).toLowerCase()}</h3>` + (environmentTool.startsWith('source:') ? sourceFields(liveSourceDraft!, environment.width, environment.height, true, false, active.counted) : barrierFields(liveBarrierDraft!, environment.width, environment.height, true, false));
   else if (source || barrier) detail = `<div class="source-detail-heading"><h3 data-object-title>${source ? SOURCE_NAMES[source.kind] : barrier!.floating ? 'Floating barrier' : 'Fixed barrier'}</h3><button type="button" class="icon-button" data-live-remove aria-label="Remove selected object">${icon('trash')}</button></div>`
-    + (source ? sourceFields(source, environment.width, environment.height) : barrierFields(barrier!, environment.width, environment.height));
+    + (source ? sourceFields(source, environment.width, environment.height, true, true, active.counted) : barrierFields(barrier!, environment.width, environment.height));
   panel.innerHTML = `<header class="inspector-header"><h2>Environment</h2><button class="icon-button" data-action="close-environment" aria-label="Close environment controls">${icon('close')}</button></header>
     <div class="live-environment-tools"><label class="environment-tool-select"><span class="visually-hidden">Environment tool</span><select data-live-tool aria-label="Environment tool">${toolOptions(environmentTool)}</select></label></div>
     <p class="environment-hint environment-placement-hint">${environmentTool === 'select' ? 'Drag an object to move it, enter X and Y, or use the arrow keys on the world.' : 'Click the world to place this object. Enter places it at the view center.'}</p>
     <div class="source-list" aria-label="Live environment objects">${objectList(environment.sources, environment.barriers, environmentSelection, true)}</div>
     <div class="source-detail">${detail}</div>
-    <details class="environment-baseline gas-settings"${liveGasesOpen ? ' open' : ''}><summary>Gases & atmosphere</summary>${gasFields(environment.gases)}<button type="button" class="button subtle small" data-live-gases>Apply gas boundary</button><p class="environment-hint" data-live-gas-readout></p></details>
+    <details class="environment-baseline gas-settings"${liveGasesOpen ? ' open' : ''}><summary>Gases & atmosphere</summary>${gasFields(environment.gases, true, false, active.counted)}<button type="button" class="button subtle small" data-live-gases>Apply gas boundary</button><p class="environment-hint" data-live-gas-readout></p></details>
     <details class="environment-baseline"><summary data-live-size-summary>World size · ${environment.width} × ${environment.height}</summary><div class="source-fields"><label>Width<input type="number" data-live-width value="${environment.width}" min="400" max="4800" step="20"></label><label>Height<input type="number" data-live-height value="${environment.height}" min="400" max="3040" step="20"></label></div><button class="button subtle small" data-live-resize>Apply size</button></details>
-    <p class="environment-hint environment-accounting">Minerals absorbed: <span data-absorbed-total>${environment.nutrientRemovedTotal.toFixed(2)}</span></p>`;
+    <p class="environment-hint environment-accounting">Minerals absorbed${active.counted ? ' (counts)' : ''}: <span data-absorbed-total></span></p>`;
   const gasPanel=panel.querySelector<HTMLDetailsElement>('.gas-settings')!;
   gasPanel.addEventListener('toggle',()=>{
     if (!active || !gasPanel.isConnected || gasPanel.open===liveGasesOpen) return;
@@ -492,12 +498,14 @@ function updateLiveEnvironmentReadout(): void {
   const panel = $('live-environment');
   if (!active || !environmentOpen || !panel || panel.hidden) return;
   const environment = active.world.environment;
-  const absorbed = panel.querySelector('[data-absorbed-total]'); if (absorbed) absorbed.textContent = environment.nutrientRemovedTotal.toFixed(2);
+  const absorbed = panel.querySelector('[data-absorbed-total]'); if (absorbed) absorbed.textContent = active.counted ? String(Math.round(environment.nutrientRemovedTotal * COUNT_SCALE)) : environment.nutrientRemovedTotal.toFixed(2);
   const gases = panel.querySelector('[data-live-gas-readout]');
   if (gases && liveGasesOpen) {
     const patches=environment.columns*environment.rows;
     const oxygen=active.metrics.oxygenDissolvedTotal/patches, carbon=active.metrics.inorganicCarbonTotal/patches;
-    gases.textContent = `Average in water: ${oxygen.toFixed(3)} oxygen · ${carbon.toFixed(3)} inorganic carbon`;
+    gases.textContent = active.counted
+      ? `Mean counts/patch: ${(oxygen * COUNT_SCALE).toFixed(1)} oxygen · ${(carbon * COUNT_SCALE).toFixed(1)} inorganic carbon`
+      : `Average in water: ${oxygen.toFixed(3)} oxygen · ${carbon.toFixed(3)} inorganic carbon`;
   }
   const list = panel.querySelector<HTMLElement>('.source-list');
   const signature = environment.sources.map(object=>`s${object.id}:${object.kind}`).join(',') + '|' + environment.barriers.map(object=>`b${object.id}:${object.floating}`).join(',') + `|${environmentSelection?.kind}:${environmentSelection?.id}`;
@@ -519,7 +527,7 @@ function updateLiveEnvironmentReadout(): void {
     if (input.ownerDocument.activeElement === input || pendingEnvironmentInputs.has(input) || input.getAttribute('aria-invalid') === 'true') return;
     const value = (current as unknown as Record<string, number | boolean>)[key];
     if (value === undefined) return;
-    input.value = typeof value === 'boolean' ? String(value) : formatEnvironmentNumber(key === 'angle' ? value * 180 / Math.PI : value, key, Number((input as HTMLInputElement).min), Number((input as HTMLInputElement).max));
+    input.value = typeof value === 'boolean' ? String(value) : displayedObjectValue(input as HTMLInputElement, key, value);
     input.dataset.presentedValue = input.value;
   });
 }
@@ -598,7 +606,7 @@ function bindLiveEnvironment(): void {
     const selection = environmentSelection, session = active;
     if (!selection) return;
     try {
-      const value = key === 'floating' ? input.value === 'true' : inputNumber(input as HTMLInputElement, input.getAttribute('aria-label') || key, Number((input as HTMLInputElement).min), Number((input as HTMLInputElement).max)) * (key === 'angle' ? Math.PI / 180 : 1);
+      const value = key === 'floating' ? input.value === 'true' : readEnvironmentNumber(input as HTMLInputElement, Number((input as HTMLInputElement).min), Number((input as HTMLInputElement).max)) * (key === 'angle' ? Math.PI / 180 : 1);
       const edit = ++environmentEditSequence; pendingEnvironmentInputs.set(input, edit);
       void updateEnvironmentObject(session,selection,{[key]:value}).catch(error=>toast(readableError(error))).finally(() => {
         if (pendingEnvironmentInputs.get(input) === edit) pendingEnvironmentInputs.delete(input);
@@ -817,7 +825,7 @@ function paintInspector(): void {
   const name = queryUi<HTMLElement>('[data-inspected-genome]');
   if (name) name.textContent = genomeName(cell.genomeId);
   if (inspectorView === 'overview') {
-    updateOrganismOverview($('inspector-content'), cell, visible, cellInspection?.body?.foodPotential);
+    updateOrganismOverview($('inspector-content'), cell, visible, cellInspection?.body?.foodPotential, active!.counted);
   } else if (inspectorView === 'body') {
     const target = $('inspector-content'), expanded = new Set([...target.querySelectorAll<HTMLDetailsElement>('details[open]')].map(item => item.dataset.kind));
     const focusedFamily = target.contains(target.ownerDocument.activeElement) ? target.ownerDocument.activeElement?.closest<HTMLDetailsElement>('details[data-kind]')?.dataset.kind : undefined;
@@ -825,7 +833,7 @@ function paintInspector(): void {
       const body = cellInspection?.body; if (!body) return;
       const meter = (name: string, used: number, capacity: number): string => `<div class="body-meter"><div><span>${name}</span><strong>${used.toFixed(3)} / ${capacity.toFixed(3)}</strong></div><meter min="0" max="${Math.max(capacity,0.000001)}" value="${used}" aria-label="${name}"></meter></div>`;
       if (body.cellular) {
-        target.innerHTML = renderCellularBody(body, expanded, cellInspection?.reception) + `<details class="cellular-section" data-kind="cellular-budgets"${expanded.has('cellular-budgets') ? ' open' : ''}><summary><span>Structure & capacity</span></summary><div class="body-capacity">${meter('Internal space',body.spaceUsed,body.spaceCapacity)}${meter('Membrane attachments',body.surfaceUsed,body.surfaceCapacity)}</div><p class="cellular-section-note">All products, incomplete assemblies and installed machinery occupy physical space.</p><table class="organelle-table"><thead><tr><th>Inherited organ</th><th>Mass</th><th>Integrity</th></tr></thead><tbody>${body.organs.map(organ=>`<tr><td>${esc(organ.kind)} #${organ.id}</td><td>${organ.mass.toFixed(4)}</td><td>${Math.round(organ.integrity*100)}%</td></tr>`).join('')}</tbody></table></details>`;
+        target.innerHTML = renderCellularBody(body, expanded, cellInspection?.reception, active!.counted) + `<details class="cellular-section" data-kind="cellular-budgets"${expanded.has('cellular-budgets') ? ' open' : ''}><summary><span>Structure & capacity</span></summary><div class="body-capacity">${meter('Internal space',body.spaceUsed,body.spaceCapacity)}${meter('Membrane attachments',body.surfaceUsed,body.surfaceCapacity)}</div><p class="cellular-section-note">All products, incomplete assemblies and installed machinery occupy physical space.</p><table class="organelle-table"><thead><tr><th>Inherited organ</th><th>Mass</th><th>Integrity</th></tr></thead><tbody>${body.organs.map(organ=>`<tr><td>${esc(organ.kind)} #${organ.id}</td><td>${organ.mass.toFixed(4)}</td><td>${Math.round(organ.integrity*100)}%</td></tr>`).join('')}</tbody></table></details>`;
       } else {
       target.innerHTML = `<div class="body-capacity">${meter('Internal space',body.spaceUsed,body.spaceCapacity)}${meter('Membrane attachments',body.surfaceUsed,body.surfaceCapacity)}</div><div class="body-work"><span>Expression <strong>${body.synthesisRate.toFixed(3)}</strong></span><span>Assembly <strong>${body.constructionRate.toFixed(3)}</strong></span><span title="Shared work budget: protein synthesis costs 0.6 work per material, and assembly costs 0.4.">Core capacity <strong>${body.assemblyCapacity.toFixed(3)}</strong></span><span>Recycling <strong>${body.recyclingRate.toFixed(3)}</strong></span><span>Repair <strong>${body.repairRate.toFixed(3)}</strong></span><small>material / s · synthesis and assembly share core work</small></div><div class="organelle-list">${ORGANELLE_CATALOG.map(definition => {
         const summary = cell.organelles.find(item => item.kind === definition.kind)!;
@@ -888,7 +896,7 @@ function renderCellTool(): void {
   if (!cellTool) return;
   $('cell-tool-status').textContent = cellTool.kind === 'place'
     ? `Place ${cellTool.genome.name} · tap the world${cellTool.placed ? ' · ' + cellTool.placed + ' added' : ''}`
-    : `Move ${cellTool.colony ? 'colony' : 'cell ' + cellTool.id} · tap a destination`;
+    : `Move ${cellTool.colony ? 'linked group' : 'cell ' + cellTool.id} · tap a destination`;
   bar.querySelector('label')!.hidden = cellTool.kind !== 'place';
   bar.querySelector<HTMLInputElement>('[data-repeat-placement]')!.checked = cellTool.kind === 'place' && cellTool.repeat;
   bar.querySelector('button')!.textContent = cellTool.kind === 'place' && cellTool.placed ? 'Done' : 'Cancel';
@@ -918,7 +926,7 @@ async function useCellTool(tool: CellTool, x: number, y: number): Promise<void> 
     } else {
       const count = await session.mutate(engine => engine.moveCell(tool.id,x,y,tool.colony));
       id = tool.id;
-      message = count === 1 ? `Moved organism ${id}.` : `Moved all ${count} organisms in the colony.`;
+      message = count === 1 ? `Moved organism ${id}.` : `Moved ${count} linked organisms.`;
     }
     void session.checkpoint().catch(() => {});
     if (active !== session || previous !== cellTool) return;
@@ -965,12 +973,16 @@ function metricsMarkup(): string {
   return `<div class="page metrics-page"><div class="metrics-grid">${cards(metricDefinitions.slice(0,4))}</div>
     <section class="chart-panel"><div class="section-heading"><h2>Population</h2><span id="history-duration"></span></div><svg class="metrics-chart" id="history-chart" viewBox="0 0 1000 240" preserveAspectRatio="none" role="img" aria-label="Population history"></svg></section>
     <section class="trophic-panel"><div class="section-heading"><h2>Feeding capabilities</h2><span>Living organisms</span></div><div class="metrics-grid">${cards([['autotrophs','Light feeders'],['heterotrophs','Organic feeders'],['mixotrophs','Mixed feeders'],['hunters','Can attack']])}</div></section>
+    ${active?.counted ? `<details class="metrics-secondary"><summary>Exact count budgets</summary>
+      <div class="count-budget-scroll"><table class="count-budget-table"><thead><tr><th>Pool</th><th>Held</th><th>Added</th><th>Removed</th><th>Remainder</th></tr></thead>
+      <tbody>${(['mineral','carbon','oxygen','energy'] as const).map((key,i) => `<tr><th scope="row">${['Minerals','Carbon','Oxygen','Energy'][i]}</th>${['held','added','removed','difference'].map(field => `<td id="count-${key}-${field}">—</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+      <p class="muted">Oxygen added includes photosynthesis. Oxygen removed includes respiration and decay. For energy, removed records withdrawals and the remainder measures dissipation. The three material rows balance at zero.</p></details>` : ''}
     <details class="metrics-secondary"><summary>Food & energy flow</summary><div class="energy-flow">${[['production','Energy fixed from light'],['digestion','Assimilated substrate'],['exudation','Organic release']].map(([key,label])=>`<div><span>${label}</span><strong id="flow-${key}">—</strong></div>`).join('')}</div><div class="energy-flow">${[['exudate','Exudate'],['tissue','Cell tissue'],['waste','Waste']].map(([key,label])=>`<div><span>${label}</span><strong id="organic-${key}">—</strong></div>`).join('')}</div></details>
-    <details class="metrics-secondary"><summary>Gases & minerals</summary><div class="metrics-grid">${cards([['oxygen-water','Oxygen in water'],['carbon-water','Inorganic carbon in water'],['carbon-cells','Organic carbon in organisms'],['carbon-food','Organic carbon in particles']])}</div><div class="metrics-grid nutrient-metrics">${[['water','Dissolved minerals'],['food','Minerals in particles'],['cells','Minerals in organisms'],['total','Total minerals']].map(([key,label])=>`<div class="metric-card"><span>${label}</span><strong id="nutrient-${key}">—</strong></div>`).join('')}</div></details>
-    <details class="metrics-secondary"><summary>Carbon & oxygen accounting</summary><div class="inspector-metrics">${[
+    <details class="metrics-secondary"><summary>Gases & minerals${active?.counted ? ' (counts)' : ''}</summary><div class="metrics-grid">${cards([['oxygen-water','Oxygen in water'],['carbon-water','Inorganic carbon in water'],['carbon-cells','Organic carbon in organisms'],['carbon-food','Organic carbon in particles']])}</div><div class="metrics-grid nutrient-metrics">${[['water','Dissolved minerals'],['food','Minerals in particles'],['cells','Minerals in organisms'],['total','Total minerals']].map(([key,label])=>`<div class="metric-card"><span>${label}</span><strong id="nutrient-${key}">—</strong></div>`).join('')}</div></details>
+    <details class="metrics-secondary"><summary>Carbon & oxygen accounting${active?.counted ? ' (counts)' : ''}</summary><div class="inspector-metrics">${[
       ['carbon-total','Carbon currently held'],['carbon-input','Carbon introduced'],['carbon-removed','Carbon removed'],['carbon-legacy','Carbon in imported legacy bodies'],['carbon-fixed','Carbon fixed by photosynthesis'],['carbon-respired','Carbon respired by organisms'],['carbon-decayed','Carbon respired by background decay'],['carbon-balance','Carbon balance error'],['oxygen-total','Oxygen in water & organisms'],['oxygen-input','Oxygen introduced'],['oxygen-removed','Oxygen removed'],['oxygen-balance','Oxygen balance error'],
     ].map(([key,label])=>metricRow(label,`<span id="gas-${key}">—</span>`)).join('')}</div><p class="muted">Carbon balance: present + removed − introduced. Oxygen balance also includes production by fixation and consumption by respiration and decay. Atmospheric inflow and outflow are recorded.</p></details>
-    <details class="metrics-secondary"><summary>Resource accounting</summary><div class="inspector-metrics">${[
+    <details class="metrics-secondary"><summary>Resource accounting${active?.counted ? ' (counts)' : ''}</summary><div class="inspector-metrics">${[
       ['introduced-material','Minerals introduced'],['removed-material','Minerals absorbed'],['withdrawn-material','Minerals withdrawn from cells'],
       ['introduced-energy','Energy introduced from outside'],['light-energy','Energy fixed from light'],['withdrawn-energy','ATP withdrawn from cells'],
       ['held-energy','Total energy still held'],['packet-energy','Held in food particles'],['dissipated-energy','Energy dissipated (by difference)'],
@@ -978,15 +990,27 @@ function metricsMarkup(): string {
     <details class="metrics-secondary"><summary>Evolution & interactions</summary><div class="metrics-grid">${cards(metricDefinitions.slice(4))}</div></details></div>`;
 }
 function renderMetrics(world: MetricsSnapshot): void {
+  const audit = world.countAudit;
+  const amount = (value: number, digits: number): string => audit
+    ? String(Math.round(value * COUNT_SCALE)) : value.toFixed(digits);
+  const residual = (entry: { held: string; added: string; removed: string }): bigint =>
+    BigInt(entry.added) - BigInt(entry.removed) - BigInt(entry.held);
+  if (audit) {
+    for (const key of ['mineral', 'carbon', 'oxygen', 'energy'] as const) {
+      const entry = audit[key];
+      for (const field of ['held', 'added', 'removed'] as const) $('count-' + key + '-' + field).textContent = entry[field];
+      $('count-' + key + '-difference').textContent = residual(entry).toString();
+    }
+  }
   const values: Record<string,number> = { population:world.population,food:world.food,births:world.births,deaths:world.deaths,generation:world.generation,mutations:world.mutatedBirths,predation:world.predationCount,attacks:world.attackCount };
   for (const [key] of metricDefinitions) $('metric-'+key).textContent = String(values[key]);
   for (const [key,value] of Object.entries(world.trophic)) $('metric-'+key).textContent = String(value);
-  for (const [key,value] of Object.entries(world.flow)) $('flow-'+key).textContent = value.toFixed(1)+' energy / s';
-  $('mean-particle-carbon').textContent = world.food ? (world.organicFoodTotal / world.food).toFixed(3) + ' organic C / particle' : '';
+  for (const [key,value] of Object.entries(world.flow)) $('flow-'+key).textContent = amount(value,1) + (audit ? ' energy counts/s' : ' energy / s');
+  $('mean-particle-carbon').textContent = world.food ? (audit ? (world.organicFoodTotal * COUNT_SCALE / world.food).toFixed(1) + ' C counts / particle' : (world.organicFoodTotal / world.food).toFixed(3) + ' organic C / particle') : '';
   const organicCounts = world.organicCounts;
   ['exudate','tissue','waste'].forEach((kind,index) => { $('organic-'+kind).textContent = organicCounts[index]+' particles'; });
-  for (const [key,value] of Object.entries({water:world.nutrientDissolvedTotal,food:world.nutrientFoodTotal,cells:world.nutrientCellTotal,total:world.nutrientTotal})) $('nutrient-'+key).textContent=value.toFixed(1);
-  for (const [key,value] of Object.entries({ 'oxygen-water':world.oxygenDissolvedTotal,'carbon-water':world.inorganicCarbonTotal,'carbon-cells':world.organicCellTotal,'carbon-food':world.organicFoodTotal })) $('metric-'+key).textContent=value.toFixed(2);
+  for (const [key,value] of Object.entries({water:world.nutrientDissolvedTotal,food:world.nutrientFoodTotal,cells:world.nutrientCellTotal,total:world.nutrientTotal})) $('nutrient-'+key).textContent=key==='total' && audit ? audit.mineral.held : amount(value,1);
+  for (const [key,value] of Object.entries({ 'oxygen-water':world.oxygenDissolvedTotal,'carbon-water':world.inorganicCarbonTotal,'carbon-cells':world.organicCellTotal,'carbon-food':world.organicFoodTotal })) $('metric-'+key).textContent=amount(value,2);
   const oxygenTotal = world.oxygenDissolvedTotal + world.oxygenCellTotal;
   const carbonBalance = world.carbonTotal + world.carbonRemovedTotal - world.carbonInputTotal;
   const oxygenBalance = oxygenTotal + world.oxygenRemovedTotal + world.carbonRespiredTotal + world.decayRespiredTotal - world.oxygenInputTotal - world.carbonFixedTotal;
@@ -994,18 +1018,25 @@ function renderMetrics(world: MetricsSnapshot): void {
     'carbon-total':world.carbonTotal,'carbon-input':world.carbonInputTotal,'carbon-removed':world.carbonRemovedTotal,'carbon-legacy':world.legacyCarbonImported,
     'carbon-fixed':world.carbonFixedTotal,'carbon-respired':world.carbonRespiredTotal,'carbon-decayed':world.decayRespiredTotal,'carbon-balance':carbonBalance,
     'oxygen-total':oxygenTotal,'oxygen-input':world.oxygenInputTotal,'oxygen-removed':world.oxygenRemovedTotal,'oxygen-balance':oxygenBalance,
-  })) $('gas-'+key).textContent = key.endsWith('balance') ? Math.abs(value) < 1e-7 ? '0.000000' : value.toExponential(3) : value.toFixed(3);
-  $('introduced-material').textContent = world.nutrientInputTotal.toFixed(2);
-  $('removed-material').textContent = active!.world.environment.nutrientRemovedTotal.toFixed(2);
-  $('withdrawn-material').textContent = world.mineralWithdrawnTotal.toFixed(2);
-  $('withdrawn-energy').textContent = world.energyWithdrawnTotal.toFixed(2);
-  $('introduced-energy').textContent = world.energyInputTotal.toFixed(2);
-  $('held-energy').textContent = world.energyTotal.toFixed(2);
-  $('packet-energy').textContent = world.packetEnergyTotal.toFixed(2);
+  })) {
+    const exact = audit && ({
+      'carbon-total': audit.carbon.held, 'carbon-input': audit.carbon.added, 'carbon-removed': audit.carbon.removed,
+      'carbon-balance': String(-residual(audit.carbon)), 'oxygen-total': audit.oxygen.held, 'oxygen-balance': String(-residual(audit.oxygen)),
+    } as Record<string, string>)[key];
+    $('gas-'+key).textContent = exact ?? (key.endsWith('balance') && !audit
+      ? Math.abs(value) < 1e-7 ? '0.000000' : value.toExponential(3) : amount(value,3));
+  }
+  $('introduced-material').textContent = audit?.mineral.added ?? amount(world.nutrientInputTotal,2);
+  $('removed-material').textContent = amount(active!.world.environment.nutrientRemovedTotal,2);
+  $('withdrawn-material').textContent = amount(world.mineralWithdrawnTotal,2);
+  $('withdrawn-energy').textContent = audit?.energy.removed ?? amount(world.energyWithdrawnTotal,2);
+  $('introduced-energy').textContent = amount(world.energyInputTotal,2);
+  $('held-energy').textContent = audit?.energy.held ?? amount(world.energyTotal,2);
+  $('packet-energy').textContent = amount(world.packetEnergyTotal,2);
   const dissipated = world.energyInputTotal + world.photosynthesisTotal - world.energyWithdrawnTotal - world.energyTotal;
-  $('dissipated-energy').textContent = (Math.abs(dissipated) < 1e-7 ? 0 : dissipated).toFixed(2);
-  $('light-energy').textContent = world.photosynthesisTotal.toFixed(2);
-  $('nutrient-total').title = world.nutrientInputTotal.toFixed(1)+' mineral units introduced since this simulation began.';
+  $('dissipated-energy').textContent = audit ? residual(audit.energy).toString() : (Math.abs(dissipated) < 1e-7 ? 0 : dissipated).toFixed(2);
+  $('light-energy').textContent = amount(world.photosynthesisTotal,2);
+  $('nutrient-total').title = (audit ? audit.mineral.added + ' mineral counts' : world.nutrientInputTotal.toFixed(1) + ' mineral units') + ' introduced since this simulation began.';
   const history = [...active!.metadata.history.filter(point=>point.time<world.time),{time:world.time,population:world.population}];
   const first = history[0]?.time ?? 0, span=Math.max(1,world.time-first);
   const peak = history.reduce((largest,point)=>Math.max(largest,point.population),1);
@@ -1028,7 +1059,7 @@ function settingsMarkup(): string {
     ${rangeField('mutation','Mutation chance',Math.round(world.mutationRate*100),0,100,1,'%')}
     <p class="muted">Seed ${active!.metadata.seed} · ${esc(active!.metadata.environmentName)}</p></section>
     <section class="settings-panel"><h2>Display</h2><div class="form-field"><label for="setting-overlay">Field</label><select id="setting-overlay" data-setting="overlay">${fieldOptions(prefs.overlay)}</select></div>
-    <label class="toggle-field"><span>Organelle highlights</span><input type="checkbox" role="switch" data-setting="sensors"${prefs.sensors?' checked':''}></label><label class="toggle-field"><span>Colony activity</span><input type="checkbox" role="switch" data-setting="colonyActivity"${prefs.colonyActivity?' checked':''}></label><p class="muted">Teal links show direct bonds. A bonded cell’s outgoing signal appears as a gray dot for zero, violet for positive or amber for negative.</p><label class="toggle-field"><span>Movement trails</span><input type="checkbox" role="switch" data-setting="trails"${prefs.trails?' checked':''}></label></section>
+    <label class="toggle-field"><span>Organelle highlights</span><input type="checkbox" role="switch" data-setting="sensors"${prefs.sensors?' checked':''}></label><label class="toggle-field"><span>Cell connections</span><input type="checkbox" role="switch" data-setting="colonyActivity"${prefs.colonyActivity?' checked':''}></label><p class="muted">Teal bars show colony bonds retained at division. Amber rings show feeding links. Thin gray lines show other contact links. Signal dots are violet for positive, amber for negative and gray for zero.</p><label class="toggle-field"><span>Movement trails</span><input type="checkbox" role="switch" data-setting="trails"${prefs.trails?' checked':''}></label></section>
     <section class="settings-panel"><h2>Environment</h2><p class="muted">${world.width} × ${world.height} · ${world.environment.sources.length} emitters · ${world.environment.barriers.length} barriers</p><p class="muted">Select emitters and barriers in the player to adjust their strength, size, direction and position.</p><button class="button subtle" data-action="edit-live-environment">${icon('flow')}Edit environment</button></section>
   </div></div>`;
 }

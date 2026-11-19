@@ -31,6 +31,7 @@
     "bench:simulation": "node --no-liftoff scripts/benchmark-simulation.mjs",
     "test:worker": "node scripts/check-worker.mjs",
     "test:crown": "node --no-liftoff scripts/check-crown.mjs",
+    "test:integer-chemistry": "node --no-liftoff scripts/check-integer-chemistry.mjs",
     "test:production-chains": "node --no-liftoff scripts/check-production-chains.mjs",
     "test:colony-formation": "node --no-liftoff scripts/check-colony-formation.mjs",
     "test:multicellular": "node --no-liftoff scripts/check-multicellular.mjs",

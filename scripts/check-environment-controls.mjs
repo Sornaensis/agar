@@ -15,7 +15,7 @@ const gases = await import(await moduleUrl('../src/gas-controls.ts', { './ui': u
 const fields = html => [...html.matchAll(/<input\b([^>]+)>/g)].map(([, attributes]) => {
   const attrs = Object.fromEntries([...attributes.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, key, value]) => [key, value]));
   return { value: attrs.value, min: attrs.min, max: attrs.max,
-    dataset: { objectField: attrs['data-object-field'], presentedValue: attrs['data-presented-value'] },
+    dataset: { objectField: attrs['data-object-field'], countScale: attrs['data-count-scale'], presentedValue: attrs['data-presented-value'] },
     get valueAsNumber() { return this.value === '' ? NaN : Number(this.value); }, getAttribute(key) { return attrs[key] ?? null; } };
 });
 const form = inputs => ({ querySelectorAll() { return inputs; } });
@@ -41,15 +41,40 @@ barrierInputs.push({ dataset: { objectField: 'floating' }, value: 'false' });
 assert.deepEqual(controls.readObjectFields(form(barrierInputs), barrier, 400, 400), { ...barrier, floating: false });
 const gasConfig = {initialOxygen:0,initialCarbon:2.5,mode:'sealed',exchangeRate:Math.fround(.03),oxygenEquilibrium:1,carbonEquilibrium:4};
 const gasHtml = gases.gasFields(gasConfig,true,true);
-const gasInputs = Object.fromEntries([...gasHtml.matchAll(/<input\b([^>]+)>/g)].map(([,attributes]) => {
+const readGasInputs = html => Object.fromEntries([...html.matchAll(/<input\b([^>]+)>/g)].map(([,attributes]) => {
   const attrs=Object.fromEntries([...attributes.matchAll(/([\w-]+)="([^"]*)"/g)].map(([,key,value])=>[key,value]));
-  return [attrs['data-gas-field'],{value:attrs.value,dataset:{presentedValue:attrs['data-presented-value'],sourceValue:attrs['data-source-value']},get valueAsNumber(){return this.value===''?NaN:Number(this.value);}}];
+  return [attrs['data-gas-field'],{value:attrs.value,dataset:{countScale:attrs['data-count-scale'],presentedValue:attrs['data-presented-value'],sourceValue:attrs['data-source-value']},get valueAsNumber(){return this.value===''?NaN:Number(this.value);}}];
 }));
+const gasInputs = readGasInputs(gasHtml);
 gasInputs.mode={value:'sealed'};
 const gasForm={querySelector(selector){return gasInputs[selector.match(/data-gas-field="([^"]+)"/)[1]];}};
 assert.deepEqual(gases.readGasConfig(gasForm),gasConfig);
 assert.equal(gases.gasFields(gasConfig,true,false).includes('data-gas-field="initialOxygen"'),false,'Live controls do not silently reset current gas inventories');
 gasInputs.exchangeRate.value='-1';assert.throws(()=>gases.readGasConfig(gasForm),/exchange rate/);
 gasInputs.exchangeRate.value='.03';gasInputs.mode.value='unexpected';assert.throws(()=>gases.readGasConfig(gasForm),/boundary/);
+for (const kind of [3,4,8,9,10,11]) {
+  const recipe = { ...controls.defaultSource(kind, 100, 100), strength: .000123456789 };
+  const inputs = fields(controls.sourceFields(recipe, 400, 400, true, true, true));
+  const rate = inputs.find(input => input.dataset.objectField === 'strength');
+  assert.equal(rate.value, '2');
+  assert.equal(rate.max, '15000');
+  assert.deepEqual(controls.readObjectFields(form(inputs), recipe, 400, 400), recipe);
+  rate.value = '1';
+  assert.equal(controls.readObjectFields(form(inputs), recipe, 400, 400).strength, 1/15000);
+  rate.value = '0.5';
+  assert.throws(() => controls.readObjectFields(form(inputs), recipe, 400, 400), /whole number/);
+  rate.value = '15001';
+  assert.throws(() => controls.readObjectFields(form(inputs), recipe, 400, 400), /15000/);
+}
+const precise = {...gasConfig, initialOxygen: .000123456789};
+const countGasInputs = {...readGasInputs(gases.gasFields(precise,true,true,true)), mode: {value:'sealed'}};
+const countGasForm = {querySelector(selector) {return countGasInputs[selector.match(/data-gas-field="([^"]+)"/)[1]];}};
+assert.deepEqual(gases.readGasConfig(countGasForm),precise);
+assert.equal(countGasInputs.initialOxygen.value,'1');
+assert.equal(countGasInputs.exchangeRate.value,'0.03');
+countGasInputs.carbonEquilibrium.value='1';
+assert.equal(gases.readGasConfig(countGasForm).carbonEquilibrium,.0001);
+countGasInputs.carbonEquilibrium.value='1.5';
+assert.throws(()=>gases.readGasConfig(countGasForm),/whole number/);
 for (const kind of [8,9,10,11,12]) assert.equal(controls.sourceMinimum(kind),0);
 console.log('Environment controls: precision-preserving edits, bounded geometry, gas boundary validation, and builder-only starting gas pools passed.');

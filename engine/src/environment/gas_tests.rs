@@ -8,7 +8,7 @@ fn state(env: &Environment) -> Vec<u8> {
     w.0
 }
 fn resume(env: &Environment) -> Environment {
-    Environment::read_checkpoint(&mut Reader::new(&state(env)), 9).unwrap()
+    Environment::read_checkpoint(&mut Reader::new(&state(env)), 17).unwrap()
 }
 fn close(a: f64, b: f64) {
     assert!((a - b).abs() < 1e-8, "{a} != {b}");
@@ -231,6 +231,7 @@ fn version_eight_environment_migration_establishes_explicit_initial_gas_ledgers(
     env.add_source(3, 100.0, 200.0, 0.3, 80.0);
     env.add_barrier(300.0, 300.0, 120.0, 30.0, 0.2, true);
     let mut old = state(&env);
+    old.remove(0); // v8 preceded the v17 chemistry-mode tag.
     let mut gas = Writer::new();
     env.gases.write_checkpoint(&mut gas);
     old.truncate(old.len() - gas.0.len());

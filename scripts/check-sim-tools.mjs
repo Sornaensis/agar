@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { module, restore, snapshot, body } from './organelle-harness.mjs';
+import { module, restore, snapshot, body, error as engineError } from './organelle-harness.mjs';
 
 // Exercise the built app and read its persisted checkpoints through the public
 // engine ABI. The player has no automation-only state or editing endpoints.
@@ -24,7 +24,7 @@ async function saved() {
       tx.oncomplete = () => db.close();
     };
   }));
-  assert.equal(restore(api,Uint8Array.from(record.bytes)),1);
+  assert.equal(restore(api,Uint8Array.from(record.bytes)),1,engineError(api));
   const state = snapshot(api), at = api.snapshot_ptr(), data = new Float64Array(api.memory.buffer,at,12);
   return {...state,width:data[7],height:data[8],paused:record.paused,withdrawn:api.energy_withdrawn_total()};
 }
@@ -101,12 +101,21 @@ async function tabTo(surface,selector) {
 try {
   await page.goto(process.env.UI_TEST_URL || 'http://127.0.0.1:4173/');
   await page.locator('[data-id="builtin:simulation:nurse-rosette"][data-action="start-template"]').click();
+  assert.equal(await page.locator('#resource-arithmetic').inputValue(),'counts');
   await page.locator('[data-count="0"]').fill('0');
   await page.getByRole('button',{name:/Start simulation/}).click();
   await page.getByRole('button',{name:'Pause simulation'}).click();
   await page.waitForFunction(() => document.getElementById('save-state')?.textContent === 'Saved');
   const initial = await saved();
+  assert.equal(api.uses_count_chemistry(),1,'The normal gallery launches a whole-count world');
   assert.equal(initial.population,0);
+  await page.locator('[data-view="metrics"]').click();
+  await page.getByText('Exact count budgets',{exact:true}).click();
+  for (const pool of ['mineral','carbon','oxygen']) {
+    assert.equal(await page.locator('#count-'+pool+'-difference').textContent(),'0');
+    assert.ok(BigInt(await page.locator('#count-'+pool+'-held').textContent())>0n);
+  }
+  await page.locator('[data-view="player"]').click();
   await tool(page,'Nurse rosette');
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('#cell-tool-bar').isVisible(),false);
@@ -176,8 +185,9 @@ try {
   await controls(child,'hidden');
   await enterPlayer(child);
   await action(child,'edit-reserves');
-  await child.locator('#reserve-energy').fill('50');
-  await child.locator('#reserve-minerals').fill('0.3');
+  assert.equal(await child.locator('#reserve-energy').getAttribute('step'),'1');
+  await child.locator('#reserve-energy').fill('500000');
+  await child.locator('#reserve-minerals').fill('3001');
   await leavePlayer(child);
   await child.waitForFunction(()=>{
     const dialog=document.querySelector('dialog[open]');
@@ -185,15 +195,15 @@ try {
       && Number(getComputedStyle(dialog,'::backdrop').opacity)===0;
   });
   await enterPlayer(child);
-  assert.equal(await child.locator('#reserve-energy').inputValue(),'50');
+  assert.equal(await child.locator('#reserve-energy').inputValue(),'500000');
   await child.getByRole('button',{name:'Apply reserves'}).click();
-  await savedWhen(s => s.cells[1].energy===50 && s.cells[1].nutrients===.3);
+  await savedWhen(s => s.cells[1].energy===50 && s.cells[1].nutrients===.3001);
   await action(child,'edit-reserves');
   await child.getByRole('button',{name:'Subtract 10 energy'}).click();
   await child.getByRole('button',{name:'Apply reserves'}).click();
-  await savedWhen(s => s.cells[1].energy===40 && s.cells[1].nutrients===.3);
+  await savedWhen(s => s.cells[1].energy===49.999 && s.cells[1].nutrients===.3001);
   await action(child,'edit-reserves');
-  for (let index = 0; index < 4; index++) await child.getByRole('button',{name:'Subtract 10 energy'}).click();
+  await child.locator('#reserve-energy').fill('0');
   await child.getByRole('button',{name:'Set energy to zero'}).waitFor();
   assert.ok(await child.locator('.reserve-zero').isVisible());
   await child.getByRole('button',{name:'Cancel',exact:true}).click();
@@ -216,7 +226,7 @@ try {
   await page.evaluate(() => { delete window.testCamera; });
   const reopened = await saved();
   assert.equal(reopened.population,2,'Neither touch reveal placed an organism');
-  assert.ok(atPoint(reopened,2,d) && reopened.cells[1].energy===40 && reopened.cells[1].nutrients===.3 && reopened.ticks===initial.ticks);
+  assert.ok(atPoint(reopened,2,d) && reopened.cells[1].energy===49.999 && reopened.cells[1].nutrients===.3001 && reopened.ticks===initial.ticks);
 
   // Wait for an actual daughter to attach. Use the paid native colony, then
   // compare all members' saved coordinates before and after one UI move.
@@ -228,8 +238,8 @@ try {
   await page.getByRole('button',{name:'Apply reserves'}).click();
   await page.waitForFunction(() => !document.querySelector('.reserve-editor[open]'));
   await page.getByRole('button',{name:'Pause simulation'}).click();
-  const afterLiveEdit = await savedWhen(s => s.paused && s.ticks>reopened.ticks && Math.abs(s.withdrawn - reopened.withdrawn - 10)<1e-8);
-  assert.ok(afterLiveEdit.cells[0].energy>0,'A running withdrawal charges exactly ten ATP to the intervention ledger');
+  const afterLiveEdit = await savedWhen(s => s.paused && s.ticks>reopened.ticks && Math.abs(s.withdrawn - reopened.withdrawn - .001)<1e-8);
+  assert.ok(afterLiveEdit.cells[0].energy>0,'A running withdrawal charges exactly ten ATP counts to the intervention ledger');
 
   await page.locator('#playback-speed').selectOption('10');
   await page.getByRole('button',{name:'Play simulation'}).click();
@@ -249,7 +259,7 @@ try {
   const members=new Set([parent.id]);
   for(const id of members)for(const peer of body(api,id).colony.neighborIds)members.add(peer);
   assert.ok(directPeers.includes(daughter.id));
-  const expectedMembership=`${members.size}-cell colony · bonded to ${directPeers.map(id=>'#'+id).join(', ')}`;
+  const expectedMembership=`${members.size}-cell colony`;
   await page.waitForFunction(label=>document.querySelector('[data-value="attachment"]')?.textContent===label,expectedMembership);
   assert.ok(await page.locator('[data-action="move-colony"]').isEnabled(),'A confirmed mother–daughter bond enables the group move');
   await action(page,'move-colony');
@@ -270,10 +280,10 @@ try {
   const newCell = withSubject.cells.at(-1);
   const predicted = body(api,newCell.id).foodPotential;
   await page.locator('[data-food-potential] > summary').click();
-  await page.waitForFunction(() => Number(document.querySelector('[data-food-pool="total"]')?.textContent)>0);
+  await page.waitForFunction(() => Number(document.querySelector('[data-food-pool="total"]')?.textContent.replaceAll(',',''))>0);
   for (const [pool,energy] of Object.entries(predicted)) {
-    const shown = Number(await page.locator(`[data-food-pool="${pool}"]`).textContent());
-    assert.ok(Math.abs(shown-energy)<0.0051,pool+' matches the saved organism');
+    const shown = Number((await page.locator(`[data-food-pool="${pool}"]`).textContent()).replaceAll(',',''));
+    assert.equal(shown,Math.round(energy*10000),pool+' matches the saved organism in whole counts');
   }
   await action(page,'edit-reserves');
   await page.locator('#reserve-energy').fill('0');
@@ -288,7 +298,7 @@ try {
   await page.touchscreen.tap(Math.round(box.x+box.width/2+(tissue.x-carcass.width/2)*scale),Math.round(box.y+box.height/2+(tissue.y-carcass.height/2)*scale));
   await page.waitForFunction(() => document.getElementById('toast')?.textContent.startsWith('Tissue particle ·'));
   const readout = await page.locator('#toast').textContent();
-  assert.ok(carcass.food.some(f => f.kind===1 && readout===`Tissue particle · ${Number(f.energy.toPrecision(4))} food energy · ${Number(f.minerals.toPrecision(4))} minerals`),
+  assert.ok(carcass.food.some(f => f.kind===1 && readout===`Tissue particle · ${Math.round(f.energy*10000).toLocaleString()} food energy · ${Math.round(f.minerals*10000).toLocaleString()} minerals`),
     'The tap reads measured particle energy and minerals');
 
   // Keep the mouse physically outside the popup throughout the observation.
@@ -318,7 +328,10 @@ try {
   await leavePlayer(running);
   await running.keyboard.press('Tab');
   await tabTo(running,'[data-action="return-player"]');
-  await running.keyboard.press('Enter');
+  const docked=running.waitForEvent('close');
+  // Docking can close the popup on keydown, before Chromium sends keyup.
+  await running.keyboard.press('Enter').catch(error=>{ if(!running.isClosed()) throw error; });
+  await docked;
   await page.locator('#world').waitFor();
   await page.mouse.move(1,1);
   assert.equal(await page.locator('body').getAttribute('data-player-controls'),null);

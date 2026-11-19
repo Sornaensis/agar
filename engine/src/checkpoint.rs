@@ -8,7 +8,7 @@ use crate::{
 
 pub(crate) const MAX_STATE_BYTES: usize = 128 * 1024 * 1024;
 const MAGIC: &[u8; 8] = b"CELLAR01";
-pub(crate) const VERSION: u32 = 16;
+pub(crate) const VERSION: u32 = 17;
 pub(crate) type Result<T> = std::result::Result<T, String>;
 
 pub(crate) fn ensure(ok: bool, message: &str) -> Result<()> {
@@ -163,7 +163,7 @@ impl<'a> Reader<'a> {
     }
 }
 
-fn checksum(bytes: &[u8]) -> u32 {
+pub(crate) fn checksum(bytes: &[u8]) -> u32 {
     // FNV-1a detects accidental corruption; validation does not rely on it for trust.
     bytes.iter().fold(0x811c9dc5_u32, |hash, byte| {
         (hash ^ *byte as u32).wrapping_mul(0x01000193)
@@ -571,7 +571,7 @@ mod tests {
         let mut live = live_engine();
         let before = save(&live).unwrap();
         assert!(!live.restore_state(bytes));
-        assert!(live.error.contains("simulation saves 3 through 16"));
+        assert!(live.error.contains(&format!("simulation saves 3 through {VERSION}")));
         assert_eq!(save(&live).unwrap(), before);
         let mut version2 = before.clone();
         version2[8..12].copy_from_slice(&2u32.to_le_bytes());

@@ -3,6 +3,7 @@ use crate::checkpoint::{ensure, Reader, Result, Writer};
 
 impl Environment {
     pub(crate) fn write_checkpoint(&self, w: &mut Writer) {
+        w.u8(u8::from(self.uses_count_chemistry()));
         w.f64(self.width);
         w.f64(self.height);
         for value in [
@@ -64,8 +65,10 @@ impl Environment {
             }
         }
         self.gases.write_checkpoint(w);
+        if let Some(water)=&self.counted {water.write(w)}
     }
     pub(crate) fn read_checkpoint(r: &mut Reader<'_>, version: u32) -> Result<Self> {
+        let counted=if version>=17 {let mode=r.u8()?; ensure(mode<=1,"invalid environment chemistry mode")?;mode==1} else {false};
         let (width, height) = if version >= 8 {
             (r.range(400.0, 4800.0)?, r.range(400.0, 3040.0)?)
         } else {
@@ -206,7 +209,7 @@ impl Environment {
             temperature: field(r, patches, 0.0, 1.0)?,
             light: field(r, patches, 0.0, 1.0)?,
             heating: field(r, patches, -2.0, 2.0)?,
-            nutrients: field(r, patches, 0.0, 1e100)?,
+            nutrients: field(r, if counted{0}else{patches}, 0.0, 1e100)?,
             nutrient_injection: field(r, patches, 0.0, 96.0)?,
             organic: field(r, patches, 0.0, 1e6)?,
             nutrient_absorption: if version >= 8 {
@@ -219,12 +222,18 @@ impl Environment {
             next_source_id,
             next_barrier_id,
             scratch: FieldScratch::default(),
+            counted:None,
             gases: if version >= 9 {
-                GasState::read_checkpoint(r, patches)?
+                GasState::read_checkpoint(r, patches, counted)?
             } else {
                 GasState::new(patches)
             },
         };
+        if counted {
+            ensure([result.nutrient_inputs,result.nutrient_removed,result.gases.oxygen_inputs,result.gases.oxygen_outputs,result.gases.carbon_inputs,result.gases.carbon_outputs].iter().all(|v|*v==0.),"duplicate chemical inventory")?;
+            result.reset_chemistry_mode(true);
+            result.counted.as_mut().unwrap().read(r)?;
+        }
         result.rebuild_flow_samples();
         result.rebuild_gas_sources();
         result.rebuild_barriers();

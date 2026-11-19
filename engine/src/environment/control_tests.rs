@@ -8,7 +8,7 @@ fn saved(env: &Environment) -> Vec<u8> {
     w.0
 }
 fn restore(env: &Environment) -> Environment {
-    Environment::read_checkpoint(&mut Reader::new(&saved(env)), 9).unwrap()
+    Environment::read_checkpoint(&mut Reader::new(&saved(env)), 17).unwrap()
 }
 
 #[test]

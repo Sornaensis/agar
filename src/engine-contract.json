@@ -1,5 +1,5 @@
 {
-  "abi": 20,
+  "abi": 21,
   "memory": "memory",
   "functions": [
     "abi_version",
@@ -71,6 +71,7 @@
     "energy_total",
     "energy_input_total",
     "render_snapshot_ptr",
+    "render_links_snapshot_ptr",
     "metrics_snapshot_ptr",
     "cell_snapshot_ptr",
     "summary_snapshot_ptr",
@@ -89,6 +90,9 @@
     "oxygen_input_total",
     "oxygen_removed_total",
     "carbon_input_total",
-    "carbon_removed_total"
+    "carbon_removed_total",
+    "set_count_chemistry",
+    "uses_count_chemistry",
+    "count_audit_ptr"
   ]
 }

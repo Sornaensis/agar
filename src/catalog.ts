@@ -100,8 +100,8 @@ export interface BuiltinSimulation {
   populations: Array<{ genomeId: string; count: number }>;
 }
 /** The standard mutation rate applies to every built-in launch. */
-export function simulationStartSettings(): { mutationRate: number } {
-  return { mutationRate: 0.1 };
+export function simulationStartSettings(): { mutationRate: number; countChemistry: boolean } {
+  return { mutationRate: 0.1, countChemistry: true };
 }
 
 export const BUILTIN_SIMULATIONS: readonly BuiltinSimulation[] = freeze([

@@ -1,17 +1,17 @@
 # A small, complete cellular program: make one light-harvesting machine.
-cellular;
+cellular counts;
 
 product Mount = anchor();
 product Pigment = pigment();
 product Catalyst = enzyme();
 
-gene mounts: Mount = if built.Solar + 0.000001 < 0.04 && pool.Mount < 0.002 then 1 else 0;
-gene pigments: Pigment = if built.Solar + 0.000001 < 0.04 && pool.Pigment < 0.002 then 1 else 0;
-gene catalysts: Catalyst = if built.Solar + 0.000001 < 0.04 && pool.Catalyst < 0.002 then 1 else 0;
+gene mounts: Mount = if built.Solar + 0.000001 < 0.04 && pool.Mount < 20 then 1 else 0;
+gene pigments: Pigment = if built.Solar + 0.000001 < 0.04 && pool.Pigment < 20 then 1 else 0;
+gene catalysts: Catalyst = if built.Solar + 0.000001 < 0.04 && pool.Catalyst < 20 then 1 else 0;
 
 assembly Solar: harvest(light) {
-  Mount: 0.01;
-  Pigment: 0.02;
-  Catalyst: 0.01;
+  Mount: 100;
+  Pigment: 200;
+  Catalyst: 100;
   activity: 1;
 }

@@ -130,7 +130,7 @@ impl Parser {
             let argument_start = self.peek().location;
             let mut argument = self.expression(0, depth)?;
             self.assignable(argument, Type::Number, argument_start)?;
-            if self.nodes[argument].ty == Type::Integer {
+            if matches!(self.nodes[argument].ty,Type::Integer | Type::Count) {
                 argument = self.add(
                     Op::Call(Function::Float, [argument, 0, 0]),
                     Type::Number,

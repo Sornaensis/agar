@@ -182,10 +182,11 @@ for (const randomSeed of options.seeds) {
     const last = result.samples.at(-1);
     result.assertions = {
       noExternalOrganicFood: !('add_food' in api) && !('set_food_rate' in api),
+      producerLineageReproducesAcrossGenerations: last.lineages.find(item => item.name === 'Phototroph').maxGeneration >= 3,
       foragerSurvives: last.lineages.find(item => item.name === 'Forager').count > 0,
       predatorSurvives: last.lineages.find(item => item.name === 'Predator').count > 0,
-      foragerReproduces: result.observedDescendants.Forager > 0,
-      predatorReproduces: result.observedDescendants.Predator > 0,
+      foragerReproduces: last.lineages.find(item => item.name === 'Forager').maxGeneration >= 2,
+      predatorReproduces: last.lineages.find(item => item.name === 'Predator').maxGeneration >= 2,
       attacksOccur: last.attacks > 0,
       predationOccurs: last.predations > 0,
     };
@@ -196,5 +197,5 @@ if (!options.output && !options.assert) console.log(JSON.stringify(study));
 if (options.assert) {
   const failures = study.results.flatMap(result => Object.entries(result.assertions).filter(([, passed]) => !passed).map(([name]) => `seed ${result.seed}: ${name}`));
   assert.deepEqual(failures, [], `Mixed ecosystem regression failures: ${failures.join(', ')}`);
-  console.log(`Mixed ecosystem checks passed: consumers survive and reproduce, physical attacks and predation occur, no supplied food, ${options.duration} seconds across ${options.seeds.length} seed(s).`);
+  console.log(`Mixed ecosystem checks passed: living producers reach generation three, consumers survive and reproduce, physical attacks and predation occur, no supplied food, ${options.duration} seconds across ${options.seeds.length} seed(s).`);
 }

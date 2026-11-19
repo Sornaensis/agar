@@ -1,4 +1,4 @@
-import type { EnvironmentMetadata, EnvironmentSnapshot, MetricsSnapshot, RenderSnapshot, SimulationSummary } from './engine';
+import type { CountAudit, EnvironmentMetadata, EnvironmentSnapshot, MetricsSnapshot, RenderSnapshot, SimulationSummary } from './engine';
 
 export interface PresentationOptions {
   /** Omit drawing data when only the simulation clock or aggregates are needed. */
@@ -20,13 +20,14 @@ export interface WirePresentation {
   summary: SimulationSummary;
   frame?: Float64Array;
   metrics?: Float64Array;
+  countAudit?: CountAudit;
   environment?: EnvironmentMetadata | EnvironmentSnapshot;
   error?: string;
 }
 export interface CapturedCheckpoint { state: Uint8Array; summary: SimulationSummary }
 
 export const ENGINE_METHODS = [
-  'analyze', 'compile', 'reset', 'resetEmpty', 'saveState', 'restoreState', 'seed', 'placeCell', 'moveCell', 'setCellStores',
+  'analyze', 'compile', 'reset', 'resetEmpty', 'setCountChemistry', 'usesCountChemistry', 'saveState', 'restoreState', 'seed', 'placeCell', 'moveCell', 'setCellStores',
   'setMutationRate', 'setEnvironment', 'setInitialNutrients', 'addNutrients',
   'addSource', 'replaceSources', 'removeSource', 'clearSources', 'getMemory', 'getCellEvaluation', 'languageSchema',
   'setWorldSize', 'updateSource', 'addBarrier', 'updateBarrier', 'removeBarrier', 'clearBarriers',

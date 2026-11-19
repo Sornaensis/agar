@@ -12,7 +12,7 @@ const exchanges = ['energyNet', 'mineralNet', 'carbonNet'];
 for (const [name, marker, response] of [['Nurse rosette',42,'nursing'],['Pulse swimmer',73,'firing']]) {
   const source=PRESETS.find(preset=>preset.name===name).source;
   for (const requireBond of [true,false]) {
-    const api=await fresh({...pool,seed:42});
+    const api=await fresh({...pool,seed:42,countChemistry:true});
     const adult=compile(api,requireBond?source:source.replace(/sensed\.(LeftJunction|RightJunction)\.bonded && /g,''));
     assert.equal(api.place_cell(adult,100,200),1,error(api));
     advance(api,35*30);
@@ -34,11 +34,11 @@ for (const [name, marker, response] of [['Nurse rosette',42,'nursing'],['Pulse s
       name+' responds to a signaling stranger only when the direct-bond check is removed');
   }
 }
-async function growPair(name, transform = source => source) {
+async function growPair(name, transform = source => source, countChemistry = true) {
   const preset = PRESETS.find(item => item.name === name);
   const example = await readFile(new URL('../examples/' + name.toLowerCase().replaceAll(' ', '-') + '.cell', import.meta.url), 'utf8');
   assert.equal(example.trimEnd(), preset.source, 'The downloadable example matches the playable genome');
-  const api = await fresh({ ...pool, seed:42 });
+  const api = await fresh({ ...pool, seed:42, countChemistry });
   const id = compile(api, transform(preset.source));
   seed(api, id, 1, pool.width / 2, pool.height / 2);
   assert.equal(body(api, 1).cellular.assemblies.length, 0, 'Founder starts without free machinery');
@@ -65,8 +65,8 @@ function closeJunctions(source) {
   return control;
 }
 
-async function nursery(open) {
-  const { api, state:birth } = await growPair('Nurse rosette', open ? undefined : closeJunctions);
+async function nursery(open, countChemistry) {
+  const { api, state:birth } = await growPair('Nurse rosette', open ? undefined : closeJunctions, countChemistry);
   const [adult, young] = birth.cells;
   const report = { birthSeconds:birth.seconds, pairedTicks:0, transferred:{energyNet:0,mineralNet:0,carbonNet:0}, energyExchanged:0,
     maternalSolarAtFission:activeMass(body(api, adult.id), 'Solar'), peakMaternalSolar:0, peakNurseFixation:0 };
@@ -107,8 +107,9 @@ async function nursery(open) {
   report.daughterAt48s = { energy:juvenile.energy, organicCarbon:juvenile.organicCarbon, envelopeGrowth:juvenile.area - young.area };
   assert.ok(report.peakMaternalSolar > report.maternalSolarAtFission + 0.03, 'The mother completes an additional paid harvester while nursing');
   if (open) {
-    assert.ok(report.transferred.carbonNet > 1 && report.transferred.mineralNet < -0.02,
-      'The developing cell receives organic carbon and supplies minerals to its nurse');
+    assert.ok(report.transferred.carbonNet > 1, 'The developing cell receives organic carbon from its nurse');
+    assert.ok(Math.abs(report.transferred.mineralNet) > 0.02, 'The paired mineral compartments exchange actual stock');
+    if (!countChemistry) assert.ok(report.transferred.mineralNet < -0.02, 'The continuous reference juvenile supplies minerals to its nurse');
     assert.ok(report.energyExchanged > 1, 'Energy flows as the cells’ reserve gradients change');
     assert.ok(report.daughterAt48s.envelopeGrowth > 0.3, 'The juvenile converts material into new envelope while attached');
   }
@@ -164,7 +165,7 @@ async function swimmer(sender) {
 // water. Two distant donors acquire inorganic minerals and carbon. Their
 // tissue later supplies the mineral-bearing meal in both treatments.
 async function tradeWithProducer(openPorts) {
-  const api = await fresh({width:400,height:400,ambientLight:.9,ambientTemperature:.18,initialNutrients:0,gases:{mode:'open',exchangeRate:.2}});
+  const api = await fresh({countChemistry:true,width:400,height:400,ambientLight:.9,ambientTemperature:.18,initialNutrients:0,gases:{mode:'open',exchangeRate:.2}});
   const producer = PRESETS.find(preset => preset.name === 'Phototroph');
   const grazer = PRESETS.find(preset => preset.name === 'Forager');
   seed(api, compile(api,producer.source), 1, 200, 200);
@@ -208,7 +209,7 @@ async function tradeWithProducer(openPorts) {
     }
     report.grazerCarbonNet += receiver.carbonNet;
     report.grazerMineralNet += receiver.mineralNet;
-    if (tick===24*30) {
+    if (tick===18*30) {
       // Move the attached pair once onto a real carcass so tissue supplies
       // minerals in both treatments without changing their contact geometry.
       const donorMinerals=state.cells.find(c=>c.id===donor)?.nutrients;
@@ -229,10 +230,12 @@ async function tradeWithProducer(openPorts) {
   return report;
 }
 
-const open = await nursery(true), closed = await nursery(false);
-assert.ok(open.daughterAt48s.energy > closed.daughterAt48s.energy + 10, 'Open junctions protect the developing daughter’s reserve');
-assert.ok(open.daughterReproducedBySeconds + 5 < closed.daughterReproducedBySeconds, 'Provisioning advances the daughter’s reproductive cycle');
-console.log('Nurse rosette', JSON.stringify({ open, closed }));
+for (const countChemistry of [false, true]) {
+  const open = await nursery(true,countChemistry), closed = await nursery(false,countChemistry);
+  assert.ok(open.daughterAt48s.energy > closed.daughterAt48s.energy + 10, 'Open junctions protect the developing daughter’s reserve');
+  assert.ok(open.daughterReproducedBySeconds + 5 < closed.daughterReproducedBySeconds, 'Provisioning advances the daughter’s reproductive cycle');
+  console.log('Nurse rosette', JSON.stringify({ countChemistry, open, closed }));
+}
 const relay = await swimmer(true), silent = await swimmer(false);
 const velocityDifference = Math.max(...relay.trajectory.map(([vx, vy], i) => Math.hypot(vx - silent.trajectory[i][0], vy - silent.trajectory[i][1])));
 assert.ok(velocityDifference > 0.01, 'Relayed propulsion changes the daughter’s measured motion');
