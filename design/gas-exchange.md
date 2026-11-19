@@ -13,11 +13,11 @@ Minerals remain the noncarbon construction resource. Two separate dissolved fiel
 | Internal gases | Finite O₂ and DIC amounts inside each organism |
 | Organic carbon reserves | Explicit amount available for respiration or construction |
 | Structural organic carbon | One carbon unit per unit of existing structural/product mass |
-| Food and gut carbon | Chemical substrate potential divided by 20 energy units per carbon unit |
+| Food and gut carbon | (Total food energy − additional energy carried by the substrate) / 20 |
 | Usable energy | ATP-like reserve used to pay for biological work |
 | Mineral nutrients | Separate conserved noncarbon material |
 
-Food's legacy `energy` field now means chemical substrate potential. It is not immediately usable energy. ATP-like usable energy never turns into carbon when a cell dies or is eaten. Material in products, assemblies, frames, replication machinery and gut contents is counted once.
+Food's `energy` field is the meal’s total chemical potential. Carbon contributes a base 20 energy units per unit of C. Tissue also carries actual fabrication energy, any additional dietary energy retained with its carbon, and free ATP present at death. Carbon atoms and mineral mass are transferred independently of these energy values. A partially captured or digested particle transfers the same fraction of each inventory.
 
 ## Reactions and physical machinery
 
@@ -26,7 +26,7 @@ The simplified balanced reactions are:
 - Oxygenic fixation: inorganic C + light → organic C + O₂.
 - Aerobic respiration: organic C + O₂ → inorganic C + usable energy.
 
-Water is an abundant implicit reservoir. One carbon unit and one oxygen unit participate in each reaction extent. Fixation stores 20 chemical-potential energy units per carbon; respiration releases 16 usable units, with the remainder dissipated. These are model parameters, not biochemical calibration.
+Water is an abundant implicit reservoir. One carbon unit and one oxygen unit participate in each reaction extent. Fixation stores 20 chemical-potential energy units per carbon. Respiration converts 80% of the chemical potential carried by the carbon oxidized to usable energy. Plain substrate yields 16 ATP per carbon. Energy-rich substrate can yield more, within the same machinery and ATP storage limits. These are model parameters, not biochemical calibration.
 
 `harvest(light)` and legacy photosynthetic organs fix carbon using shared local light, available internal DIC, built capacity and reserve space. They produce only the oxygen corresponding to actual fixation. A fixed 12% of newly fixed carbon is released as exudate; the rest enters organic reserves.
 
@@ -35,6 +35,8 @@ Water is an abundant implicit reservoir. One carbon unit and one oxygen unit par
 Digestion transfers accessible carbon and minerals from captured food into reserves. It does not grant a second energy reward. Refractory residues retain their carbon. Construction consumes organic carbon and minerals in a fixed quota; recycling returns the structural carbon it releases. Division partitions existing organic and internal-gas pools. Death and predation transfer actual carbon and release internal gases.
 
 The retained background decay process is explicitly aerobic: it consumes dissolved oxygen, releases the same amount of inorganic carbon and returns associated minerals. Its reaction total is exposed separately from organism respiration. It stops when oxygen is unavailable, retaining unprocessed particle carbon. This is a simplified background decomposer process, not a population of modeled microbes.
+
+New biosynthesis stores 90% of its paid fabrication energy in the constructed material and dissipates 10%. For a killed or wholly engulfed cell, the gross meal is the sum of body carbon potential, embodied fabrication energy, any additional energy associated with structural carbon, reserve carbon potential and its additional energy, free ATP, and existing gut contents. Carcass creation itself conserves that sum. A predator converts the assimilated share to ATP through its own metabolism. Movement, maintenance, engulfment and respiration have their own costs.
 
 ## Membrane exchange and transport
 

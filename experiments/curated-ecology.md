@@ -18,7 +18,7 @@ The former mixed ecosystem behaved differently. At seed 42 with ordinary browser
 
 The revised genome doubles initial exudate digestion capacity and keeps the larger tissue enzyme. It delays the burst of construction for a daughter until 1.75 times birth area and keeps single copies of several adult machines. It remembers a prey cue for 18 seconds. Paired chemical receptors steer the search when vision has no return. A gut containing waste alone leaves the hunter searching. Contact recognition still protects peers carrying its marker.
 
-These checks isolate the genome from the habitat change. Each starts with one unmodified hunter in a 400 × 400 world and runs for 300 simulated seconds. The dark trial scatters organic food. The prey trial scatters 20 non-attacking cells and supplies no additional food.
+These controlled trials were recorded before the tissue-energy update. They isolate the genome from the habitat change. Each starts with one unmodified hunter in a 400 × 400 world and runs for 300 simulated seconds. The dark trial scatters organic food. The prey trial scatters 20 non-attacking cells and supplies no additional food.
 
 | Seed | Dark trial, living hunters | Dark trial, births | Prey trial, living hunters | Prey trial, births | Prey killed |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -51,11 +51,11 @@ The **Sunlit food web** starts 48 Phototrophs, 12 Foragers and one Predator toge
 
 | Seed | Phototrophs at 600 s | Foragers at 600 s | Predators at 600 s | Observed Forager descendants | Predation deaths |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 42 | 268 | 12 | 5 | 25 | 50 |
-| 7 | 269 | 1 | 4 | 11 | 46 |
-| 2026 | 221 | 26 | 7 | 34 | 63 |
+| 42 | 249 | 21 | 10 | 26 | 57 |
+| 7 | 230 | 48 | 10 | 79 | 56 |
+| 2026 | 243 | 33 | 9 | 55 | 46 |
 
-All three lineages reproduced on each seed. Seed 7 ended with 1 surviving Forager. The [full preset results](scenarios.json) include founder counts, source hashes, exchange measurements and the observation interval for each scenario.
+All three lineages reproduced on each seed under ABI 17. The previous ABI 16 runs ended with 5, 4 and 7 predators on these seeds. A matched feeding trial isolates the energetic change from differences in population trajectories. The same developed Phototroph yielded 128.29 energy units of carcass tissue under ABI 16 and 352.25 under ABI 17. [Full preset results](scenarios.json) · [Matched feeding trial](predation-yield.json)
 
 ## Repeating the comparisons
 

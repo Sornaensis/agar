@@ -3,7 +3,7 @@ use super::*;
 
 impl World {
     pub fn organic_cell_total(&self) -> f64 { self.cells.iter().map(Cell::organic_carbon_total).sum() }
-    pub fn organic_food_total(&self) -> f64 { self.food.iter().map(|f| f.energy / CHEMICAL_ENERGY_PER_CARBON).sum() }
+    pub fn organic_food_total(&self) -> f64 { self.food.iter().map(Food::carbon).sum() }
     pub fn internal_inorganic_carbon_total(&self) -> f64 { self.cells.iter().map(|c| c.internal_inorganic_carbon).sum() }
     pub fn oxygen_cell_total(&self) -> f64 { self.cells.iter().map(|c| c.internal_oxygen).sum() }
     pub fn carbon_total(&self) -> f64 {
@@ -73,15 +73,24 @@ impl World {
             // every biosynthetic reserve just to saturate storage capacity.
             let basal = cap.basal_respiration.min(cap.respiration);
             let basal_room = (cap.energy * 0.25 - cell.energy).max(0.0);
-            let capacity = (cap.respiration - basal) * DT + (basal * DT).min(basal_room);
+            if cell.organic_carbon <= 0.0 { continue; }
+            let efficiency = RESPIRATION_ENERGY_PER_CARBON / CHEMICAL_ENERGY_PER_CARBON;
+            let yield_per_carbon = RESPIRATION_ENERGY_PER_CARBON
+                + efficiency * cell.reserve_enrichment / cell.organic_carbon;
+            // Machinery processes a finite amount of carbon. Both standard and
+            // enriched substrate require oxygen and actual room for their ATP.
+            let capacity = (cap.respiration - basal) * DT
+                + (basal * DT).min(basal_room * (RESPIRATION_ENERGY_PER_CARBON / yield_per_carbon));
             let carbon = (capacity / RESPIRATION_ENERGY_PER_CARBON)
                 .min(cell.organic_carbon).min(cell.internal_oxygen)
-                .min((cap.energy - cell.energy).max(0.0) / RESPIRATION_ENERGY_PER_CARBON);
+                .min((cap.energy - cell.energy).max(0.0) / yield_per_carbon);
             if carbon <= 0.0 { continue; }
+            let extra = cell.reserve_extra_for(carbon);
+            cell.reserve_enrichment -= extra;
             cell.organic_carbon -= carbon;
             cell.internal_oxygen -= carbon;
             cell.internal_inorganic_carbon += carbon;
-            cell.energy += carbon * RESPIRATION_ENERGY_PER_CARBON;
+            cell.energy += carbon * RESPIRATION_ENERGY_PER_CARBON + extra * efficiency;
             cell.respiration_rate = carbon / DT;
             self.carbon_respired_total += carbon;
         }
@@ -93,7 +102,7 @@ impl World {
         workspace.clear_groups(self.environment.patch_count());
         let fractions = ORGANIC_DECAY.map(|rate| -(-rate * DT).exp_m1());
         for (index, food) in self.food.iter().enumerate() {
-            let carbon = food.energy / CHEMICAL_ENERGY_PER_CARBON;
+            let carbon = food.carbon();
             let requested = if food.energy <= 1e-6 { carbon } else { carbon * fractions[food.kind as usize] };
             if requested > 0.0 { workspace.group_request(self.environment.patch_index(food.x, food.y), (index, requested)); }
         }
@@ -107,12 +116,16 @@ impl World {
             let mut remaining = supplied;
             for &(index, requested) in group {
                 let food = &mut self.food[index];
-                let carbon = food.energy / CHEMICAL_ENERGY_PER_CARBON;
+                let carbon = food.carbon();
                 let consumed = (requested * factor).min(remaining).min(carbon);
                 if consumed <= 0.0 { continue; }
                 let fraction = (consumed / carbon).min(1.0);
                 let minerals = food.nutrients * fraction;
-                food.energy = (food.energy - consumed * CHEMICAL_ENERGY_PER_CARBON).max(0.0);
+                let extra = food.extra_energy * fraction;
+                food.extra_energy -= extra;
+                food.energy = if consumed == carbon { 0.0 } else {
+                    (food.energy - (consumed * CHEMICAL_ENERGY_PER_CARBON + extra)).max(0.0)
+                };
                 food.nutrients = (food.nutrients - minerals).max(0.0);
                 self.environment.recycle_nutrients_patch(patch, minerals);
                 self.environment.release_inorganic_carbon_patch(patch, consumed);

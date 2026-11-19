@@ -1,7 +1,7 @@
 import { ORGANELLE_CATALOG } from './organelles';
 import { WorldCamera } from './world-camera';
 import { PeriodicVisibility } from './periodic-visibility';
-import type { BodyInspection, Cell, RenderCell, EnvironmentSnapshot, EnvironmentSource, EnvironmentBarrier } from './engine';
+import type { BodyInspection, Cell, Food, RenderCell, EnvironmentSnapshot, EnvironmentSource, EnvironmentBarrier } from './engine';
 import type { RenderWorldSnapshot } from './session';
 
 const PALETTE = ['#5ce1ba', '#aaa2ff', '#efa66b', '#6dcbea', '#ed9db7', '#d7d889'];
@@ -290,6 +290,20 @@ export class Renderer {
         nearest = cell;
         nearestDistance = distance;
       }
+    }
+    return nearest;
+  }
+
+  /** Resolve a single canvas tap without scanning particles during hover or animation. */
+  pickFood(world: RenderWorldSnapshot, clientX: number, clientY: number): Food | null {
+    const point = this.toWorld(clientX,clientY);
+    if (!point) return null;
+    let nearest: Food | null = null, best = (2.5 + 6 / this.scale) ** 2;
+    for (const food of world.food) {
+      const rawX = Math.abs(food.x-point.x), rawY = Math.abs(food.y-point.y);
+      const dx = Math.min(rawX,world.width-rawX), dy = Math.min(rawY,world.height-rawY);
+      const distance = dx*dx + dy*dy;
+      if (distance < best) { nearest = food; best = distance; }
     }
     return nearest;
   }

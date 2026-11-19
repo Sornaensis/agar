@@ -590,13 +590,17 @@ fn paid_frame_can_exceed_area_four_and_large_bodies_collide_across_the_torus_sea
     for cell in &mut world.cells {
         cell.energy += 600.0;
         cell.nutrient_stored += 10.0;
+        cell.organic_carbon += 10.0;
     }
-    world.energy_imports += 1200.0;
+    world.energy_imports += 1200.0 + 20.0 * CHEMICAL_ENERGY_PER_CARBON;
+    world.carbon_imports += 20.0;
+    let carbon = world.carbon_total();
     world.nutrient_imports += 20.0;
     let material = world.nutrient_total();
     let energy = world.energy_total();
     for cell in &mut world.cells {
         for _ in 0..1000 {
+            let mass = cell.body.structural_mass();
             cell.body.work(
                 1.0,
                 &request,
@@ -606,6 +610,7 @@ fn paid_frame_can_exceed_area_four_and_large_bodies_collide_across_the_torus_sea
                 1.0,
                 8.0,
             );
+            cell.move_construction_carbon(mass);
             if cell.body.area >= 8.0 - 1e-10 {
                 break;
             }
@@ -614,6 +619,7 @@ fn paid_frame_can_exceed_area_four_and_large_bodies_collide_across_the_torus_sea
         cell.body.validate().unwrap();
         cell.y = 300.0;
     }
+    close(world.carbon_total(), carbon);
     assert!(world.energy_total() < energy);
     close(world.nutrient_total(), material);
     world.cells[0].x = 5.0;

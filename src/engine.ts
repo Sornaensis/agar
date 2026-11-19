@@ -32,7 +32,10 @@ export interface CellularBodyInspection {
   products:CellularProduct[];assemblies:CellularAssembly[];recipes:CellularRecipe[];
   replication:{mass:number;requiredMass:number;progress:number;genomeMass:number};constriction:{progress:number};
 }
+/** Gross food energy available if these contents are released or consumed whole. */
+export interface FoodPotential { body:number; reserve:number; gut:number; atp:number; total:number }
 export interface BodyInspection {
+  foodPotential:FoodPotential;
   cellId:number; area:number; mass:number; spaceUsed:number; spaceCapacity:number; surfaceUsed:number; surfaceCapacity:number;
   constructionRate:number; recyclingRate:number; repairRate:number; synthesisRate:number; assemblyCapacity:number;
   organs: { id:number; kind:OrganelleKind; mass:number; integrity:number; functional:boolean; minimumMass:number; embodiedEnergy:number }[];
@@ -53,6 +56,9 @@ export function validateBodyInspection(value: unknown, expectedCellId: number): 
     || !Array.isArray(body.organs) || body.organs.length>24000 || !body.organs.every(o=>o && Number.isInteger(o.id) && o.id>0 && kind(o.kind) && [o.mass,o.integrity,o.minimumMass,o.embodiedEnergy].every(finite) && o.integrity<=1 && typeof o.functional==='boolean')
     || new Set(body.organs.map(o=>o.id)).size!==body.organs.length
     || !Array.isArray(body.requested) || body.requested.length!==16 || !body.requested.every((r,i)=>r.kind===ORGANELLE_KINDS[i] && Number.isInteger(r.count) && r.count>=0 && [r.size,r.build,r.recycle,r.proteinMass].every(finite) && r.build<=1 && r.recycle<=1)) return fail();
+  const pools = body.foodPotential;
+  if (!pools || ![pools.body,pools.reserve,pools.gut,pools.atp,pools.total].every(n => Number.isFinite(n) && n >= 0)
+    || Math.abs(pools.total - (pools.body+pools.reserve+pools.gut+pools.atp)) > 1e-8*Math.max(1,pools.total)) return fail();
   if (body.colony !== undefined && (!body.colony || !Number.isSafeInteger(body.colony.neighbors)
     || body.colony.neighbors < 0 || ![body.colony.energyNet,body.colony.mineralNet,body.colony.carbonNet].every(angle))) return fail();
   if (body.cellular != null) {
@@ -361,7 +367,7 @@ export interface MetricsSnapshot extends SimulationSummary {
   nutrientTotal:number; nutrientInputTotal:number; nutrientDissolvedTotal:number; nutrientFoodTotal:number; nutrientCellTotal:number;
   trophic:{autotrophs:number;heterotrophs:number;mixotrophs:number;hunters:number};
   flow:{production:number;digestion:number;exudation:number};
-  organicCounts:[number,number,number];
+  organicCounts:[number,number,number]; packetEnergyTotal:number;
   carbonTotal:number; carbonInputTotal:number; organicCellTotal:number; organicFoodTotal:number;
   carbonFixedTotal:number; carbonRespiredTotal:number; decayRespiredTotal:number; legacyCarbonImported:number;
   oxygenCellTotal:number; oxygenDissolvedTotal:number; inorganicCarbonTotal:number;
@@ -371,7 +377,7 @@ export interface MetricsSnapshot extends SimulationSummary {
 
 const RENDER_HEADER = 12;
 const RENDER_CELL_STRIDE = 21;
-const METRICS_HEADER = 53;
+const METRICS_HEADER = 54;
 
 /** Decode a worker-transferred compact buffer without any WASM calls. */
 export function decodeRenderSnapshot(data: Float64Array): RenderSnapshot {
@@ -418,6 +424,7 @@ export function decodeRenderSnapshot(data: Float64Array): RenderSnapshot {
 export function decodeMetricsSnapshot(data: Float64Array): MetricsSnapshot {
   if (data.length < METRICS_HEADER || !Number.isSafeInteger(data[35]) || data[35] < 0
     || data.length !== METRICS_HEADER + data[35] * 3) throw new Error('The metrics snapshot has an invalid layout.');
+  if (!Number.isFinite(data[53]) || data[53] < 0) throw new Error('The metrics snapshot has invalid particle energy.');
   const genomes: MetricsSnapshot['genomes'] = [];
   for (let i = 0; i < data[35]; i++) {
     const n = METRICS_HEADER + i * 3;
@@ -433,7 +440,7 @@ export function decodeMetricsSnapshot(data: Float64Array): MetricsSnapshot {
     carbonTotal:data[36],carbonInputTotal:data[37],organicCellTotal:data[38],organicFoodTotal:data[39],
     carbonFixedTotal:data[40],carbonRespiredTotal:data[41],decayRespiredTotal:data[42],legacyCarbonImported:data[43],
     oxygenCellTotal:data[44],oxygenDissolvedTotal:data[45],inorganicCarbonTotal:data[46],oxygenInputTotal:data[47],
-    oxygenRemovedTotal:data[48],carbonRemovedTotal:data[49],internalInorganicCarbonTotal:data[50],energyWithdrawnTotal:data[51],mineralWithdrawnTotal:data[52],genomes};
+    oxygenRemovedTotal:data[48],carbonRemovedTotal:data[49],internalInorganicCarbonTotal:data[50],energyWithdrawnTotal:data[51],mineralWithdrawnTotal:data[52],packetEnergyTotal:data[53],genomes};
 }
 
 interface WasmExports extends WebAssembly.Exports {

@@ -242,8 +242,13 @@ publish rf001 = 0; avoid_message rf001;
     let edge = 600.0 + world.cells[0].radius() + CELL_RADIUS;
     let marked = seed(&mut world, &genomes, 2, edge, 380.0);
     let prey = seed(&mut world, &genomes, 3, edge, 382.0);
-    world.cells[marked].integrity = 0.2;
-    world.cells[prey].integrity = 0.2;
+    for i in [marked, prey] {
+        // Both candidate meals fit the paid gut, including remaining ATP.
+        let cell = &mut world.cells[i];
+        cell.integrity = 0.2;
+        cell.energy = 5.0;
+        cell.organic_carbon = 0.25;
+    }
     let caps: Vec<_> = world.cells.iter().map(|cell| cell.body.capacities()).collect();
     let mut workspace = PhaseWorkspace::default();
     world.freeze_contact_signals(&genomes, &mut workspace.signals);

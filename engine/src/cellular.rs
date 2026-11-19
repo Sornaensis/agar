@@ -1013,7 +1013,7 @@ impl CellularState {
             bindings: DerivedBindings::default(),
         }
     }
-    pub(crate) fn validate(&self) -> CheckpointResult<()> {
+    pub(crate) fn validate(&self, retention: f64) -> CheckpointResult<()> {
         ensure(
             self.pools.len() <= MAX_POOLS && self.assemblies.len() <= MAX_INSTANCES,
             "too many cellular material records",
@@ -1034,6 +1034,7 @@ impl CellularState {
                 pool.mass,
                 pool.embodied_energy,
                 pool.product.kind.synthesis_cost(),
+                retention,
             )?;
             ensure(
                 pool.expression_requested.is_finite()
@@ -1085,6 +1086,7 @@ impl CellularState {
                     ingredient.mass,
                     ingredient.embodied_energy,
                     part.product.kind.synthesis_cost() + recipe.kind.installation_cost(),
+                    retention,
                 )?;
                 ensure(
                     ingredient.mass <= part.required_mass + EPS,
@@ -1096,11 +1098,13 @@ impl CellularState {
             self.genome_mass,
             self.genome_energy,
             REPLICA_ENERGY_PER_MASS,
+            retention,
         )?;
         validate_ledger(
             self.replica_mass,
             self.replica_energy,
             REPLICA_ENERGY_PER_MASS,
+            retention,
         )?;
         ensure(
             self.constriction.is_finite() && (0.0..=1.0).contains(&self.constriction),
@@ -1259,7 +1263,7 @@ impl CellularState {
                 });
             }
         }
-        state.validate()?;
+        state.validate(crate::body::max_embodied_fraction(version))?;
         Ok(state)
     }
 }
@@ -1273,13 +1277,13 @@ fn validate_product(product: &ProductDef) -> CheckpointResult<()> {
         "invalid cellular product definition",
     )
 }
-fn validate_ledger(mass: f64, energy: f64, cost: f64) -> CheckpointResult<()> {
+fn validate_ledger(mass: f64, energy: f64, cost: f64, retention: f64) -> CheckpointResult<()> {
     ensure(
         mass.is_finite()
             && (0.0..=MAX_AREA * 0.9).contains(&mass)
             && energy.is_finite()
             && energy >= 0.0
-            && energy <= mass * cost * EMBODIED_FRACTION + 1e-8,
+            && energy <= mass * cost * retention + 1e-8,
         "invalid cellular material or energy ledger",
     )
 }
@@ -2239,7 +2243,8 @@ mod tests {
         let mut energy = 100.0;
         let mut minerals = 2.0;
         let initial_material = body.structural_mass() + minerals;
-        let initial_energy = body.embodied_energy() + energy;
+        let embodied_start = body.embodied_energy();
+        let initial_energy = embodied_start + energy;
         let report = work(
             &mut body,
             &program,
@@ -2257,6 +2262,8 @@ mod tests {
             body.embodied_energy() + energy + report.dissipated_energy,
             initial_energy,
         );
+        close(body.embodied_energy() - embodied_start, (100.0 - energy) * 0.90);
+        let before_install = (body.embodied_energy(), energy);
         let outputs = body.cellular_actions(&program, &controls(&program, 0.0));
         close(outputs.force_x, 0.0);
         let second = work(
@@ -2267,6 +2274,7 @@ mod tests {
             &mut minerals,
             1.0,
         );
+        close(body.embodied_energy() - before_install.0, (before_install.1 - energy) * 0.90);
         close(second.constructed_mass, 0.04);
         close(body.capacities().thrust, 4.0);
         close(body.structural_mass() + minerals, initial_material);

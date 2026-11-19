@@ -611,8 +611,8 @@ fn shipped_predator_pays_for_local_heat_sensing_and_escapes_while_fed() {
         if senses_heat {
             assert!((heat_mass - 0.02).abs() < 1e-7);
             // Each .002 anchor + .008 receptor costs .66 to synthesize and
-            // .30 to assemble; the normal embodied fraction retains .48 total.
-            assert!((heat_embodied - 0.48).abs() < 1e-7);
+            // .30 to assemble. Each receiver retains its paid fabrication share.
+            assert!((heat_embodied - 1.92 * crate::body::EMBODIED_FRACTION).abs() < 1e-7);
             assert!(cell.energy - world.carbon_respired_total * RESPIRATION_ENERGY_PER_CARBON < initial_energy - 1.92,
                 "Respiration can replenish usable energy, but cannot erase paid sensor fabrication");
         } else {
@@ -738,4 +738,93 @@ fn shipped_predator_keeps_searching_when_waste_occupies_its_gut_in_darkness() {
         assert!(left + right > 1.0, "A dark, waste-fed hunter keeps seeking useful food");
         assert!((right - left) * turn > 0.1, "Its differential motors turn toward the plume");
     }
+}
+
+#[test]
+fn whole_engulf_needs_room_for_retained_energy_and_preserves_prey_substrates() {
+    let mut w = World::empty(9);
+    w.try_seed_fixture(1, 1, 300.0, 300.0, BodyFixture::Scavenger).unwrap();
+    w.try_seed_fixture(2, 1, 320.0, 300.0, BodyFixture::Bare).unwrap();
+    let a = &mut w.cells[0];
+    a.body.area = 2.0;
+    (a.x, a.y, a.angle) = (300.0, 300.0, 0.0);
+    let edge = a.x + a.radius() + w.cells[1].radius();
+    let b = &mut w.cells[1];
+    (b.x, b.y, b.integrity) = (edge, 300.0, 0.2);
+    b.reserve_enrichment = 5.0;
+    b.structural_enrichment = 3.0;
+    b.energy = 7.0;
+    b.organic_carbon = 0.5;
+    b.ingest_enriched(OrganicKind::Waste, 12.0, 0.2, 4.0);
+    let meal = b.food_potential();
+    let tissue_extra = b.tissue_extra_energy();
+    let total_mineral = b.mass();
+    let cost = 8.0 * b.body.area;
+    let start_atp = w.cells[0].energy;
+    let mut caps: Vec<_> = w.cells.iter().map(|c| c.body.capacities()).collect();
+    let outputs = [Outputs { engulf: true, feed: 1.0, ..Outputs::default() }, Outputs::default()];
+    caps[0].gut_minerals = total_mineral + 1.0;
+    caps[0].gut_energy = meal.total() - 0.1;
+    assert_eq!(w.resolve_predation(&outputs, &caps), [false, false]);
+    assert_eq!(w.cells[0].energy, start_atp);
+    caps[0].gut_energy = meal.total() + 0.1;
+    assert_eq!(w.resolve_predation(&outputs, &caps), [false, true]);
+    let a = &w.cells[0];
+    let close = |v: f64, expected: f64| assert!((v - expected).abs() < 1e-8, "{v} != {expected}");
+    close(a.energy, start_atp - cost);
+    close(a.gut_energy, meal.total());
+    close(a.gut_nutrients, total_mineral);
+    close(a.gut[OrganicKind::Tissue as usize].extra_energy, tissue_extra);
+    close(a.gut[OrganicKind::Waste as usize].energy, 12.0);
+    close(a.gut[OrganicKind::Waste as usize].extra_energy, 4.0);
+    close(w.cells[1].gut_energy, 0.0);
+    close(w.cells[1].energy, 0.0);
+}
+
+#[test]
+fn live_bites_only_take_a_proportional_share_of_enriched_reserves() {
+    let mut w = World::empty(19);
+    for recipe in [BodyFixture::Hunter, BodyFixture::Bare] {
+        w.try_seed_fixture(1, 1, 300.0, 300.0, recipe).unwrap();
+    }
+    for (i, c) in w.cells.iter_mut().enumerate() {
+        (c.x, c.y, c.angle) = (300.0 + 14.0 * i as f64, 300.0, 0.0);
+    }
+    let b = &mut w.cells[1];
+    b.reserve_enrichment = 20.0;
+    b.organic_carbon = 1.0;
+    b.nutrient_stored = 0.5;
+    b.structural_enrichment = 7.0;
+    let atp = b.energy;
+    let body = b.food_potential().body;
+    let caps: Vec<_> = w.cells.iter().map(|c| c.body.capacities()).collect();
+    let outputs = [Outputs { bite: 1.0, feed: 1.0, ..Outputs::default() }, Outputs::default()];
+    w.resolve_predation(&outputs, &caps);
+    let b = &w.cells[1];
+    let meal = w.cells[0].gut[OrganicKind::Tissue as usize];
+    assert!(b.alive() && b.integrity < 1.0 && meal.energy > 0.0);
+    assert_eq!(b.energy, atp);
+    assert_eq!(b.food_potential().body, body);
+    assert!((meal.extra_energy - meal.energy * 0.5).abs() < 1e-10);
+    assert!((b.reserve_enrichment + meal.extra_energy - 20.0).abs() < 1e-10);
+    assert!((b.organic_carbon + (meal.energy - meal.extra_energy) / 20.0 - 1.0).abs() < 1e-10);
+    assert!((b.nutrient_stored + meal.nutrients - 0.5).abs() < 1e-10);
+}
+
+#[test]
+fn partial_particle_capture_keeps_the_same_carbon_and_energy_density_in_both_shares() {
+    let mut w = World::empty(72);
+    w.try_seed_fixture(1, 1, 300.0, 300.0, BodyFixture::Scavenger).unwrap();
+    let (x,y) = (w.cells[0].x,w.cells[0].y);
+    assert!(w.particle(OrganicKind::Tissue,x,y,20.0,0.4));
+    w.food[0].extra_energy = 12.0;
+    let caps = [w.cells[0].body.capacities()];
+    w.eat(&[Outputs {feed:1.0,..Outputs::default()}], &caps);
+    let meal = w.cells[0].gut[OrganicKind::Tissue as usize];
+    let rest = &w.food[0];
+    assert!(meal.energy > 0.0 && rest.energy > 0.0);
+    assert!((meal.energy + rest.energy - 20.0).abs() < 1e-10);
+    assert!((meal.extra_energy / meal.energy - 0.6).abs() < 1e-10);
+    assert!((rest.extra_energy / rest.energy - 0.6).abs() < 1e-10);
+    assert!((meal.nutrients + rest.nutrients - 0.4).abs() < 1e-10);
 }

@@ -60,6 +60,12 @@ try {
 
   await page.locator('#world').focus(); await page.keyboard.press('ArrowRight');
   await page.locator('#inspector-content .inspector-metrics').waitFor();
+  await page.locator('[data-food-potential] > summary').click();
+  await page.waitForFunction(() => Number(document.querySelector('[data-food-pool="total"]')?.textContent) > 0);
+  const foodEnergy = await page.locator('[data-food-pool]').evaluateAll(fields =>
+    Object.fromEntries(fields.map(field => [field.dataset.foodPool,Number(field.textContent)])));
+  assert.ok(Math.abs(foodEnergy.total-foodEnergy.body-foodEnergy.reserve-foodEnergy.gut-foodEnergy.atp)<0.03);
+  await page.locator('[data-food-potential] > summary').click();
   await page.locator('[data-inspector-view="body"]').click();
   await page.locator('.cellular-body').waitFor();
   await page.locator('[data-kind="cellular-budgets"] > summary').click();
@@ -90,6 +96,10 @@ try {
   await page.locator('#setting-overlay').selectOption('nutrients');
   await page.locator('[data-view="metrics"]').click();
   await textIs('#metric-population', '12');
+  const balance = await page.evaluate(() => Object.fromEntries(['introduced-energy','light-energy','withdrawn-energy','held-energy','packet-energy','dissipated-energy']
+    .map(key => [key,Number(document.getElementById(key).textContent)])));
+  assert.ok(balance['packet-energy']>=0 && balance['held-energy']>=balance['packet-energy']);
+  assert.ok(Math.abs(balance['introduced-energy']+balance['light-energy']-balance['held-energy']-balance['withdrawn-energy']-balance['dissipated-energy'])<0.03);
   assert.match(await page.locator('#mean-particle-carbon').textContent(), /organic C \/ particle/);
   await page.locator('[data-view="genomes"]').click();
   await page.locator('[data-genome-stats]').waitFor();

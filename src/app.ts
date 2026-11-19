@@ -216,6 +216,10 @@ function renderView(): void {
         selectEnvironmentObject(source ? {kind:'source',id:source.id} : barrier ? {kind:'barrier',id:barrier.id} : null); return;
       }
       selectedId = renderer.pickCell(active.world, event.clientX, event.clientY)?.id ?? null;
+      if (selectedId === null) {
+        const food = renderer.pickFood(active.world,event.clientX,event.clientY);
+        if (food) toast(`${['Exudate','Tissue','Waste'][food.kind]} particle · ${Number(food.energy.toPrecision(4))} food energy · ${Number(food.nutrients.toPrecision(4))} minerals`);
+      }
       inspectorView = 'overview'; memoryPage = 0; memoryFilter = ''; renderInspector();
     });
     canvas.addEventListener('keydown', event => {
@@ -421,7 +425,7 @@ function playerWindowChanged(reason?: PlayerCloseReason): void {
 }
 
 function playerMarkup(): string {
-  return `<section class="player-stage" aria-label="Simulation player"><canvas id="world" tabindex="0" role="img" aria-label="Simulation. Select an organism to inspect or drag it. Scroll or pinch to zoom. Shift-drag or swipe the background to pan. Arrow keys select organisms; Space plays or pauses."></canvas>
+  return `<section class="player-stage" aria-label="Simulation player"><canvas id="world" tabindex="0" role="img" aria-label="Simulation. Select an organism to inspect or drag it. Tap a food particle to read its energy and minerals. Scroll or pinch to zoom. Shift-drag or swipe the background to pan. Arrow keys select organisms; Space plays or pauses."></canvas>
     <div class="player-toolbar"><div class="playback"><button class="play-button" id="play-pause" data-action="play"></button><select class="playback-speed" id="playback-speed" aria-label="Playback speed" title="Playback speed">${[1,2,5,10].map(speed => `<option value="${speed}">${speed}×</option>`).join('')}</select></div><button class="button subtle" data-action="toggle-environment" aria-pressed="${environmentOpen}">${icon('flow')}Environment</button><button class="button primary" data-action="add-organism">${icon('plus')}Add organism</button><button type="button" class="player-popout" data-action="popout-player" title="${playerView.supportsAlwaysOnTop ? 'Open an always-on-top player' : 'Open a separate player window; always-on-top is unavailable in this browser'}">${icon('expand')}${playerView.supportsAlwaysOnTop ? 'Pop out' : 'Window'}</button></div>
     <div class="cell-tool-bar" id="cell-tool-bar" hidden><span id="cell-tool-status" title="Tap or click a destination, or press Enter to use the center of the view." role="status" aria-live="polite"></span><label><input type="checkbox" data-repeat-placement> Place several</label><button type="button" class="button small subtle" data-action="cancel-cell-tool">Done</button></div>
     <div class="player-view-controls">${cameraControls('player')}<span>Scroll to zoom · Shift-drag to pan</span></div><aside class="live-environment" id="live-environment" aria-label="Environment controls" hidden></aside><div class="player-caption" id="player-caption"></div><aside class="cell-inspector" id="cell-inspector" aria-label="Organism inspector" hidden></aside></section>`;
@@ -694,7 +698,11 @@ function renderInspector(): void {
     ${cell ? `<nav class="inspector-tabs" aria-label="Organism details" role="tablist">${(['overview','body','memory','program'] as const).map(view => `<button role="tab" data-inspector-view="${view}" tabindex="${inspectorView === view ? 0 : -1}" aria-selected="${inspectorView === view}" class="${inspectorView === view ? 'active' : ''}">${view[0].toUpperCase()+view.slice(1)}</button>`).join('')}</nav><div id="inspector-content"></div>` : '<p class="muted">This organism has died.</p>'}`;
   if (!cell) return;
   if (inspectorView === 'overview') {
-    $('inspector-content').innerHTML = organismOverview();
+    const content = $('inspector-content');
+    content.innerHTML = organismOverview();
+    content.querySelector('[data-food-potential]')!.addEventListener('toggle', () => {
+      inspectorEpoch++; inspectorStamp = ''; updateInspector();
+    });
   } else if (inspectorView === 'memory') {
     $('inspector-content').innerHTML = `<div class="memory-summary" id="memory-summary"></div><input id="memory-filter" class="search-input memory-filter" type="search" placeholder="Find a register" aria-label="Find a register" value="${esc(memoryFilter)}"><table class="memory-table"><thead><tr><th>Address</th><th>Value</th></tr></thead><tbody id="memory-values"></tbody></table><div class="memory-footer"><button class="button subtle" data-action="memory-previous">Previous</button><span id="memory-page"></span><button class="button subtle" data-action="memory-next">Next</button></div>`;
   } else if (inspectorView === 'program') {
@@ -734,7 +742,8 @@ function updateInspector(): void {
   const session = active, id = selectedId, mode = inspectorView, epoch = inspectorEpoch;
   if (!session.world.cells.some(item => item.id === id)) { cellInspection = null; renderInspector(); return; }
   const readReception = mode === 'body' && !!content.querySelector('[data-kind="colony-reception"][open]');
-  const stamp = `${session.stateVersion}:${session.tick}:${id}:${mode}:${readReception}`;
+  const readFood = mode === 'overview' && Boolean(content.querySelector('[data-food-potential][open]'));
+  const stamp = `${session.stateVersion}:${session.tick}:${id}:${mode}:${readReception}:${readFood}`;
   if (inspectorPending || inspectorStamp === stamp) return;
   inspectorPending = true;
   void (async () => {
@@ -742,10 +751,11 @@ function updateInspector(): void {
       const stateVersion = session.stateVersion, tick = session.tick;
       const cell = await engine.cellSnapshot(id);
       if (!cell) return null;
-      const body = mode === 'body' || mode === 'memory' ? await engine.cellBody(id) : undefined;
+      const needsBody = mode === 'body' || mode === 'memory' || readFood;
+      const body = needsBody ? await engine.cellBody(id) : undefined;
       const memory = mode === 'memory' ? await engine.getMemory(id) : undefined;
       const reception = readReception ? (await engine.getCellEvaluation(id)).signals : undefined;
-      return { cell, body, memory, reception, stamp: `${stateVersion}:${tick}:${id}:${mode}:${readReception}` };
+      return { cell, body, memory, reception, stamp: `${stateVersion}:${tick}:${id}:${mode}:${readReception}:${readFood}` };
     });
     if (!detail) return;
     const { cell, body, memory, reception } = detail;
@@ -773,7 +783,7 @@ function paintInspector(): void {
   const name = queryUi<HTMLElement>('[data-inspected-genome]');
   if (name) name.textContent = genomeName(cell.genomeId);
   if (inspectorView === 'overview') {
-    updateOrganismOverview($('inspector-content'), cell, active.world.cells.find(item => item.id === cell.id));
+    updateOrganismOverview($('inspector-content'), cell, active.world.cells.find(item => item.id === cell.id), cellInspection?.body?.foodPotential);
   } else if (inspectorView === 'body') {
     const target = $('inspector-content'), expanded = new Set([...target.querySelectorAll<HTMLDetailsElement>('details[open]')].map(item => item.dataset.kind));
     const focusedFamily = target.contains(target.ownerDocument.activeElement) ? target.ownerDocument.activeElement?.closest<HTMLDetailsElement>('details[data-kind]')?.dataset.kind : undefined;
@@ -926,7 +936,11 @@ function metricsMarkup(): string {
     <details class="metrics-secondary"><summary>Carbon & oxygen accounting</summary><div class="inspector-metrics">${[
       ['carbon-total','Carbon currently held'],['carbon-input','Carbon introduced'],['carbon-removed','Carbon removed'],['carbon-legacy','Carbon in imported legacy bodies'],['carbon-fixed','Carbon fixed by photosynthesis'],['carbon-respired','Carbon respired by organisms'],['carbon-decayed','Carbon respired by background decay'],['carbon-balance','Carbon balance error'],['oxygen-total','Oxygen in water & organisms'],['oxygen-input','Oxygen introduced'],['oxygen-removed','Oxygen removed'],['oxygen-balance','Oxygen balance error'],
     ].map(([key,label])=>metricRow(label,`<span id="gas-${key}">—</span>`)).join('')}</div><p class="muted">Carbon balance: present + removed − introduced. Oxygen balance also includes production by fixation and consumption by respiration and decay. Atmospheric inflow and outflow are recorded.</p></details>
-    <details class="metrics-secondary"><summary>Resource accounting</summary><div class="inspector-metrics">${metricRow('Material introduced','<span id="introduced-material">—</span>')}${metricRow('Minerals absorbed','<span id="removed-material">—</span>')}${metricRow('Minerals withdrawn from cells','<span id="withdrawn-material">—</span>')}${metricRow('Energy withdrawn from cells','<span id="withdrawn-energy">—</span>')}${metricRow('Energy introduced','<span id="introduced-energy">—</span>')}${metricRow('Energy currently held','<span id="held-energy">—</span>')}${metricRow('Light energy collected','<span id="light-energy">—</span>')}</div></details>
+    <details class="metrics-secondary"><summary>Resource accounting</summary><div class="inspector-metrics">${[
+      ['introduced-material','Minerals introduced'],['removed-material','Minerals absorbed'],['withdrawn-material','Minerals withdrawn from cells'],
+      ['introduced-energy','Energy introduced from outside'],['light-energy','Energy fixed from light'],['withdrawn-energy','ATP withdrawn from cells'],
+      ['held-energy','Total energy still held'],['packet-energy','Held in food particles'],['dissipated-energy','Energy dissipated (by difference)'],
+    ].map(([id,label])=>metricRow(label,`<span id="${id}">—</span>`)).join('')}</div><p class="muted">Energy supplied from outside and fixed from light is either still held, withdrawn, or dissipated through construction, metabolism and decay.</p></details>
     <details class="metrics-secondary"><summary>Evolution & interactions</summary><div class="metrics-grid">${cards(metricDefinitions.slice(4))}</div></details></div>`;
 }
 function renderMetrics(world: MetricsSnapshot): void {
@@ -953,6 +967,9 @@ function renderMetrics(world: MetricsSnapshot): void {
   $('withdrawn-energy').textContent = world.energyWithdrawnTotal.toFixed(2);
   $('introduced-energy').textContent = world.energyInputTotal.toFixed(2);
   $('held-energy').textContent = world.energyTotal.toFixed(2);
+  $('packet-energy').textContent = world.packetEnergyTotal.toFixed(2);
+  const dissipated = world.energyInputTotal + world.photosynthesisTotal - world.energyWithdrawnTotal - world.energyTotal;
+  $('dissipated-energy').textContent = (Math.abs(dissipated) < 1e-7 ? 0 : dissipated).toFixed(2);
   $('light-energy').textContent = world.photosynthesisTotal.toFixed(2);
   $('nutrient-total').title = world.nutrientInputTotal.toFixed(1)+' mineral units introduced since this simulation began.';
   const history = [...active!.metadata.history.filter(point=>point.time<world.time),{time:world.time,population:world.population}];

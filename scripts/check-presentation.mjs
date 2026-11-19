@@ -61,9 +61,12 @@ const appFunction = name => {
 // The actual inspector refresh paints once after fresh data, never once before
 // and again after. Paused unchanged state and hidden documents do no work.
 {
-  const doc = { hidden: false }, content = { ownerDocument: doc };
+  let showFood = false, bodyReads = 0;
+  const doc = { hidden: false }, content = { ownerDocument: doc, querySelector(selector) {
+    return selector === '[data-food-potential][open]' && showFood ? {} : null;
+  } };
   let reads = 0, paints = 0;
-  const engine = { async cellSnapshot(id) { reads++; return { id, genomeId: 1 }; } };
+  const engine = { async cellSnapshot(id) { reads++; return { id, genomeId: 1 }; }, async cellBody() { bodyReads++; return {}; } };
   const session = { revision: 0, stateVersion: 1, tick: 10, world: { cells: [{ id: 1 }] }, inspect: read => read(engine) };
   const context = vm.createContext({ active: session, cellTool: null, selectedId: 1, inspectorView: 'overview', inspectorEpoch: 0,
     inspectorStamp: '', inspectorPending: false, cellInspection: null, inspectorProgram: null,
@@ -78,6 +81,10 @@ const appFunction = name => {
   session.stateVersion++; context.updateInspector(); await settle(); assert.equal(reads, 2); assert.equal(paints, 2);
   doc.hidden = true; session.stateVersion++; context.updateInspector(); await settle(); assert.equal(reads, 2); assert.equal(paints, 2);
   doc.hidden = false; context.updateInspector(); await settle(); assert.equal(reads, 3); assert.equal(paints, 3);
+  assert.equal(bodyReads, 0, 'Overview only requests a body when food potential is open');
+  showFood = true; context.updateInspector(); await settle(); assert.equal(bodyReads, 1);
+  context.updateInspector(); await settle(); assert.equal(bodyReads, 1);
+  showFood = false; context.updateInspector(); await settle(); assert.equal(bodyReads, 1);
 }
 
 // The cellular Memory panel combines the actual private register read with

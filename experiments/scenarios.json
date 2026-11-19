@@ -1,5 +1,5 @@
 {
-  "wasmSha256": "8c07cb6a48bd19efc8298eb5dbccfb1c976e6f0504bc786f3bc06676d252bf22",
+  "wasmSha256": "85199f0cbc08c85a34284a4dc13672d4164f19afa74daea23fe1672c1b4d6021",
   "ticksPerSecond": 30,
   "founderPlacement": "Seeded uniform scatter from the normal launch path",
   "environments": {
@@ -98,19 +98,19 @@
           "seed": 42,
           "observations": {
             "alive": {
-              "Phototroph": 16,
-              "Predator": 5
+              "Phototroph": 20,
+              "Predator": 6
             },
             "observedDescendants": {
-              "Phototroph": 10,
-              "Predator": 2
+              "Phototroph": 12,
+              "Predator": 3
             },
             "firstObservedBirth": 86,
             "firstObservedKill": 36,
-            "kills": 10,
-            "attacks": 3530,
-            "foodCaptures": 689,
-            "huntersObservedWithTissue": 4
+            "kills": 8,
+            "attacks": 2560,
+            "foodCaptures": 666,
+            "huntersObservedWithTissue": 5
           },
           "checks": {
             "naturalHunt": true,
@@ -123,18 +123,18 @@
           "observations": {
             "alive": {
               "Phototroph": 17,
-              "Predator": 4
+              "Predator": 6
             },
             "observedDescendants": {
               "Phototroph": 10,
-              "Predator": 1
+              "Predator": 3
             },
             "firstObservedBirth": 86,
             "firstObservedKill": 32,
             "kills": 9,
-            "attacks": 3231,
-            "foodCaptures": 505,
-            "huntersObservedWithTissue": 4
+            "attacks": 3328,
+            "foodCaptures": 1179,
+            "huntersObservedWithTissue": 5
           },
           "checks": {
             "naturalHunt": true,
@@ -146,18 +146,18 @@
           "seed": 2026,
           "observations": {
             "alive": {
-              "Phototroph": 24,
+              "Phototroph": 26,
               "Predator": 3
             },
             "observedDescendants": {
-              "Phototroph": 12,
-              "Predator": 0
+              "Phototroph": 13,
+              "Predator": 1
             },
             "firstObservedBirth": 86,
             "firstObservedKill": 34,
-            "kills": 4,
-            "attacks": 1458,
-            "foodCaptures": 950,
+            "kills": 3,
+            "attacks": 1114,
+            "foodCaptures": 963,
             "huntersObservedWithTissue": 3
           },
           "checks": {
@@ -199,49 +199,49 @@
           "seed": 42,
           "observations": {
             "alive": {
-              "Phototroph": 268,
-              "Forager": 12,
-              "Predator": 5
+              "Phototroph": 249,
+              "Forager": 21,
+              "Predator": 10
             },
             "observedDescendants": {
-              "Phototroph": 270,
-              "Forager": 25,
-              "Predator": 4
+              "Phototroph": 257,
+              "Forager": 26,
+              "Predator": 9
             },
             "firstObservedBirth": 74,
             "firstObservedKill": 32,
-            "kills": 50,
-            "attacks": 14572,
-            "foodCaptures": 22869,
-            "huntersObservedWithTissue": 5,
+            "kills": 57,
+            "attacks": 24217,
+            "foodCaptures": 39245,
+            "huntersObservedWithTissue": 10,
             "firstDescendantSeconds": {
               "Forager": 74,
               "Phototroph": 86,
-              "Predator": 136
+              "Predator": 130
             },
             "oldestObservedDescendantSeconds": {
               "Phototroph": 515.1,
-              "Forager": 495.73333,
-              "Predator": 464.03333
+              "Forager": 526.3,
+              "Predator": 470.96667
             },
             "descendantsAliveAtEnd": {
-              "Phototroph": 229,
-              "Forager": 12,
-              "Predator": 4
+              "Phototroph": 215,
+              "Forager": 21,
+              "Predator": 9
             },
             "atFiveMinutes": {
               "second": 300,
               "population": {
-                "Phototroph": 199,
-                "Forager": 6,
-                "Predator": 2
+                "Phototroph": 191,
+                "Forager": 8,
+                "Predator": 4
               },
-              "kills": 9
+              "kills": 18
             },
-            "grazersObservedDigestingProducerFood": 27,
-            "grazersReceivingCarbonAtJunctions": 24,
-            "peakCarbonTransferredIntoGrazerPerTick": 0.012866286376435328,
-            "peakMineralTransferredOutOfGrazerPerTick": 0.0004223126088428908
+            "grazersObservedDigestingProducerFood": 28,
+            "grazersReceivingCarbonAtJunctions": 28,
+            "peakCarbonTransferredIntoGrazerPerTick": 0.013613172163596182,
+            "peakMineralTransferredOutOfGrazerPerTick": 0.0005747388083759819
           },
           "checks": {
             "naturalHunt": true,
@@ -258,49 +258,49 @@
           "seed": 7,
           "observations": {
             "alive": {
-              "Phototroph": 269,
-              "Forager": 1,
-              "Predator": 4
+              "Phototroph": 230,
+              "Forager": 48,
+              "Predator": 10
             },
             "observedDescendants": {
-              "Phototroph": 262,
-              "Forager": 11,
-              "Predator": 4
+              "Phototroph": 235,
+              "Forager": 79,
+              "Predator": 9
             },
             "firstObservedBirth": 72,
             "firstObservedKill": 34,
-            "kills": 46,
-            "attacks": 15657,
-            "foodCaptures": 26120,
-            "huntersObservedWithTissue": 5,
+            "kills": 56,
+            "attacks": 20012,
+            "foodCaptures": 109199,
+            "huntersObservedWithTissue": 10,
             "firstDescendantSeconds": {
               "Forager": 72,
               "Phototroph": 86,
-              "Predator": 128
+              "Predator": 108
             },
             "oldestObservedDescendantSeconds": {
               "Phototroph": 515.1,
-              "Forager": 486.26667,
-              "Predator": 472.96667
+              "Forager": 526.3,
+              "Predator": 492.43333
             },
             "descendantsAliveAtEnd": {
-              "Phototroph": 227,
-              "Forager": 1,
-              "Predator": 4
+              "Phototroph": 194,
+              "Forager": 46,
+              "Predator": 9
             },
             "atFiveMinutes": {
               "second": 300,
               "population": {
-                "Phototroph": 172,
-                "Forager": 3,
-                "Predator": 4
+                "Phototroph": 168,
+                "Forager": 25,
+                "Predator": 5
               },
-              "kills": 25
+              "kills": 21
             },
-            "grazersObservedDigestingProducerFood": 17,
-            "grazersReceivingCarbonAtJunctions": 12,
-            "peakCarbonTransferredIntoGrazerPerTick": 0.020000000000000007,
-            "peakMineralTransferredOutOfGrazerPerTick": 0.0008988497551731045
+            "grazersObservedDigestingProducerFood": 60,
+            "grazersReceivingCarbonAtJunctions": 69,
+            "peakCarbonTransferredIntoGrazerPerTick": 0.020000000000000004,
+            "peakMineralTransferredOutOfGrazerPerTick": 0.0008323089102370603
           },
           "checks": {
             "naturalHunt": true,
@@ -317,49 +317,49 @@
           "seed": 2026,
           "observations": {
             "alive": {
-              "Phototroph": 221,
-              "Forager": 26,
-              "Predator": 7
+              "Phototroph": 243,
+              "Forager": 33,
+              "Predator": 9
             },
             "observedDescendants": {
               "Phototroph": 235,
-              "Forager": 34,
-              "Predator": 6
+              "Forager": 55,
+              "Predator": 8
             },
-            "firstObservedBirth": 78,
+            "firstObservedBirth": 76,
             "firstObservedKill": 38,
-            "kills": 63,
-            "attacks": 20647,
-            "foodCaptures": 46661,
-            "huntersObservedWithTissue": 7,
+            "kills": 46,
+            "attacks": 19078,
+            "foodCaptures": 85549,
+            "huntersObservedWithTissue": 9,
             "firstDescendantSeconds": {
-              "Forager": 78,
+              "Forager": 76,
               "Phototroph": 86,
-              "Predator": 100
+              "Predator": 118
             },
             "oldestObservedDescendantSeconds": {
               "Phototroph": 515.1,
-              "Forager": 519.36667,
-              "Predator": 501.33333
+              "Forager": 445.83333,
+              "Predator": 483.16667
             },
             "descendantsAliveAtEnd": {
-              "Phototroph": 187,
-              "Forager": 26,
-              "Predator": 6
+              "Phototroph": 205,
+              "Forager": 32,
+              "Predator": 8
             },
             "atFiveMinutes": {
               "second": 300,
               "population": {
-                "Phototroph": 162,
-                "Forager": 9,
+                "Phototroph": 184,
+                "Forager": 13,
                 "Predator": 4
               },
-              "kills": 24
+              "kills": 11
             },
-            "grazersObservedDigestingProducerFood": 35,
-            "grazersReceivingCarbonAtJunctions": 36,
-            "peakCarbonTransferredIntoGrazerPerTick": 0.02,
-            "peakMineralTransferredOutOfGrazerPerTick": 0.00048248755750856284
+            "grazersObservedDigestingProducerFood": 50,
+            "grazersReceivingCarbonAtJunctions": 46,
+            "peakCarbonTransferredIntoGrazerPerTick": 0.020000000000000007,
+            "peakMineralTransferredOutOfGrazerPerTick": 0.0008278077182276754
           },
           "checks": {
             "naturalHunt": true,

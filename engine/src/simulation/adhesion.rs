@@ -105,6 +105,9 @@ pub(super) struct JunctionWorkspace {
 struct JunctionAccount {
     cell: usize,
     stores: [Store; 3],
+    enrichment: f64,
+    extra_sent: f64,
+    extra_received: f64,
 }
 impl JunctionWorkspace {
     fn account(&mut self, index: usize, cell: &Cell) -> usize {
@@ -113,6 +116,7 @@ impl JunctionWorkspace {
             let caps = cell.body.capacities();
             self.accounts.push(JunctionAccount {
                 cell: index,
+                enrichment: cell.reserve_enrichment, extra_sent: 0.0, extra_received: 0.0,
                 stores: [Store::new(cell.energy, caps.energy), Store::new(cell.nutrient_stored, caps.minerals),
                     Store::new(cell.organic_carbon, caps.energy / CHEMICAL_ENERGY_PER_CARBON)],
             });
@@ -161,12 +165,22 @@ impl JunctionWorkspace {
                 let transfer = (amount.abs() * donor.scale_out.min(recipient.scale_in))
                     .min((donor.stock - donor.sent).max(0.0))
                     .min((recipient.room() - recipient.received).max(0.0));
+                if k == 2 && transfer > 0.0 && self.accounts[from].enrichment > 0.0 {
+                    let donor = &self.accounts[from];
+                    let left = (donor.enrichment - donor.extra_sent).max(0.0);
+                    let remaining_carbon = donor.stores[k].stock - donor.stores[k].sent;
+                    let extra = if transfer >= remaining_carbon { left }
+                        else { (donor.enrichment * (transfer / donor.stores[k].stock)).min(left) };
+                    self.accounts[from].extra_sent += extra;
+                    self.accounts[to].extra_received += extra;
+                }
                 self.accounts[from].stores[k].sent += transfer;
                 self.accounts[to].stores[k].received += transfer;
             }
         }
         for account in &self.accounts {
             let cell = &mut cells[account.cell];
+            cell.reserve_enrichment = (account.enrichment - account.extra_sent).max(0.0) + account.extra_received;
             let balances = [&mut cell.energy, &mut cell.nutrient_stored, &mut cell.organic_carbon];
             for (k, (balance, store)) in balances.into_iter().zip(&account.stores).enumerate() {
                 if store.received != 0.0 || store.sent != 0.0 {

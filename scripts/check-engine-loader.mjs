@@ -165,12 +165,31 @@ export async function checkEngineLoader() {
     const organicSaved=organicProbe.saveState();organicProbe.restoreState(organicSaved);
     assert.equal(organicProbe.snapshot().food.length,1401);
     const current=editorA.saveState();
-    assert.equal(new DataView(current.buffer,current.byteOffset,current.byteLength).getUint32(8,true),12);
+    assert.equal(new DataView(current.buffer,current.byteOffset,current.byteLength).getUint32(8,true),13);
     for (const filename of ['trophic-v1.bin','trophic-v2.bin']) {
       const legacy=new Uint8Array(await readFile(new URL('../engine/fixtures/'+filename,import.meta.url)));
       assert.throws(()=>editorA.restoreState(legacy),/Unsupported simulation version.*preserved/);
       assert.deepEqual(editorA.saveState(),current,'Old body saves are rejected atomically, never silently converted');
     }
+    // Check the genuine WASM32 lineage on its native pointer-width budget.
+    // A single Nurse rosette grew in the ABI16 Colony pool (seed 42, tick 2250).
+    const oldGrown = await readFile(new URL('../engine/fixtures/grown-v12.bin', import.meta.url));
+    assert.equal(oldGrown.readUInt32LE(8),12);
+    assert.equal(createHash('sha256').update(oldGrown).digest('hex'),'2563e1f2aa9c1c26af2f5ab99a28671e7330ee4c2005af3ab538351197f0d91f');
+    const grown = await Engine.load(); grown.restoreState(oldGrown);
+    const oldTotals = grown.metricsSnapshot();
+    const close = (a,b) => assert.ok(Math.abs(a-b)<1e-8, `Expected ${a} to equal ${b}`);
+    close(oldTotals.energyTotal,324.8172229953766);
+    close(grown.cellBody(1).foodPotential.body,1.6401427086660116*20 + 33.74410098753904);
+    close(grown.cellBody(1).foodPotential.atp,77.26168152533621);
+    grown.setCellStores(1,0,null);
+    const deadTotals = grown.metricsSnapshot();
+    assert.equal(deadTotals.population,0);
+    close(deadTotals.energyTotal + deadTotals.energyWithdrawnTotal,oldTotals.energyTotal);
+    close(deadTotals.carbonTotal,oldTotals.carbonTotal);
+    close(deadTotals.nutrientTotal,oldTotals.nutrientTotal);
+    const carcass = grown.saveState(); grown.restoreState(carcass);
+    assert.deepEqual(grown.saveState(),carcass);
     // Produced by the shipped ABI13 WASM (SHA-256 3ecb2671f2d07847a473ffa07817324aa1e258010364deaa00ce82db6e75a1e4).
     // This founder has a v9 cellular genome and no contact declarations or register state.
     const historical = await readFile(new URL('../engine/fixtures/contact-migration-v9.bin', import.meta.url));
@@ -178,10 +197,10 @@ export async function checkEngineLoader() {
     const migrated = await Engine.load();
     migrated.restoreState(historical);
     const upgraded = migrated.saveState();
-    assert.equal(new DataView(upgraded.buffer, upgraded.byteOffset, upgraded.byteLength).getUint32(8,true), 12);
+    assert.equal(new DataView(upgraded.buffer, upgraded.byteOffset, upgraded.byteLength).getUint32(8,true), 13);
     // Canonical public projections recorded on ABI14 from the authentic v9 save.
     // v11 also stores the last exchange counters, so the save layout differs.
-    function physicalStateHash(instance) {
+    function physicalStateHash(instance, omitHeldEnergy = false) {
       const api = instance.wasm;
       const hash = createHash('sha256');
       for (const [read, len, width] of [['snapshot_ptr','snapshot_len',8],
@@ -189,12 +208,15 @@ export async function checkEngineLoader() {
         const pointer = api[read]();
         const bytes = new Uint8Array(api.memory.buffer, pointer, api[len]() * width);
         if (read === 'metrics_snapshot_ptr') {
-          // Preserve the ABI14 reference hash. ABI16 inserted two withdrawal
-          // counters after its original 51 metric words and before genome rows.
+          // Project the shared historical metric layout. New exports include
+          // two player withdrawal counters and total packet energy before the genome rows.
           const counters = new Float64Array(api.memory.buffer, pointer + 51 * width, 2);
           assert.deepEqual([...counters], [0,0]);
-          hash.update(bytes.subarray(0, 51 * width));
-          hash.update(bytes.subarray(53 * width));
+          if (omitHeldEnergy) {
+            hash.update(bytes.subarray(0, 18 * width));
+            hash.update(bytes.subarray(19 * width, 51 * width));
+          } else hash.update(bytes.subarray(0, 51 * width));
+          hash.update(bytes.subarray(54 * width));
         } else hash.update(bytes);
       }
       return hash.digest('hex');
@@ -205,7 +227,9 @@ export async function checkEngineLoader() {
     migrated.tick(60);
     replay.tick(60);
     assert.deepEqual(replay.saveState(), migrated.saveState(), 'The migrated founder replays exactly');
-    assert.equal(physicalStateHash(migrated),'31e2eb829c15f2e719b4e4a4c024bcc41a0189c22c467b8e6753e6d9df880291');
+    // New fabrication retains more of the same expenditure after the import.
+    assert.ok(migrated.wasm.energy_total() > 150.7418515626691);
+    assert.equal(physicalStateHash(migrated,true),'5556e158ee5479e23ef9e9c1f058086efdfa802adaabb2a8deb3e7bc54869413');
     const markerOnly = await Engine.load();
     markerOnly.restoreState(await readFile(new URL('../engine/fixtures/signal-migration-v10.bin', import.meta.url)));
     assert.deepEqual(markerOnly.getMemory(1).map(x => [x.name,x.value]), [['rf002',6]]);
@@ -235,7 +259,7 @@ export async function checkEngineLoader() {
   } finally {
     globalThis.fetch = originalFetch; WebAssembly.compile = originalCompile;
   }
-  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, version12 body/product/substrate/mechanism/control/environment/gas continuation and explicit atomic rejection of pre-organelle checkpoints.');
+  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, version13 body/product/substrate/mechanism/control/environment/gas continuation and explicit atomic rejection of pre-organelle checkpoints.');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await checkEngineLoader();

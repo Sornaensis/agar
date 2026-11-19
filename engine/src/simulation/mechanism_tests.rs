@@ -112,6 +112,7 @@ fn mixed_meal(world: &mut World) {
     let cell = &mut world.cells[0];
     for kind in OrganicKind::ALL {
         cell.gut[kind as usize] = OrganicMatter {
+            extra_energy: 0.0,
             energy: 2.0,
             nutrients: 0.02,
         };
@@ -484,15 +485,12 @@ fn mechanism_checkpoints_resume_exactly_and_reject_unknown_body_tags_atomically(
     let before = crate::checkpoint::save(&restored).unwrap();
     assert_eq!(crate::checkpoint::save(&original).unwrap(), before);
 
+    let mut historical = restored.world.cells[0].body.clone();
+    historical.apply_pre_v13_energy_yield();
     let mut body_writer = Writer::new();
-    restored.world.cells[0]
-        .body
-        .write_checkpoint(&mut body_writer);
+    historical.write_checkpoint(&mut body_writer);
     assert!(Body::read_checkpoint_version(&mut Reader::new(&body_writer.0), 5).is_err());
-    assert_eq!(
-        Body::read_checkpoint_version(&mut Reader::new(&body_writer.0), 7).unwrap(),
-        restored.world.cells[0].body
-    );
+    assert_eq!(Body::read_checkpoint_version(&mut Reader::new(&body_writer.0), 7).unwrap(),historical);
 
     let mut corrupted = before.clone();
     let name = b"Hydrolase";

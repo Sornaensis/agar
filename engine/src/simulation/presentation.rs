@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 pub(super) const RENDER_HEADER: usize = 12;
 pub(super) const RENDER_CELL_STRIDE: usize = 21;
-pub(super) const METRICS_HEADER: usize = 53;
+pub(super) const METRICS_HEADER: usize = 54;
 
 impl World {
     pub(crate) fn cell_snapshot(&self, id: u32, target: &mut Vec<f64>) -> bool {
@@ -141,7 +141,8 @@ impl World {
             flow[2] += cell.exudation_rate;
             cell_material += cell.mass();
             cell_energy += cell.energy + cell.gut_energy + cell.body.embodied_energy()
-                + (cell.organic_carbon + cell.body.structural_mass() * STRUCTURAL_CARBON_PER_MASS) * CHEMICAL_ENERGY_PER_CARBON;
+                + (cell.organic_carbon + cell.body.structural_mass() * STRUCTURAL_CARBON_PER_MASS) * CHEMICAL_ENERGY_PER_CARBON
+                + cell.reserve_enrichment + cell.structural_enrichment;
             generation = generation.max(cell.generation);
             let group = groups.entry(cell.genome_id).or_default();
             group.0 += 1;
@@ -198,7 +199,7 @@ impl World {
             self.carbon_fixed_total, self.carbon_respired_total, self.decay_carbon_respired_total, self.legacy_carbon_imports,
             self.oxygen_cell_total(), self.environment.oxygen_total(), self.environment.inorganic_carbon_total(),
             self.environment.oxygen_input_total(), self.environment.oxygen_output_total(), self.environment.carbon_output_total(),
-            self.internal_inorganic_carbon_total(), self.energy_withdrawn, self.mineral_withdrawn,
+            self.internal_inorganic_carbon_total(), self.energy_withdrawn, self.mineral_withdrawn, food_energy,
         ]);
         debug_assert_eq!(target.len(), METRICS_HEADER);
         for (id, (population, max_generation)) in groups {

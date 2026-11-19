@@ -139,6 +139,7 @@ fn recycling_controls_and_original_recipes_survive_checkpoint_seven_exactly() {
     let mut energy = 100.0;
     let mut minerals = 1.0;
     work(&mut body, &program, &request, &mut energy, &mut minerals, 0.25);
+    body.apply_pre_v13_energy_yield();
     let mut writer = Writer::new();
     body.write_checkpoint(&mut writer);
     let mut reader = Reader::new(&writer.0);

@@ -19,7 +19,10 @@ pub const MIN_AREA: f64 = 0.25;
 pub const MAX_AREA: f64 = (760.0 / (8.0 * BASE_RADIUS)) * (760.0 / (8.0 * BASE_RADIUS));
 pub const SCAFFOLD_MASS_PER_AREA: f64 = 0.35;
 pub const SCAFFOLD_ENERGY_PER_MASS: f64 = 80.0;
-pub const EMBODIED_FRACTION: f64 = 0.25;
+pub const EMBODIED_FRACTION: f64 = 0.90;
+pub(crate) fn max_embodied_fraction(version: u32) -> f64 {
+    if version < 13 { 0.25 } else { EMBODIED_FRACTION }
+}
 pub const RECOVERY_FRACTION: f64 = 0.5;
 pub const MIN_FUNCTIONAL_INTEGRITY: f64 = 0.2;
 pub const CORE_MASS_PER_AREA: f64 = 0.04;
@@ -1482,7 +1485,27 @@ impl Body {
         !core.iter().any(|&mass| mass + EPS < required)
     }
 
+    /// Encode fixtures produced with current constructors under the old energy rules.
+    #[cfg(test)]
+    pub(crate) fn apply_pre_v13_energy_yield(&mut self) {
+        let ratio = max_embodied_fraction(12) / EMBODIED_FRACTION;
+        self.scaffold_energy *= ratio;
+        for energy in &mut self.precursor_energy { *energy *= ratio; }
+        for organ in &mut self.organs { organ.embodied_energy *= ratio; }
+        if let Some(state) = &mut self.cellular {
+            state.genome_energy *= ratio;
+            state.replica_energy *= ratio;
+            for pool in &mut state.pools { pool.embodied_energy *= ratio; }
+            for assembly in &mut state.assemblies {
+                for part in &mut assembly.ingredients { part.embodied_energy *= ratio; }
+            }
+        }
+    }
+
     pub fn validate(&self) -> CheckpointResult<()> {
+        self.validate_with_retention(EMBODIED_FRACTION)
+    }
+    fn validate_with_retention(&self, retention: f64) -> CheckpointResult<()> {
         ensure(
             self.area.is_finite() && self.area >= MIN_AREA && self.area <= MAX_AREA + EPS,
             "body area outside geometric bounds",
@@ -1495,7 +1518,7 @@ impl Body {
             self.scaffold_energy.is_finite()
                 && self.scaffold_energy >= 0.0
                 && self.scaffold_energy
-                    <= self.scaffold_mass() * SCAFFOLD_ENERGY_PER_MASS * EMBODIED_FRACTION + EPS,
+                    <= self.scaffold_mass() * SCAFFOLD_ENERGY_PER_MASS * retention + EPS,
             "invalid scaffold energy ledger",
         )?;
         ensure(
@@ -1517,13 +1540,13 @@ impl Body {
                         <= self.precursor_mass[k]
                             * kind.construction_cost()
                             * PROTEIN_SYNTHESIS_FRACTION
-                            * EMBODIED_FRACTION
+                            * retention
                             + EPS,
                 "invalid assembly protein energy ledger",
             )?;
         }
         if let Some(state) = &self.cellular {
-            state.validate()?;
+            state.validate(retention)?;
         }
         let mut ids = std::collections::HashSet::with_capacity(self.organs.len());
         let mut incomplete = [false; FAMILY_COUNT];
@@ -1546,7 +1569,7 @@ impl Body {
                 organ.embodied_energy.is_finite()
                     && organ.embodied_energy >= 0.0
                     && organ.embodied_energy
-                        <= organ.mass * organ.kind.construction_cost() * EMBODIED_FRACTION + EPS,
+                        <= organ.mass * organ.kind.construction_cost() * retention + EPS,
                 "invalid organelle energy ledger",
             )?;
             if organ.mass + EPS < organ.kind.min_mass() {
@@ -1656,7 +1679,7 @@ impl Body {
             precursor_energy,
             cellular,
         };
-        body.validate()?;
+        body.validate_with_retention(max_embodied_fraction(version))?;
         Ok(body)
     }
 }
@@ -2013,7 +2036,8 @@ mod tests {
     fn expression_is_paid_family_specific_and_cannot_assemble_in_the_same_tick() {
         let (mut body, _) = Body::founder();
         let (mut energy, mut minerals) = (1000.0, 100.0);
-        let initial_energy = energy + body.embodied_energy();
+        let embodied_start = body.embodied_energy();
+        let initial_energy = energy + embodied_start;
         let initial_material = minerals + body.structural_mass();
         let mut expression = BodyControls::default();
         expression.build[OrganelleKind::Flagellum as usize] = 1.0;
@@ -2035,6 +2059,7 @@ mod tests {
             first.synthesized_mass,
         );
         assert!(body.upkeep() > 0.178);
+        close(body.embodied_energy() - embodied_start, (1000.0 - energy) * 0.90);
         let mut wrong_family = controls(OrganelleKind::Photosynthetic, 1, 0.04);
         wrong_family.build.fill(0.0);
         let second = body.work(
@@ -2052,6 +2077,10 @@ mod tests {
         // matching target from assembling on a later tick.
         let mut correct_family = controls(OrganelleKind::Flagellum, 1, 0.03);
         correct_family.build.fill(0.0);
+        let atp_before = energy;
+        let embodied_before = body.embodied_energy();
+        let turnover = body.precursor_energy.iter().sum::<f64>()
+            * -(-std::f64::consts::LN_2 / PROTEIN_HALF_LIFE).exp_m1();
         let third = body.work(
             0.0,
             &correct_family,
@@ -2061,6 +2090,7 @@ mod tests {
             1.0,
             MAX_AREA,
         );
+        close(body.embodied_energy() - embodied_before + turnover, (atp_before - energy) * 0.90);
         assert_eq!(third.synthesized_mass, 0.0);
         assert!(body.capacities().thrust > 0.0);
         close(initial_material, minerals + body.structural_mass());
@@ -2182,7 +2212,9 @@ mod tests {
         a.validate().unwrap();
         b.validate().unwrap();
 
-        let (old, _) = Body::fixture(BodyFixture::Producer);
+        let (mut old, _) = Body::fixture(BodyFixture::Producer);
+        // Build a v3 ledger using the fraction that was actually paid in that format.
+        old.apply_pre_v13_energy_yield();
         let mut writer = Writer::new();
         old.write_checkpoint(&mut writer);
         // Version 3 ended after the individual organelle records.
@@ -2334,6 +2366,7 @@ mod tests {
             body.embodied_energy() + energy + report.dissipated_energy,
             resources,
         );
+        close(body.embodied_energy() - initial.embodied_energy(), (1000.0 - energy) * 0.90);
         let area = body.area;
         run(
             &mut body,

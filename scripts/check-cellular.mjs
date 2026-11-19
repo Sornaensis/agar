@@ -239,7 +239,7 @@ for (const preset of PRESETS) {
 
   const firstDivisionSeconds = state.seconds;
   const bytes = save(api), resumed = await fresh();
-  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 12);
+  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 13);
   assert.equal(restore(resumed, bytes), 1, error(resumed));
   assert.deepEqual(save(resumed), bytes);
   advance(api, 90); advance(resumed, 90);
@@ -255,5 +255,5 @@ for (const preset of PRESETS) {
     firstDivisionSeconds: Math.round(firstDivisionSeconds * 100) / 100, timeLimitSeconds: cycleSeconds });
 }
 
-console.log(`Cellular checks passed: ${PRESETS.length} authored genomes, ${importable.length} importable examples, local receptor separation, bright/shade motor recycling and regrowth, paid development, frozen inspection, resource conservation, whole-machine fission with functioning consumer daughters, gene/placement mutations, and exact v12 continuation.`);
+console.log(`Cellular checks passed: ${PRESETS.length} authored genomes, ${importable.length} importable examples, local receptor separation, bright/shade motor recycling and regrowth, paid development, frozen inspection, resource conservation, whole-machine fission with functioning consumer daughters, gene/placement mutations, and exact v13 continuation.`);
 console.log(JSON.stringify({ conditions: 'One founder; 0.85 light; 3 initial minerals per patch; 4 supplied exudate particles/s for non-phototrophs. The Predator tissue-funded lifecycle is tested separately in the native engine.', cycles }));

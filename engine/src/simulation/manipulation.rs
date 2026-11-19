@@ -139,7 +139,8 @@ impl World {
         if energy == Some(0.0) {
             // The normal tick preflights packet storage and IDs before mutating
             // the world. The same guarantee applies when an edit triggers death.
-            let organic_energy = cell.organic_carbon_total() * CHEMICAL_ENERGY_PER_CARBON;
+            let potential = cell.food_potential();
+            let organic_energy = potential.body + potential.reserve + potential.gut;
             self.reserve_organic_packets(organic_energy, 4)?;
         }
         let cell = &mut self.cells[i];

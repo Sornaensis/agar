@@ -329,8 +329,7 @@ later capture after the cell and particle move back into contact.
 
 Material is counted in free minerals, product pools, each installed ingredient,
 envelope, genetic material, guts, particles and dissolved fields. Transfers do not
-create material. Fabrication spends energy, retains a fraction as embodied energy
-and dissipates the remainder. Gene duplication changes demand, not the shared
+create material. Fabrication retains 90% of the energy spent on new material as embodied energy. The remaining 10% dissipates during construction. Gene duplication changes demand, not the shared
 budget. Recipe definitions are retained with each physical instance.
 
 ## Inspection, mutation and saves
@@ -353,7 +352,7 @@ ingredients, assembly identities, activities and genetic progress. Formats 3, 4,
 5 and 6 remain readable. Existing sources default to unrestricted initiation and
 zero recycling. Corrected optical coverage and directional primitive interactions
 can change affected trajectories. Save/restore replay is deterministic within the
-current engine. The current WASM ABI is 16. Checkpoint 12 saves both contact channels, junction machinery, the last measured exchange and cumulative player withdrawals. It reads checkpoints 3 through 11. Language schema 3 describes register access and contact messaging in its cellular metadata.
+current engine. The current WASM ABI is 17. Checkpoint 13 also stores the energy carried by food, gut contents and organic reserves above their base carbon potential. It reads checkpoints 3 through 12 and preserves their actual recorded construction energy. Language schema 3 describes register access and contact messaging in its cellular metadata.
 
 This is a coarse cellular language: named aggregate material pools and discrete
 machines implementing a fixed set of small physical operations. There is no

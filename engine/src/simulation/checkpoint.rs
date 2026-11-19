@@ -72,10 +72,13 @@ impl World {
             for pool in &c.gut {
                 w.f64(pool.energy);
                 w.f64(pool.nutrients);
+                w.f64(pool.extra_energy);
             }
             w.f64(c.synthesis_rate);
             for v in [c.organic_carbon, c.internal_oxygen, c.internal_inorganic_carbon,
                 c.respiration_rate, c.carbon_fixation_rate] { w.f64(v); }
+            w.f64(c.reserve_enrichment);
+            w.f64(c.structural_enrichment);
             w.u32(c.adhered_neighbors);
             for amount in c.junction_net { w.f64(amount); }
             c.body.write_checkpoint(w);
@@ -106,6 +109,7 @@ impl World {
                 w.f64(v);
             }
             w.u8(f.kind as u8);
+            w.f64(f.extra_energy);
         }
     }
     pub(crate) fn read_checkpoint(
@@ -192,6 +196,7 @@ impl World {
                 for pool in &mut gut {
                     pool.energy = r.range(0.0, 1e12)?;
                     pool.nutrients = r.range(0.0, 1e12)?;
+                    pool.extra_energy = read_substrate_enrichment(r, version, pool.energy)?;
                     ensure(
                         pool.energy > 0.0 || pool.nutrients == 0.0,
                         "empty substrate pool contains minerals",
@@ -211,11 +216,16 @@ impl World {
                 gut[OrganicKind::Tissue as usize] = OrganicMatter {
                     energy: gut_energy,
                     nutrients: gut_nutrients,
+                    extra_energy: 0.0,
                 };
                 synthesis_rate = 0.0;
             }
             let mut gases = [0.0; 5];
             if version >= 9 { for value in &mut gases { *value = r.range(0.0, 1e12)?; } }
+            let (reserve_enrichment, structural_enrichment) = if version >= 13 {
+                (r.range(0.0, 1e100)?, r.range(0.0, 1e100)?)
+            } else { (0.0, 0.0) };
+            ensure(gases[0] > 0.0 || reserve_enrichment == 0.0, "reserve energy without organic carbon")?;
             let mut adhered_neighbors = 0;
             let mut junction_net = [0.0; 3];
             if version >= 11 {
@@ -225,6 +235,7 @@ impl World {
                 ensure(adhered_neighbors > 0 || junction_net == [0.0; 3], "junction transfer without a contact")?;
             }
             let body = Body::read_checkpoint_version(r, version)?;
+            ensure(body.structural_mass() > 0.0 || structural_enrichment == 0.0, "stored energy without body material")?;
             let memory = Registers::read_checkpoint(r)?;
             let scan_target = Rc::from(r.text(128)?);
             let mut requested = BodyControls::default();
@@ -288,7 +299,7 @@ impl World {
                 body,
                 memory,
                 nutrient_stored,
-                adhered_neighbors, junction_net,
+                adhered_neighbors, junction_net, reserve_enrichment, structural_enrichment,
                 organic_carbon: gases[0], internal_oxygen: gases[1], internal_inorganic_carbon: gases[2],
                 respiration_rate: gases[3], carbon_fixation_rate: gases[4],
                 gut_energy,
@@ -337,7 +348,7 @@ impl World {
             cells.push(c);
         }
         let count = r.u32()? as usize;
-        let particle_bytes = if version >= 4 { 41 } else { 40 };
+        let particle_bytes = if version >= 13 { 49 } else if version >= 4 { 41 } else { 40 };
         ensure(
             count <= r.remaining() / particle_bytes,
             "particle count exceeds checkpoint data",
@@ -370,6 +381,7 @@ impl World {
                     && energy > 0.0,
                 "invalid particle",
             )?;
+            let extra_energy = read_substrate_enrichment(r, version, energy)?;
             food.push(Food {
                 id,
                 kind,
@@ -377,6 +389,7 @@ impl World {
                 y,
                 energy,
                 nutrients,
+                extra_energy,
             });
         }
         let mut world = Self {
@@ -449,10 +462,51 @@ impl World {
     }
 }
 
+/// The pre-v13 particle and gut energy values were entirely carbon-backed.
+fn read_substrate_enrichment(reader: &mut Reader<'_>, version: u32, energy: f64) -> Result<f64> {
+    if version < 13 { return Ok(0.0); }
+    let extra = reader.range(0.0, energy)?;
+    ensure(extra == 0.0 || extra < energy, "substrate energy without carrier carbon")?;
+    Ok(extra)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{checkpoint, Engine};
+
+    #[test]
+    fn enrichment_roundtrips_and_requires_carrier_carbon() {
+        let mut live = Engine::new();
+        let genome = live.compile("thrust=0;turn=0;divide=false;feed=0;");
+        live.world.reset_empty(8, 0);
+        live.world.try_seed_cells(genome, 1, 100.0, 100.0).unwrap();
+        // Move some reserve carbon into a particle so the supply ledgers stay exact.
+        live.world.cells[0].organic_carbon -= 0.1;
+        assert!(live.world.particle(OrganicKind::Tissue, 200.0, 200.0, 2.0, 0.0));
+        let energy = live.world.energy_total();
+        let carbon = live.world.carbon_total();
+        live.world.cells[0].energy -= 3.0;
+        live.world.cells[0].reserve_enrichment = 1.0;
+        live.world.cells[0].structural_enrichment = 1.0;
+        live.world.food[0].energy += 1.0;
+        live.world.food[0].extra_energy = 1.0;
+        let good = checkpoint::save(&live).unwrap();
+        let restored = checkpoint::restore(&good).unwrap();
+        assert!((restored.world.energy_total() - energy).abs() < 1e-9);
+        assert!((restored.world.carbon_total() - carbon).abs() < 1e-9);
+        assert_eq!(checkpoint::save(&restored).unwrap(), good);
+        for case in 0..3 {
+            let mut forged = checkpoint::restore(&good).unwrap();
+            match case {
+                0 => forged.world.food[0].extra_energy = forged.world.food[0].energy,
+                1 => forged.world.cells[0].organic_carbon = 0.0,
+                _ => forged.world.cells[0].gut[0].extra_energy = 1.0,
+            }
+            assert!(!live.restore_state(&checkpoint::save(&forged).unwrap()));
+            assert_eq!(checkpoint::save(&live).unwrap(), good);
+        }
+    }
 
     #[test]
     fn mildly_heat_damaged_universal_core_survives_and_roundtrips_without_free_headroom() {

@@ -127,7 +127,7 @@ thread_local! { static ENGINE: RefCell<Engine> = RefCell::new(Engine::new()); }
 
 #[no_mangle]
 pub extern "C" fn abi_version() -> u32 {
-    16
+    17
 }
 
 /// Allocate a writable, zero-initialized byte buffer. The caller must deallocate
@@ -1116,7 +1116,7 @@ mod tests {
         engine.world.cells[0].vy = -1.25;
         engine.world.cells[0].integrity = 0.8;
         engine.world.snapshot(&mut engine.snapshot);
-        assert_eq!(abi_version(), 16);
+        assert_eq!(abi_version(), 17);
         assert_eq!(simulation::CELL_STRIDE, 163);
         assert_eq!(engine.snapshot.len(), 12 + 22 * simulation::CELL_STRIDE + 360 * 5);
         assert_eq!(engine.snapshot[7], simulation::WIDTH as f64);

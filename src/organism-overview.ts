@@ -1,4 +1,4 @@
-import type { Cell, RenderCell } from './engine';
+import type { Cell, FoodPotential, RenderCell } from './engine';
 import { clock } from './ui';
 
 const amount = (value: number) => Number(value.toFixed(2)).toString();
@@ -18,11 +18,16 @@ const details = [
 
 export function organismOverview(): string {
   return `<div class="organism-overview">
-    <div class="organism-reserves">${reserve('energy','Energy')}${reserve('minerals','Minerals')}${reserve('integrity','Integrity')}${reserve('gut','Gut contents')}</div>
+    <div class="organism-reserves">${reserve('energy','Available ATP')}${reserve('minerals','Minerals')}${reserve('integrity','Integrity')}${reserve('gut','Gut contents')}</div>
     <dl class="organism-facts inspector-metrics">
       ${[['feeding','Feeding'],['age','Age'],['maturity','Growth to division size'],['attachment','Colony']].map(([key,label]) => `<div><dt>${label}</dt><dd data-value="${key}"></dd></div>`).join('')}
       <div class="organism-signal" hidden><dt>Outgoing signal</dt><dd data-value="signal"></dd></div>
     </dl>
+    <details class="organism-physiology" data-food-potential><summary>Food energy if consumed</summary>
+      <dl class="organism-detail-facts">${[['body','Body tissue'],['reserve','Stored organic fuel'],['gut','Gut contents'],['atp','Remaining ATP'],['total','Total food energy']].map(([key,label]) =>
+        `<div><dt>${label}</dt><dd data-food-pool="${key}">—</dd></div>`).join('')}</dl>
+      <p class="muted">Body tissue includes the energy retained during construction. A consumer must digest and respire its meal to gain ATP.</p>
+    </details>
     <details class="organism-physiology"><summary>Physiology</summary><dl class="organism-detail-facts">${details.map(([key,label]) => `<div><dt>${label}</dt><dd data-value="${key}"></dd></div>`).join('')}</dl></details>
   </div>`;
 }
@@ -36,7 +41,7 @@ function feeding(cell: Cell): string {
   return 'No feeding organs';
 }
 
-export function updateOrganismOverview(root: HTMLElement, cell: Cell, visible?: RenderCell): void {
+export function updateOrganismOverview(root: HTMLElement, cell: Cell, visible?: RenderCell, food?: FoodPotential): void {
   const values: Record<string, string> = {
     feeding: feeding(cell), age: clock(cell.age), maturity: cell.divisionReady ? 'Ready to divide' : percent(cell.maturity),
     attachment: visible?.attachedNeighbors ? `${visible.attachedNeighbors} attached neighbor${visible.attachedNeighbors === 1 ? '' : 's'}` : 'Free-living',
@@ -58,6 +63,10 @@ export function updateOrganismOverview(root: HTMLElement, cell: Cell, visible?: 
     meter.value = value;
     values[key] = key === 'integrity' ? percent(value) : amount(value) + ' / ' + amount(capacity);
     meter.setAttribute('aria-valuetext',values[key]);
+  }
+  if (food) for (const field of root.querySelectorAll<HTMLElement>('[data-food-pool]')) {
+    const text = amount(food[field.dataset.foodPool as keyof FoodPotential]);
+    if (field.textContent !== text) field.textContent = text;
   }
   root.querySelector<HTMLElement>('.organism-signal')!.hidden = visible?.contactSignal === undefined;
   for (const field of root.querySelectorAll<HTMLElement>('[data-value]')) {

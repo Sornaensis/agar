@@ -64,6 +64,8 @@ fn matched_junctions_exchange_three_real_stores_across_a_seam() {
             assembly.activity = 0.5;
         }
     }
+    world.cells[0].reserve_enrichment = 4.0;
+    let old_carbon = world.cells[0].organic_carbon;
     let before = [stores(&world.cells[0]), stores(&world.cells[1])];
     phase(&mut world, &genomes);
     let expected = [0.8*0.02*DT*JUNCTION_RATES[0], -0.8*0.02*DT*JUNCTION_RATES[1],
@@ -74,6 +76,8 @@ fn matched_junctions_exchange_three_real_stores_across_a_seam() {
         close(stores(&world.cells[0])[k], before[0][k] - expected[k]);
         close(stores(&world.cells[1])[k], before[1][k] + expected[k]);
     }
+    close(world.cells[1].reserve_enrichment,4.0 * expected[2] / old_carbon);
+    close(world.cells[0].reserve_enrichment + world.cells[1].reserve_enrichment,4.0);
     assert!(world.cells.iter().all(|c| c.adhered_neighbors == 1));
     let body = world.body_json(world.cells[1].id, &genomes).unwrap();
     assert!(body.contains("\"colony\":{\"neighbors\":1,"));
@@ -183,7 +187,9 @@ fn exchanged_junction_state_roundtrips_and_v10_rejects_new_body_tags() {
     phase(&mut world,&genomes);
     assert!(world.cells[1].junction_net[0] > 0.0);
     let mut writer=Writer::new();
-    world.cells[0].body.write_checkpoint(&mut writer);
+    let mut historical = world.cells[0].body.clone();
+    historical.apply_pre_v13_energy_yield();
+    historical.write_checkpoint(&mut writer);
     assert!(Body::read_checkpoint_version(&mut Reader::new(&writer.0),10).is_err());
     assert!(Body::read_checkpoint_version(&mut Reader::new(&writer.0),11).is_ok());
 
@@ -218,6 +224,8 @@ fn fission_keeps_the_parents_completed_exchange_and_starts_the_daughter_at_zero(
     parent.nutrient_stored -= replica_mass;
     parent.organic_carbon -= replica_mass;
     parent.energy -= 80.0 * replica_mass + 8.0 * parent.body.area;
+    parent.energy -= 1.0;
+    parent.structural_enrichment = 1.0;
     let state = parent.body.cellular.as_mut().unwrap();
     state.replica_mass = replica_mass;
     state.replica_energy = 80.0 * replica_mass * crate::body::EMBODIED_FRACTION;
@@ -227,6 +235,9 @@ fn fission_keeps_the_parents_completed_exchange_and_starts_the_daughter_at_zero(
     world.step(&mut genomes);
     assert_eq!(world.births,1);
     let [parent, peer, daughter] = world.cells.as_slice() else { panic!("expected two parents and one daughter") };
+    close(parent.structural_enrichment + daughter.structural_enrichment, 1.0);
+    close(parent.structural_enrichment / parent.body.structural_mass(),
+        daughter.structural_enrichment / daughter.body.structural_mass());
     assert_eq!((parent.adhered_neighbors, peer.adhered_neighbors), (1,1));
     assert!(parent.junction_net[0] < 0.0);
     assert_eq!(peer.junction_net[0],-parent.junction_net[0]);

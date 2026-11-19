@@ -294,4 +294,23 @@ engine.tick(1);
 assert.equal(memory().rf001,undefined);
 assert.equal(engine.getCellEvaluation(founder).contactMessageDeclarations.find(item=>item.kind==='publish').value,null);
 
+// Ledger and inspector agree on the yield of an exact, ordinary founder.
+engine.resetEmpty(19,0);
+const subject = engine.placeCell(engine.compile(source),200,200);
+const inspected = engine.cellBody(subject);
+const potential = inspected.foodPotential, live = engine.cellSnapshot(subject);
+const close = (actual,expected) => assert.ok(Math.abs(actual-expected) < 1e-8,`${actual} ≠ ${expected}`);
+close(potential.atp,live.energy); close(potential.gut,live.gutEnergy);
+close(potential.total,potential.body+potential.reserve+potential.gut+potential.atp);
+assert.ok(potential.body > 0 && potential.reserve > 0);
+assert.throws(() => validateBodyInspection({...inspected,foodPotential:{...potential,total:potential.total+1}},subject));
+const alive = engine.metricsSnapshot();
+close(alive.energyTotal,potential.total);
+engine.setCellStores(subject,0,null);
+const remains = engine.metricsSnapshot();
+close(remains.energyWithdrawnTotal,potential.atp);
+close(remains.packetEnergyTotal,potential.total-potential.atp);
+close(remains.packetEnergyTotal,engine.renderSnapshot().food.reduce((sum,packet)=>sum+packet.energy,0));
+close(remains.energyTotal+remains.energyWithdrawnTotal,alive.energyTotal);
+
 console.log('Cellular UI checks passed for register and message completions, authoritative mechanism/receptor schema, pure functions, live UTF-16 declaration spans, frozen memory/write previews, physical inventory and escaped rendering.');

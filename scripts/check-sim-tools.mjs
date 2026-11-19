@@ -169,8 +169,38 @@ try {
   assert.ok(Math.abs((moved.x-parent.x)-(companion.x-daughter.x))<1e-7 && Math.abs((moved.y-parent.y)-(companion.y-daughter.y))<1e-7,
     JSON.stringify({beforeTick:beforeMove.ticks,afterTick:shifted.ticks,from:[parent.x,parent.y,daughter.x,daughter.y],to:[moved.x,moved.y,companion.x,companion.y]}));
   assert.equal(shifted.ticks,beforeMove.ticks);
+
+  // A player can compare a live body's gross yield against a real physical
+  // packet. An explicit ATP withdrawal is separated from what is left as food.
+  await tool(page,'Forager');
+  const freshPosition = await point(page,shifted,.23,.73);
+  await page.touchscreen.tap(freshPosition.x,freshPosition.y);
+  const withSubject = await savedWhen(s => s.population===shifted.population+1);
+  const newCell = withSubject.cells.at(-1);
+  const predicted = body(api,newCell.id).foodPotential;
+  await page.locator('[data-food-potential] > summary').click();
+  await page.waitForFunction(() => Number(document.querySelector('[data-food-pool="total"]')?.textContent)>0);
+  for (const [pool,energy] of Object.entries(predicted)) {
+    const shown = Number(await page.locator(`[data-food-pool="${pool}"]`).textContent());
+    assert.ok(Math.abs(shown-energy)<0.0051,pool+' matches the saved organism');
+  }
+  await action(page,'edit-reserves');
+  await page.locator('#reserve-energy').fill('0');
+  await page.getByRole('button',{name:'Set energy to zero'}).click();
+  const carcass = await savedWhen(s => s.deaths===withSubject.deaths+1);
+  assert.equal(carcass.ticks,withSubject.ticks);
+  const energyInFood = s => s.food.reduce((sum,f)=>sum+f.energy,0);
+  assert.ok(Math.abs(energyInFood(carcass)-energyInFood(withSubject)-predicted.total+predicted.atp)<1e-8);
+  const tissue = carcass.food.find(f => f.kind===1 && Math.hypot(f.x-newCell.x,f.y-newCell.y)<30);
+  assert.ok(tissue);
+  const box = await canvas.boundingBox(), scale = Math.min(box.width/carcass.width,box.height/carcass.height);
+  await page.touchscreen.tap(Math.round(box.x+box.width/2+(tissue.x-carcass.width/2)*scale),Math.round(box.y+box.height/2+(tissue.y-carcass.height/2)*scale));
+  await page.waitForFunction(() => document.getElementById('toast')?.textContent.startsWith('Tissue particle ·'));
+  const readout = await page.locator('#toast').textContent();
+  assert.ok(carcass.food.some(f => f.kind===1 && readout===`Tissue particle · ${Number(f.energy.toPrecision(4))} food energy · ${Number(f.minerals.toPrecision(4))} minerals`),
+    'The tap reads measured particle energy and minerals');
   assert.deepEqual(errors,[]);
-  console.log('Player edits passed: exact repeated placement, pinch/pan/cancel, blocked and transformed destinations, direct drag, narrow pop-out editing, live energy withdrawals, checkpoint reopen and an intact parent–daughter colony move.');
+  console.log('Player edits passed: exact repeated placement, pinch/pan/cancel, blocked and transformed destinations, direct drag, narrow pop-out editing, live energy withdrawals, checkpoint reopen, an intact parent–daughter colony move, and measured body/packet food energy.');
 } catch (error) {
   console.error('Visible player:',(await page.locator('body').innerText()).slice(-3000));
   throw error;
