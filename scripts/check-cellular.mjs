@@ -9,7 +9,8 @@ const conserved = state => {
 };
 
 // Every authored example must compile, including files users can import directly.
-for (const name of ['solar', 'regulated-motor', 'phototroph', 'forager', 'rememberer', 'predator', 'separate-digestion', 'local-control']) {
+const importable = ['solar', 'regulated-motor', 'phototroph', 'forager', 'rememberer', 'predator', 'separate-digestion', 'local-control', 'colony', 'conserver', 'nurse-rosette', 'pulse-swimmer'];
+for (const name of importable) {
   const api = await fresh({ ambientLight: 0.85, initialNutrients: 3 });
   const genome = compile(api, await readFile(new URL(`../examples/${name}.cell`, import.meta.url), 'utf8'));
   if (name === 'solar' || name === 'regulated-motor') {
@@ -69,8 +70,42 @@ for (const name of ['solar', 'regulated-motor', 'phototroph', 'forager', 'rememb
   assert.deepEqual(save(api), save(resumed), 'Named sensing, shared stock, controls and remodeling resume exactly');
 }
 
+// Follow a real division with identical resources, seed and physical recipes.
+// Removing only the reciprocal selector isolates adhesion from ordinary drag.
+const colonySource = PRESETS.find(preset => preset.name === 'Colony phototroph').source;
+const pairedGaps = [];
+for (const adhesive of [true, false]) {
+  const api = await fresh({ width:400, height:400, ambientLight:0.85, initialNutrients:3,
+    gases:{ mode:'open', exchangeRate:0.5 } });
+  const genome = compile(api, adhesive ? colonySource : colonySource.replace('adhere_message rf020;', ''));
+  seed(api, genome, 1, 200, 200);
+  let state = snapshot(api);
+  while (!state.births && state.seconds < 150) state = advance(api, state.cells[0].area < 1.9 ? 30 : 1);
+  assert.equal(state.population, 2);
+  for (const cell of state.cells) {
+    assert.ok(body(api, cell.id).cellular.assemblies.some(machine => machine.kind === 'adhere()' && machine.functionalMass > 0));
+  }
+  const checkpoint = save(api), resumed = await fresh();
+  assert.equal(restore(resumed, checkpoint), 1, error(resumed));
+  state = advance(api, 150);
+  advance(resumed, 150);
+  assert.deepEqual(save(resumed), save(api), 'Both newly separated and adhering daughters replay exactly');
+  const [a, b] = state.cells;
+  const delta = n => n - Math.round(n / 400) * 400;
+  const gap = Math.hypot(delta(a.x - b.x), delta(a.y - b.y)) - a.radius - b.radius;
+  pairedGaps.push(gap);
+  assert.ok(adhesive ? gap < 0.05 : gap > 3);
+  for (const cell of state.cells) {
+    const paired = evaluation(api, cell.id).bindings.find(binding => binding.name === 'paired_contact');
+    assert.equal(paired.value, adhesive, 'Flank receptors read the other daughter while it remains attached');
+  }
+  conserved(state);
+}
+console.log(`Five seconds after division, colony surface gaps with and without adhesion were ${pairedGaps.map(gap => gap.toFixed(3)).join(' and ')} world units.`);
+
 const cycles = [];
 for (const preset of PRESETS) {
+  const producer = ['Phototroph', 'Colony phototroph', 'Nurse rosette', 'Pulse swimmer'].includes(preset.name);
   // This reproductive-capacity fixture continuously supplies food in a small
   // region. Aerate the culture explicitly so accumulated decay does not turn
   // a feeding test into an unintended anoxia test; sealed limits have their own
@@ -106,7 +141,7 @@ for (const preset of PRESETS) {
   while (!state.births && state.ticks < cycleSeconds * 30) {
     const parent = state.cells.find(cell => cell.id === 1);
     assert.ok(parent, `${preset.name} must survive development in its supplied habitat`);
-    if (preset.name !== 'Phototroph' && state.ticks >= nextFood) {
+    if (!producer && state.ticks >= nextFood) {
       assert.equal(api.add_food(parent.x, parent.y, 4), 4);
       nextFood = state.ticks + 30;
     }
@@ -147,7 +182,7 @@ for (const preset of PRESETS) {
       }
     }
   }
-  if (preset.name === 'Phototroph') {
+  if (producer) {
     assert.ok(state.photosynthesis > 0);
     assert.equal(state.eaten, 0);
   }
@@ -155,7 +190,7 @@ for (const preset of PRESETS) {
 
   const firstDivisionSeconds = state.seconds;
   const bytes = save(api), resumed = await fresh();
-  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 9);
+  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 11);
   assert.equal(restore(resumed, bytes), 1, error(resumed));
   assert.deepEqual(save(resumed), bytes);
   advance(api, 90); advance(resumed, 90);
@@ -167,9 +202,9 @@ for (const preset of PRESETS) {
     compile(api, source(api, mutant));
     assert.equal(api.mutate_genome(genome, 17, kind), mutant);
   }
-  cycles.push({ name: preset.name, suppliedSubstrate: preset.name === 'Phototroph' ? 'none' : 'exudate',
+  cycles.push({ name: preset.name, suppliedSubstrate: producer ? 'none' : 'exudate',
     firstDivisionSeconds: Math.round(firstDivisionSeconds * 100) / 100, timeLimitSeconds: cycleSeconds });
 }
 
-console.log('Cellular checks passed: 8 authored genomes, 8 importable examples, local receptor separation, bright/shade motor recycling and regrowth, paid development, frozen inspection, resource conservation, whole-machine fission with functioning consumer daughters, gene/placement mutations, and exact v9 continuation.');
+console.log(`Cellular checks passed: ${PRESETS.length} authored genomes, ${importable.length} importable examples, local receptor separation, bright/shade motor recycling and regrowth, paid development, frozen inspection, resource conservation, whole-machine fission with functioning consumer daughters, gene/placement mutations, and exact v11 continuation.`);
 console.log(JSON.stringify({ conditions: 'One founder; 0.85 light; 3 initial minerals per patch; 4 supplied exudate particles/s for non-phototrophs. The Predator tissue-funded lifecycle is tested separately in the native engine.', cycles }));

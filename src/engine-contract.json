@@ -1,5 +1,5 @@
 {
-  "abi": 12,
+  "abi": 15,
   "memory": "memory",
   "functions": [
     "abi_version",
@@ -44,10 +44,14 @@
     "nutrient_food_total",
     "nutrient_cell_total",
     "add_source",
+    "add_source_configured",
+    "replace_sources",
     "remove_source",
     "clear_sources",
     "environment_snapshot_ptr",
     "environment_snapshot_len",
+    "environment_metadata_ptr",
+    "environment_metadata_len",
     "cell_memory_ptr",
     "cell_memory_len",
     "cell_evaluation_ptr",

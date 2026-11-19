@@ -126,6 +126,7 @@ function symbolHelp(symbol: GenomeSymbol, compact = false): HTMLElement {
 }
 
 function evaluationValue(value: unknown, type: string): string {
+  if (value === null) return 'empty';
   if (type === 'vec2' && Array.isArray(value)) return `vec(${value.map(component => evaluationValue(component, 'scalar')).join(', ')})`;
   if (typeof value === 'number') return Number.isInteger(value) ? String(value) : Number(value.toPrecision(7)).toString();
   if (typeof value === 'string') return JSON.stringify(value);
@@ -287,6 +288,7 @@ export class ProgramEditor {
   }
 
   get value(): string { return this.source; }
+  get visible(): boolean { return !this.destroyed && this.element.isConnected && !this.element.ownerDocument.hidden; }
   get canUndo(): boolean { return !this.destroyed && !this.readOnly && undoDepth(this.view.state) > 0; }
   get canRedo(): boolean { return !this.destroyed && !this.readOnly && redoDepth(this.view.state) > 0; }
   get state(): ProgramEditorState {
@@ -433,14 +435,15 @@ export class ProgramEditor {
     const cellular = isCellularSource(this.source), selected = select.value;
     select.setAttribute('aria-label', cellular ? direction === 'read' ? 'Cellular input reference' : 'Cellular declaration reference' : direction === 'read' ? 'Read signal reference' : 'Write signal reference');
     const prompt = document.createElement('option'); prompt.value = '';
-    prompt.textContent = cellular ? direction === 'read' ? 'Inputs & stocks' : 'Products & recipes' : direction === 'read' ? 'Read signals' : 'Write signals';
+    prompt.textContent = cellular ? direction === 'read' ? 'Inputs & memory' : 'Declarations & writes' : direction === 'read' ? 'Read signals' : 'Write signals';
     select.replaceChildren(prompt);
     const groups = new Map<string, HTMLOptGroupElement>();
     for (const item of genomeSignalCatalog(direction, this.source)) {
-      const groupName = cellular && direction === 'write' ? item.type === 'mechanism' ? 'Mechanisms' : item.category === 'function' ? 'Product roles' : 'Declarations & placement'
+      const groupName = item.category === 'register' || item.name === 'clear' ? 'Memory registers'
+        : item.type === 'contact message' ? 'Contact messages'
+        : cellular && direction === 'write' ? item.type === 'mechanism' ? 'Mechanisms' : item.category === 'function' ? 'Product roles' : 'Declarations & placement'
         : /^(pool|concentration|built)\./.test(item.name) ? 'This cell’s products & assemblies'
         : item.name.startsWith('sensed.') ? 'Named receptor readings'
-        : item.category === 'register' ? 'Memory registers'
         : direction === 'write' ? /^(target|build|recycle)\./.test(item.name) ? 'Organelle construction' : item.name.startsWith('scan.') ? 'Physical scan' : 'Actions'
           : /^(object|contact)\./.test(item.name) ? 'Physical observations'
             : /^(light|heat|chemical|flow)\./.test(item.name) ? 'Environment sensors'
@@ -484,11 +487,13 @@ export class ProgramEditor {
     if (!this.readOnly) {
       const insert = document.createElement('button'); insert.type = 'button'; insert.className = 'program-reference-insert';
       const cellular = isCellularSource(this.source);
-      insert.textContent = cellular ? this.writeSignalSelect.value ? 'Insert declaration' : 'Insert input' : symbol.category === 'output' || this.writeSignalSelect.value ? 'Insert write' : 'Insert read';
+      const writing = symbol.category === 'output' || Boolean(this.writeSignalSelect.value);
+      insert.textContent = cellular && symbol.category !== 'register' && symbol.name !== 'clear'
+        ? writing ? 'Insert declaration' : 'Insert input' : writing ? 'Insert write' : 'Insert read';
       insert.addEventListener('click', () => {
         if (this.destroyed || this.readOnly) return;
-        const writing = symbol.category === 'output' || Boolean(this.writeSignalSelect.value);
-        const text = cellular ? symbol.insertText ?? (symbol.category === 'function' ? `${symbol.name}(${symbol.name === 'regulator' ? '8' : ''})` : symbol.name)
+        const text = symbol.category === 'register' ? symbol.name + (writing ? ' = ' : '') : symbol.name === 'clear' ? 'clear '
+          : cellular ? symbol.insertText ?? (symbol.category === 'function' && symbol.type !== 'mechanism' ? `${symbol.name}(${symbol.name === 'regulator' ? '8' : ''})` : symbol.name)
           : writing ? `${symbol.name} = ` : symbol.name;
         const selection = this.view.state.selection.main;
         this.view.dispatch({ changes: { from: selection.from, to: selection.to, insert: text }, selection: { anchor: selection.from + text.length },
@@ -555,6 +560,12 @@ export class ProgramEditor {
           type: write.kind === 'clear' ? 'boolean' : write.type, label: write.kind === 'clear' ? `clear ${write.name}` : `${write.name} write`,
           note: write.applies ? 'This rule would apply. Previewing does not change memory.' : write.guard ? 'This write is suppressed by an active clear.' : 'The when condition is false; this rule would not apply.' };
       }
+    }
+    const message = evaluation.contactMessageDeclarations?.find(item => item.from <= start && end <= item.to);
+    if (message) {
+      const keyword = message.kind === 'publish' || message.kind === 'signal' ? message.kind : message.kind + '_message';
+      return { from: message.from, to: message.to, type: 'scalar', value: message.value, label: `${keyword} ${message.register}`,
+        note: message.value === null ? 'This register is empty, so the declaration is inactive.' : 'Current occupied register value at this snapshot.' };
     }
     let found: (typeof evaluation.expressions)[number] | undefined;
     for (const expression of evaluation.expressions) {

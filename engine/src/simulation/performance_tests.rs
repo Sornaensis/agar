@@ -123,7 +123,7 @@ fn eligible_capture_index_preserves_empty_exhausted_wrapped_and_mineral_cases() 
         if scenario == 4 { optimized.environment.add_barrier(5.0, HEIGHT-4.0, 30.0, 3.0, PI*0.5, false); }
         let before = state(&optimized);
         let mut reader = Reader::new(&before);
-        let mut reference = World::read_checkpoint(&mut reader, 1, 9).unwrap();
+        let mut reference = World::read_checkpoint(&mut reader, 1, crate::checkpoint::VERSION).unwrap();
         assert!(reader.finished());
         let mut caps: Vec<_> = optimized.cells.iter().map(|cell| cell.body.capacities()).collect();
         let outputs: Vec<_> = caps.iter().enumerate().map(|(i, _)| Outputs { feed: if i % 3 == 0 { 0.0 } else { 1.0 }, ..Outputs::default() }).collect();

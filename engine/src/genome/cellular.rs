@@ -16,6 +16,43 @@ pub(super) struct GeneRoot {
     pub root: usize,
 }
 
+/// A paid receptor can observe the identity and payload of the same touched
+/// cell. The receiver’s avoidance and adhesion comparisons are private.
+#[derive(Debug, Clone, Default)]
+pub(super) struct ContactMessages {
+    // Publish identity, avoid, adhere, publish signal. Slots are scalar register addresses.
+    pub addresses: [Option<u16>; 4],
+    pub initial: Option<f64>,
+    pub signal_initial: Option<f64>,
+}
+impl ContactMessages {
+    pub(super) const ROLES: [&'static str; 4] = ["publish", "avoid", "adhere", "signal"];
+
+    /// The v10 budget stored the three declaration slots and one initializer.
+    /// Charge added representation overhead at runtime for old declarations.
+    pub(super) fn legacy_layout_overhead(&self) -> usize {
+        if self.addresses[3].is_none() {
+            std::mem::size_of::<Self>() - std::mem::size_of::<([Option<u16>; 3], Option<f64>)>()
+        } else { 0 }
+    }
+    pub(super) fn value(&self, role: usize, memory: &Registers) -> Option<f64> {
+        let register = Register { ty: Type::Number, index: self.addresses[role]? };
+        match memory.entries.get(&register) {
+            Some(Value::Scalar(value)) => Some(*value),
+            _ => None,
+        }
+    }
+    pub(super) fn to_json(&self) -> String {
+        let mut fields = Self::ROLES.iter().zip(self.addresses).map(|(role, index)| {
+            let address = index.map_or_else(|| "null".into(), |index| quote(&format!("rf{index:03}")));
+            format!("\"{role}\":{address}")
+        }).collect::<Vec<_>>();
+        fields.push(format!("\"initial\":{}", self.initial.map_or_else(|| "null".into(), |v| v.to_string())));
+        fields.push(format!("\"signalInitial\":{}", self.signal_initial.map_or_else(|| "null".into(), |v| v.to_string())));
+        format!("{{{}}}", fields.join(","))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct CellularGraph {
     pub definition: CellularProgram,
@@ -23,6 +60,7 @@ pub(super) struct CellularGraph {
     pub activity: Vec<Option<usize>>,
     pub start: Vec<Option<usize>>,
     pub recycle: Vec<Option<usize>>,
+    pub messages: Option<Box<ContactMessages>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -52,6 +90,7 @@ impl CellularGraph {
 
     pub(super) fn allocated_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
+            - std::mem::size_of::<CellularProgram>() + CellularProgram::authored_inline_bytes()
             + self.definition.products.capacity() * std::mem::size_of::<ProductDef>()
             + self.definition.assemblies.capacity() * std::mem::size_of::<AssemblyDef>()
             + self.genes.capacity() * std::mem::size_of::<GeneRoot>()
@@ -73,6 +112,8 @@ impl CellularGraph {
                 })
                 .sum::<usize>()
             + self.genes.iter().map(|g| g.name.capacity()).sum::<usize>()
+            + self.messages.as_ref().map_or(0, |_| std::mem::size_of::<ContactMessages>())
+            + self.definition.derived_bytes()
     }
 
     pub(super) fn controls(&self, roots: &[usize], values: &[Value]) -> CellularControls {
@@ -175,7 +216,7 @@ impl Sensor {
         matches!(
             name,
             "energy" | "energy.fraction" | "energy.capacity" | "age" | "speed" | "integrity"
-                | "oxygen" | "respiration.rate"
+                | "oxygen" | "respiration.rate" | "memory.used" | "memory.cost"
         ) || (name.starts_with("body.") && name != "body.division_ready")
             || [
                 "nutrient.",
@@ -204,6 +245,40 @@ impl Program {
         })
     }
 
+    pub(super) fn contact_messages(&self) -> Option<&ContactMessages> {
+        self.cellular.as_ref()?.messages.as_deref()
+    }
+    pub fn participates_in_contact_signaling(&self) -> bool {
+        self.contact_messages().is_some()
+    }
+    pub fn published_message(&self, memory: &Registers) -> Option<f64> {
+        self.contact_messages()?.value(0, memory)
+    }
+    pub fn avoid_message(&self, memory: &Registers) -> Option<f64> {
+        self.contact_messages()?.value(1, memory)
+    }
+    pub fn adhesion_message(&self, memory: &Registers) -> Option<f64> {
+        self.contact_messages()?.value(2, memory)
+    }
+    pub fn contact_signal(&self, memory: &Registers) -> Option<f64> {
+        self.contact_messages()?.value(3, memory)
+    }
+    pub fn message_initializer(&self) -> Option<f64> {
+        self.contact_messages()?.initial
+    }
+    /// Seed a newly created cell, including a daughter carrying a mutated
+    /// program. Loading a checkpoint must preserve an explicitly cleared slot.
+    pub fn initialize_message(&self, memory: &mut Registers) {
+        if let Some(messages) = self.contact_messages() {
+            for (index, value) in [(messages.addresses[0], messages.initial),
+                                   (messages.addresses[3], messages.signal_initial)] {
+                if let (Some(index), Some(value)) = (index, value) {
+                    memory.entries.insert(Register { ty: Type::Number, index }, Value::Scalar(value));
+                }
+            }
+        }
+    }
+
     pub fn receptor_reads(&self) -> &[(usize, ReceptorField)] {
         &self.execution.receptor_reads
     }
@@ -222,15 +297,16 @@ impl Program {
     pub(super) fn from_cellular(
         nodes: Vec<Node>,
         bindings: Vec<Binding>,
+        writes: Vec<WriteRule>,
         graph: CellularGraph,
     ) -> Self {
         let output_roots = [None; OUTPUT_COUNT];
-        let execution = ExecutionPlan::compile(&nodes, &output_roots, &[], &graph.roots());
+        let execution = ExecutionPlan::compile(&nodes, &output_roots, &writes, &graph.roots());
         Self {
             nodes,
             bindings,
             output_roots,
-            writes: Vec::new(),
+            writes,
             execution,
             cellular: Some(Box::new(graph)),
         }
@@ -441,6 +517,9 @@ impl Parser {
         let mut assembly_locations = Vec::new();
         let mut genes = Vec::new();
         let mut gene_names = HashSet::new();
+        let mut writes = Vec::new();
+        let mut register_rules = HashSet::new();
+        let mut messages = ContactMessages::default();
         while self.peek().kind != Kind::End {
             let declaration = self.take();
             let Kind::Name(keyword) = &declaration.kind else {
@@ -554,6 +633,62 @@ impl Parser {
                     recycle.push(recycle_root);
                     self.geometry_locations.push(GeometryLocation { close, at: at_location, direction: direction_location });
                 }
+                "publish" | "avoid_message" | "adhere_message" | "signal" => {
+                    let role = match keyword.as_str() { "publish" => 0, "avoid_message" => 1, "adhere_message" => 2, _ => 3 };
+                    let token = self.take();
+                    let Kind::Name(name) = &token.kind else {
+                        return Err(token.location.error("expected a scalar register rf001 through rf999."));
+                    };
+                    let register = Self::register(name, token.location)?;
+                    if register.ty != Type::Number {
+                        return Err(token.location.error("contact messages require a scalar register rf001 through rf999."));
+                    }
+                    if messages.addresses[role].replace(register.index).is_some() {
+                        return Err(declaration.location.error(format!("duplicate '{keyword}' declaration.")));
+                    }
+                    if messages.addresses[0].is_some() && messages.addresses[0] == messages.addresses[3] {
+                        return Err(token.location.error("publish and signal require different scalar register addresses."));
+                    }
+                    if matches!(role, 0 | 3) && self.peek().kind == Kind::Assign {
+                        self.take();
+                        let location = self.peek().location;
+                        let initial = self.material_number()?;
+                        if !initial.is_finite() || initial.abs() > MAX_SIGNAL {
+                            return Err(location.error("message initializer exceeds the scalar limit."));
+                        }
+                        if role == 0 { messages.initial = Some(initial); }
+                        else { messages.signal_initial = Some(initial); }
+                    }
+                    self.expect(Kind::Semicolon, "';' after contact-message declaration")?;
+                    self.message_locations[role] = Some(declaration.location.through(self.tokens[self.position-1].location.to));
+                }
+                "clear" => {
+                    let token = self.take();
+                    let Kind::Name(name) = &token.kind else {
+                        return Err(token.location.error("expected a register after 'clear'."));
+                    };
+                    let register = Self::register(name, token.location)?;
+                    if !register_rules.insert((register, false)) {
+                        return Err(token.location.error(format!("register '{name}' already has a clear rule.")));
+                    }
+                    let guard = self.guard()?;
+                    self.expect(Kind::Semicolon, "';' after clear")?;
+                    self.write_locations.push(token.location);
+                    writes.push(WriteRule { register, value: None, guard });
+                }
+                name if Register::reserved(name) => {
+                    let register = Self::register(name, declaration.location)?;
+                    if !register_rules.insert((register, true)) {
+                        return Err(declaration.location.error(format!("register '{name}' already has a write rule.")));
+                    }
+                    self.expect(Kind::Assign, "'=' after register address")?;
+                    let value = self.expression(0, 0)?;
+                    self.assignable(value, register.ty, declaration.location)?;
+                    let guard = self.guard()?;
+                    self.expect(Kind::Semicolon, "';' after register write")?;
+                    self.write_locations.push(declaration.location);
+                    writes.push(WriteRule { register, value: Some(value), guard });
+                }
                 "fn" => self.function_declaration(declaration.location)?,
                 "let" => {
                     let (name, location) = self.declaration_name("signal")?;
@@ -568,10 +703,10 @@ impl Parser {
                 _ => return Err(declaration.location.error(format!("'{keyword}' is unavailable in cellular mode; express products with genes and assemble physical machinery."))),
             }
         }
-        let definition = CellularProgram {
+        let definition = CellularProgram::new(
             products,
             assemblies,
-        };
+        );
         for &(index, field, location) in &self.receptor_references {
             if !ReceptorField::for_kind(definition.assemblies[index].kind).contains(&field) {
                 return Err(location.error(format!(
@@ -583,10 +718,10 @@ impl Parser {
         }
         for (assembly, location) in definition.assemblies.iter().zip(assembly_locations) {
             // Report recipe failures at their declaration, not at end-of-file.
-            let single = CellularProgram {
-                products: definition.products.clone(),
-                assemblies: vec![assembly.clone()],
-            };
+            let single = CellularProgram::new(
+                definition.products.clone(),
+                vec![assembly.clone()],
+            );
             single.validate().map_err(|error| location.error(error))?;
         }
         definition
@@ -595,12 +730,14 @@ impl Parser {
         Ok(Program::from_cellular(
             std::mem::take(&mut self.nodes),
             std::mem::take(&mut self.binding_order),
+            writes,
             CellularGraph {
                 definition,
                 genes,
                 activity,
                 start,
                 recycle,
+                messages: messages.addresses.iter().any(Option::is_some).then(|| Box::new(messages)),
             },
         ))
     }
@@ -704,7 +841,7 @@ pub(super) fn schema_json() -> String {
         })
         .collect::<Vec<_>>()
         .join(",");
-    format!("{{\"marker\":\"cellular;\",\"products\":[{products}],\"assemblies\":[{assemblies}],\"mechanisms\":[{mechanisms}],\"reads\":[{reads}],\"maxProducts\":{MAX_PRODUCTS},\"maxAssemblies\":{MAX_ASSEMBLIES},\"maxGenes\":{MAX_GENES},\"recipeControls\":[{{\"name\":\"activity\",\"type\":\"scalar\",\"default\":1}},{{\"name\":\"start_when\",\"type\":\"boolean\",\"default\":true}},{{\"name\":\"recycle\",\"type\":\"scalar\",\"default\":0}}],\"concentration\":\"pool mass / body.area\",\"userFunctions\":{{\"keyword\":\"fn\",\"maxParameters\":8,\"parameterType\":\"scalar\",\"maxFunctions\":64,\"recursive\":false}}}}")
+    format!("{{\"marker\":\"cellular;\",\"products\":[{products}],\"assemblies\":[{assemblies}],\"mechanisms\":[{mechanisms}],\"reads\":[{reads}],\"maxProducts\":{MAX_PRODUCTS},\"maxAssemblies\":{MAX_ASSEMBLIES},\"maxGenes\":{MAX_GENES},\"registers\":{{\"prefixes\":[\"ri\",\"rf\",\"rb\",\"rs\",\"rv\"],\"addressesPerType\":{REGISTER_COUNT},\"upkeepPerSecond\":{REGISTER_ENERGY_COST},\"clearWins\":true}},\"contactMessages\":{{\"declarations\":[\"publish\",\"avoid_message\",\"adhere_message\",\"signal\"],\"registerType\":\"scalar\",\"receptor\":\"sense(contact)\",\"validField\":\"message_valid\",\"valueField\":\"message\",\"signalValidField\":\"signal_valid\",\"signalValueField\":\"signal\",\"initializerLimit\":{MAX_SIGNAL}}},\"recipeControls\":[{{\"name\":\"activity\",\"type\":\"scalar\",\"default\":1}},{{\"name\":\"start_when\",\"type\":\"boolean\",\"default\":true}},{{\"name\":\"recycle\",\"type\":\"scalar\",\"default\":0}}],\"concentration\":\"pool mass / body.area\",\"userFunctions\":{{\"keyword\":\"fn\",\"maxParameters\":8,\"parameterType\":\"scalar\",\"maxFunctions\":64,\"recursive\":false}}}}")
 }
 
 #[cfg(test)]
@@ -813,13 +950,11 @@ assembly Swim: flagellum {
     }
 
     #[test]
-    fn cellular_mode_rejects_legacy_actions_magic_reads_and_registers() {
+    fn cellular_mode_rejects_legacy_actions_and_unavailable_measurements() {
         for statement in [
             "thrust = 1;",
             "target.flagellum.count = 4;",
             "express.core = 1;",
-            "rf001 = 1;",
-            "clear rf001;",
         ] {
             let error = Program::compile(&format!("cellular; {statement}")).unwrap_err();
             assert!(error.contains("unavailable in cellular mode"), "{error}");
@@ -828,11 +963,8 @@ assembly Swim: flagellum {
             "protein.flagellum",
             "organelle.core.count",
             "body.division_ready",
-            "memory.used",
             "time",
             "id",
-            "rf001",
-            "populated(rf001)",
         ] {
             assert!(
                 Program::compile(&format!(
@@ -843,6 +975,163 @@ assembly Swim: flagellum {
             );
         }
         assert!(Program::compile("thrust=0;turn=0;divide=false;rf001=energy;").is_ok());
+    }
+
+    #[test]
+    fn cellular_registers_read_the_prior_tick_and_only_publish_the_declared_scalar() {
+        let source = r#"cellular;
+# 🌿
+publish rf001 = 0;
+avoid_message rf002;
+adhere_message rf001;
+fn increment(x) = x + rf001;
+ri001 = ri001 + 1;
+rf001 = increment(1) when ri001 < 2;
+rf002 = rf001;
+rb001 = populated(rf001);
+rs001 = "private";
+rv001 = vec(rf001, rf002);
+clear rf001 when ri001 == 1;
+"#;
+        let p = Program::compile(source).unwrap();
+        let mut memory = Registers::default();
+        assert_eq!(p.message_initializer(), Some(0.0));
+        assert_eq!(p.published_message(&memory), None);
+        p.initialize_message(&mut memory);
+        assert_eq!(p.published_message(&memory), Some(0.0));
+        assert_eq!(p.avoid_message(&memory), None);
+        assert_eq!(p.adhesion_message(&memory), Some(0.0));
+        let inputs = Inputs::default();
+        let mut scratch = EvalScratch::default();
+        p.evaluate_cell(&inputs, &mut memory, &mut scratch);
+        assert_eq!(p.published_message(&memory), Some(1.0));
+        assert_eq!(p.avoid_message(&memory), Some(0.0));
+        assert_eq!(memory.value("rb001"), Some(&Value::Boolean(true)));
+        assert_eq!(memory.value("rs001"), Some(&Value::Text(Rc::from("private"))));
+        assert_eq!(memory.value("rv001"), Some(&Value::Vector([0.0, 0.0])));
+        let before = memory.clone();
+        let trace = Program::evaluation_json(source, &inputs, &memory, 1, 1, 1).unwrap();
+        assert_eq!(memory, before);
+        assert!(trace.contains(r#""kind":"clear","type":"scalar","value":null,"guard":true,"applies":true"#));
+        let from = source[..source.find("publish").unwrap()].encode_utf16().count();
+        let to = from + "publish rf001 = 0;".len();
+        assert!(trace.contains(&format!(r#"{{"kind":"publish","register":"rf001","value":1,"from":{from},"to":{to}}}"#)));
+        assert!(p.graph_json().contains(r#""roots":[{"id":"write:ri001""#));
+        assert!(p.graph_json().contains(r#""contactMessages":{"publish":"rf001","avoid":"rf002","adhere":"rf001","signal":null,"initial":0,"signalInitial":null}"#));
+        p.evaluate_cell(&inputs, &mut memory, &mut scratch);
+        assert_eq!(p.published_message(&memory), None);
+        assert_eq!(p.adhesion_message(&memory), None);
+        assert_eq!(p.avoid_message(&memory), Some(1.0));
+        assert_eq!(memory.value("rv001"), Some(&Value::Vector([1.0, 0.0])));
+        let mut w = Writer::new();
+        p.write_checkpoint(&mut w);
+        assert!(Program::read_checkpoint_version(&mut Reader::new(&w.0), 9).is_err());
+        let restored = Program::read_checkpoint(&mut Reader::new(&w.0)).unwrap();
+        assert!(restored.checkpoint_source_matches(&p, source, true));
+        let mut w = Writer::new();
+        memory.write_checkpoint(&mut w);
+        let mut resumed = Registers::read_checkpoint(&mut Reader::new(&w.0)).unwrap();
+        assert_eq!(restored.published_message(&resumed), None);
+        for _ in 0..5 {
+            p.evaluate_cell(&inputs, &mut memory, &mut scratch);
+            restored.evaluate_cell(&inputs, &mut resumed, &mut scratch);
+            assert_eq!(memory, resumed);
+        }
+    }
+
+    #[test]
+    fn independent_payload_keeps_identity_and_checked_source_spans_through_replay() {
+        let source = "cellular; # 🌱\npublish rf001=17; signal rf002 = 0; avoid_message rf001; adhere_message rf001; rf002=rf002-0.5; clear rf002 when ri001==1; ri001=ri001+1;";
+        let program = Program::compile(source).unwrap();
+        let mut memory = Registers::default();
+        program.initialize_message(&mut memory);
+        assert_eq!(program.published_message(&memory),Some(17.0));
+        assert_eq!(program.contact_signal(&memory),Some(0.0));
+        let trace = Program::evaluation_json(source,&Inputs::default(),&memory,1,1,0).unwrap();
+        let from = source[..source.find("signal rf002").unwrap()].encode_utf16().count();
+        let to = from + "signal rf002 = 0;".len();
+        assert!(trace.contains(&format!(r#"{{"kind":"signal","register":"rf002","value":0,"from":{from},"to":{to}}}"#)));
+        let mut scratch = EvalScratch::default();
+        program.evaluate_cell(&Inputs::default(),&mut memory,&mut scratch);
+        assert_eq!(program.contact_signal(&memory),Some(-0.5));
+        program.evaluate_cell(&Inputs::default(),&mut memory,&mut scratch);
+        assert_eq!(program.contact_signal(&memory), None);
+        assert_eq!(program.avoid_message(&memory), Some(17.0));
+        assert_eq!(program.adhesion_message(&memory), Some(17.0));
+        let mut writer = Writer::new();
+        program.write_checkpoint(&mut writer);
+        assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0),10).is_err());
+        let restored = Program::read_checkpoint(&mut Reader::new(&writer.0)).unwrap();
+        assert!(restored.checkpoint_source_matches(&program, source, true));
+        assert_eq!(restored.contact_signal(&memory),None);
+        let payload_only = Program::compile("cellular; signal rf999 = -2;").unwrap();
+        memory = Registers::default();
+        payload_only.initialize_message(&mut memory);
+        assert_eq!(payload_only.contact_signal(&memory),Some(-2.0));
+        assert_eq!(payload_only.published_message(&memory),None);
+        // All the old identifier contexts remain usable after adding this keyword.
+        for old in ["cellular; let signal=1; rf001=signal;", "cellular; fn signal(x)=x; rf001=signal(1);",
+            "cellular; product signal=anchor(); gene g:signal=1;"] {
+            let p = Program::compile(old).unwrap();
+            let mut writer = Writer::new();
+            p.write_checkpoint(&mut writer);
+            let old_p = Program::read_checkpoint_version(&mut Reader::new(&writer.0),10).unwrap();
+            assert!(old_p.checkpoint_source_matches(&p,old,true));
+        }
+        for bad in ["signal ri001;", "signal rf001=energy;", "signal rf001=1e13;",
+            "signal rf001; signal rf002;", "publish rf001; signal rf001;",
+            "signal rf001; publish rf001;", "signal rf001 when true;"] {
+            assert!(Program::compile(&format!("cellular; {bad}")).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn checkpoint_gates_payload_reads_even_without_a_local_publisher() {
+        let touch = "cellular; product A=anchor(); product R=receptor(); product F=filament(); assembly Touch:sense(contact){A:.01;R:.01;F:.01;}";
+        for field in ["pressure", "message", "message_valid", "signal", "signal_valid"] {
+            let read = format!("sensed.Touch.{field}");
+            let value = if field.ends_with("_valid") { format!("if {read} then 1 else 0") } else { read };
+            let source = format!("{touch} gene sample:A={value};");
+            let program = Program::compile(&source).unwrap();
+            assert!(!program.participates_in_contact_signaling());
+            let mut w=Writer::new();
+            program.write_checkpoint(&mut w);
+            for version in [9,10,11] {
+                let minimum = if field.starts_with("signal") { 11 } else if field.starts_with("message") { 10 } else { 7 };
+                assert_eq!(Program::read_checkpoint_version(&mut Reader::new(&w.0), version).is_ok(),
+                    version >= minimum, "{field} in version {version}");
+            }
+        }
+    }
+
+    #[test]
+    fn contact_declarations_are_typed_bounded_and_restricted_to_physical_contact() {
+        for line in [
+            "publish ri001;", "publish rb001;", "publish rf000;", "publish rf1000;",
+            "publish rf001; publish rf002;", "avoid_message ri001;", "avoid_message rf001 = 0;",
+            "publish rf001 = energy;", "publish rf001 = 1+2;", "publish rf001 = 1e14;",
+            "adhere_message rf001 when true;", "rf001 = true;", "clear rf001 when 1;",
+            "ri001=1;ri001=2;", "clear rb001;clear rb001;",
+        ] { assert!(Program::compile(&format!("cellular; {line}")).is_err(), "{line}"); }
+        let receptor = "cellular; product R=receptor(); product A=anchor(); product F=filament(); assembly Port: sense(contact) { R:.01; A:.01; F:.01; }";
+        let source = format!("{receptor} rb001=sensed.Port.message_valid;rf001=sensed.Port.message;");
+        let p = Program::compile(&source).unwrap();
+        assert!(Program::compile(&source.replace("sense(contact)", "sense(heat)")).is_err());
+        let mut memory = Registers::default();
+        let mut scratch = EvalScratch::default();
+        for (available, valid, message_valid, message, expected) in [
+            (true,true,true,0.0,Some(0.0)), (true,true,true,-4.5,Some(-4.5)),
+            (true,true,false,3.0,None), (true,false,true,3.0,None), (false,true,true,3.0,None),
+        ] {
+            let inputs = Inputs { receptors:vec![ReceptorInput { available,valid,message_valid,message,
+                ..ReceptorInput::default() }], ..Inputs::default() };
+            p.evaluate_cell(&inputs, &mut memory, &mut scratch);
+            assert_eq!(memory.value("rb001"),Some(&Value::Boolean(expected.is_some())));
+            assert_eq!(memory.value("rf001"),Some(&Value::Scalar(expected.unwrap_or(0.0))));
+        }
+        assert!(!p.participates_in_contact_signaling(), "reading a contact never exposes any private register");
+        assert!(Program::compile("cellular; let publish=1; gene g: A=publish; product A=anchor();").is_ok(),
+            "existing names are preserved because the new declaration keywords are contextual");
     }
 
     #[test]
@@ -1176,7 +1465,9 @@ assembly Digest: digest(tissue) { Catalyst: 0.04; activity: if gut.tissue.energy
         assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 6).is_err());
         assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 7).is_err());
         assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 8).is_err());
-        let restored = Program::read_checkpoint_version(&mut Reader::new(&writer.0), 9).unwrap();
+        assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 9).is_err());
+        assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 10).is_err());
+        let restored = Program::read_checkpoint_version(&mut Reader::new(&writer.0), 11).unwrap();
         assert_eq!(program.cellular(), restored.cellular());
         assert_eq!(program.evaluate(&inputs()), restored.evaluate(&inputs()));
         assert!(restored.checkpoint_source_matches(&program, &source, true));

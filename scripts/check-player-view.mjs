@@ -170,12 +170,12 @@ const createPlayer = opener => { const host = opener.document.createElement('div
 }
 
 // Exercise the real application gates, rather than a second implementation of
-// them: catalog navigation/edits retain the renderer, and hidden-opener frames
-// still advance the same session until the user explicitly pauses it.
+// them: catalog navigation/edits retain the renderer and the independent work
+// loop can advance the same session until the user explicitly pauses it.
 {
   const appSource = await readFile(new URL('../src/app.ts', import.meta.url), 'utf8');
   const parsed = ts.createSourceFile('app.ts', appSource, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
-  const names = ['renderView', 'navigate', 'frame', 'togglePlayback', 'playerVisibilityChanged', 'handleUiClick', 'handleUiInput', 'handleUiChange', 'handleUiKeydown', 'handleUiDismissMenus', 'bindUiDocument'];
+  const names = ['renderView', 'navigate', 'frame', 'playerIsVisible', 'viewPresentationOptions', 'simulationWork', 'advanceSimulation', 'togglePlayback', 'playerVisibilityChanged', 'handleUiClick', 'handleUiInput', 'handleUiChange', 'handleUiKeydown', 'handleUiDismissMenus', 'bindUiDocument'];
   const functions = names.map(name => {
     const declaration = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
     assert.ok(declaration, `Application function ${name} is present`); return declaration.getText(parsed);
@@ -196,12 +196,12 @@ const createPlayer = opener => { const host = opener.document.createElement('div
   const fail = error => { throw error instanceof Error ? error : new Error(String(error)); };
   const context = vm.createContext({
     document: opener.document, window: opener, performance: { now: () => 0 },
-    ready: true, transitioning: false, prefs: { tab: 'simulation', simulationView: 'player' },
+    ready: true, transitioning: false, unloading: false, prefs: { tab: 'simulation', simulationView: 'player', overlay: 'none' },
     active: session, renderer, inspectorProgram: editor, playerElement: player, restoringPlayer: false,
-    inspectorEpoch: 0, selectedId: null, cellInspection: null, catalogQuery: '', accumulator: 0,
-    lastFrame: 0, lastMetrics: 0, lastEnvironment: 0, lastCheckpoint: 0, lastUi: 0, lifecycleFlushes: 0, saveFailed: false,
+    inspectorEpoch: 0, selectedId: null, cellInspection: null, catalogQuery: '',
+    lastPresentation: 0, lastMetrics: 0, lastEnvironment: 0, lastCheckpoint: 0, lastUi: 0, lifecycleFlushes: 0, saveFailed: false,
     playerView: { isOpen: true, visible: true, setTitle() {} },
-    frameLoop: { refresh() {} }, flushLifecycle: async () => {},
+    frameLoop: { refresh() {} }, simulationLoop: { refresh() {}, reset() {} }, flushLifecycle: async () => {},
     $: id => id === 'workspace' ? workspace : null, queryUi: () => null, esc: value => value, icon: () => '',
     renderCatalog: () => '<section>Catalog</section>', renderCatalogCards() {}, refreshCatalogs: async () => {}, persistPreferences() {},
     playerPlaceholderMarkup: () => '<section>Player is popped out</section>', metricsMarkup: () => '<section>Metrics</section>', settingsMarkup: () => '<section>Settings</section>',
@@ -219,11 +219,17 @@ const createPlayer = opener => { const host = opener.document.createElement('div
   for (const view of ['metrics', 'settings', 'genomes', 'player']) { context.prefs.simulationView = view; context.renderView(); }
   assert.equal(context.playerElement, player); assert.equal(context.renderer, renderer);
   let now = 1000;
-  const frame = () => context.frame(now += 100);
+  const frame = () => {
+    context.frame(now += 100);
+    const work = context.simulationWork();
+    if (work && !work.busy) void context.advanceSimulation(work.target, 3, now);
+  };
   opener.document.hidden = true;
   for (const tab of ['genomes', 'environments', 'simulation']) {
     context.prefs.tab = tab; const before = calls.advances.length; frame();
     assert.equal(calls.advances.length, before + 1, `${tab}: visible PiP advances with a hidden opener`);
+    assert.equal(calls.advances.at(-1).options.frame, true);
+    assert.equal(calls.advances.at(-1).options.environment, 'metadata', 'No overlay exports only object/config metadata');
   }
   session.metadata.paused = true; let before = calls.advances.length; frame(); assert.equal(calls.advances.length, before);
   session.metadata.paused = false; frame(); assert.equal(calls.advances.length, before + 1);
@@ -232,6 +238,7 @@ const createPlayer = opener => { const host = opener.document.createElement('div
   frame(); assert.equal(calls.advances.length, before + 1, 'Both hidden surfaces still advance an open player');
   assert.equal(calls.renders, drawn); assert.equal(calls.ui, painted, 'Hidden frames skip rendering and inspector work');
   assert.equal(calls.advances.at(-1).options.environment, false); assert.equal(calls.advances.at(-1).options.metrics, false);
+  assert.equal(calls.advances.at(-1).options.frame, false, 'Hidden stepping does not export entities');
   session.busy = true; before = calls.advances.length; frame(); assert.equal(calls.advances.length, before, 'Only one advancing batch may be in flight'); session.busy = false;
   const saved = calls.checkpoints; session.touch(); now += 3600000; frame();
   assert.ok(calls.advances.at(-1).steps <= 8, 'A delayed callback never triggers wall-clock catch-up');
@@ -240,8 +247,12 @@ const createPlayer = opener => { const host = opener.document.createElement('div
   context.playerView.isOpen = true; opener.document.hidden = false; frame(); assert.equal(calls.advances.length, before + 1, 'Visible main app can drive an open hidden player');
   const refreshed = calls.refreshes; session.metadata.paused = true; context.playerView.visible = true;
   context.playerVisibilityChanged(); assert.equal(calls.refreshes, refreshed + 1, 'Returning refreshes hidden projections even when paused');
+  context.prefs.overlay = 'oxygen';
+  assert.equal(context.viewPresentationOptions().environment, true, 'Visible overlays request their field samples');
+  context.playerView.visible = false; context.playerView.isOpen = false; context.prefs.tab = 'simulation'; context.prefs.simulationView = 'metrics';
+  assert.deepEqual(JSON.parse(JSON.stringify(context.viewPresentationOptions())), { frame: false, metrics: true, environment: 'metadata' }, 'Metrics needs no cell arrays or full field grid');
   session.metadata.paused = false;
-  context.playerView.visible = true; context.prefs.tab = 'environments';
+  context.playerView.isOpen = true; context.playerView.visible = true; context.prefs.tab = 'environments';
 
   // Delegation accepts elements/events from another window without relying on
   // the opener's Element constructor, and removing it prevents duplicate work.

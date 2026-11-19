@@ -11,7 +11,7 @@ function freeze<T>(value: T): T {
 
 /** Built-ins stay immutable. Saving an edit creates an independently named user copy. */
 export const BUILTIN_GENOMES: readonly GenomeDocument[] = freeze(PRESETS.map(preset => ({
-  id: `builtin:genome:${preset.name.toLowerCase()}`, name: preset.name, source: preset.source,
+  id: `builtin:genome:${preset.name.toLowerCase().replaceAll(' ', '-')}`, name: preset.name, source: preset.source,
   description: preset.description, languageVersion: 3, createdAt: 0, updatedAt: 0,
 })));
 
@@ -44,6 +44,10 @@ export const BUILTIN_ENVIRONMENTS: readonly EnvironmentDocument[] = freeze([
         { kind: 3, x: 440, y: 500, strength: 0.6, radius: 200 },
       ],
     },
+  },
+  {
+    id: 'builtin:environment:colony-pool', name: 'Colony pool', description: 'Still, evenly lit water with dissolved minerals for observing division and contact between relatives.', createdAt: 0, updatedAt: 0,
+    config: { width:400, height:400, foodRate:0, ambientTemperature:0.5, ambientLight:0.85, currentStrength:0, initialNutrients:3, sources:[] },
   },
   {
     id: 'builtin:environment:current-bands', name: 'Current bands',
@@ -86,6 +90,21 @@ export const BUILTIN_SIMULATIONS: readonly BuiltinSimulation[] = freeze([
     id: 'builtin:simulation:sunlit-pond', name: 'Sunlit pond', description: 'Pure autotrophs build a population from light and minerals.',
     environmentId: 'builtin:environment:sunlit-pond', seed: 42,
     populations: [{ genomeId: 'builtin:genome:phototroph', count: 22 }],
+  },
+  {
+    id: 'builtin:simulation:colonies', name: 'Colonies', description: 'Watch dividing phototrophs form small groups with matching contact signals and adhesive surfaces.',
+    environmentId: 'builtin:environment:sunlit-pond', seed: 42,
+    populations: [{ genomeId: 'builtin:genome:colony-phototroph', count: 22 }],
+  },
+  {
+    id: 'builtin:simulation:nurse-rosette', name: 'Nurse rosette', description: 'Follow one founder through division. Inspect the attached mother and juvenile to see their different harvesting and growth rates and the resources exchanged.',
+    environmentId:'builtin:environment:colony-pool', seed:42,
+    populations:[{genomeId:'builtin:genome:nurse-rosette',count:1}],
+  },
+  {
+    id: 'builtin:simulation:pulse-swimmers', name: 'Pulse swimmers', description: 'After division, mature cells start a pulse. Attached young cells relay it, swim briefly and rest before they can respond again.',
+    environmentId:'builtin:environment:colony-pool', seed:42,
+    populations:[{genomeId:'builtin:genome:pulse-swimmer',count:3}],
   },
   {
     id: 'builtin:simulation:mixed-ecosystem', name: 'Mixed ecosystem', description: 'Many producers support a few foragers, mixotrophs, and predators. Survival depends on the food chain.',

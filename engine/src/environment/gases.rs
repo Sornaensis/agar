@@ -32,6 +32,8 @@ pub(super) struct GasState {
     carbon_injection: Vec<f64>,
     carbon_absorption: Vec<f64>,
     aeration: Vec<f64>,
+    /// Derived from the atmosphere and aerators, never serialized.
+    exchange_fraction: Vec<f64>,
 }
 impl GasState {
     pub fn new(patches: usize) -> Self {
@@ -53,6 +55,7 @@ impl GasState {
             carbon_injection: vec![0.0; patches],
             carbon_absorption: vec![0.0; patches],
             aeration: vec![0.0; patches],
+            exchange_fraction: vec![0.0; patches],
         }
     }
     pub fn reset(&mut self) {
@@ -141,6 +144,7 @@ impl Environment {
         self.gases.exchange_rate = rate;
         self.gases.oxygen_equilibrium = oxygen_equilibrium;
         self.gases.carbon_equilibrium = carbon_equilibrium;
+        self.rebuild_exchange_fractions();
         true
     }
     pub fn oxygen_patch(&self, index: usize) -> f64 {
@@ -190,13 +194,27 @@ impl Environment {
     pub fn release_oxygen(&mut self, x: f64, y: f64, amount: f64) {
         if amount.is_finite() && amount > 0.0 && x.is_finite() && y.is_finite() {
             let i = self.patch_index(x, y);
-            self.gases.oxygen[i] += amount;
+            self.release_oxygen_patch(i, amount);
         }
     }
     pub fn release_inorganic_carbon(&mut self, x: f64, y: f64, amount: f64) {
         if amount.is_finite() && amount > 0.0 && x.is_finite() && y.is_finite() {
             let i = self.patch_index(x, y);
-            self.gases.carbon[i] += amount;
+            self.release_inorganic_carbon_patch(i, amount);
+        }
+    }
+    pub fn release_oxygen_patch(&mut self, index: usize, amount: f64) {
+        if amount.is_finite() && amount > 0.0 {
+            if let Some(balance) = self.gases.oxygen.get_mut(index) {
+                *balance += amount;
+            }
+        }
+    }
+    pub fn release_inorganic_carbon_patch(&mut self, index: usize, amount: f64) {
+        if amount.is_finite() && amount > 0.0 {
+            if let Some(balance) = self.gases.carbon.get_mut(index) {
+                *balance += amount;
+            }
         }
     }
     pub(super) fn rebuild_gas_sources(&mut self) {
@@ -239,12 +257,29 @@ impl Environment {
                 *value += rate * source.strength * weight / sum;
             }
         }
+        self.rebuild_exchange_fractions();
+    }
+    fn rebuild_exchange_fractions(&mut self) {
+        let gas = &mut self.gases;
+        gas.exchange_fraction.resize(gas.oxygen.len(), 0.0);
+        let ambient = if gas.atmosphere_open {
+            gas.exchange_rate
+        } else {
+            0.0
+        };
+        for (fraction, aeration) in gas.exchange_fraction.iter_mut().zip(&gas.aeration) {
+            let rate = ambient + aeration;
+            *fraction = if rate <= 0.0 {
+                0.0
+            } else {
+                -(-rate * DT).exp_m1()
+            };
+        }
     }
     pub(super) fn step_gases(&mut self, has_flow: bool) {
         transport_amounts(
             &mut self.gases.oxygen,
-            self.columns,
-            self.rows,
+            &self.grid.neighbors,
             &self.blocked_right,
             &self.blocked_down,
             OXYGEN_DIFFUSION,
@@ -253,8 +288,7 @@ impl Environment {
         );
         transport_amounts(
             &mut self.gases.carbon,
-            self.columns,
-            self.rows,
+            &self.grid.neighbors,
             &self.blocked_right,
             &self.blocked_down,
             CARBON_DIFFUSION,
@@ -288,7 +322,7 @@ impl Environment {
             if rate <= 0.0 {
                 continue;
             }
-            let fraction = -(-rate * DT).exp_m1();
+            let fraction = gas.exchange_fraction[i];
             // Deliberately abstract saturation curve: the temperature signal
             // has no Celsius/depth/pressure calibration in this simulator.
             let oxygen_target =
@@ -331,5 +365,56 @@ fn exchange(balance: &mut f64, target: f64, fraction: f64, input: &mut f64, outp
         let actual = (-change).min(*balance);
         *balance -= actual;
         *output += actual;
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use crate::checkpoint::{Reader, Writer};
+    #[test]
+    fn exchange_fractions_match_direct_formula_through_all_configuration_paths() {
+        let mut env = Environment::default();
+        let aerator = env.add_source(12, 1190.0, 20.0, 0.8, 100.0);
+        for revision in 0..7 {
+            match revision {
+                1 => {
+                    env.configure_gas_exchange(true, 0.2, 2.0, 3.0);
+                }
+                2 => {
+                    env.update_source(aerator, 12, 10.0, 300.0, 1.0, 300.0, 0.0, 600.0);
+                }
+                3 => {
+                    env.set_size(1180.0, 740.0);
+                }
+                4 => {
+                    let mut writer = Writer::new();
+                    env.write_checkpoint(&mut writer);
+                    env = Environment::read_checkpoint(&mut Reader::new(&writer.0), 9).unwrap();
+                }
+                5 => {
+                    env.configure_gas_exchange(false, 0.0, 1.0, 1.0);
+                    env.reset_dynamic();
+                }
+                6 => {
+                    env.clear_sources();
+                }
+                _ => {}
+            }
+            for i in 0..env.patch_count() {
+                let gas = &env.gases;
+                let rate = if gas.atmosphere_open {
+                    gas.exchange_rate
+                } else {
+                    0.0
+                } + gas.aeration[i];
+                let expected = if rate <= 0.0 {
+                    0.0
+                } else {
+                    -(-rate * DT).exp_m1()
+                };
+                assert_eq!(gas.exchange_fraction[i].to_bits(), expected.to_bits());
+            }
+        }
     }
 }

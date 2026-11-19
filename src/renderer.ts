@@ -1,5 +1,6 @@
 import { ORGANELLE_CATALOG } from './organelles';
 import { WorldCamera } from './world-camera';
+import { PeriodicVisibility } from './periodic-visibility';
 import type { BodyInspection, Cell, RenderCell, EnvironmentSnapshot, EnvironmentSource, EnvironmentBarrier } from './engine';
 import type { RenderWorldSnapshot } from './session';
 
@@ -17,7 +18,7 @@ function rgba(hex: string, alpha: number): string {
 
 interface TrailPoint { x: number; y: number; time: number }
 export type FieldOverlay = 'none' | 'light' | 'heat' | 'flow' | 'nutrients' | 'oxygen' | 'carbon';
-interface RenderOptions { sensors?: boolean; trails?: boolean; overlay?: FieldOverlay }
+interface RenderOptions { colonyActivity?:boolean; sensors?: boolean; trails?: boolean; overlay?: FieldOverlay }
 export type EnvironmentSelection = { kind: 'source' | 'barrier'; id: number } | null;
 interface CameraPointer { x: number; y: number; startX: number; startY: number; touch: boolean }
 
@@ -25,6 +26,7 @@ interface CameraPointer { x: number; y: number; startX: number; startY: number; 
 export class Renderer {
   private readonly context: CanvasRenderingContext2D;
   private readonly camera = new WorldCamera();
+  private readonly visibility = new PeriodicVisibility();
   private readonly input = new AbortController();
   private readonly pointers = new Map<number, CameraPointer>();
   private readonly originalTouchAction: string;
@@ -37,9 +39,11 @@ export class Renderer {
   private renderWindow: Window & typeof globalThis;
   private readonly sprites = new Map<string, HTMLCanvasElement>();
   private readonly trails = new Map<number, TrailPoint[]>();
+  private readonly livingTrails = new Set<number>();
   private background: HTMLCanvasElement | null = null;
   private fieldCanvas: HTMLCanvasElement | null = null;
-  private fieldEnvironment: EnvironmentSnapshot | null = null;
+  private fieldSamples: Float32Array | null = null;
+  private fieldPixels: ImageData | null = null;
   private fieldMode: FieldOverlay = 'none';
   private worldWidth = 1200;
   private worldHeight = 760;
@@ -102,6 +106,11 @@ export class Renderer {
     this.scale = this.camera.scale;
     this.offsetX = this.camera.offsetX;
     this.offsetY = this.camera.offsetY;
+    this.visibility.width = this.worldWidth; this.visibility.height = this.worldHeight;
+    this.visibility.left = -this.offsetX / this.scale;
+    this.visibility.right = (this.cssWidth - this.offsetX) / this.scale;
+    this.visibility.top = -this.offsetY / this.scale;
+    this.visibility.bottom = (this.cssHeight - this.offsetY) / this.scale;
   }
 
   /** Reset to a complete view without changing the simulated world. */
@@ -252,10 +261,13 @@ export class Renderer {
     if (!position) return null;
     const tolerance = 5 / this.scale;
     // Last drawn wins where barriers overlap.
-    for (const barrier of [...(world.environment.barriers ?? [])].reverse()) {
+    const barriers = world.environment.barriers;
+    for (let index = barriers.length - 1; index >= 0; index--) {
+      const barrier = barriers[index];
       const cos = Math.cos(barrier.angle), sin = Math.sin(barrier.angle);
-      for (const point of this.wrappedPositions(barrier.x, barrier.y, Math.hypot(barrier.length, barrier.width) / 2 + tolerance)) {
-        const dx = position.x - point.x, dy = position.y - point.y;
+      const count = this.visibility.collect(barrier.x, barrier.y, Math.hypot(barrier.length, barrier.width) / 2 + tolerance);
+      for (let image = 0; image < count; image += 2) {
+        const dx = position.x - this.visibility.points[image], dy = position.y - this.visibility.points[image + 1];
         if (Math.abs(dx * cos + dy * sin) <= barrier.length / 2 + tolerance
           && Math.abs(-dx * sin + dy * cos) <= barrier.width / 2 + tolerance) return barrier;
       }
@@ -272,7 +284,7 @@ export class Renderer {
       this.updateTransform();
     }
     if (this.pixelRatio !== Math.min(this.renderWindow.devicePixelRatio || 1, 2)) this.resize();
-    const optionsKey = `${options.overlay ?? 'none'}:${options.trails ?? false}:${options.sensors ?? true}`;
+    const optionsKey = `${options.overlay ?? 'none'}:${options.trails ?? false}:${options.sensors ?? true}:${options.colonyActivity ?? true}`;
     if (this.lastWorld === world && this.lastSelected === selectedId && this.lastDetails === details && this.lastBody === body
       && this.lastOptions === optionsKey && this.renderedResize === this.resizeVersion) return;
     this.lastWorld = world; this.lastSelected = selectedId; this.lastDetails = details; this.lastBody = body;
@@ -301,10 +313,11 @@ export class Renderer {
     }
     this.lastTick = world.tick;
 
-    const selected = world.cells.find((cell) => cell.id === selectedId);
+    const selected = selectedId === null ? undefined : world.cells.find((cell) => cell.id === selectedId);
     if (selected && details?.id === selected.id && options.sensors !== false) {
-      for (const point of this.wrappedPositions(selected.x, selected.y, selected.radius + 16)) {
-        this.drawBodyDetails(details, point.x, point.y);
+      const count = this.visibility.collect(selected.x, selected.y, selected.radius + 16);
+      for (let image = 0; image < count; image += 2) {
+        this.drawBodyDetails(details, this.visibility.points[image], this.visibility.points[image + 1]);
       }
     }
 
@@ -312,17 +325,20 @@ export class Renderer {
     const organicPaths = [new Path2D(),new Path2D(),new Path2D()];
     const organicHalos = [new Path2D(),new Path2D(),new Path2D()];
     for (const food of world.food) {
+      const count = this.visibility.collect(food.x, food.y, 5);
+      if (!count) continue;
       const radius = (food.kind === 1 ? 1.8 : 1.2) + clamp(Math.max(food.energy / 40, food.nutrients), 0, 1) * 0.7;
       const path = organicPaths[food.kind], halo = organicHalos[food.kind];
-      for (const point of this.wrappedPositions(food.x, food.y, 5)) {
-        halo.moveTo(point.x + 5,point.y); halo.arc(point.x,point.y,5,0,Math.PI * 2);
+      for (let image = 0; image < count; image += 2) {
+        const x = this.visibility.points[image], y = this.visibility.points[image + 1];
+        halo.moveTo(x + 5,y); halo.arc(x,y,5,0,Math.PI * 2);
         if (food.kind === 1) {
-          path.moveTo(point.x,point.y-radius); path.lineTo(point.x+radius,point.y);
-          path.lineTo(point.x,point.y+radius); path.lineTo(point.x-radius,point.y); path.closePath();
+          path.moveTo(x,y-radius); path.lineTo(x+radius,y);
+          path.lineTo(x,y+radius); path.lineTo(x-radius,y); path.closePath();
         } else if (food.kind === 2) {
-          path.rect(point.x-radius*0.7,point.y-radius*0.7,radius*1.4,radius*1.4);
+          path.rect(x-radius*0.7,y-radius*0.7,radius*1.4,radius*1.4);
         } else {
-          path.moveTo(point.x+radius,point.y); path.arc(point.x,point.y,radius,0,Math.PI * 2);
+          path.moveTo(x+radius,y); path.arc(x,y,radius,0,Math.PI * 2);
         }
       }
     }
@@ -335,12 +351,14 @@ export class Renderer {
 
     for (const cell of world.cells) {
       const margin = Math.max(cell.radius * 2.4 + 5, cell.id === selectedId ? cell.radius + 8 / this.scale : 0);
-      for (const point of this.wrappedPositions(cell.x, cell.y, margin)) {
-        this.drawCell(cell, point.x, point.y, cell.id === selectedId);
+      const count = this.visibility.collect(cell.x, cell.y, margin);
+      for (let image = 0; image < count; image += 2) {
+        this.drawCell(cell, this.visibility.points[image], this.visibility.points[image + 1], cell.id === selectedId);
       }
     }
     if (selected && details?.id===selected.id && body?.cellId===selected.id && body.cellular && options.sensors!==false) {
-      for (const point of this.wrappedPositions(selected.x,selected.y,selected.radius+32/this.scale)) this.drawCellularDetails(details,body,point.x,point.y);
+      const count = this.visibility.collect(selected.x,selected.y,selected.radius+32/this.scale);
+      for (let image = 0; image < count; image += 2) this.drawCellularDetails(details,body,this.visibility.points[image],this.visibility.points[image + 1]);
     }
     this.drawBarriers(world.environment.barriers ?? []);
     this.drawSources(world.environment.sources, overlay);
@@ -349,12 +367,17 @@ export class Renderer {
 
   private drawEnvironment(environment: EnvironmentSnapshot, mode: FieldOverlay): void {
     const { columns, rows, samples } = environment;
+    if (samples.length !== columns * rows * 7) return;
     if (!this.fieldCanvas) this.fieldCanvas = document.createElement('canvas');
-    if (this.fieldEnvironment !== environment || this.fieldMode !== mode) {
-      this.fieldCanvas.width = columns;
-      this.fieldCanvas.height = rows;
+    if (this.fieldSamples !== samples || this.fieldMode !== mode) {
+      if (this.fieldCanvas.width !== columns) this.fieldCanvas.width = columns;
+      if (this.fieldCanvas.height !== rows) this.fieldCanvas.height = rows;
       const field = this.fieldCanvas.getContext('2d')!;
-      const pixels = field.createImageData(columns, rows);
+      if (!this.fieldPixels || this.fieldPixels.width !== columns || this.fieldPixels.height !== rows) this.fieldPixels = field.createImageData(columns, rows);
+      const pixels = this.fieldPixels;
+      const red = mode === 'oxygen' ? 101 : mode === 'carbon' ? 214 : 104;
+      const green = mode === 'oxygen' ? 190 : mode === 'carbon' ? 165 : 215;
+      const blue = mode === 'oxygen' ? 247 : mode === 'carbon' ? 242 : 157;
       for (let index = 0; index < columns * rows; index += 1) {
         const offset = index * 4;
         const sample = index * 7;
@@ -369,8 +392,7 @@ export class Renderer {
           pixels.data[offset + 3] = Math.round(clamp(Math.abs(difference) * 2, 0, 1) * 108);
         } else if (mode === 'nutrients' || mode === 'oxygen' || mode === 'carbon') {
           const level = Math.max(0, samples[sample + (mode === 'nutrients' ? 4 : mode === 'oxygen' ? 5 : 6)]);
-          const color = mode === 'oxygen' ? [101, 190, 247] : mode === 'carbon' ? [214, 165, 242] : [104, 215, 157];
-          pixels.data[offset] = color[0]; pixels.data[offset + 1] = color[1]; pixels.data[offset + 2] = color[2];
+          pixels.data[offset] = red; pixels.data[offset + 1] = green; pixels.data[offset + 2] = blue;
           // Fixed scale: a fading patch always means depletion, independent of other patches.
           pixels.data[offset + 3] = Math.round(level / (level + 0.5) * 145);
         } else {
@@ -379,7 +401,7 @@ export class Renderer {
         }
       }
       field.putImageData(pixels, 0, 0);
-      this.fieldEnvironment = environment;
+      this.fieldSamples = samples;
       this.fieldMode = mode;
     }
     const context = this.context;
@@ -433,9 +455,11 @@ export class Renderer {
         || ([8,9,12].includes(source.kind) && overlay === 'oxygen') || ([10,11,12].includes(source.kind) && overlay === 'carbon');
       const directional = source.kind === 5 || source.kind === 6;
       const margin = showRadius ? directional ? Math.hypot(source.length / 2, source.radius) : source.radius : 14 / this.scale;
-      for (const point of this.wrappedPositions(source.x, source.y, margin)) {
+      const count = this.visibility.collect(source.x, source.y, margin);
+      for (let image = 0; image < count; image += 2) {
+        const x = this.visibility.points[image], y = this.visibility.points[image + 1];
         if (showRadius) {
-          context.save(); context.translate(point.x, point.y); context.rotate(source.angle);
+          context.save(); context.translate(x, y); context.rotate(source.angle);
           context.lineWidth = (selected ? 1.15 : 0.7) / this.scale;
           context.strokeStyle = rgba(color, selected ? 0.7 : 0.32);
           context.fillStyle = rgba(color, selected ? 0.045 : 0.018);
@@ -464,12 +488,12 @@ export class Renderer {
           context.restore();
         }
         if (selected) {
-          context.beginPath(); context.arc(point.x, point.y, 13 / this.scale, 0, Math.PI * 2);
+          context.beginPath(); context.arc(x, y, 13 / this.scale, 0, Math.PI * 2);
           context.strokeStyle = rgba(color, 0.42); context.lineWidth = 1 / this.scale; context.stroke();
         }
         context.setLineDash([]);
         context.beginPath();
-        context.arc(point.x, point.y, 9 / this.scale, 0, Math.PI * 2);
+        context.arc(x, y, 9 / this.scale, 0, Math.PI * 2);
         context.fillStyle = selected ? '#233b42' : '#142329';
         context.fill();
         context.lineWidth = (selected ? 1.5 : 1) / this.scale;
@@ -479,7 +503,7 @@ export class Renderer {
         context.font = `600 ${9 / this.scale}px ui-monospace, monospace`;
         context.textAlign = 'center';
         context.textBaseline = 'middle';
-        context.fillText(label, point.x, point.y + 0.3 / this.scale);
+        context.fillText(label, x, y + 0.3 / this.scale);
       }
     }
     context.restore();
@@ -504,8 +528,9 @@ export class Renderer {
       const selected = this.selection?.kind === 'barrier' && this.selection.id === barrier.id;
       const color = barrier.floating ? '#79c6df' : '#a8b6bd';
       const margin = Math.hypot(barrier.length, barrier.width) / 2 + 6 / this.scale;
-      for (const point of this.wrappedPositions(barrier.x, barrier.y, margin)) {
-        context.save(); context.translate(point.x, point.y); context.rotate(barrier.angle);
+      const count = this.visibility.collect(barrier.x, barrier.y, margin);
+      for (let image = 0; image < count; image += 2) {
+        context.save(); context.translate(this.visibility.points[image], this.visibility.points[image + 1]); context.rotate(barrier.angle);
         context.fillStyle = barrier.floating ? '#234650' : '#354148';
         context.strokeStyle = rgba(color, selected ? 1 : 0.85);
         context.lineWidth = (selected ? 1.8 : 1.1) / this.scale;
@@ -683,6 +708,22 @@ export class Renderer {
       context.stroke();
     }
     context.restore();
+    if (this.renderOptions.colonyActivity !== false) {
+      if (cell.attachedNeighbors) {
+        context.beginPath();
+        context.arc(x, y, radius * 0.9, 0, Math.PI * 2);
+        context.strokeStyle = '#60c7ba';
+        context.lineWidth = 1.15;
+        context.stroke();
+      }
+      const signal = cell.contactSignal;
+      if (signal !== undefined) {
+        context.beginPath();
+        context.arc(x, y, radius * (signal === 0 ? 0.13 : 0.32), 0, Math.PI * 2);
+        context.fillStyle = signal > 0 ? '#d4a8ff' : signal < 0 ? '#f3b75d' : '#9eaebc';
+        context.fill();
+      }
+    }
     if (cell.photosynthesisRate > 0.05) {
       context.save();
       context.strokeStyle = `rgba(239,211,127,${clamp(cell.photosynthesisRate / 12, 0.08, 0.45)})`;
@@ -750,20 +791,8 @@ export class Renderer {
     context.restore();
   }
 
-  private wrappedPositions(x: number, y: number, margin: number): { x: number; y: number }[] {
-    const xs = [x];
-    const ys = [y];
-    if (x < margin) xs.push(x + this.worldWidth);
-    if (x > this.worldWidth - margin) xs.push(x - this.worldWidth);
-    if (y < margin) ys.push(y + this.worldHeight);
-    if (y > this.worldHeight - margin) ys.push(y - this.worldHeight);
-    const left = -this.offsetX / this.scale - margin, right = (this.cssWidth - this.offsetX) / this.scale + margin;
-    const top = -this.offsetY / this.scale - margin, bottom = (this.cssHeight - this.offsetY) / this.scale + margin;
-    return xs.flatMap((px) => ys.map((py) => ({ x: px, y: py }))).filter(point => point.x >= left && point.x <= right && point.y >= top && point.y <= bottom);
-  }
-
   private recordTrails(world: RenderWorldSnapshot): void {
-    const living = new Set<number>();
+    const living = this.livingTrails; living.clear();
     for (const cell of world.cells) {
       living.add(cell.id);
       const points = this.trails.get(cell.id) ?? [];
@@ -783,6 +812,20 @@ export class Renderer {
     for (const cell of world.cells) {
       const points = this.trails.get(cell.id);
       if (!points || points.length < 2) continue;
+      // Keep the history while panning, but skip paths wholly outside the view.
+      const margin = 1.1 / this.scale;
+      const left = this.visibility.left - margin, right = this.visibility.right + margin;
+      const top = this.visibility.top - margin, bottom = this.visibility.bottom + margin;
+      if (!(points[0].x >= left && points[0].x <= right && points[0].y >= top && points[0].y <= bottom)) {
+        let crosses = false;
+        for (let i = 1; i < points.length && !crosses; i++) {
+          const a = points[i - 1], b = points[i];
+          crosses = Math.abs(a.x - b.x) <= world.width / 2 && Math.abs(a.y - b.y) <= world.height / 2
+            && Math.max(a.x, b.x) >= left && Math.min(a.x, b.x) <= right
+            && Math.max(a.y, b.y) >= top && Math.min(a.y, b.y) <= bottom;
+        }
+        if (!crosses) continue;
+      }
       context.strokeStyle = rgba(genomeColor(cell.genomeId), 0.17);
       context.beginPath();
       context.moveTo(points[0].x, points[0].y);
@@ -810,9 +853,10 @@ export class Renderer {
     this.canvas.style.touchAction = this.originalTouchAction;
     this.canvas.style.cursor = this.originalCursor;
     this.trails.clear();
+    this.livingTrails.clear();
     this.sprites.clear();
     this.background = null;
     this.fieldCanvas = null;
-    this.fieldEnvironment = null;
+    this.fieldSamples = null; this.fieldPixels = null;
   }
 }

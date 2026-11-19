@@ -50,7 +50,7 @@ const distance = (a, b) => Math.hypot(Math.min(Math.abs(a.x - b.x), 1200 - Math.
 async function createWorld(config) {
   if (!customModule) return fresh(config);
   const api = (await WebAssembly.instantiate(customModule, {})).exports;
-  assert.equal(api.abi_version(), 12);
+  assert.equal(api.abi_version(), 15);
   api.set_environment(config.ambientTemperature, config.ambientLight, config.currentStrength);
   api.set_initial_nutrients(config.initialNutrients); api.set_food_rate(0); api.set_mutation_rate(config.mutationRate);
   const gases=config.gases??{};

@@ -1,18 +1,18 @@
 use super::*;
 use crate::cellular::{AssemblyInstance, Ingredient, ProductDef, Recipe, RecipePart};
 
-fn recipe(name: &str, kind: MechanismKind, mass: f64, at: f64) -> Recipe {
+fn recipe(name: &str, kind: MechanismKind, mass: f64, at: f64) -> std::rc::Rc<Recipe> {
     let roles = kind.required_roles();
-    Recipe {
+    std::rc::Rc::new(Recipe {
         name: name.into(), kind: AssemblyKind::Mechanism(kind), at, direction: 0.0,
         parts: roles.iter().map(|&role| RecipePart {
             product: ProductDef { name: role.name().into(), kind: role, half_life: 0.0 },
             required_mass: mass / roles.len() as f64,
         }).collect(),
-    }
+    })
 }
 
-fn append(body: &mut Body, recipe: &Recipe, fraction: f64, integrity: f64) {
+fn append(body: &mut Body, recipe: &std::rc::Rc<Recipe>, fraction: f64, integrity: f64) {
     let state = body.cellular.get_or_insert_with(CellularState::default);
     state.assemblies.push(AssemblyInstance {
         id: state.next_assembly_id, recipe: recipe.clone(), integrity, activity: 1.0,
@@ -103,7 +103,7 @@ fn partial_or_disabled_copies_do_not_replace_functioning_inherited_machinery() {
     append(&mut body, &machine, 1.0, 1.0);
     append(&mut body, &machine, 1.0, 1.0);
     let mut changed_product = machine.clone();
-    changed_product.parts[0].product.half_life = 8.0;
+    std::rc::Rc::make_mut(&mut changed_product).parts[0].product.half_life = 8.0;
     append(&mut body, &changed_product, 1.0, 1.0);
     append(&mut body, &changed_product, 1.0, 1.0);
     let (left, right) = body.partition().unwrap();

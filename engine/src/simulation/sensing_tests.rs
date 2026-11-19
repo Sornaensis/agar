@@ -113,6 +113,35 @@ fn observe_and_retain_tracks(world: &mut World) -> Inputs {
 }
 
 #[test]
+fn skipping_unused_pure_sensors_preserves_outputs_and_tracking() {
+    for source in [IDLE,
+        "thrust=light.level;turn=chemical.organic_bearing;divide=false;feed=flow.speed;absorb=heat.value;",
+        "thrust=length(object.motion);turn=angle(contact.offset);divide=false;feed=chemical.mineral;absorb=light.bearing;",
+    ] {
+        let (mut world, genomes) = scene(BodyFixture::Hunter, source, 0.8);
+        world.environment.configure(0.3, 0.8, 8.0);
+        world.environment.add_source(0, 125.0, 120.0, 0.6, 80.0);
+        world.environment.emit_organic(110.0, 110.0, 12.0);
+        add_particle(&mut world, 118.0, 110.0);
+        add_cell(&mut world, BodyFixture::Hunter, 143.0, 110.0);
+        let caps: Vec<_> = world.cells.iter().map(|cell| cell.body.capacities()).collect();
+        let mut complete = ObservationWorkspace::default();
+        let mut used = ObservationWorkspace::default();
+        let before = state(&world);
+        world.observations_into(None, &caps, &mut complete, None);
+        world.observations_into(None, &caps, &mut used, Some(&genomes));
+        for (all, used) in complete.inputs.iter().zip(&used.inputs) {
+            assert_eq!(genomes[0].program.evaluate(all), genomes[0].program.evaluate(used));
+        }
+        for (all, used) in complete.tracking.iter().zip(&used.tracking) {
+            assert_eq!(all.next_serial, used.next_serial);
+            assert_eq!(format!("{:?}", all.entries), format!("{:?}", used.entries));
+        }
+        assert_eq!(before, state(&world), "sampling must remain read-only");
+    }
+}
+
+#[test]
 fn absent_receptors_reveal_no_environment_or_target_properties() {
     let (mut world, _) = scene(BodyFixture::Bare, IDLE, 1.0);
     world.environment.configure(0.3, 1.0, 20.0);

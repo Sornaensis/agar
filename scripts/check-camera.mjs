@@ -51,4 +51,36 @@ near(camera.zoom, .25, 'Invalid zoom does not corrupt camera');
 camera.fit();
 near(camera.zoom, 1, 'Fit restores zoom');
 near(camera.point(350, 250).x, 2400, 'Fit restores center');
-console.log('Camera: fit, cursor anchoring, pan, bounds, viewport resize, large worlds and invalid-input checks passed.');
+const visibilitySource = await readFile(new URL('../src/periodic-visibility.ts', import.meta.url), 'utf8');
+const visibilityCode = ts.transpileModule(visibilitySource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+const { PeriodicVisibility } = await import(`data:text/javascript;base64,${Buffer.from(visibilityCode).toString('base64')}`);
+const visibility = new PeriodicVisibility(), buffer = visibility.points;
+// Exact oracle is the former renderer helper, including image/painter order.
+function previous(x, y, margin) {
+  const xs = [x], ys = [y];
+  if (x < margin) xs.push(x + visibility.width);
+  if (x > visibility.width - margin) xs.push(x - visibility.width);
+  if (y < margin) ys.push(y + visibility.height);
+  if (y > visibility.height - margin) ys.push(y - visibility.height);
+  return xs.flatMap(px => ys.map(py => ({ x: px, y: py })))
+    .filter(point => point.x >= visibility.left - margin && point.x <= visibility.right + margin && point.y >= visibility.top - margin && point.y <= visibility.bottom + margin)
+    .flatMap(point => [point.x, point.y]);
+}
+let seed = 42, cases = 0;
+const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 2 ** 32; };
+for (const [width, height] of [[400, 400], [1200, 760], [4800, 3040]]) {
+  visibility.width = width; visibility.height = height;
+  for (const zoom of [.25, 1, 24]) {
+    camera.setWorld(width, height); camera.setViewport(1000, 760); camera.fit(); camera.zoomAt(zoom);
+    visibility.left = -camera.offsetX / camera.scale; visibility.right = (1000 - camera.offsetX) / camera.scale;
+    visibility.top = -camera.offsetY / camera.scale; visibility.bottom = (760 - camera.offsetY) / camera.scale;
+    const check = (x, y, margin) => {
+      const count = visibility.collect(x, y, margin);
+      assert.deepEqual([...visibility.points.subarray(0, count)], previous(x, y, margin));
+      assert.equal(visibility.points, buffer, 'Every entity uses the same fixed storage'); cases++;
+    };
+    for (let i = 0; i < 300; i++) check(random() * width, random() * height, random() * width * 1.2);
+    for (const x of [-0, 0, width / 2, width]) for (const y of [-0, 0, height / 2, height]) for (const margin of [0, 5, width / 2, 6000]) check(x, y, margin);
+  }
+}
+console.log(`Camera: fit, anchoring, pan, resize and bounds; ${cases} allocation-free torus image cases match exact ordered seam/viewport behavior.`);

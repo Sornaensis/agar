@@ -280,7 +280,7 @@ fn daughter_that_dies_during_division_returns_all_its_material() {
     assert!(world.energy_total() <= world.energy_input_total() + 1e-8);
 }
 
-fn paid_fission_fixture(storage_integrity: f64) -> (World, Vec<Genome>) {
+pub(super) fn paid_fission_fixture(storage_integrity: f64) -> (World, Vec<Genome>) {
     use crate::body::EMBODIED_FRACTION;
     let (mut world, genomes) = super::mechanism_tests::equipped(
         "assembly SpareStructure: support() { Frame: 0.04; }\n\

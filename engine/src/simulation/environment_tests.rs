@@ -163,7 +163,7 @@ fn live_world_resize_and_absorber_roundtrip_keep_full_material_ledger_and_exact_
         world.step(&mut registry);
     }
     let saved = bytes(&world);
-    let mut restored = World::read_checkpoint(&mut Reader::new(&saved), registry.len(), 9).unwrap();
+    let mut restored = World::read_checkpoint(&mut Reader::new(&saved), registry.len(), crate::checkpoint::VERSION).unwrap();
     assert_eq!(bytes(&restored), saved);
     for _ in 0..15 {
         world.step(&mut registry);

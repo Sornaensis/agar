@@ -26,8 +26,14 @@ let powered = enough(built.Gut, 0.06) && enough(built.ExudateEnzyme, 0.04) && en
 let equipped = powered && enough(built.LeftMotor, 0.025) && enough(built.RightMotor, 0.025);
 let surplus = equipped && energy > 55 && gut.energy > 2 && carbon.organic > 0.3 * body.area;
 let difference = sensed.LeftChemistry.organic - sensed.RightChemistry.organic;
-let steer = if sensed.LeftChemistry.valid && sensed.RightChemistry.valid && abs(difference) > 0.000001
-  then clamp(difference * 100, -1, 1) else sin(age * 0.5) * 0.3;
+let cue = sensed.LeftChemistry.valid && sensed.RightChemistry.valid && abs(difference) > 0.000001;
+let cue_turn = clamp(difference * 100, -1, 1);
+rf010 = cue_turn when cue;
+rf011 = age when cue;
+let recent = populated(rf011) && age - rf011 < 1.5;
+clear rf010 when !cue && !recent;
+clear rf011 when !cue && !recent;
+let steer = if cue then cue_turn else if recent then rf010 else sin(age * 0.5) * 0.3;
 let move = if gut.fraction > 0.5 then 0 else 0.15 + 0.25 * activate(concentration.Persistence, 0.002);
 
 let need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);

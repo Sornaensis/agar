@@ -8,7 +8,7 @@ use crate::{
 
 pub(crate) const MAX_STATE_BYTES: usize = 128 * 1024 * 1024;
 const MAGIC: &[u8; 8] = b"CELLAR01";
-const VERSION: u32 = 9;
+pub(crate) const VERSION: u32 = 11;
 pub(crate) type Result<T> = std::result::Result<T, String>;
 
 pub(crate) fn ensure(ok: bool, message: &str) -> Result<()> {
@@ -212,8 +212,8 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
     let mut r = Reader::new(bytes);
     ensure(r.take(8)? == MAGIC, "unknown save format")?;
     let version = r.u32()?;
-    if !matches!(version, 3 | 4 | 5 | 6 | 7 | 8 | VERSION) {
-        return Err(format!("Unsupported simulation version {version}. Agar supports simulation saves 3 through 9. The saved simulation is preserved."));
+    if !(3..=VERSION).contains(&version) {
+        return Err(format!("Unsupported simulation version {version}. Agar supports simulation saves 3 through 11. The saved simulation is preserved."));
     }
     ensure(r.u32()? as usize == bytes.len(), "incorrect save length")?;
     ensure(r.u32()? == checksum(&bytes[20..]), "checksum mismatch")?;
@@ -439,13 +439,69 @@ mod tests {
     }
 
     #[test]
+    fn v9_solar_founder_migrates_without_inventing_contact_registers() {
+        // Captured from the prior native ABI12 engine (SHA-256 deb178c1a522d699fadf0a0b14c5b1eee0b323d2acc73858aeace043dcc12861).
+        // 400x400, seed 42, solar.cell at (193,205), 60 ticks, 0.85 light, 3 minerals, open 1/1 gases at 0.5/s.
+        let historical = include_bytes!("../fixtures/contact-migration-v9-native.bin");
+        assert_eq!(u32::from_le_bytes(historical[8..12].try_into().unwrap()), 9);
+        let mut live = restore(historical).unwrap();
+        assert_eq!(live.world.ticks, 60);
+        assert_eq!(live.genomes.len(), 1);
+        assert_eq!(live.world.cells.len(), 1);
+        let cell = &live.world.cells[0];
+        assert_eq!(cell.energy, 63.20913203174605);
+        assert_eq!(cell.organic_carbon, 3.357653796920631);
+        assert_eq!(cell.memory.populated_count(), 0);
+        assert!(!live.genomes[0].program.participates_in_contact_signaling());
+        assert_eq!(live.genomes[0].program.published_message(&cell.memory), None);
+        let migrated = save(&live).unwrap();
+        assert_eq!(u32::from_le_bytes(migrated[8..12].try_into().unwrap()), VERSION);
+        let mut resumed = restore(&migrated).unwrap();
+        assert_eq!(save(&resumed).unwrap(),migrated);
+        for _ in 0..60 {
+            live.world.step(&mut live.genomes);
+            resumed.world.step(&mut resumed.genomes);
+        }
+        assert_eq!(save(&resumed).unwrap(), save(&live).unwrap());
+    }
+
+    #[test]
+    fn v10_marker_migrates_without_reinitializing_or_creating_a_payload() {
+        // Native64 ABI14, two cells of a register program. The first cleared
+        // its initial identity and the second was seeded on the capture tick.
+        let historical = include_bytes!("../fixtures/signal-migration-v10-native.bin");
+        assert_eq!(u32::from_le_bytes(historical[8..12].try_into().unwrap()),10);
+        let mut live = restore(historical).unwrap();
+        assert_eq!(live.world.ticks,6);
+        let p = &live.genomes[0].program;
+        let first=&live.world.cells[0].memory;
+        let second=&live.world.cells[1].memory;
+        assert_eq!(p.published_message(first),None);
+        assert_eq!(first.value("rf002"),Some(&crate::genome::Value::Scalar(6.0)));
+        assert_eq!(p.published_message(second),Some(17.0));
+        assert_eq!(p.avoid_message(second),Some(17.0));
+        assert_eq!(p.adhesion_message(second),Some(17.0));
+        assert_eq!(p.contact_signal(first),None);
+        assert_eq!(p.contact_signal(second),None);
+        let checkpoint = save(&live).unwrap();
+        assert_eq!(u32::from_le_bytes(checkpoint[8..12].try_into().unwrap()),VERSION);
+        let mut resumed = restore(&checkpoint).unwrap();
+        assert_eq!(save(&resumed).unwrap(), checkpoint);
+        for _ in 0..20 {
+            live.world.step(&mut live.genomes);
+            resumed.world.step(&mut resumed.genomes);
+        }
+        assert_eq!(save(&live).unwrap(), save(&resumed).unwrap());
+    }
+
+    #[test]
     fn pre_plan_checkpoints_keep_authored_bytes_and_rebuild_runtime_plans() {
         // Produced by the unchanged phase-one engine, not reconstructed by the
         // current serializer. Its stored budget contains no execution plan.
         let bytes = include_bytes!("../fixtures/execution-plan-v4.bin");
         let mut restored = restore(bytes).unwrap();
         let migrated_bytes = save(&restored).unwrap();
-        assert_eq!(u32::from_le_bytes(migrated_bytes[8..12].try_into().unwrap()), 9);
+        assert_eq!(u32::from_le_bytes(migrated_bytes[8..12].try_into().unwrap()), VERSION);
         assert_eq!(save(&restore(&migrated_bytes).unwrap()).unwrap(), migrated_bytes);
         let saved_budget = u32::from_le_bytes(bytes[32..36].try_into().unwrap()) as usize;
         let genome = &restored.genomes[0];
@@ -512,7 +568,7 @@ mod tests {
         let mut live = live_engine();
         let before = save(&live).unwrap();
         assert!(!live.restore_state(bytes));
-        assert!(live.error.contains("simulation saves 3 through 9"));
+        assert!(live.error.contains("simulation saves 3 through 11"));
         assert_eq!(save(&live).unwrap(), before);
         let mut version2 = before.clone();
         version2[8..12].copy_from_slice(&2u32.to_le_bytes());

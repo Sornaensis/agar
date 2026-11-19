@@ -289,8 +289,7 @@ export class CatalogUI {
           await worker.setEnvironment(next.ambientTemperature, next.ambientLight, next.currentStrength);
           await worker.setInitialNutrients(next.initialNutrients); await worker.setFoodRate(next.foodRate);
           if (!await worker.setInitialGases(next.gases.initialOxygen, next.gases.initialCarbon) || !await worker.setGasExchange(next.gases)) throw new Error('The gas settings could not be applied.');
-          await worker.clearSources();
-          for (const source of next.sources) if (!await worker.addSource(source.kind, source.x, source.y, source.strength, source.radius, source.angle, source.length)) throw new Error('An emitter could not be added.');
+          if (!await worker.replaceSources(next.sources)) throw new Error('The emitters could not be added.');
           // Settle the fields without moving authored geometry. The preview
           // then restores each motion flag at the exact saved coordinates.
           const barrierIds: number[] = [];
@@ -300,7 +299,7 @@ export class CatalogUI {
             barrierIds.push(id);
           }
           await worker.resetEmpty(42, 0);
-          const settled = await worker.advance(60);
+          const settled = await worker.advance(60, { frame: false });
           if (settled.error) throw new Error(settled.error);
           if (!alive(dialog) || engine !== worker) return;
           if (stamp !== revision) continue;
@@ -310,9 +309,10 @@ export class CatalogUI {
           }
           const presentation = await worker.presentation({ environment: true });
           if (presentation.error) throw new Error(presentation.error);
+          if (!presentation.frame || !presentation.environment || !('samples' in presentation.environment)) throw new Error('The preview snapshot is incomplete.');
           if (!alive(dialog) || engine !== worker) return;
           if (stamp !== revision) continue;
-          snapshot = { ...presentation.frame, environment: presentation.environment! }; visibleRevision = stamp;
+          snapshot = { ...presentation.frame, environment: presentation.environment }; visibleRevision = stamp;
           draw(); status.textContent = ''; status.hidden = true; return;
         }
       })().catch(error => { if (alive(dialog)) { status.hidden = false; status.textContent = 'Preview unavailable'; setDialogError(dialog, error); } }).finally(() => { busy = false; });

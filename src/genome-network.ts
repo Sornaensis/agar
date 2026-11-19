@@ -175,6 +175,12 @@ export function buildGenomeNetwork(graph: GenomeGraph): GenomeNetwork {
     if (root.guard !== null) connect(resolve(root.guard), target, `${root.id}:when`, 'when', kind, true, temporal, root.id);
     else if (root.kind === 'clear') target.constants.push({ port: 'clear', value: 'always', rule: root.id });
   }
+  // A birth-initialized marker can serve its whole lifetime without appearing
+  // in an expression or a write rule. It is still a visible register node.
+  if (graph.contactMessages) for (const key of ['publish', 'avoid', 'adhere', 'signal'] as const) {
+    const address = graph.contactMessages[key];
+    if (address) register(address);
+  }
 
   // Registers remain at level zero. Commit edges are deliberately absent from
   // this DAG calculation, including a legal direct register self-assignment.

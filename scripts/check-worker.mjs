@@ -163,6 +163,22 @@ try {
   const compactOnly = await remote.presentation();
   assert.equal(Object.hasOwn(compactOnly, 'metrics'), false);
   assert.equal(Object.hasOwn(compactOnly, 'environment'), false);
+  assert.equal(compactOnly.tick, compactOnly.frame.tick);
+  assert.deepEqual(compactOnly.summary, reference.summary());
+
+  // Hidden stepping sends exact state metadata without exporting entity arrays
+  // or field grids. A read-only full refresh later catches the player up.
+  const summaryOnly = await remote.advance(3, { frame: false }); reference.tick(3);
+  assert.equal(Object.hasOwn(summaryOnly, 'frame'), false);
+  assert.equal(Object.hasOwn(summaryOnly, 'metrics'), false);
+  assert.equal(Object.hasOwn(summaryOnly, 'environment'), false);
+  assert.equal(summaryOnly.tick, 15); assert.deepEqual(summaryOnly.summary, reference.summary());
+  const metadataOnly = await remote.presentation({ frame: false, environment: 'metadata' });
+  const { samples: _samples, ...expectedMetadata } = reference.environment();
+  assert.deepEqual(metadataOnly.environment, expectedMetadata);
+  assert.equal(Object.hasOwn(metadataOnly.environment, 'samples'), false);
+  assert.deepEqual(await remote.environmentMetadata(), expectedMetadata);
+  assert.deepEqual((await remote.presentation({ environment: true })).frame, reference.renderSnapshot());
 
   // Checkpoint metadata and owned bytes must describe the point between the two
   // queued advances, not whichever tick is current when the response is read.
@@ -173,8 +189,8 @@ try {
   const expectedBytes = reference.saveState(), expectedSummary = reference.summary();
   reference.tick(9);
   const [beforeFrame, checkpoint, afterFrame] = await Promise.all([beforeCapture, captured, afterCapture]);
-  assert.equal(beforeFrame.frame.tick, 19);
-  assert.equal(afterFrame.frame.tick, 28);
+  assert.equal(beforeFrame.frame.tick, 22);
+  assert.equal(afterFrame.frame.tick, 31);
   assert.deepEqual(checkpoint.state, expectedBytes);
   assert.deepEqual(checkpoint.summary, expectedSummary);
   assert.deepEqual(afterFrame.frame, reference.renderSnapshot());
@@ -189,14 +205,14 @@ try {
   const rejected = assert.rejects(remote.compile('thrust=;turn=0;divide=false;'), /expression|expected|unexpected/i);
   const stillReadable = remote.presentation();
   await rejected;
-  assert.equal((await stillReadable).frame.tick, 19);
+  assert.equal((await stillReadable).frame.tick, 22);
   const invalidSave = Uint8Array.from([1, 2, 3]);
   await assert.rejects(remote.restoreState(invalidSave), /save|MiB|invalid/i);
   assert.deepEqual(invalidSave, Uint8Array.from([1, 2, 3]));
   assert.deepEqual(await remote.saveState(), expectedBytes);
   await assert.rejects(remote.advance(-1), /whole ticks/);
   await remote.advance(1);
-  assert.equal((await remote.presentation()).frame.tick, 20);
+  assert.equal((await remote.presentation()).frame.tick, 23);
   await remote.summary();
   assert.ok(Atomics.load(adapter.transfers, 0) > 0, 'Worker returned transferable buffers');
   assert.equal(Atomics.load(adapter.transfers, 1), Atomics.load(adapter.transfers, 0), 'Every transferred buffer detached at its sender');
@@ -208,11 +224,11 @@ try {
   await failing.setFoodRate(0);
   await failing.resetEmpty(8, 0);
   await failing.seed(failingId, 2);
-  const partial = await failing.advance(5, { metrics: true });
+  const partial = await failing.advance(5, { frame: false, metrics: true });
   assert.match(partial.error, /after two real ticks/);
-  assert.equal(partial.frame.tick, 2);
+  assert.equal(Object.hasOwn(partial, 'frame'), false); assert.equal(partial.tick, 2);
   assert.equal(partial.metrics.tick, 2);
-  assert.equal((await failing.captureCheckpoint()).summary.time, partial.frame.time);
+  assert.equal((await failing.captureCheckpoint()).summary.time, partial.summary.time);
   assert.equal((await failing.advance(3)).frame.tick, 5, 'A reported tick failure leaves later RPC usable');
 
   // Environment commands must use the same ordered real-worker path as ticks
@@ -258,6 +274,19 @@ try {
   await habitat.clearSources(); await habitat.clearBarriers();
   environment = await habitat.environment();
   assert.equal(environment.sources.length + environment.barriers.length, 0);
+  const sourceConfig = [{kind: 5, x: 400.25, y: 500.75, strength: .3, radius: 100, angle: .7, length: 1100},
+    {kind: 8, x: 700, y: 400, strength: 1, radius: 80, angle: 0, length: 600}];
+  assert.equal(await habitat.replaceSources(sourceConfig), true);
+  const packedMetadata = await habitat.environmentMetadata();
+  assert.equal(packedMetadata.sources.length, 2);
+  for (let index = 0; index < sourceConfig.length; index++) for (const [key, value] of Object.entries(sourceConfig[index])) {
+    assert.equal(packedMetadata.sources[index][key], Math.fround(value), `Packed source ${index} ${key} preserves scalar ABI normalization`);
+  }
+  const beforeInvalid = await habitat.saveState();
+  assert.equal(await habitat.replaceSources([sourceConfig[0], {...sourceConfig[1], kind: 99}]), false);
+  assert.deepEqual(await habitat.saveState(), beforeInvalid, 'Invalid packed source replacement is atomic');
+  assert.equal(await habitat.replaceSources([]), true);
+  assert.equal((await habitat.environmentMetadata()).sources.length, 0);
 
   const { engine: chemistry } = await fresh();
   await chemistry.setFoodRate(0); await chemistry.setEnvironment(.5,0,0);
@@ -323,7 +352,7 @@ try {
   assert.ok(migratedGas.metrics.legacyCarbonImported>0,'Legacy organic inventory is explicitly counted at migration');
   checkChemicalBudget(migratedGas.metrics);
   const upgradedGas=await chemistry.saveState();
-  assert.equal(new DataView(upgradedGas.buffer,upgradedGas.byteOffset,upgradedGas.byteLength).getUint32(8,true),9);
+  assert.equal(new DataView(upgradedGas.buffer,upgradedGas.byteOffset,upgradedGas.byteLength).getUint32(8,true),11);
   const migratedFuture=await chemistry.advance(12,{metrics:true,environment:true});
   await chemistry.restoreState(upgradedGas);
   assert.deepEqual(await chemistry.advance(12,{metrics:true,environment:true}),migratedFuture);

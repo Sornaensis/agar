@@ -22,15 +22,19 @@ function setup() {
   const engine = {
     time: 0, foodRate: 0, broken: false, disposed: false, gate: null, partialFailure: false, events: [],
     summary() { return { time: this.time, population: 1, food: 0, births: 0, deaths: 0, generation: 0 }; },
-    async presentation() {
-      return { frame: { ...this.summary(), tick: this.time * 30, cells: [{ id: 1, generation: 0 }], food: [], foodRate: this.foodRate },
-        metrics: { tick: this.time * 30, population: 1 }, environment: { ambientTemperature: .5, ambientLight: .2, currentStrength: 0 } };
+    async presentation(options = {}) {
+      const result = { tick: this.time * 30, summary: this.summary() };
+      if (options.frame !== false) result.frame = { ...this.summary(), tick: this.time * 30, cells: [{ id: 1, generation: 0 }], food: [], foodRate: this.foodRate };
+      if (options.metrics) result.metrics = { tick: this.time * 30, population: 1 };
+      if (options.environment) result.environment = { columns: 1, rows: 1, ambientTemperature: .5, ambientLight: .2, currentStrength: 0, sources: [], barriers: [] };
+      if (options.environment === true) result.environment.samples = new Float32Array(7);
+      return result;
     },
-    async advance(steps) {
+    async advance(steps, options) {
       this.events.push(['advance', steps]);
       if (this.gate) { const gate = this.gate; this.gate = null; await gate.promise; }
       this.time += this.partialFailure ? 2 : steps;
-      const result = await this.presentation();
+      const result = await this.presentation(options);
       if (this.partialFailure) result.error = 'Organism allocation failed';
       this.events.push(['advanced', this.time]);
       return result;
@@ -41,6 +45,7 @@ function setup() {
       return { state: encode({ time: this.time, foodRate: this.foodRate }), summary: this.summary() };
     },
     async setFoodRate(value) { this.foodRate = value; },
+    async getCellEvaluation(id) { this.events.push(['evaluation', id, this.time]); return { cellId: id, tick: this.time * 30, value: this.foodRate }; },
     dispose() { this.disposed = true; },
   };
   const writes = [], committed = [], statuses = [];
@@ -54,7 +59,7 @@ function setup() {
     id: 'simulation:test', name: 'Test', environmentName: 'Still water', seed: 42, paused: true, speed: 1,
     createdAt: 1, updatedAt: 2, genomeNames: { 1: 'Forager' }, history: [], summary: engine.summary(),
   };
-  const initial = { frame: { ...engine.summary(), tick: 0, cells: [{ id: 1, generation: 0 }], food: [] }, metrics: {}, environment: {} };
+  const initial = { tick: 0, summary: engine.summary(), frame: { ...engine.summary(), tick: 0, cells: [{ id: 1, generation: 0 }], food: [] }, metrics: {}, environment: { columns: 1, rows: 1, samples: new Float32Array(7) } };
   const session = new SimulationSession(engine, metadata, initial, storage,
     (status, error) => statuses.push({ status, error }), value => committed.push(structuredClone(value)));
   return { engine, session, metadata, storage, writes, committed, statuses };
@@ -253,4 +258,60 @@ for (const failure of ['snapshot', 'validation', 'commit']) {
   await assert.rejects(claimSimulation('simulation:lock-test'), /Web Locks/);
 }
 
-console.log('Session checks passed: ordered commands and same-tick inspection/capture; coalesced autosaves; revision isolation; final flush; partial failures and retries; bounded history; disposal and exclusive lock lifetime.');
+// Summary-only advances keep the visual snapshot immutable while updating the
+// exact engine clock, history, dirty revision and captured checkpoint metadata.
+{
+  const { session, engine, writes } = setup();
+  const frame = session.world, samples = frame.environment.samples;
+  await session.advance(3, { frame: false });
+  assert.equal(session.world, frame); assert.equal(session.world.tick, 0);
+  assert.equal(session.tick, 90); assert.equal(session.metadata.summary.time, 3);
+  assert.equal(session.metadata.history.at(-1).time, 3); assert.equal(session.stateVersion, 1);
+  await session.refresh({ frame: false, environment: 'metadata' });
+  assert.equal(session.world.cells, frame.cells); assert.equal(session.world.environment.samples, samples);
+  assert.equal(session.stateVersion, 1, 'Read-only presentation does not invalidate inspection');
+  engine.partialFailure = true;
+  await assert.rejects(session.advance(5, { frame: false, metrics: true }), /allocation failed/);
+  assert.equal(session.tick, 150); assert.equal(session.world.tick, 0); assert.equal(session.metrics.tick, 150);
+  assert.equal(session.metadata.summary.time, 5); assert.equal(session.revision, 2);
+  const saved = session.checkpoint();
+  await until(() => writes.length === 1, 'Hidden partial progress can be checkpointed');
+  assert.equal(writes[0].record.summary.time, 5); assert.equal(decode(writes[0].record.state).time, 5);
+  writes[0].resolve(); await saved;
+  await session.refresh();
+  assert.equal(session.world.tick, session.tick); assert.notEqual(session.world.cells, frame.cells);
+  assert.notEqual(session.world.environment.samples, samples, 'Returning explicitly replaces stale field samples');
+}
+
+// Multiple editors share one trace per actual state. Same-tick world edits
+// invalidate it; UI metadata edits and read-only refreshes do not.
+{
+  const { session, engine } = setup();
+  const a = session.evaluation(1), b = session.evaluation(1);
+  assert.equal(a, b); assert.equal(await a, await b);
+  assert.equal(engine.events.filter(event => event[0] === 'evaluation').length, 1);
+  session.metadata.name = 'Renamed'; session.touch();
+  await session.refresh({ frame: false }); await session.evaluation(1);
+  assert.equal(engine.events.filter(event => event[0] === 'evaluation').length, 1);
+  await session.mutate(current => current.setFoodRate(12));
+  const beforeStep = await session.evaluation(1);
+  assert.equal(beforeStep.evaluation.value, 12);
+  assert.equal(beforeStep.stateVersion, session.stateVersion);
+  assert.equal(engine.events.filter(event => event[0] === 'evaluation').length, 2);
+  const gate = engine.gate = deferred(), advance = session.advance(1, { frame: false });
+  const next = session.evaluation(1);
+  // A resolved cache must not hide advancement already queued before this read.
+  gate.resolve(); await advance;
+  assert.equal((await next).evaluation.tick, session.tick);
+  assert.equal(beforeStep.stateVersion, session.stateVersion - 1, 'An old trace retains the version it actually read');
+  await session.evaluation(1);
+  assert.equal(engine.events.filter(event => event[0] === 'evaluation').length, 3);
+  const read = engine.getCellEvaluation; let fail = true;
+  engine.getCellEvaluation = async function(id) { if (fail) throw new Error('Trace unavailable'); return read.call(this, id); };
+  await assert.rejects(session.evaluation(2), /Trace unavailable/); fail = false;
+  assert.equal((await session.evaluation(2)).evaluation.cellId, 2, 'A failed trace is retryable');
+  session.dispose();
+  await assert.rejects(session.evaluation(1), /closed/, 'A closed session cannot return a previously cached successful trace');
+}
+
+console.log('Session checks passed: ordered commands; exact summary-only progress and partial errors; immutable visual frames; metadata/field reuse; shared same-state inspection and mutation invalidation; checkpoints, retries, bounded history, disposal and locks.');

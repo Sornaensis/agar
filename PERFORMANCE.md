@@ -1,10 +1,129 @@
 # Simulation performance
 
-The measurements below record the builds identified in their linked reports.
-Subsequent consumer-development, energy-allocation and division changes alter
-simulation trajectories; the older behavior-equality measurements are historical
-evidence for those optimization steps. Current food-chain validation is described
-in [the ecosystem experiments](experiments/README.md).
+## ABI 13: larger simulations
+
+These changes preserve the physical rules and checkpoint format 9. The current
+release is compared directly with the delivered ABI 12 build; all ten benchmark
+trajectories have identical canonical checkpoints, full world buffers and
+complete environment buffers at the sampled boundaries. Runtime allocation
+diagnostics are allowed to differ; physical values are not normalized.
+
+### Whole-engine measurements
+
+| Workload | Previous tick | Optimized tick | Speedup |
+| --- | ---: | ---: | ---: |
+| Mixed ecosystem, 84 founders | 5.39 ms | 2.46 ms | 2.19× |
+| Mixed ecosystem, fixed and floating barriers | 16.06 ms | 3.88 ms | 4.14× |
+| 1,000 Phototrophs, default world | 37.84 ms | 25.97 ms | 1.46× |
+| 1,000 Phototrophs, maximum world | 48.65 ms | 35.47 ms | 1.37× |
+| 1,000 Foragers + 19,265 particles, maximum world | 184.32 ms | 158.91 ms | 1.16× |
+| 20,000 particles, default world | 13.84 ms | 5.73 ms | 2.42× |
+| 100,000 particles, maximum world | 108.72 ms | 46.85 ms | 2.32× |
+| Maximum fields, currents, no barriers | 52.18 ms | 10.57 ms | 4.93× |
+| Maximum fields, currents, three fixed barriers | 120.59 ms | 14.03 ms | 8.59× |
+| Maximum fields, currents, three floating barriers | 119.42 ms | 14.58 ms | 8.19× |
+
+Default worlds are 1,200 × 760; maximum worlds are 4,800 × 3,040.
+Field-only cases contain no organisms or particles and use seven sources with
+ambient current 8. These are Node/V8 release-WASM measurements with
+`--no-liftoff`: medians of three identical 60-tick trajectories, alternating
+engine order, with five untimed scratch-warm ticks after restore. Setup,
+checkpoint verification, UI hydration, worker transfer and drawing are excluded.
+The report retains individual samples, build hashes, export timings and memory.
+
+The gain depends on the workload. The 1,000-Forager case remains expensive:
+158.91 ms/tick is below real-time throughput on this runtime, whose 30-Hz
+simulation needs at most 33.33 ms/tick. These changes preserve its full physical
+sensing and persistent tracking behavior. They do not reduce sensor fidelity or
+skip biological ticks.
+
+Raw results: [performance-abi13.json](experiments/performance-abi13.json).
+
+### What changed
+
+- Environment transport uses conservative nearby-barrier candidates, cached
+  neighbor visibility and shared scalar stencils. Ambient trigonometry is
+  prepared per row/column; static source work, gas-exchange fractions and patch
+  geometry are cached. Source addition order, scalar interpolation arithmetic,
+  flux allocation and the final flow cap are preserved.
+- Sensing rejects losing optical candidates before occlusion, computes contact
+  protection only for the selected contact, and samples only requested pure
+  receptor fields. Legacy tracking still executes. Capture indexes eligible
+  cells and stops querying once their budgets or usable stores are exhausted.
+- Genome plans reuse identical typed expressions while authored graphs remain
+  intact. Redundant value conversions are removed; immutable definitions and
+  recipes use copy-on-write sharing with stable cache identity. Post-work body
+  capacities are reused through the second spill, with divided bodies refreshed.
+- Particle reactions use their known patch index, bypass zero-oxygen allocations,
+  and visit occupied patch groups in ascending order. Per-particle arithmetic and
+  mineral-request sorting remain unchanged.
+- Builder source lists are validated and replaced atomically with one cache
+  rebuild. Configured one-off additions also avoid the former add/update pair.
+
+### Player and presentation
+
+Advancement now returns an exact tick and summary independently of drawing.
+Hidden and non-player views omit entity frames; visible frames are requested at
+most about 30 times per second. Source/barrier metadata is separate from field
+samples. Omitting an undisplayed maximum grid avoids **1,021,440 bytes** of field
+samples per update. Field pixels reuse storage, and inspectors share a trace
+for the same accepted state, rejecting stale results and closed-session reads.
+
+The completion-driven scheduler keeps one advancing batch, starts with one
+tick, then adapts toward a 12 ms budget with an eight-tick ceiling. It yields to
+commands between batches and resets accumulated time on pause/lifecycle changes.
+Fake-clock tests reach approximately 300 ticks/s at hidden 10× playback without
+rAF; this removes the app's previous 80-tick/s ceiling. Browser/OS throttling or
+suspension can still reduce background throughput.
+
+Periodic-image culling uses one reusable coordinate buffer. With 10,000 cells
+and 100,000 particles, the production helper measured:
+
+| View | Previous traversal | Optimized traversal |
+| --- | ---: | ---: |
+| World fit | 64.52 ms | 3.28 ms |
+| 24× zoom | 59.52 ms | 2.69 ms |
+
+This is a Node helper benchmark, with 6,552 exact ordered-image checks and
+matching traversal counts/checksums. It does not measure Canvas/GPU or browser
+FPS. Visible frames retain their immutable decoded-object semantics.
+Raw results: [presentation-performance.json](experiments/presentation-performance.json).
+
+### Validation and tradeoffs
+
+The final build passes **306 native release tests** and **17 integration checks**,
+including real workers, player lifecycle, session/storage behavior, inspector
+freshness, camera seams, the WASM ABI and all eight supplied organism lifecycles.
+A separate old/new comparison matches **74 sampled states**, including a real
+Phototroph division with an automatically mutated daughter at 83.9 seconds,
+live source/barrier edits, resizing, gas-boundary changes and cross-version
+restore/continuation. See [optimization-equivalence.json](experiments/optimization-equivalence.json)
+and [optimization-validation.json](experiments/optimization-validation.json).
+A real Chromium smoke test remains unavailable in this execution environment.
+
+Exact-result caches trade memory for speed. The maximum field-only benchmark
+allocated 42.00 MiB of WASM linear memory versus 25.19 MiB previously. This is an
+allocated-memory measure after restore and export work, not a live-heap census.
+At maximum dimensions, ambient-current caching uses about 1.67 MiB per active
+flow source; source-only flow can use one combined grid instead. Definition
+sharing is per declaration handle, and checkpoint-loaded recipe records are not
+globally deduplicated. Derived memory is charged conservatively, so registry
+admission near the 64 MiB limit can differ while authored checkpoint budgets
+remain unchanged.
+
+Reproduce the current comparisons with:
+
+```sh
+npm run build:wasm
+npm run bench:simulation -- --baseline /path/to/ABI12.wasm --output experiments/performance-abi13.json
+node --no-liftoff scripts/benchmark-presentation.mjs --output experiments/presentation-performance.json
+# Run from the archived ABI 13 project with its matching presets and module.
+node --no-liftoff scripts/check-optimization-equivalence.mjs --baseline /path/to/ABI12.wasm --output experiments/optimization-equivalence.json
+```
+
+## Earlier optimization measurements
+
+The following reports describe earlier builds and trajectories.
 
 ## Cellular execution improvements
 

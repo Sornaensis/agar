@@ -37,15 +37,16 @@ async function developed(name, required) {
   return { api, genome, state };
 }
 function placeAhead(api, targetGenome, cell, separation) {
+  const known = new Set(snapshot(api).cells.map(other => other.id));
   const checkpoint = save(api);
   seed(api, targetGenome, 1, cell.x, cell.y);
-  const trial = snapshot(api).cells.find(other => other.genome === targetGenome);
+  const trial = snapshot(api).cells.find(other => !known.has(other.id));
   const jitter = { x: delta(trial.x - cell.x, 1200), y: delta(trial.y - cell.y, 760) };
   assert.equal(restore(api, checkpoint), 1);
   seed(api, targetGenome, 1,
     wrap(cell.x + Math.cos(cell.angle) * separation - jitter.x, 1200),
     wrap(cell.y + Math.sin(cell.angle) * separation - jitter.y, 760));
-  return snapshot(api).cells.find(other => other.genome === targetGenome);
+  return snapshot(api).cells.find(other => !known.has(other.id));
 }
 function placeParticleAhead(api, cell, noseDistance) {
   const checkpoint = save(api);
@@ -99,6 +100,20 @@ assert.ok(sawParticle && bestGut > 1 && digestion > 1, 'After following the surf
 const predator = await developed('Predator', ['Gut', 'Capture', 'TissueEnzyme', 'LeftMotor', 'RightMotor', 'Vision', 'Touch', 'Piercer']);
 const preyGenome = compile(predator.api, 'thrust=0;turn=0;divide=false;feed=0;absorb=0;');
 const hunter = predator.state.cells[0];
+// Replay the same approach with a new Predator and an unrelated marker mimic.
+const markedGenome = compile(predator.api, 'cellular; publish rf099 = 17;');
+const encounterStart = save(predator.api);
+for (const visitor of [predator.genome, markedGenome]) {
+  const neighbor = placeAhead(predator.api, visitor, hunter, hunter.radius + 7 - 0.1);
+  const read = values(predator.api, hunter.id);
+  assert.equal(read['sensed.Touch.message_valid'], true);
+  assert.equal(read['sensed.Touch.message'], 17);
+  assert.equal(read.peer, true);
+  const state = advance(predator.api, 120);
+  assert.equal(state.attacks, 0, 'A signed contact must be spared, including on its first tick');
+  assert.equal(state.cells.find(cell => cell.id === neighbor.id)?.integrity, 1);
+  assert.equal(restore(predator.api, encounterStart), 1);
+}
 const prey = placeAhead(predator.api, preyGenome, hunter, hunter.radius + 7 - 0.1);
 assert.equal(values(predator.api, 1)['sensed.Touch.valid'], true);
 let tissuePeak = 0, usefulTissue = 0, killed = false;

@@ -39,7 +39,10 @@ fn fixture(definitions: usize, copies: usize) -> (Body, CellularProgram) {
         parts: (0..3).map(|j| ((i + j) % definitions, 0.04 / 3.0)).collect(),
         at: 0.0, direction: 0.0,
     }).collect();
-    let program = CellularProgram { products, assemblies };
+    let program = CellularProgram::new(
+        products,
+        assemblies,
+    );
     program.validate().unwrap();
     let (mut body, _) = Body::founder();
     body.area = definitions as f64;
@@ -56,8 +59,8 @@ fn fixture(definitions: usize, copies: usize) -> (Body, CellularProgram) {
             }).collect();
             state.assemblies.push(AssemblyInstance {
                 id: state.next_assembly_id,
-                recipe: Recipe { name: def.name.clone(), kind: def.kind,
-                    parts: parts.clone(), at: def.at, direction: def.direction },
+                recipe: std::rc::Rc::new(Recipe { name: def.name.clone(), kind: def.kind,
+                    parts: parts.clone(), at: def.at, direction: def.direction }),
                 ingredients: parts.iter().map(|p| Ingredient {
                     mass: p.required_mass * if copy == copies - 1 { 0.75 } else { 1.0 },
                     embodied_energy: 0.0,

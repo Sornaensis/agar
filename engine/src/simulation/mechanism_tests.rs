@@ -79,13 +79,13 @@ pub(super) fn equipped(extra: &str) -> (World, Vec<Genome>) {
             .collect();
         state.assemblies.push(AssemblyInstance {
             id: state.next_assembly_id,
-            recipe: Recipe {
+            recipe: std::rc::Rc::new(Recipe {
                 name: def.name.clone(),
                 kind: def.kind,
                 parts,
                 at: def.at,
                 direction: def.direction,
-            },
+            }),
             ingredients,
             integrity: 1.0,
             activity: 1.0,
@@ -474,7 +474,7 @@ fn mechanism_checkpoints_resume_exactly_and_reject_unknown_body_tags_atomically(
     original.world = world;
     original.genomes = genomes;
     let bytes = crate::checkpoint::save(&original).unwrap();
-    assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 9);
+    assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 11);
     let mut restored = crate::checkpoint::restore(&bytes).unwrap();
     assert_eq!(crate::checkpoint::save(&restored).unwrap(), bytes);
     for _ in 0..120 {

@@ -127,7 +127,7 @@ thread_local! { static ENGINE: RefCell<Engine> = RefCell::new(Engine::new()); }
 
 #[no_mangle]
 pub extern "C" fn abi_version() -> u32 {
-    12
+    15
 }
 
 /// Allocate a writable, zero-initialized byte buffer. The caller must deallocate
@@ -391,7 +391,7 @@ pub extern "C" fn cell_evaluation_ptr(cell_id: u32) -> *const u8 {
             return std::ptr::null();
         };
         let genome = &engine.genomes[(cell.genome_id - 1) as usize];
-        let inputs = engine.world.sense_program(cell_id, &genome.program).unwrap();
+        let inputs = engine.world.sense_program_in_registry(cell_id, &genome.program, &engine.genomes).unwrap();
         match Program::evaluation_json(
             &genome.source,
             &inputs,
@@ -588,6 +588,60 @@ pub extern "C" fn add_source(kind: u32, x: f32, y: f32, strength: f32, radius: f
     })
 }
 
+/// Install a complete emitter with one derived-field rebuild.
+#[no_mangle]
+pub extern "C" fn add_source_configured(kind: u32, x: f32, y: f32, strength: f32,
+    radius: f32, angle: f32, length: f32) -> u32 {
+    ENGINE.with(|e| {
+        let mut e = e.borrow_mut();
+        e.error.clear();
+        let id = e.world.environment.add_source_configured(kind, x as f64, y as f64,
+            strength as f64, radius as f64, angle as f64, length as f64);
+        if id == 0 {
+            e.error = "Could not add source: use a kind from 0 through 12, finite values, and at most 64 sources.".into();
+        }
+        id
+    })
+}
+
+/// Atomically replace emitters from packed little-endian f64 records:
+/// kind, x, y, strength, radius, angle, length. Empty input clears the list.
+/// # Safety
+/// For nonempty input, ptr must identify count * 56 readable bytes from alloc.
+#[no_mangle]
+pub unsafe extern "C" fn replace_sources(ptr: *const u8, count: u32) -> u32 {
+    ENGINE.with(|e| {
+        let mut e = e.borrow_mut();
+        e.error.clear();
+        if count > 64 || (count != 0 && ptr.is_null()) {
+            e.error = "Source list must contain at most 64 complete sources.".into();
+            return 0;
+        }
+        let bytes = if count == 0 { &[][..] }
+            else { std::slice::from_raw_parts(ptr, count as usize * 56) };
+        let mut configs = Vec::with_capacity(count as usize);
+        for record in bytes.chunks_exact(56) {
+            let mut values = [0.0_f64; 7];
+            for (value, bytes) in values.iter_mut().zip(record.chunks_exact(8)) {
+                *value = f64::from_le_bytes(bytes.try_into().unwrap());
+            }
+            if !values[0].is_finite() || values[0] < 0.0 || values[0] > 12.0 || values[0].fract() != 0.0 {
+                e.error = "Source kinds must be integers from 0 through 12.".into();
+                return 0;
+            }
+            // Match the established scalar ABI's f32 argument precision.
+            let f = |index: usize| values[index] as f32 as f64;
+            configs.push(environment::SourceConfig {
+                kind: values[0] as u32, x: f(1), y: f(2), strength: f(3),
+                radius: f(4), angle: f(5), length: f(6),
+            });
+        }
+        let ok = e.world.environment.replace_sources(&configs);
+        if !ok { e.error = "Invalid source parameters or exhausted source identifiers.".into(); }
+        u32::from(ok)
+    })
+}
+
 #[no_mangle]
 pub extern "C" fn remove_source(id: u32) -> u32 {
     ENGINE.with(|e| {
@@ -704,6 +758,23 @@ pub extern "C" fn environment_snapshot_len() -> u32 {
     ENGINE.with(|e| e.borrow().environment_snapshot.len() as u32)
 }
 
+/// The normal environment header plus source/barrier records, without grid samples.
+/// This shares the environment projection buffer; copy before another projection.
+#[no_mangle]
+pub extern "C" fn environment_metadata_ptr() -> *const f32 {
+    ENGINE.with(|e| {
+        let mut e = e.borrow_mut();
+        let Engine { world, environment_snapshot, .. } = &mut *e;
+        world.environment.metadata_snapshot(environment_snapshot);
+        environment_snapshot.as_ptr()
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn environment_metadata_len() -> u32 {
+    ENGINE.with(|e| e.borrow().environment_snapshot.len() as u32)
+}
+
 #[no_mangle]
 pub extern "C" fn reset(seed: u32, genome_id: u32) -> u32 {
     ENGINE.with(|e| {
@@ -711,7 +782,8 @@ pub extern "C" fn reset(seed: u32, genome_id: u32) -> u32 {
         if !e.valid_genome(genome_id) {
             return 0;
         }
-        match e.world.try_reset(seed, genome_id) {
+        let Engine { world, genomes, .. } = &mut *e;
+        match world.try_reset_in_registry(seed, genome_id, genomes) {
             Ok(()) => 1,
             Err(error) => {
                 e.error = error;
@@ -756,7 +828,8 @@ pub extern "C" fn seed_cells(genome_id: u32, count: f64, x: f32, y: f32) -> u32 
             return 0;
         }
         if !e.valid_genome(genome_id) { return 0; }
-        match e.world.try_seed_cells(genome_id, count as usize, x as f64, y as f64) {
+        let Engine { world, genomes, .. } = &mut *e;
+        match world.try_seed_cells_in_registry(genome_id, count as usize, x as f64, y as f64, genomes) {
             Ok(added) => added as u32,
             Err(error) => { e.error = error; 0 }
         }
@@ -831,10 +904,12 @@ pub extern "C" fn render_snapshot_ptr() -> *const f64 {
         let mut engine = engine.borrow_mut();
         let Engine {
             world,
+            genomes,
             presentation_buffer,
             ..
         } = &mut *engine;
         world.render_snapshot(presentation_buffer);
+        world.append_colony_activity(genomes, presentation_buffer);
         presentation_buffer.as_ptr()
     })
 }
@@ -1003,7 +1078,7 @@ mod tests {
         engine.world.cells[0].vy = -1.25;
         engine.world.cells[0].integrity = 0.8;
         engine.world.snapshot(&mut engine.snapshot);
-        assert_eq!(abi_version(), 12);
+        assert_eq!(abi_version(), 15);
         assert_eq!(simulation::CELL_STRIDE, 163);
         assert_eq!(engine.snapshot.len(), 12 + 22 * simulation::CELL_STRIDE + 360 * 5);
         assert_eq!(engine.snapshot[7], simulation::WIDTH as f64);
@@ -1245,6 +1320,47 @@ mod tests {
         assert_eq!(error_len(), 0);
         assert_eq!(genome_byte_limit(), 64 * 1024 * 1024);
         assert!(genome_bytes() > 0);
+    }
+
+    #[test]
+    fn packed_source_replacement_is_atomic_unaligned_safe_and_matches_scalar_edits() {
+        ENGINE.with(|e| *e.borrow_mut() = Engine::new());
+        assert!(add_source(0, 20.0, 30.0, 0.5, 100.0) > 0);
+        let before = ENGINE.with(|e| checkpoint::save(&e.borrow()).unwrap());
+        let records = [
+            [6.0_f64, -1.123456789, 761.1, 2.0, 4.0, -0.123456789, 900.1],
+            [8.0, 35.0, 68.0, 0.42, 130.1, 1.5, 700.0],
+        ];
+        clear_sources();
+        for row in records {
+            let [kind, x, y, strength, radius, angle, length] = row;
+            let id = add_source(kind as u32, x as f32, y as f32, strength as f32, radius as f32);
+            assert!(id > 0);
+            assert_eq!(update_source(id, kind as u32, x as f32, y as f32,
+                strength as f32, radius as f32, angle as f32, length as f32), 1);
+        }
+        let expected = ENGINE.with(|e| checkpoint::save(&e.borrow()).unwrap());
+        ENGINE.with(|e| assert!(e.borrow_mut().restore_state(&before)));
+        let mut packed = vec![0_u8]; // Deliberately offset from allocation alignment.
+        for row in records { for value in row { packed.extend(value.to_le_bytes()); } }
+        assert_eq!(unsafe { replace_sources(packed.as_ptr().add(1), 2) }, 1);
+        assert_eq!(ENGINE.with(|e| checkpoint::save(&e.borrow()).unwrap()), expected);
+        let pointer = environment_snapshot_ptr();
+        let full = unsafe { std::slice::from_raw_parts(pointer, environment_snapshot_len() as usize) }.to_vec();
+        let pointer = environment_metadata_ptr();
+        let metadata = unsafe { std::slice::from_raw_parts(pointer, environment_metadata_len() as usize) };
+        assert_eq!(&metadata[..21], &full[..21]);
+        assert_eq!(&metadata[21..], &full[21 + environment::PATCHES * 7..]);
+        assert_eq!(ENGINE.with(|e| checkpoint::save(&e.borrow()).unwrap()), expected);
+        for kind in [f64::NAN, 0.5, 13.0] {
+            packed[1..9].copy_from_slice(&kind.to_le_bytes());
+            assert_eq!(unsafe { replace_sources(packed.as_ptr().add(1), 2) }, 0);
+            assert_eq!(ENGINE.with(|e| checkpoint::save(&e.borrow()).unwrap()), expected);
+        }
+        assert_eq!(unsafe { replace_sources(std::ptr::null(), 65) }, 0);
+        assert_eq!(ENGINE.with(|e| checkpoint::save(&e.borrow()).unwrap()), expected);
+        assert_eq!(unsafe { replace_sources(std::ptr::null(), 0) }, 1);
+        ENGINE.with(|e| assert!(e.borrow().world.environment.sources.is_empty()));
     }
 
     #[test]

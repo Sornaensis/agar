@@ -18,10 +18,8 @@ impl World {
     /// committed together before proportional, supply-limited inward transfers.
     /// O2/DIC diffuse passively; neither pumps nor a species identity are needed.
     pub(super) fn exchange_gases_in(&mut self, workspace: &mut PhaseWorkspace) {
-        let groups = &mut workspace.groups;
-        groups.resize_with(self.environment.patch_count(), Vec::new);
         for oxygen in [true, false] {
-            for group in groups.iter_mut() { group.clear(); }
+            workspace.clear_groups(self.environment.patch_count());
             for (index, cell) in self.cells.iter().enumerate() {
                 if !cell.alive() { continue; }
                 let patch = self.environment.patch_index(cell.x, cell.y);
@@ -30,20 +28,20 @@ impl World {
                 let outside = if oxygen { self.environment.oxygen_patch(patch) } else { self.environment.inorganic_carbon_patch(patch) };
                 let conductance = (0.6 * cell.body.area.sqrt() * DT).min(volume * 0.5);
                 let amount = (outside - internal / volume) * conductance;
-                if amount != 0.0 { groups[patch].push((index, amount.max(-internal))); }
+                if amount != 0.0 { workspace.group_request(patch, (index, amount.max(-internal))); }
             }
-            for (patch, group) in groups.iter().enumerate() {
-                if group.is_empty() { continue; }
+            for patch in occupied_patches(&workspace.group_patches) {
+                let group = &workspace.groups[patch];
                 let mut demand = 0.0;
                 for &(index, amount) in group {
                     if amount >= 0.0 { demand += amount; continue; }
                     let cell = &mut self.cells[index];
                     if oxygen {
                         cell.internal_oxygen += amount;
-                        self.environment.release_oxygen(cell.x, cell.y, -amount);
+                        self.environment.release_oxygen_patch(patch, -amount);
                     } else {
                         cell.internal_inorganic_carbon += amount;
-                        self.environment.release_inorganic_carbon(cell.x, cell.y, -amount);
+                        self.environment.release_inorganic_carbon_patch(patch, -amount);
                     }
                 }
                 if demand == 0.0 { continue; }
@@ -58,9 +56,8 @@ impl World {
                     else { self.cells[index].internal_inorganic_carbon += received; }
                 }
                 if remaining > 0.0 {
-                    let cell = &self.cells[group[0].0];
-                    if oxygen { self.environment.release_oxygen(cell.x, cell.y, remaining); }
-                    else { self.environment.release_inorganic_carbon(cell.x, cell.y, remaining); }
+                    if oxygen { self.environment.release_oxygen_patch(patch, remaining); }
+                    else { self.environment.release_inorganic_carbon_patch(patch, remaining); }
                 }
             }
         }
@@ -93,19 +90,19 @@ impl World {
     /// An explicit background aerobic decay reaction. No oxygen means no decay;
     /// particles retain their carbon. Its extent and O2 demand are accounted.
     pub(super) fn decay_food_in(&mut self, workspace: &mut PhaseWorkspace) {
-        let groups = &mut workspace.groups;
-        groups.resize_with(self.environment.patch_count(), Vec::new);
-        for group in groups.iter_mut() { group.clear(); }
+        workspace.clear_groups(self.environment.patch_count());
         let fractions = ORGANIC_DECAY.map(|rate| -(-rate * DT).exp_m1());
         for (index, food) in self.food.iter().enumerate() {
             let carbon = food.energy / CHEMICAL_ENERGY_PER_CARBON;
             let requested = if food.energy <= 1e-6 { carbon } else { carbon * fractions[food.kind as usize] };
-            if requested > 0.0 { groups[self.environment.patch_index(food.x, food.y)].push((index, requested)); }
+            if requested > 0.0 { workspace.group_request(self.environment.patch_index(food.x, food.y), (index, requested)); }
         }
-        for (patch, group) in groups.iter().enumerate() {
+        for patch in occupied_patches(&workspace.group_patches) {
+            let group = &workspace.groups[patch];
             let demand: f64 = group.iter().map(|(_, amount)| amount).sum();
             if demand == 0.0 { continue; }
             let supplied = self.environment.take_oxygen(patch, demand);
+            if supplied == 0.0 { continue; }
             let factor = (supplied / demand).min(1.0);
             let mut remaining = supplied;
             for &(index, requested) in group {
@@ -117,19 +114,18 @@ impl World {
                 let minerals = food.nutrients * fraction;
                 food.energy = (food.energy - consumed * CHEMICAL_ENERGY_PER_CARBON).max(0.0);
                 food.nutrients = (food.nutrients - minerals).max(0.0);
-                self.environment.recycle_nutrients(food.x, food.y, minerals);
-                self.environment.release_inorganic_carbon(food.x, food.y, consumed);
-                self.environment.emit_organic(food.x, food.y, consumed * CHEMICAL_ENERGY_PER_CARBON * 0.08);
+                self.environment.recycle_nutrients_patch(patch, minerals);
+                self.environment.release_inorganic_carbon_patch(patch, consumed);
+                self.environment.emit_organic_patch(patch, consumed * CHEMICAL_ENERGY_PER_CARBON * 0.08);
                 self.decay_carbon_respired_total += consumed;
                 remaining = (remaining - consumed).max(0.0);
                 if food.energy == 0.0 {
-                    self.environment.recycle_nutrients(food.x, food.y, food.nutrients);
+                    self.environment.recycle_nutrients_patch(patch, food.nutrients);
                     food.nutrients = 0.0;
                 }
             }
             if remaining > 0.0 {
-                let food = &self.food[group[0].0];
-                self.environment.release_oxygen(food.x, food.y, remaining);
+                self.environment.release_oxygen_patch(patch, remaining);
             }
         }
         self.food.retain(|food| food.energy > 0.0);

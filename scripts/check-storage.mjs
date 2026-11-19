@@ -24,9 +24,9 @@ const catalog = await import(await moduleUrl('../src/catalog.ts', { './presets':
 const { BUILTIN_GENOMES: genomes, BUILTIN_ENVIRONMENTS: environments, BUILTIN_SIMULATIONS: simulations } = catalog;
 const copy = value => structuredClone(value);
 
-assert.equal(genomes.length, 8);
-assert.equal(environments.length, 4);
-assert.equal(simulations.length, 4);
+assert.equal(genomes.length, 11);
+assert.equal(environments.length, 5);
+assert.equal(simulations.length, 7);
 for (const genome of genomes) {
   assert.ok(Object.isFrozen(genome));
   assert.throws(() => storage.validateGenomeDocument(genome), /copied/);

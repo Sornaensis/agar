@@ -11,7 +11,7 @@ export const MECHANISM_KINDS = [
   'import(mineral)', 'import(particle)', 'engulf()', 'digest(exudate)', 'digest(tissue)', 'digest(waste)',
   'propel()', 'pierce()', 'shield()', 'repair()', 'sense(light)', 'sense(heat)', 'sense(chemical)',
   'sense(contact)', 'sense(optical)', 'grow()', 'replicate()', 'constrict()', 'recycle()',
-  'respire(oxygen)',
+  'respire(oxygen)', 'adhere()', 'junction(energy)', 'junction(mineral)', 'junction(carbon)',
 ] as const;
 export type MechanismKind = typeof MECHANISM_KINDS[number];
 export type CellularAssemblyKind = OrganelleKind | 'membrane' | 'replicator' | 'constrictor' | MechanismKind;
@@ -38,6 +38,7 @@ export interface BodyInspection {
   organs: { id:number; kind:OrganelleKind; mass:number; integrity:number; functional:boolean; minimumMass:number; embodiedEnergy:number }[];
   requested: { kind:OrganelleKind; count:number; size:number; build:number; recycle:number; proteinMass:number }[];
   cellular?:CellularBodyInspection|null;
+  colony?: { neighbors:number; energyNet:number; mineralNet:number; carbonNet:number };
 }
 
 /** Physical inventories are validated before use in the inspector or canvas. */
@@ -52,6 +53,8 @@ export function validateBodyInspection(value: unknown, expectedCellId: number): 
     || !Array.isArray(body.organs) || body.organs.length>24000 || !body.organs.every(o=>o && Number.isInteger(o.id) && o.id>0 && kind(o.kind) && [o.mass,o.integrity,o.minimumMass,o.embodiedEnergy].every(finite) && o.integrity<=1 && typeof o.functional==='boolean')
     || new Set(body.organs.map(o=>o.id)).size!==body.organs.length
     || !Array.isArray(body.requested) || body.requested.length!==16 || !body.requested.every((r,i)=>r.kind===ORGANELLE_KINDS[i] && Number.isInteger(r.count) && r.count>=0 && [r.size,r.build,r.recycle,r.proteinMass].every(finite) && r.build<=1 && r.recycle<=1)) return fail();
+  if (body.colony !== undefined && (!body.colony || !Number.isSafeInteger(body.colony.neighbors)
+    || body.colony.neighbors < 0 || ![body.colony.energyNet,body.colony.mineralNet,body.colony.carbonNet].every(angle))) return fail();
   if (body.cellular != null) {
     const cellular = body.cellular;
     const roles = new Set(['scaffold','anchor','motor','filament','pigment','enzyme','membrane','transporter','receptor','regulator','replicase','constrictor']);
@@ -83,6 +86,8 @@ export interface LanguageSchema {
   cellular?: { marker:'cellular;'; products:{name:string;arguments:string[]}[]; assemblies:{name:string;requiredRoles:string[]}[];
     mechanisms?:{name:string;constructor:string;target:string|null;requiredRoles:string[];description:string;receptorFields?:{name:string;type:GenomeValueType;requiresValid:boolean}[]}[];
     recipeControls?:{name:string;type:GenomeValueType;default:GenomeValue}[];
+    registers:{prefixes:string[];addressesPerType:number;upkeepPerSecond:number;clearWins:boolean};
+    contactMessages:{declarations:string[];registerType:'scalar';receptor:'sense(contact)';validField:'message_valid';valueField:'message';signalValidField:'signal_valid';signalValueField:'signal';initializerLimit:number};
     concentration?:string;userFunctions?:{keyword:'fn';maxParameters:number;parameterType:'scalar';maxFunctions:number;recursive:false};
     reads:{name:string;type:GenomeValueType}[];maxProducts:number;maxAssemblies:number;maxGenes:number };
 }
@@ -116,15 +121,18 @@ export interface EnvironmentBarrier {
   id: number; x: number; y: number; length: number; width: number; angle: number;
   floating: boolean; vx: number; vy: number;
 }
-export interface EnvironmentSnapshot {
+export interface EnvironmentMetadata {
   columns: number; rows: number; width: number; height: number;
   ambientTemperature: number; ambientLight: number; currentStrength: number; initialNutrients: number;
   nutrientRemovedTotal: number;
   gases: GasConfig;
   oxygenInputTotal: number; oxygenRemovedTotal: number;
   carbonInputTotal: number; carbonRemovedTotal: number;
+  sources: EnvironmentSource[]; barriers: EnvironmentBarrier[];
+}
+export interface EnvironmentSnapshot extends EnvironmentMetadata {
   /** Interleaved light, temperature, flow x, flow y, minerals, O2 and inorganic carbon. */
-  samples: Float32Array; sources: EnvironmentSource[]; barriers: EnvironmentBarrier[];
+  samples: Float32Array;
 }
 export interface RegisterEntry { name: string; type: string; value: unknown }
 export type GenomeValueType = 'integer' | 'scalar' | 'boolean' | 'string' | 'vec2';
@@ -169,6 +177,20 @@ export interface GenomeEvaluation {
   time: number; tick: number; source: string;
   expressions: GenomeExpressionEvaluation[]; bindings: GenomeBindingEvaluation[];
   signals: GenomeSignalEvaluation[]; outputs: GenomeOutputEvaluation[]; writes: GenomeWriteEvaluation[];
+  contactMessages?: ContactMessages;
+  contactMessageDeclarations?: ContactMessageDeclaration[];
+}
+
+export type ContactMessageRole = 'publish' | 'avoid' | 'adhere' | 'signal';
+export interface ContactMessages { publish: string | null; avoid: string | null; adhere: string | null; initial: number | null; signal: string | null; signalInitial: number | null }
+export interface ContactMessageDeclaration { kind: ContactMessageRole; register: string; value: number | null; from: number; to: number }
+const messageRoles = ['publish', 'avoid', 'adhere', 'signal'] as const;
+function validMessagePolicy(policy: ContactMessages): boolean {
+  return Boolean(policy && typeof policy === 'object' && messageRoles.some(role => policy[role] !== null)
+    && messageRoles.every(role => policy[role] === null || typeof policy[role] === 'string' && /^rf(?!000)\d{3}$/.test(policy[role]!))
+    && (policy.signal === null || policy.signal !== policy.publish)
+    && (policy.signalInitial === null || policy.signal !== null && Number.isFinite(policy.signalInitial) && Math.abs(policy.signalInitial) <= 1e12)
+    && (policy.initial === null || policy.publish !== null && Number.isFinite(policy.initial) && Math.abs(policy.initial) <= 1e12));
 }
 
 /** Keep source ranges and runtime values trustworthy before rendering inspection UI. */
@@ -188,12 +210,26 @@ export function validateGenomeEvaluation(value: unknown, expectedCellId?: number
     || new TextEncoder().encode(trace.source).length > MAX_PROGRAM_BYTES
     || !Array.isArray(trace.expressions) || (!cellular && !trace.expressions.length) || trace.expressions.length > 8192
     || !Array.isArray(trace.bindings) || trace.bindings.length > 8192
-    || !Array.isArray(trace.signals) || (cellular ? trace.signals.length > READ_SIGNAL_COUNT + 64 * 3 + 64 * 9 : trace.signals.length !== READ_SIGNAL_COUNT)
+    || !Array.isArray(trace.signals) || (cellular ? trace.signals.length > READ_SIGNAL_COUNT + 64 * 3 + 64 * 10 : trace.signals.length !== READ_SIGNAL_COUNT)
     || !Array.isArray(trace.outputs) || (cellular ? trace.outputs.length > 256 + 64 * 3 : trace.outputs.length !== WRITE_SIGNAL_COUNT)
-    || !Array.isArray(trace.writes) || trace.writes.length > (cellular ? 0 : 9990)) return fail();
+    || !Array.isArray(trace.writes) || trace.writes.length > 9990) return fail();
   const range = (from: number, to: number): boolean => Number.isInteger(from) && Number.isInteger(to)
     && from >= 0 && to > from && to <= trace.source.length;
   const scalar = (item: unknown): item is number => typeof item === 'number' && Number.isFinite(item) && Math.abs(item) <= 1e12;
+  if (trace.contactMessages !== undefined || trace.contactMessageDeclarations !== undefined) {
+    const policy = trace.contactMessages, declarations = trace.contactMessageDeclarations;
+    const matchesDeclaration = (item: ContactMessageDeclaration): boolean => {
+      const keyword = item.kind === 'publish' || item.kind === 'signal' ? item.kind : item.kind + '_message';
+      const text = trace.source.slice(item.from, item.to).replace(/#[^\n]*/g, ' ');
+      const declaration = /^(publish|signal|avoid_message|adhere_message)\s+(rf\d{3})\b/.exec(text);
+      return declaration?.[1] === keyword && declaration[2] === item.register && text.endsWith(';');
+    };
+    if (!cellular || !policy || !validMessagePolicy(policy) || !Array.isArray(declarations)
+      || declarations.length !== messageRoles.filter(role => policy[role] !== null).length
+      || new Set(declarations.map(item => item?.kind)).size !== declarations.length
+      || !declarations.every(item => item && messageRoles.includes(item.kind) && typeof item.register === 'string' && policy[item.kind] === item.register
+        && (item.value === null || scalar(item.value)) && range(item.from, item.to) && matchesDeclaration(item))) return fail();
+  }
   const typed = (type: GenomeValueType, item: unknown): boolean => {
     if (!types.has(type)) return false;
     switch (type) {
@@ -252,7 +288,7 @@ export interface GenomeGraphRoot {
   id: string; kind: 'output' | 'write' | 'clear'; name: string; type: GenomeValueType;
   value: number | null; guard: number | null; default: string | null;
 }
-export interface GenomeGraph { version: 1; mode?:'legacy'|'cellular'; nodes: GenomeGraphNode[]; roots: GenomeGraphRoot[] }
+export interface GenomeGraph { version: 1; mode?:'legacy'|'cellular'; nodes: GenomeGraphNode[]; roots: GenomeGraphRoot[]; contactMessages?: ContactMessages }
 
 /** Validate the owned JSON boundary before any graph traversal or DOM creation. */
 export function validateGenomeGraph(value: unknown): GenomeGraph {
@@ -260,7 +296,8 @@ export function validateGenomeGraph(value: unknown): GenomeGraph {
   if (!value || typeof value !== 'object') return fail();
   const graph = value as GenomeGraph;
   if (graph.version !== 1 || (graph.mode!==undefined && graph.mode!=='legacy' && graph.mode!=='cellular') || !Array.isArray(graph.nodes) || graph.nodes.length > 8192
-    || !Array.isArray(graph.roots) || graph.roots.length > 9990 + WRITE_SIGNAL_COUNT) return fail();
+    || !Array.isArray(graph.roots) || graph.roots.length > 9990 + (graph.mode === 'cellular' ? 256 + 64 * 3 : WRITE_SIGNAL_COUNT)
+    || (graph.contactMessages !== undefined && (graph.mode !== 'cellular' || !validMessagePolicy(graph.contactMessages)))) return fail();
   const types = new Set(['integer', 'scalar', 'boolean', 'string', 'vec2']);
   const kinds = new Set(['constant', 'sensor', 'register', 'populated', 'reference', 'unary', 'binary', 'conditional', 'call']);
   for (let index = 0; index < graph.nodes.length; index++) {
@@ -301,6 +338,7 @@ export interface WorldSnapshot {
   environment: EnvironmentSnapshot;
 }
 export interface RenderCell {
+  attachedNeighbors?:number; contactSignal?:number;
   id:number; genomeId:number; x:number; y:number; vx:number; vy:number; angle:number; radius:number;
   energy:number; energyCapacity:number; gutEnergy:number; gutCapacity:number; integrity:number; photosynthesisRate:number;
   flagellumCount:number; flagellumCapacity:number; cortexMass:number; cortexCapacity:number;
@@ -314,6 +352,7 @@ export type RenderWorldSnapshot = RenderSnapshot & { environment: EnvironmentSna
 export interface SimulationSummary {
   time:number; population:number; food:number; births:number; deaths:number; generation:number;
 }
+export interface SimulationStatus { tick: number; summary: SimulationSummary }
 export interface MetricsSnapshot extends SimulationSummary {
   tick:number; eaten:number; mutationRate:number; mutatedBirths:number; mutationSkipped:number;
   genomeCount:number; genomeLimit:number; genomeBytes:number; genomeByteLimit:number;
@@ -335,9 +374,11 @@ const METRICS_HEADER = 51;
 
 /** Decode a worker-transferred compact buffer without any WASM calls. */
 export function decodeRenderSnapshot(data: Float64Array): RenderSnapshot {
+  const baseLength = RENDER_HEADER + data[2] * RENDER_CELL_STRIDE + data[3] * FOOD_STRIDE;
+  const extra = data.length - baseLength;
   if (data.length < RENDER_HEADER || !Number.isSafeInteger(data[2]) || data[2] < 0
     || !Number.isSafeInteger(data[3]) || data[3] < 0
-    || data.length !== RENDER_HEADER + data[2] * RENDER_CELL_STRIDE + data[3] * FOOD_STRIDE) {
+    || extra < 0 || extra > data[2] * 4 || extra % 4 !== 0) {
     throw new Error('The render snapshot has an invalid layout.');
   }
   const cells: RenderCell[] = [];
@@ -356,6 +397,18 @@ export function decodeRenderSnapshot(data: Float64Array): RenderSnapshot {
     const kind = data[n+4];
     if (kind !== 0 && kind !== 1 && kind !== 2) throw new Error('The render snapshot has an invalid organic material kind.');
     food.push({x:data[n],y:data[n+1],energy:data[n+2],nutrients:data[n+3],kind});
+  }
+  let previous = -1;
+  for (let n = baseLength; n < data.length; n += 4) {
+    const index = data[n], neighbors = data[n+1], valid = data[n+2], signal = data[n+3];
+    if (!Number.isInteger(index) || index <= previous || index >= cells.length ||
+        !Number.isSafeInteger(neighbors) || neighbors < 0 || (valid !== 0 && valid !== 1) ||
+        !Number.isFinite(signal) || (!valid && (signal !== 0 || neighbors === 0))) {
+      throw new Error('The render snapshot contains an invalid colony observation.');
+    }
+    previous = index;
+    cells[index].attachedNeighbors = neighbors;
+    if (valid) cells[index].contactSignal = signal;
   }
   return {tick:data[0],time:data[1],cells,food,births:data[4],deaths:data[5],eaten:data[6],
     width:data[7],height:data[8],foodRate:data[9],mutationRate:data[10],generation:data[11]};
@@ -424,12 +477,15 @@ interface WasmExports extends WebAssembly.Exports {
   nutrient_food_total(): number; nutrient_cell_total(): number;
   nutrient_removed_total(): number;
   add_source(kind: number, x: number, y: number, strength: number, radius: number): number;
+  add_source_configured(kind: number, x: number, y: number, strength: number, radius: number, angle: number, length: number): number;
+  replace_sources(ptr: number, count: number): number;
   update_source(id: number, kind: number, x: number, y: number, strength: number, radius: number, angle: number, length: number): number;
   remove_source(id: number): number; clear_sources(): void;
   add_barrier(x: number, y: number, length: number, width: number, angle: number, floating: number): number;
   update_barrier(id: number, x: number, y: number, length: number, width: number, angle: number, floating: number): number;
   remove_barrier(id: number): number; clear_barriers(): void;
   environment_snapshot_ptr(): number; environment_snapshot_len(): number;
+  environment_metadata_ptr(): number; environment_metadata_len(): number;
   cell_memory_ptr(id: number): number; cell_memory_len(): number;
   cell_evaluation_ptr(id: number): number; cell_evaluation_len(): number;
   predation_count(): number; attack_count(): number; photosynthesis_total(): number;
@@ -573,12 +629,27 @@ export class Engine {
   addNutrients(x = -1, y = -1, amount = 25): number { return this.wasm.add_nutrients(x, y, amount); }
   addSource(kind: SourceKind, x: number, y: number, strength: number, radius: number, angle = 0, length = 600): number {
     if (![x, y, strength, radius, angle, length].every(Number.isFinite)) return 0;
-    const id = this.wasm.add_source(kind, x, y, strength, radius);
-    if (id && !this.updateSource(id, kind, x, y, strength, radius, angle, length)) {
-      this.wasm.remove_source(id);
-      return 0;
-    }
-    return id;
+    return this.wasm.add_source_configured(kind, x, y, strength, radius, angle, length);
+  }
+  replaceSources(sources: readonly Omit<EnvironmentSource, 'id'>[]): boolean {
+    if (sources.length > 64) return false;
+    const length = sources.length * 7 * Float64Array.BYTES_PER_ELEMENT;
+    const pointer = length ? this.wasm.alloc(length) : 0;
+    if (length && !pointer) throw new Error('Could not allocate the environment configuration.');
+    try {
+      if (length) {
+        const data = new DataView(this.wasm.memory.buffer, pointer, length);
+        for (let index = 0; index < sources.length; index++) {
+          const source = sources[index], offset = index * 7;
+          // The existing scalar ABI accepts f32 values. Preserve that exact
+          // normalization when packing the atomic replacement's f64 records.
+          const values = [source.kind, source.x, source.y, source.strength, source.radius, source.angle, source.length];
+          if (!values.every(Number.isFinite)) return false;
+          for (let field = 0; field < 7; field++) data.setFloat64((offset + field) * 8, Math.fround(values[field]), true);
+        }
+      }
+      return this.wasm.replace_sources(pointer, sources.length) !== 0;
+    } finally { if (length) this.wasm.dealloc(pointer, length); }
   }
   updateSource(id: number, kind: SourceKind, x: number, y: number, strength: number, radius: number, angle: number, length: number): boolean {
     return this.wasm.update_source(id, kind, x, y, strength, radius, angle, length) !== 0;
@@ -657,8 +728,16 @@ export class Engine {
   environment(): EnvironmentSnapshot {
     const pointer = this.wasm.environment_snapshot_ptr();
     const data = new Float32Array(this.wasm.memory.buffer, pointer, this.wasm.environment_snapshot_len());
+    return this.decodeEnvironment(data, true) as EnvironmentSnapshot;
+  }
+  environmentMetadata(): EnvironmentMetadata {
+    const pointer = this.wasm.environment_metadata_ptr();
+    const data = new Float32Array(this.wasm.memory.buffer, pointer, this.wasm.environment_metadata_len());
+    return this.decodeEnvironment(data, false);
+  }
+  private decodeEnvironment(data: Float32Array, fields: boolean): EnvironmentMetadata | EnvironmentSnapshot {
     const columns = data[0], rows = data[1], count = data[5], width = data[7], height = data[8], barrierCount = data[9];
-    const sampleEnd = 21 + columns * rows * 7, barrierStart = sampleEnd + count * 8;
+    const sampleEnd = 21 + (fields ? columns * rows * 7 : 0), barrierStart = sampleEnd + count * 8;
     if (!Number.isInteger(columns) || !Number.isInteger(rows) || columns < 1 || rows < 1
       || columns > 240 || rows > 152 || width !== columns * 20 || height !== rows * 20
       || !Number.isInteger(count) || count < 0 || count > 64
@@ -666,7 +745,6 @@ export class Engine {
       || !Number.isFinite(data[10]) || data[10] < 0
       || ![0, 1].includes(data[13]) || !data.subarray(11, 21).every(value => Number.isFinite(value) && value >= 0)
       || data.length !== barrierStart + barrierCount * 10) throw new Error('The environment snapshot has an invalid layout.');
-    const samples = data.slice(21, sampleEnd);
     const sources: EnvironmentSource[] = [];
     for (let i = 0; i < count; i++) {
       const n = sampleEnd + i * 8;
@@ -680,9 +758,10 @@ export class Engine {
       if (![0, 1].includes(data[n + 6]) || !data.subarray(n, n + 10).every(Number.isFinite)) throw new Error('The environment contains an invalid barrier.');
       barriers.push({ id: data[n], x: data[n + 1], y: data[n + 2], length: data[n + 3], width: data[n + 4], angle: data[n + 5], floating: data[n + 6] === 1, vx: data[n + 7], vy: data[n + 8] });
     }
-    return { columns, rows, width, height, ambientTemperature: data[2], ambientLight: data[3], currentStrength: data[4], initialNutrients: data[6], nutrientRemovedTotal: data[10],
+    const metadata: EnvironmentMetadata = { columns, rows, width, height, ambientTemperature: data[2], ambientLight: data[3], currentStrength: data[4], initialNutrients: data[6], nutrientRemovedTotal: data[10],
       gases: { initialOxygen: data[11], initialCarbon: data[12], mode: data[13] === 1 ? 'open' : 'sealed', exchangeRate: data[14], oxygenEquilibrium: data[15], carbonEquilibrium: data[16] },
-      oxygenInputTotal: data[17], oxygenRemovedTotal: data[18], carbonInputTotal: data[19], carbonRemovedTotal: data[20], samples, sources, barriers };
+      oxygenInputTotal: data[17], oxygenRemovedTotal: data[18], carbonInputTotal: data[19], carbonRemovedTotal: data[20], sources, barriers };
+    return fields ? { ...metadata, samples: data.slice(21, sampleEnd) } : metadata;
   }
 
   /** Owned compact bytes can be transferred to the UI without cloning cell objects. */
@@ -707,11 +786,14 @@ export class Engine {
     return cell;
   }
   summary(): SimulationSummary {
+    return this.status().summary;
+  }
+  status(): SimulationStatus {
     const pointer = this.wasm.summary_snapshot_ptr();
     const length = this.wasm.presentation_len();
-    if (length !== 6) throw new Error('The simulation summary has an invalid layout.');
+    if (length !== 7) throw new Error('The simulation summary has an invalid layout.');
     const data = new Float64Array(this.wasm.memory.buffer, pointer, length);
-    return {time:data[0],population:data[1],food:data[2],births:data[3],deaths:data[4],generation:data[5]};
+    return {tick:data[6],summary:{time:data[0],population:data[1],food:data[2],births:data[3],deaths:data[4],generation:data[5]}};
   }
 
   snapshot(): WorldSnapshot {

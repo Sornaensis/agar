@@ -25,6 +25,11 @@ let expanding = body.area > body.birth_area * 1.6;
 let powered = enough(built.Gut, 0.06) && enough(built.ExudateEnzyme, 0.025) && enough(built.Capture, 0.03) && enough(built.Respiration, 0.04);
 let equipped = powered && enough(built.LeftMotor, 0.025) && enough(built.RightMotor, 0.025) && enough(built.Vision, 0.02) && enough(built.Touch, 0.01) && enough(built.Piercer, 0.05) && enough(built.TissueEnzyme, 0.08);
 let surplus = equipped && energy > 55 && gut.energy > 2 && carbon.organic > 0.3 * body.area;
+# Advertise a contact marker from birth. Spare matching targets of either weapon.
+publish rf001 = 17;
+avoid_message rf001;
+let peer = sensed.Touch.message_valid && sensed.Touch.message == rf001;
+let leave_peer = if angle(sensed.Touch.offset) >= 0 then -0.8 else 0.8;
 let firm_contact = sensed.Touch.valid && sensed.Touch.resistance > 0.1;
 let hungry = (energy.fraction < 0.7 || carbon.organic * 20 < energy.capacity * 0.4) && gut.fraction < 0.45;
 # Paired local temperatures select the cooler side before tissue is damaged.
@@ -32,8 +37,8 @@ let heat_escape = sensed.LeftHeat.valid && sensed.RightHeat.valid
   && max(sensed.LeftHeat.value, sensed.RightHeat.value) > 0.78;
 let heat_delta = sensed.RightHeat.value - sensed.LeftHeat.value;
 let cool_turn = if heat_delta < -0.002 then -0.75 else 0.75;
-let steer = if heat_escape then cool_turn else if gut.fraction > 0.45 then 0 else if hungry && sensed.Vision.valid then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1) else sin(age * 0.5) * (if equipped then 0.12 else 0.4);
-let move = if heat_escape then 0.4 else if firm_contact || gut.fraction > 0.45 then 0 else if hungry && sensed.Vision.valid then 0.5 else if hungry && equipped then 0.28 else 0.07;
+let steer = if heat_escape then cool_turn else if peer then leave_peer else if gut.fraction > 0.45 then 0 else if hungry && sensed.Vision.valid then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1) else sin(age * 0.5) * (if equipped then 0.12 else 0.4);
+let move = if heat_escape then 0.4 else if peer then 0.25 else if firm_contact || gut.fraction > 0.45 then 0 else if hungry && sensed.Vision.valid then 0.5 else if hungry && equipped then 0.28 else 0.07;
 
 let need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);
 let need_Gut = funded && (true) && missing(built.Gut, (if expanding then 0.12 else 0.06), 0.06);

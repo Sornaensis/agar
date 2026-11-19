@@ -110,7 +110,21 @@ impl Program {
         if let Some(cellular) = &self.cellular {
             // An impossible legacy node count introduces the v5 extension.
             // Legacy programs retain their original byte representation.
-            w.u32(u32::MAX);
+            if let Some(messages) = &cellular.messages {
+                // Preserve the old representation for programs without contact
+                // declarations. The new sentinel cannot be a bounded node count.
+                let has_signal = messages.addresses[3].is_some();
+                w.u32(if has_signal { u32::MAX - 2 } else { u32::MAX - 1 });
+                let slots = if has_signal { 4 } else { 3 };
+                for index in &messages.addresses[..slots] { w.u16(index.unwrap_or(0)); }
+                let initializers = [messages.initial, messages.signal_initial];
+                for value in &initializers[..if has_signal { 2 } else { 1 }] {
+                    w.u8(value.is_some() as u8);
+                    if let Some(value) = value { w.f64(*value); }
+                }
+            } else {
+                w.u32(u32::MAX);
+            }
             w.count(cellular.definition.products.len());
             for product in &cellular.definition.products {
                 w.text(&product.name);
@@ -236,12 +250,39 @@ impl Program {
 
     #[cfg(test)]
     pub(crate) fn read_checkpoint(r: &mut Reader<'_>) -> Result<Self> {
-        Self::read_checkpoint_version(r, 9)
+        Self::read_checkpoint_version(r, 11)
     }
 
     pub(crate) fn read_checkpoint_version(r: &mut Reader<'_>, version: u32) -> Result<Self> {
         let header = r.u32()?;
-        let cellular = if header == u32::MAX {
+        let has_signal = header == u32::MAX - 2;
+        let messages = if header == u32::MAX - 1 || has_signal {
+            ensure(version >= 10, "contact declarations need checkpoint version 10")?;
+            ensure(!has_signal || version >= 11, "contact payloads need checkpoint version 11")?;
+            let mut messages = cellular::ContactMessages::default();
+            let slots = if has_signal { 4 } else { 3 };
+            for slot in &mut messages.addresses[..slots] {
+                let index = r.u16()?;
+                ensure(index as usize <= REGISTER_COUNT, "invalid scalar contact register")?;
+                *slot = (index != 0).then_some(index);
+            }
+            ensure(messages.addresses.iter().any(Option::is_some), "missing contact declaration")?;
+            if has_signal {
+                ensure(messages.addresses[3].is_some() && messages.addresses[3] != messages.addresses[0],
+                    "payload requires an independent scalar register")?;
+            }
+            let mut read_initial = |address: Option<u16>| -> Result<Option<f64>> {
+                let flag = r.u8()?;
+                ensure(flag <= 1, "invalid message initializer flag")?;
+                if flag == 0 { return Ok(None); }
+                ensure(address.is_some(), "initializer without published register")?;
+                Ok(Some(r.range(-MAX_SIGNAL, MAX_SIGNAL)?))
+            };
+            messages.initial = read_initial(messages.addresses[0])?;
+            if has_signal { messages.signal_initial = read_initial(messages.addresses[3])?; }
+            Some(Box::new(messages))
+        } else { None };
+        let cellular = if header == u32::MAX || messages.is_some() {
             ensure(version >= 5, "cellular programs need checkpoint version 5")?;
             let count = r.count(cellular::MAX_PRODUCTS)?;
             let mut products = Vec::with_capacity(count);
@@ -276,6 +317,9 @@ impl Program {
                     version >= 6 || !matches!(kind, AssemblyKind::Mechanism(_)),
                     "mechanism assemblies need checkpoint version 6",
                 )?;
+                ensure(version >= 11 || !matches!(kind, AssemblyKind::Mechanism(k) if k as usize >= 27),
+                    "junction machinery needs checkpoint version 11")?;
+                ensure(version >= 10 || kind.name() != "adhere()", "adhesion needs checkpoint version 10")?;
                 ensure(
                     version >= 9 || kind.name() != "respire(oxygen)",
                     "aerobic respiration needs checkpoint version 9",
@@ -299,10 +343,10 @@ impl Program {
                     direction,
                 });
             }
-            let definition = CellularProgram {
+            let definition = CellularProgram::new(
                 products,
                 assemblies,
-            };
+            );
             definition
                 .validate()
                 .map_err(|error| format!("Invalid simulation save: {error}"))?;
@@ -366,6 +410,10 @@ impl Program {
                         .get(r.u8()? as usize)
                         .copied()
                         .ok_or("Invalid simulation save: unknown receptor field.")?;
+                    ensure(version >= 11 || !matches!(field, ReceptorField::Signal | ReceptorField::SignalValid),
+                        "contact payloads need checkpoint version 11")?;
+                    ensure(version >= 10 || !matches!(field, ReceptorField::Message | ReceptorField::MessageValid),
+                        "contact messages need checkpoint version 10")?;
                     ensure(
                         ReceptorField::for_kind(definition.assemblies[index].kind).contains(&field),
                         "receptor does not supply that measurement",
@@ -406,8 +454,9 @@ impl Program {
             if cellular.is_some() {
                 ensure(
                     match &op {
-                        Op::Sensor(sensor) => sensor.cellular_allowed(),
-                        Op::Register(_) | Op::Populated(_) => false,
+                        Op::Sensor(sensor) => sensor.cellular_allowed()
+                            && (version >= 10 || !matches!(sensor, Sensor::MemoryUsed | Sensor::MemoryCost)),
+                        Op::Register(_) | Op::Populated(_) => version >= 10,
                         _ => true,
                     },
                     "legacy signal in cellular program",
@@ -514,7 +563,7 @@ impl Program {
         }
         if let Some(definition) = cellular {
             ensure(
-                roots.iter().all(Option::is_none) && writes.is_empty(),
+                roots.iter().all(Option::is_none) && (version >= 10 || writes.is_empty()),
                 "legacy actions in cellular program",
             )?;
             let count = r.count(cellular::MAX_GENES)?;
@@ -568,12 +617,14 @@ impl Program {
             return Ok(Self::from_cellular(
                 nodes,
                 bindings,
+                writes,
                 cellular::CellularGraph {
                     definition,
                     genes,
                     activity,
                     start,
                     recycle,
+                    messages,
                 },
             ));
         }

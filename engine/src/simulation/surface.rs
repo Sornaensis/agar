@@ -59,6 +59,7 @@ impl World {
                         || relative_angle(dy.atan2(dx) - cell.angle - assembly.recipe.direction).abs() > PI * 0.4 {
                         continue;
                     }
+                    if avoids_contact(&workspace.signals, attacker, victim) { continue; }
                     if best.is_none_or(|(old, distance)| gap < distance
                         || (gap == distance && geometry.ids[victim] < geometry.ids[old])) {
                         best = Some((victim, gap));

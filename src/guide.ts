@@ -52,7 +52,7 @@ gene remember: Persistence = if sensed.Chemistry.valid
   then 0.15 else 0;
 let persistence = activate(concentration.Persistence, 0.002);</pre>
       <p>This regulator has an eight-second half-life. Its stock rises when a cue triggers expression and decays afterward. Growing the cell dilutes its concentration; division partitions the actual product. The stock, concentration, half-life and expression rate are visible in the Body inspector.</p>
-      <p>Cellular programs read resource and body state, product stocks and local sensor measurements. External measurements still need working receptors and valid readings. Their lasting state comes from physical products and machinery. The <b>Rememberer</b> preset demonstrates a regulator-driven change in motor activity.</p>
+      <p>Regulator stocks store a material history that changes with synthesis, decay, dilution and division. The <b>Rememberer</b> demonstrates how that history can change motor activity. For an exact previous reading or a counter, cellular programs can also use typed registers.</p>
       <p><code>activate(c, k)</code> computes c / (c + k), after clamping both arguments nonnegative; the zero-denominator result is zero. <code>repress(c, k)</code> is its complement. These are pure response curves, with no implicit synthesis or memory.</p>
       <pre class="guide-code">fn slow_when(brake, threshold) = repress(brake, threshold);
 let motor_activity = slow_when(concentration.Brake, 0.02);</pre>
@@ -114,22 +114,34 @@ digest.waste = if gut.exudate.energy + gut.tissue.energy &lt; 1
       <p>The <code>digest.*</code> efforts share finite processing work. All default to 1 except waste, which defaults to 0.35. Inspect <code>gut.&lt;kind&gt;.energy</code> and <code>.nutrients</code> to prioritize what is already inside the cell. External sensors still report physical appearance, contact and chemical cues; they do not reveal hidden food labels.</p>
       <p><code>thrust</code> and <code>turn</code> need flagella. <code>bite</code> needs a piercing apparatus and physical reach. <code>engulf</code> depends on a phagocytic cup, manageable geometry, energy and digestive space. <code>defend</code> and <code>repair</code> spend resources; cortex and repair machinery affect their capacity. Program requests alone cannot supply missing organs.</p>
       <p><code>divide = body.division_ready;</code> requests division after sufficient growth, energy and cooldown, with viable cores and a valid packing arrangement for both halves. Whole discrete organs are assigned to daughters, never cloned. Build at least two units of an essential capability if both daughters should inherit it. A cell may otherwise divide into a daughter lacking its motor or energy source.</p>
-      <p>The retained parent keeps its age and registers; the daughter starts with empty memory and no object tracks. Mutations change its program, not its inherited organs. Cells have no age limit; starvation and damage can still kill them, returning accounted tissue and gut contents to the environment. Organism and organic-particle counts have no fixed caps.</p>
+      <p>The retained parent keeps its age and registers; the daughter starts with fresh memory and object tracks. Its program can initialize one published scalar at birth. Mutations change its program, not its inherited organs. Cells have no age limit; starvation and damage can still kill them, returning accounted tissue and gut contents to the environment. Organism and organic-particle counts have no fixed caps.</p>
     </details>
     <details class="guide-section"><summary>Program editor and live values</summary>
-      <p>Cellular programs have <b>Inputs &amp; stocks</b> and <b>Products &amp; recipes</b> reference menus. Ctrl/Cmd + Space suggests declarations at the top level, typed mechanisms and their targets after an assembly name, product names inside recipes, and readable stocks, sensors, functions and local bindings inside expressions. A summary counts products, genes and recipes. Legacy programs keep their existing Read signals and Write signals menus.</p>
+      <p>Use <b>Inputs &amp; memory</b> to find readings, stocks and registers. <b>Declarations &amp; writes</b> lists recipes, message declarations and register assignments. Ctrl/Cmd + Space suggests names and operations valid at the cursor.</p>
       <table><tbody><tr><th>Ctrl/Cmd + S</th><td>Explicitly save a valid genome or copy.</td></tr><tr><th>Ctrl/Cmd + Enter</th><td>Check types.</td></tr><tr><th>Ctrl/Cmd + Space</th><td>Open autocomplete.</td></tr><tr><th>Ctrl/Cmd + Z / Shift + Z</th><td>Undo / redo, including mutations.</td></tr><tr><th>F8 / Shift + F8</th><td>Next / previous diagnostic.</td></tr></tbody></table>
       <p>Type checking runs after a short editing pause; click an error to jump to its source. Typing saves a recovery draft, while <b>Save genome</b> commits the valid document. Organism programs are read-only. Click, hover or select a complete expression there to see its typed value from the current Rust snapshot. Previewing never applies writes or spends energy. Action values are requests; physical checks still determine the result.</p>
       <p>The genome is a pure reactive program. <code>let</code> binds an immutable expression recomputed each tick. Use arithmetic, comparisons, boolean operators and <code>if … then … else …</code>. Plain whole literals such as <code>2</code> are integers; <code>2.0</code> is scalar. Use <code>int()</code> when converting a scalar count. Statements end in semicolons; <code>#</code> starts a comment.</p>
       <p>Genomes support 8,192 expression nodes, 256 KiB of source and 64 nesting levels. The compiler and runtime bound values and strings.</p>
     </details>
-    <details class="guide-section"><summary>Legacy programs: memory registers</summary>
+    <details class="guide-section"><summary>Private registers and contact messages</summary>
       <p>Each primitive type has 999 addresses: integers <code>ri001…ri999</code>, scalars <code>rf001…rf999</code>, booleans <code>rb001…rb999</code>, strings <code>rs001…rs999</code> and vectors <code>rv001…rv999</code>.</p>
       <pre class="guide-code">ri001 = ri001 + 1 when !object.valid;
 clear ri001 when object.valid;
 rs001 = object.token when object.valid;
 clear rs001 when !object.valid &amp;&amp; ri001 &gt; 60;</pre>
-      <p>All reads use memory from the start of the tick. Writes commit together afterward; clear wins if both fire. Empty values read as zero, false, empty string or zero vector. <code>populated()</code> distinguishes empty from stored zero. Every populated register costs 0.0025 energy/s, including stored false and empty strings. Clear unused memory to release that cost.</p>
+      <p>Each organism has its own registers. All reads see the start of the tick. Writes commit together afterward, and clear wins when both fire. Empty registers read as zero, false, empty string or zero vector. <code>populated()</code> distinguishes an empty register from a stored zero. Every occupied register costs 0.0025 energy per second. The Memory tab shows occupied registers alongside regulator stocks.</p>
+      <pre class="guide-code">cellular;
+publish rf001 = 17;
+avoid_message rf001;
+adhere_message rf001;
+product Mount = anchor(); product Skin = membrane();
+gene mounts: Mount = if pool.Mount &lt; 0.04 then 0.2 else 0;
+gene skins: Skin = if pool.Skin &lt; 0.04 then 0.2 else 0;
+assembly Link: adhere() { Mount: 0.02; Skin: 0.02; }</pre>
+      <p><code>publish</code> exposes one scalar register. The optional number sets it once at birth. Writing the register updates the message on the next tick. Clearing it withdraws the message. A working <code>sense(contact)</code> recipe named <code>Touch</code> reads the touched cell’s <code>sensed.Touch.message</code> when <code>sensed.Touch.message_valid</code> is true. A published zero is valid.</p>
+      <p><code>signal rf002 = 0;</code> selects a second scalar address. Change it to request supplies or relay a pulse while keeping the recognition marker steady. A receptor reads its contact’s <code>signal_valid</code> and <code>signal</code> from the same tick as the marker.</p>
+      <p>Attached cells with matching <code>junction(energy)</code>, <code>junction(mineral)</code> or <code>junction(carbon)</code> machinery exchange that resource toward equal storage fractions. Both sides must build and activate the port. Open <b>Body → Colony exchange</b> to see signed transfers. Try <b>Nurse rosette</b> for resource sharing or <b>Pulse swimmers</b> for relayed movement.</p>
+      <p><code>avoid_message</code> skips an attack on each candidate whose published value exactly matches the chosen occupied register. <code>adhere_message</code> selects a value for adhesion. Both contacting cells must accept each other’s message and operate built <code>adhere()</code> machinery. Matching values describe a shared signal. Unrelated cells can publish the same value.</p>
     </details>
     <details class="guide-section"><summary>Mutation and dependency graph</summary>
       <p>Each mutation edits one typed node against the inherited source, preserving unrelated code, comments and layout. Constants, equivalent references and typed expression changes remain valid programs. Validity does not guarantee survival.</p>
@@ -150,7 +162,7 @@ clear rs001 when !object.valid &amp;&amp; ri001 &gt; 60;</pre>
       <p>Minerals circulate through water, bodies and particles. Construction transfers them into structures; recycling and death return them. Usable, raw gut and embodied structural energy remain separate, and maintenance, movement and conversion dissipate energy. Metrics includes introduced resources, total held energy and harvested light.</p>
     </details>
     <details class="guide-section"><summary>Saved files and older versions</summary>
-      <p>IndexedDB holds genomes, environments and full simulation checkpoints; local storage keeps preferences and unfinished drafts. Export genomes and environments from their menus. Existing v3 organelle programs remain executable. Checkpoint 9 saves preserve gas fields, carbon inventories and reaction ledgers as well as world dimensions, per-source geometry and moving barriers; checkpoints 3 through 8 remain readable. Old organic inventories are classified once at import. Updated physical rules can change old trajectories, while saving and continuing under the current engine is deterministic. Earlier investment-language documents remain viewable and exportable.</p>
+      <p>IndexedDB holds genomes, environments and full simulation checkpoints; local storage keeps preferences and unfinished drafts. Export genomes and environments from their menus. Existing v3 organelle programs remain executable. Checkpoint 11 saves preserve signal registers, junction machinery and last-tick exchange, along with gas fields, carbon inventories and reaction ledgers as well as world dimensions, per-source geometry and moving barriers; checkpoints 3 through 10 remain readable. Old organic inventories are classified once at import. Updated physical rules can change old trajectories, while saving and continuing under the current engine is deterministic. Earlier investment-language documents remain viewable and exportable.</p>
     </details>
   `, 'guide-dialog');
 }

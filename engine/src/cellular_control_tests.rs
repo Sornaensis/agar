@@ -11,15 +11,15 @@ fn recycling_program() -> CellularProgram {
 
 #[test]
 fn low_energy_construction_depends_on_paid_resources_not_empty_storage_capacity() {
-    let program = CellularProgram {
-        products: vec![product("Protease", ProductKind::Enzyme), product("Wall", ProductKind::Membrane)],
-        assemblies: vec![
+    let program = CellularProgram::new(
+        vec![product("Protease", ProductKind::Enzyme), product("Wall", ProductKind::Membrane)],
+        vec![
             AssemblyDef { name: "TissueEnzyme".into(), kind: AssemblyKind::Mechanism(MechanismKind::DigestTissue),
                 parts: vec![(0, 0.02)], at: 0.0, direction: 0.0 },
             AssemblyDef { name: "Battery".into(), kind: AssemblyKind::Mechanism(MechanismKind::EnergyStorage),
                 parts: vec![(1, 0.08)], at: 0.0, direction: 0.0 },
         ],
-    };
+    );
     program.validate().unwrap();
     let mut results = Vec::new();
     for extra_storage in [false, true] {

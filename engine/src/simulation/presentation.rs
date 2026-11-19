@@ -81,6 +81,24 @@ impl World {
         );
     }
 
+    /// Sparse visual data follows the ordinary frame. The row index refers to
+    /// the cell in this same snapshot, so it also works after deaths or fission.
+    pub(crate) fn append_colony_activity(&self, genomes: &[Genome], target: &mut Vec<f64>) {
+        if !genomes.iter().any(|g| g.program.participates_in_contact_signaling()) {
+            return;
+        }
+        for (index, cell) in self.cells.iter().enumerate() {
+            let program = &genomes[(cell.genome_id - 1) as usize].program;
+            let payload = program.contact_signal(&cell.memory);
+            if cell.adhered_neighbors > 0 || payload.is_some() {
+                target.extend_from_slice(&[
+                    index as f64, cell.adhered_neighbors as f64,
+                    u8::from(payload.is_some()) as f64, payload.unwrap_or(0.0),
+                ]);
+            }
+        }
+    }
+
     /// Small save metadata projection, captured beside checkpoint bytes.
     pub(crate) fn summary_snapshot(&self, target: &mut Vec<f64>) {
         target.clear();
@@ -95,6 +113,7 @@ impl World {
                 .map(|cell| cell.generation)
                 .max()
                 .unwrap_or(0) as f64,
+            self.ticks as f64,
         ]);
     }
 
@@ -402,7 +421,8 @@ mod tests {
                 9.0,
                 world.births as f64,
                 world.deaths as f64,
-                4.0
+                4.0,
+                world.ticks as f64,
             ]
         );
         assert_eq!(state(&world), before);
@@ -418,7 +438,7 @@ mod tests {
         assert_eq!(output.len(), METRICS_HEADER);
         assert_eq!(output[35], 0.0);
         world.summary_snapshot(&mut output);
-        assert_eq!(output, [0.0; 6]);
+        assert_eq!(output, [0.0; 7]);
         assert!(!world.cell_snapshot(1, &mut output));
         assert!(output.is_empty());
     }

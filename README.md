@@ -19,6 +19,14 @@ New built-in genomes use `cellular;` programs: declare typed **products**, expre
 
 Named receptors expose `sensed.Eye.level` or `sensed.Chemistry.organic` at their actual attachment points. Regulatory products provide physical memory, read as mass with `pool.Name` or mass per area with `concentration.Name`. Pure `fn` definitions and `activate`/`repress` helpers express reusable feedback. A recipe's `start_when` permits new instances without stopping ones already underway. Its `recycle` expression selects physical machinery for paid recovery by a built `recycle()` mechanism. Current defaults share products between independently regulated recipes.
 
+Cellular programs can store private values between ticks and publish a recognition marker and a separate scalar signal on contact. **Conserver** remembers a low-reserve episode until its energy recovers. **Rememberer** follows its last observed chemical gradient for up to 1.5 seconds. **Predator** advertises a marker from birth and checks each potential victim before piercing or engulfing it. Any cell can advertise the same marker.
+
+Start **Colonies** to watch phototrophs grow adhesive surfaces and divide. Descendants with working, mutually matching surfaces can stay together. Each cell still builds its own machinery and pays its own energy costs. Select a cell and open **Memory** to see its registers or **Program** to inspect a contact reading. The editable colony genome includes the complete recognition and construction rules. [Colony example](examples/colony.cell)
+
+**Nurse rosette** and **Pulse swimmers** are selectable simulation presets. The rosette’s young cells request support. Attached adults increase their light-harvesting effort, and compatible junctions share usable energy, free minerals and organic carbon according to reserve levels. Pulse swimmers pass short signals between their flank receptors. A received pulse activates the young cell’s motor and starts a recovery period before it can fire again.
+
+In the player, a teal rim shows a cell that was attached during the last exchange. A bright violet or amber dot shows a positive or negative public signal, and a small gray dot shows an occupied zero. Select a cell and open **Body → Colony exchange** for its attached-neighbor count and signed transfers in the last tick. **Settings → Colony activity** toggles the highlights. [Nurse rosette](examples/nurse-rosette.cell) · [Pulse swimmer](examples/pulse-swimmer.cell)
+
 See [the cellular language and physical rules](design/cellular.md), [the solar example](examples/solar.cell), [a regulated motor](examples/regulated-motor.cell), [a feeding pathway](examples/separate-digestion.cell), and [local sensing with motor recycling and regrowth](examples/local-control.cell). The Body inspector shows stocks, recipe composition, bottlenecks, placement, new-start permission, recycling and replication. Named observations are available through the Program inspector's input reference and live values. The following organelle/action-language details also document compatibility behavior for saved legacy programs.
 
 ## Workspace
@@ -107,7 +115,7 @@ Current programs tolerate modest loss of working capacity before requesting repl
 
 Each `express.<family>` produces that family’s assembly proteins from minerals, organic carbon and energy. Proteins persist between ticks, occupy internal space, add upkeep and turn over into recovered minerals and carbon, with dissipated energy. Count/size targets assemble organs from matching proteins already present at the start of the tick; expressing a gene cannot create a functional organ immediately. Expression and assembly share finite core throughput, energy and space. Leaving every gene on can fill the cell with unused protein and delay the machinery it needs. Regulate expression using `protein.<family>`, actual organ mass and resource reserves. Allocation uses a common starting snapshot; new space, recovered resources and newly functional machinery are used on following ticks. Lowering a target does not remove anything without explicit recycling. Recycling costs processing energy and returns only accounted material and a fraction of retained structural energy. Capacity loss releases mineral, organic-carbon and gut overflow into the environment; excess usable energy dissipates.
 
-Division requires doubled birth area, sufficient energy, cooldown and a feasible packing of actual organs with a viable core in each half. Discrete organs are assigned, never cloned. Cellular partitioning prefers to distribute functioning copies of each exact recipe between the two cells, subject to core support and space limits. Build duplicate essential capabilities before division if both daughters should inherit them. The retained parent keeps its memory and age; the daughter starts with empty registers and no object tracks. Mutations affect the inherited program, not the inherited body.
+Division requires doubled birth area, sufficient energy, cooldown and a feasible packing of actual organs with a viable core in each half. Discrete organs are assigned, never cloned. Cellular partitioning prefers to distribute functioning copies of each exact recipe between the two cells, subject to core support and space limits. Build duplicate essential capabilities before division if both daughters should inherit them. The retained parent keeps its memory and age; the daughter starts with fresh registers, including any explicitly initialized publication, and fresh object tracks. Mutations affect the inherited program, not the inherited body.
 
 There is **no fixed population cap, organic-particle count cap or age-based death timer**. Cells die from physical damage, loss of essential machinery or exhausted energy. Age remains observable; the compatibility signal `lifespan` is zero, meaning no fixed maximum. Resources, mortality, browser memory and execution time constrain practical populations. The former area-4 growth ceiling is gone. A separate geometry bound keeps cell radius at or below 95 world units, retained from the original habitat geometry; maximum envelope area is about 184.18. Collision queries use actual radii. These are simulation abstractions, not biological fidelity claims.
 
@@ -171,7 +179,7 @@ Current foragers approach optical returns, follow the edge of large nearby objec
 
 The Forager gives injury escape priority over feeding rest and optical attraction. Its own integrity can trigger that response even when an attacker is outside its contact receptor's coverage. Escape uses the existing paid motors and lasts until repair restores integrity.
 
-Predators continue approaching soft particles and stop for resistant contact. Two paid flank thermoreceptors compare local temperatures; escape toward cooler water takes priority over contact, hunting and full-gut rest. This response requires the actual built receptors and does not grant heat protection.
+Predators approach soft particles, turn away from recognized peers and stop at other resistant contacts. Two paid flank thermoreceptors compare local temperatures; escape toward cooler water takes priority over contact, hunting and full-gut rest. This response requires the actual built receptors and does not grant heat protection.
 
 Chemoreception reads local dissolved minerals and an organic-cue field emitted by release, leakage and decay. Cues diffuse, move with currents and decay; they do not point to a chosen meal. Light sensing is separate from photosynthesis, and temperature and currents affect cells even without their sensors.
 
@@ -213,7 +221,7 @@ In an organism's read-only Program view, hover, place the caret or select an exp
 
 IndexedDB stores documents and complete worlds; localStorage stores preferences and editor drafts. Changing runs checkpoint every two seconds and after key actions, and reopen paused. The save indicator reports failures. The active simulation advances when its main view is visible or its floating player is open, including while the main app shows a catalog. An open player uses a timer when both windows are hidden; browser throttling can slow it. There is no offline catch-up. Web Locks protect a run from competing writers in multiple tabs. Clearing browser site data removes its local saves; export genomes and environments for portable copies.
 
-**Current formats: engine ABI 12, checkpoint 9, genome language 3 with additive cellular metadata.** Genome JSON exports use `agar.genome` version 2 with `languageVersion: 3`; environment JSON remains version 1. Plain `.cell` source is checked with the current compiler. Checkpoint-3 simulations retain their actual organs, resources, memory and source. Their previously unclassified organic particles and gut contents import as tissue; their new protein pools start empty. Checkpoints 4, 5, 6, 7 and 8 also remain readable. Older states receive explicit initial gases and a one-time ledger for existing carbon; their future follows the new chemistry. New saves retain cellular products, ingredient ledgers, replication, mechanism identities and construction controls. Existing recipes default to allowing new starts and requesting no recycling. Corrected optical coverage and directional primitive interactions intentionally change affected trajectories. The old `build.*` source spelling remains an alias for expression.
+**Current formats: engine ABI 15, checkpoint 11, genome language 3 with additive cellular metadata.** Genome JSON exports use `agar.genome` version 2 with `languageVersion: 3`; environment JSON remains version 1. Plain `.cell` source is checked with the current compiler. Checkpoint-3 simulations retain their actual organs, resources, memory and source. Their previously unclassified organic particles and gut contents import as tissue; their new protein pools start empty. Checkpoints 4 through 10 also remain readable. Older states receive explicit initial gases and a one-time ledger for existing carbon; their future follows the new chemistry. New saves retain cellular products, ingredient ledgers, replication, mechanism identities and construction controls. Existing recipes default to allowing new starts and requesting no recycling. Corrected optical coverage and directional primitive interactions intentionally change affected trajectories. The old `build.*` source spelling remains an alias for expression.
 
 The organelle model is an intentional compatibility break. Checkpoints 1/2 are rejected before replacing the engine state. Older saved genomes remain viewable, renameable and exportable, but must be manually updated in a new copy before introduction. Their investment fractions and omniscient sensors are not silently converted into free organs. Saved records and old files remain preserved. New and old browser documents keep the same storage namespace.
 
@@ -278,6 +286,7 @@ npm run test:player-view
 npm run test:environment-controls
 npm run test:worker
 npm run test:cellular
+npm run test:multicellular
 npm run test:cellular-ui
 npm run test:food-chain
 npm run test:ecosystem    # ten simulated minutes of the actual mixed preset
@@ -302,11 +311,14 @@ and spatial columns, shares identical field-flow samples, and evaluates a derive
 genome plan with folded constants and unreachable bindings removed. Authored
 programs remain intact for mutation, inspection and checkpoints.
 
-Each simulation and environment preview runs in a dedicated worker. The main
-thread requests at most one advancing batch of eight fixed 1/30-second ticks,
-draws compact snapshots, and requests aggregate metrics or field overlays at
-250 ms intervals when visible. Selected-cell details are fetched on demand;
-unchanged frames are not repainted. Pausing and closing drain outstanding work
+Each simulation and environment preview runs in a dedicated worker. A completion-driven scheduler
+requests at most one advancing batch of eight fixed 1/30-second ticks and adapts
+batch size to recent cost. Drawing remains independent of stepping; visible
+frames are requested at most about 30 times per second, while hidden or
+non-simulation views receive only exact tick/summary updates. Field samples are
+requested only for visible overlays; source/barrier metadata stays current
+without copying the grid. Selected-cell details are fetched on demand, and
+visible inspectors share one trace per unchanged session state. Pausing and closing drain outstanding work
 and save checkpoint bytes with their matching summary before releasing the run.
 
 The comparison harness

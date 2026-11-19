@@ -10,8 +10,10 @@ use crate::body::{
 };
 use crate::checkpoint::{ensure, Reader, Result as CheckpointResult, Writer};
 use crate::material_allocation::{AllocationScratch, MaterialDemand};
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::collections::HashMap;
+use std::ops::{Deref, DerefMut};
+use std::rc::Rc;
 
 pub const MAX_PRODUCTS: usize = 64;
 pub const MAX_ASSEMBLIES: usize = 64;
@@ -99,23 +101,25 @@ pub enum MechanismKind {
     LightHarvest, MineralImport, ParticleCapture, Engulf,
     DigestExudate, DigestTissue, DigestWaste, Propulsion, Pierce, Shield,
     Repair, SenseLight, SenseHeat, SenseChemical, SenseContact, SenseOptical,
-    Grow, Replicate, Constrict, Recycle, RespireOxygen,
+    Grow, Replicate, Constrict, Recycle, RespireOxygen, Adhere, JunctionEnergy, JunctionMineral, JunctionCarbon,
 }
 impl MechanismKind {
-    pub const ALL: [Self; 26] = [
+    pub const ALL: [Self; 30] = [
         Self::Support, Self::Translation, Self::EnergyStorage, Self::MineralStorage,
         Self::FoodStorage, Self::LightHarvest, Self::MineralImport, Self::ParticleCapture,
         Self::Engulf, Self::DigestExudate, Self::DigestTissue, Self::DigestWaste,
         Self::Propulsion, Self::Pierce, Self::Shield, Self::Repair, Self::SenseLight,
         Self::SenseHeat, Self::SenseChemical, Self::SenseContact, Self::SenseOptical,
-        Self::Grow, Self::Replicate, Self::Constrict, Self::Recycle, Self::RespireOxygen,
+        Self::Grow, Self::Replicate, Self::Constrict, Self::Recycle, Self::RespireOxygen, Self::Adhere,
+        Self::JunctionEnergy, Self::JunctionMineral, Self::JunctionCarbon,
     ];
     pub fn name(self) -> &'static str {
         ["support()", "translate()", "store(energy)", "store(mineral)", "store(food)",
          "harvest(light)", "import(mineral)", "import(particle)", "engulf()",
          "digest(exudate)", "digest(tissue)", "digest(waste)", "propel()", "pierce()",
          "shield()", "repair()", "sense(light)", "sense(heat)", "sense(chemical)",
-         "sense(contact)", "sense(optical)", "grow()", "replicate()", "constrict()", "recycle()", "respire(oxygen)"]
+         "sense(contact)", "sense(optical)", "grow()", "replicate()", "constrict()", "recycle()", "respire(oxygen)", "adhere()",
+         "junction(energy)", "junction(mineral)", "junction(carbon)"]
             [self as usize]
     }
     pub fn from_name(name: &str) -> Option<Self> {
@@ -154,7 +158,11 @@ impl MechanismKind {
          "Pays for a material-bearing genome copy over time.",
          "Performs paid constriction after replication and feasible division geometry.",
          "Dismantles selected machinery over time, recovering original ingredients with paid work.",
-         "Consumes organic carbon and oxygen to make usable energy and inorganic carbon."]
+         "Consumes organic carbon and oxygen to make usable energy and inorganic carbon.",
+         "Holds contacting cells together while their surface messages match in both directions.",
+         "Exchanges stored ATP with an adhered neighbor carrying an active energy junction.",
+         "Exchanges free mineral with an adhered neighbor carrying an active mineral junction.",
+         "Exchanges organic carbon reserves with an adhered neighbor carrying an active carbon junction."]
             [self as usize]
     }
     pub fn required_roles(self) -> &'static [ProductKind] {
@@ -165,6 +173,8 @@ impl MechanismKind {
             Self::EnergyStorage | Self::MineralStorage | Self::FoodStorage => &[Membrane],
             Self::LightHarvest => &[Anchor, Pigment, Enzyme],
             Self::RespireOxygen => &[Enzyme, Membrane],
+            Self::Adhere => &[Anchor, Membrane],
+            Self::JunctionEnergy | Self::JunctionMineral | Self::JunctionCarbon => &[Membrane, Transporter],
             Self::MineralImport => &[Anchor, Transporter],
             Self::ParticleCapture => &[Anchor, Motor],
             Self::Engulf => &[Anchor, Motor, Membrane],
@@ -182,17 +192,17 @@ impl MechanismKind {
     pub fn minimum_mass(self) -> f64 {
         [0.04, 0.02, 0.02, 0.02, 0.04, 0.04, 0.015, 0.015, 0.025,
          0.01, 0.01, 0.01, 0.025, 0.025, 0.02, 0.025, 0.01, 0.01,
-         0.015, 0.01, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02][self as usize]
+         0.015, 0.01, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02][self as usize]
     }
     fn internal_footprint(self) -> f64 {
         [1.0, 1.0, 2.4, 2.4, 2.5, 1.35, 0.7, 0.8, 0.8,
          1.0, 1.0, 1.0, 0.65, 0.8, 0.35, 1.0, 0.8, 0.8,
-         1.0, 0.7, 1.3, 1.0, 1.0, 1.0, 1.0, 1.2][self as usize]
+         1.0, 0.7, 1.3, 1.0, 1.0, 1.0, 1.0, 1.2, 1.0, 0.7, 0.7, 0.7][self as usize]
     }
     fn surface_footprint(self) -> f64 {
         [0.0, 0.0, 0.0, 0.0, 0.0, 0.55, 1.8, 2.2, 2.2,
          0.0, 0.0, 0.0, 1.5, 2.0, 3.0, 0.0, 1.2, 1.1,
-         1.5, 1.1, 2.0, 1.5, 0.0, 1.5, 0.0, 0.0][self as usize]
+         1.5, 1.1, 2.0, 1.5, 0.0, 1.5, 0.0, 0.0, 1.4, 1.4, 1.4, 1.4][self as usize]
     }
 }
 
@@ -296,12 +306,63 @@ pub struct AssemblyDef {
     pub direction: f64,
 }
 
+/// Immutable while shared. Mutation detaches the declaration data before any
+/// cached binding or installed recipe can observe a changed definition.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct CellularProgram {
+pub struct CellularProgram(Rc<CellularDefinition>);
+
+#[derive(Debug, Default)]
+pub struct CellularDefinition {
     pub products: Vec<ProductDef>,
     pub assemblies: Vec<AssemblyDef>,
+    recipes: OnceCell<Vec<Rc<Recipe>>>,
+}
+impl Clone for CellularDefinition {
+    fn clone(&self) -> Self {
+        Self { products: self.products.clone(), assemblies: self.assemblies.clone(),
+            recipes: OnceCell::new() }
+    }
+}
+impl PartialEq for CellularDefinition {
+    fn eq(&self, other: &Self) -> bool {
+        self.products == other.products && self.assemblies == other.assemblies
+    }
+}
+impl Deref for CellularProgram {
+    type Target = CellularDefinition;
+    fn deref(&self) -> &Self::Target { &self.0 }
+}
+impl DerefMut for CellularProgram {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        let definition = Rc::make_mut(&mut self.0);
+        definition.recipes.take();
+        definition
+    }
 }
 impl CellularProgram {
+    pub fn new(products: Vec<ProductDef>, assemblies: Vec<AssemblyDef>) -> Self {
+        Self(Rc::new(CellularDefinition { products, assemblies, recipes: OnceCell::new() }))
+    }
+    fn same_definition(&self, other: &Self) -> bool { Rc::ptr_eq(&self.0, &other.0) }
+    fn recipe(&self, index: usize) -> Rc<Recipe> {
+        self.recipes.get_or_init(|| self.assemblies.iter()
+            .map(|definition| Rc::new(Recipe::from_def(self, definition))).collect())[index].clone()
+    }
+    /// Keep the authored allocation estimate independent of runtime sharing.
+    pub(crate) fn authored_inline_bytes() -> usize {
+        std::mem::size_of::<Vec<ProductDef>>() + std::mem::size_of::<Vec<AssemblyDef>>()
+    }
+    /// Charge the complete lazy recipe cache up front so creating a machine
+    /// never changes a genome's retained allocation budget or save bytes.
+    pub(crate) fn derived_bytes(&self) -> usize {
+        let rc_header = 2 * std::mem::size_of::<usize>();
+        rc_header + std::mem::size_of::<OnceCell<Vec<Rc<Recipe>>>>()
+            + self.assemblies.len() * std::mem::size_of::<Rc<Recipe>>()
+            + self.assemblies.iter().map(|def| rc_header + std::mem::size_of::<Recipe>()
+                + def.name.len() + def.parts.len() * std::mem::size_of::<RecipePart>()
+                + def.parts.iter().map(|&(product,_)| self.products[product].name.len()).sum::<usize>())
+                .sum::<usize>()
+    }
     pub fn validate(&self) -> Result<(), String> {
         if self.products.len() > MAX_PRODUCTS || self.assemblies.len() > MAX_ASSEMBLIES {
             return Err("At most 64 products and 64 assemblies are supported.".into());
@@ -472,7 +533,7 @@ pub struct Ingredient {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AssemblyInstance {
     pub id: u32,
-    pub recipe: Recipe,
+    pub recipe: Rc<Recipe>,
     pub ingredients: Vec<Ingredient>,
     pub integrity: f64,
     pub activity: f64,
@@ -575,7 +636,7 @@ struct BindingCache {
 }
 impl BindingCache {
     fn ensure(&mut self, program: &CellularProgram, pools: &[ProductPool], assemblies: &[AssemblyInstance], next_id: u32) {
-        if self.program.as_ref() == Some(program)
+        if self.program.as_ref().is_some_and(|cached| cached.same_definition(program))
             && self.pool_count == pools.len()
             && self.instance_count == assemblies.len()
             && self.next_id == next_id
@@ -823,7 +884,7 @@ impl CellularState {
                 SenseChemical => cap.chemical_sensing += active,
                 SenseContact => cap.mechanical_sensing += active,
                 SenseOptical => cap.optical_sensing += active,
-                Support | Grow | Replicate | Constrict | Recycle => {},
+                Support | Grow | Replicate | Constrict | Recycle | Adhere | JunctionEnergy | JunctionMineral | JunctionCarbon => {},
             }
         }
         cap.optical_range = if cap.optical_sensing > 0.0 {
@@ -986,9 +1047,9 @@ impl CellularState {
                 "invalid or duplicate assembly identifier",
             )?;
             let recipe = &assembly.recipe;
-            let program = CellularProgram {
-                products: recipe.parts.iter().map(|p| p.product.clone()).collect(),
-                assemblies: vec![AssemblyDef {
+            let program = CellularProgram::new(
+                recipe.parts.iter().map(|p| p.product.clone()).collect(),
+                vec![AssemblyDef {
                     name: recipe.name.clone(),
                     kind: recipe.kind,
                     at: recipe.at,
@@ -1000,7 +1061,7 @@ impl CellularState {
                         .map(|(i, p)| (i, p.required_mass))
                         .collect(),
                 }],
-            };
+            );
             ensure(
                 program.validate().is_ok(),
                 "invalid installed assembly recipe",
@@ -1141,6 +1202,8 @@ impl CellularState {
                 value @ 19..=42 if version >= 6 => AssemblyKind::Mechanism(MechanismKind::ALL[(value - 19) as usize]),
                 43 if version >= 7 => AssemblyKind::Mechanism(MechanismKind::Recycle),
                 44 if version >= 9 => AssemblyKind::Mechanism(MechanismKind::RespireOxygen),
+                45 if version >= 10 => AssemblyKind::Mechanism(MechanismKind::Adhere),
+                tag @ 46..=48 if version >= 11 => AssemblyKind::Mechanism(MechanismKind::ALL[(tag - 19) as usize]),
                 value => AssemblyKind::Organelle(
                     OrganelleKind::from_index(value as usize)
                         .ok_or("Invalid simulation save: unknown assembly family.")?,
@@ -1165,13 +1228,13 @@ impl CellularState {
             }
             state.assemblies.push(AssemblyInstance {
                 id,
-                recipe: Recipe {
+                recipe: Rc::new(Recipe {
                     name,
                     kind,
                     parts,
                     at,
                     direction,
-                },
+                }),
                 ingredients,
                 integrity,
                 activity,
@@ -1319,8 +1382,8 @@ impl Body {
         let area = self.area;
         let state = self.cellular.get_or_insert_with(CellularState::default);
         let mut active = [0.0; FAMILY_COUNT];
-        let mut mechanism_total = [0.0; 26];
-        let mut mechanism_active = [0.0; 26];
+        let mut mechanism_total = [0.0; MechanismKind::ALL.len()];
+        let mut mechanism_active = [0.0; MechanismKind::ALL.len()];
         let mut actions = CellularActions {
             scan_width: std::f64::consts::TAU,
             digest: [1.0; 3],
@@ -1560,7 +1623,7 @@ impl Body {
             pending_ids += 1;
             state.assemblies.push(AssemblyInstance {
                 id: 0,
-                recipe: Recipe::from_def(program, def),
+                recipe: program.recipe(definition),
                 ingredients: vec![Ingredient::default(); def.parts.len()],
                 integrity: 1.0,
                 activity: effort(controls.activity.get(definition).copied().unwrap_or(0.0)),
@@ -2017,20 +2080,82 @@ mod tests {
         }
     }
     fn flagellum_program() -> CellularProgram {
-        CellularProgram {
-            products: vec![
+        CellularProgram::new(
+            vec![
                 product("Anchor", ProductKind::Anchor),
                 product("Motor", ProductKind::Motor),
                 product("Tail", ProductKind::Filament),
             ],
-            assemblies: vec![AssemblyDef {
+            vec![AssemblyDef {
                 name: "Swim".into(),
                 kind: AssemblyKind::Organelle(OrganelleKind::Flagellum),
                 parts: vec![(0, 0.005), (1, 0.01), (2, 0.025)],
                 at: 0.0,
                 direction: 0.0,
             }],
-        }
+        )
+    }
+
+    #[test]
+    fn shared_declarations_detach_before_mutation_and_invalidate_bindings() {
+        let mut program = flagellum_program();
+        let old = program.clone();
+        assert!(program.same_definition(&old));
+        let mut body = stocked(&program, &[0.02,0.03,0.04]);
+        add_complete(&mut body, &program, 0);
+        let before = body.cellular_inputs(&program);
+        let shared = body.cellular.as_ref().unwrap().bindings.0.borrow().program.clone().unwrap();
+        assert!(shared.same_definition(&program));
+        let installed = body.cellular.as_ref().unwrap().assemblies[0].recipe.clone();
+        assert!(Rc::ptr_eq(&installed, &program.recipe(0)));
+        let budget = program.derived_bytes();
+        assert_eq!(program.derived_bytes(), budget);
+
+        // Field-style editing must detach even if the caller never explicitly
+        // cloned the handle: the binding cache itself retains the old version.
+        drop(old);
+        drop(shared);
+        program.products[1].half_life = 8.0;
+        assert_eq!(installed.parts[1].product.half_life, 0.0);
+        let changed = body.cellular_inputs(&program);
+        assert_eq!(changed.0[1], 0.0);
+        assert_eq!(changed.1[0], 0.0);
+        assert!(body.cellular.as_ref().unwrap().bindings.0.borrow().program.as_ref()
+            .unwrap().same_definition(&program));
+        assert!(!Rc::ptr_eq(&installed, &program.recipe(0)));
+
+        program.products[1].half_life = 0.0;
+        let restored = body.cellular_inputs(&program);
+        assert_eq!(before, restored);
+        let clone = program.clone();
+        program.assemblies[0].direction = 0.75;
+        assert_eq!(clone.assemblies[0].direction, 0.0);
+        assert_eq!(installed.direction, 0.0);
+        assert_eq!(body.cellular_inputs(&program).1[0], 0.0);
+    }
+
+    #[test]
+    fn installed_recipes_share_declarations_without_sharing_material() {
+        let program = flagellum_program();
+        let budget = program.derived_bytes();
+        let mut first = stocked(&program, &[0.02,0.03,0.04]);
+        let mut second = first.clone();
+        add_complete(&mut first, &program, 0);
+        add_complete(&mut second, &program, 0);
+        let a = &first.cellular.as_ref().unwrap().assemblies[0];
+        let b = &second.cellular.as_ref().unwrap().assemblies[0];
+        assert!(Rc::ptr_eq(&a.recipe, &b.recipe));
+        assert_eq!(program.derived_bytes(), budget, "lazy cache has a fixed runtime budget");
+        let before = b.ingredients[0].mass;
+        first.cellular.as_mut().unwrap().assemblies[0].ingredients[0].mass *= 0.5;
+        assert_eq!(second.cellular.as_ref().unwrap().assemblies[0].ingredients[0].mass, before);
+        let mut writer = Writer::new();
+        second.write_checkpoint(&mut writer);
+        let saved = writer.0;
+        let restored = Body::read_checkpoint(&mut Reader::new(&saved)).unwrap();
+        let mut writer = Writer::new();
+        restored.write_checkpoint(&mut writer);
+        assert_eq!(writer.0, saved, "sharing never enters canonical body bytes");
     }
     fn controls(program: &CellularProgram, expression: f64) -> CellularControls {
         CellularControls {
@@ -2059,7 +2184,7 @@ mod tests {
         body
     }
     fn complete(program: &CellularProgram, definition: usize, id: u32) -> AssemblyInstance {
-        let recipe = Recipe::from_def(program, &program.assemblies[definition]);
+        let recipe = program.recipe(definition);
         let ingredients = recipe
             .parts
             .iter()
@@ -2195,13 +2320,13 @@ mod tests {
 
     #[test]
     fn duplicated_genes_change_competition_without_duplicating_translation_capacity() {
-        let program = CellularProgram {
-            products: vec![
+        let program = CellularProgram::new(
+            vec![
                 product("A", ProductKind::Scaffold),
                 product("B", ProductKind::Scaffold),
             ],
-            assemblies: vec![],
-        };
+            vec![],
+        );
         let (mut body, _) = Body::founder();
         let mut energy = 100.0;
         let mut minerals = 1.0;
@@ -2243,10 +2368,10 @@ mod tests {
 
     #[test]
     fn regulator_half_life_recovers_material_and_accounts_for_all_embodied_energy() {
-        let program = CellularProgram {
-            products: vec![product("Run", ProductKind::Regulator)],
-            assemblies: vec![],
-        };
+        let program = CellularProgram::new(
+            vec![product("Run", ProductKind::Regulator)],
+            vec![],
+        );
         let mut body = stocked(&program, &[0.2]);
         let mut energy = 20.0;
         let mut minerals = 0.0;
@@ -2303,15 +2428,15 @@ mod tests {
 
     #[test]
     fn sensors_and_processing_obey_stored_activity_and_damage_never_erases_material() {
-        let program = CellularProgram {
-            products: vec![
+        let program = CellularProgram::new(
+            vec![
                 product("Anchor", ProductKind::Anchor),
                 product("Sensor", ProductKind::Receptor),
                 product("Pigment", ProductKind::Pigment),
                 product("Frame", ProductKind::Scaffold),
                 product("Enzyme", ProductKind::Enzyme),
             ],
-            assemblies: vec![
+            vec![
                 AssemblyDef {
                     name: "Light".into(),
                     kind: AssemblyKind::Organelle(OrganelleKind::Photoreceptor),
@@ -2327,7 +2452,7 @@ mod tests {
                     direction: 0.0,
                 },
             ],
-        };
+        );
         program.validate().unwrap();
         let (mut body, _) = Body::founder();
         add_complete(&mut body, &program, 0);
@@ -2403,19 +2528,19 @@ mod tests {
 
     #[test]
     fn cellular_cores_support_whole_daughters_and_partial_cores_never_do() {
-        let program = CellularProgram {
-            products: vec![
+        let program = CellularProgram::new(
+            vec![
                 product("Frame", ProductKind::Scaffold),
                 product("Enzyme", ProductKind::Enzyme),
             ],
-            assemblies: vec![AssemblyDef {
+            vec![AssemblyDef {
                 name: "Core".into(),
                 kind: AssemblyKind::Organelle(OrganelleKind::Core),
                 parts: vec![(0, 0.03), (1, 0.03)],
                 at: 0.0,
                 direction: 0.0,
             }],
-        };
+        );
         let (mut body, _) = Body::founder();
         body.area = 2.001;
         body.scaffold_energy *= body.area;
@@ -2436,8 +2561,8 @@ mod tests {
 
     #[test]
     fn membrane_replication_and_constriction_are_paid_distinct_delayed_steps() {
-        let program = CellularProgram {
-            products: vec![
+        let program = CellularProgram::new(
+            vec![
                 product("Skin", ProductKind::Membrane),
                 product("Enzyme", ProductKind::Enzyme),
                 product("Frame", ProductKind::Scaffold),
@@ -2446,7 +2571,7 @@ mod tests {
                 product("Motor", ProductKind::Motor),
                 product("Ring", ProductKind::Constrictor),
             ],
-            assemblies: vec![
+            vec![
                 AssemblyDef {
                     name: "Growth".into(),
                     kind: AssemblyKind::Membrane,
@@ -2469,7 +2594,7 @@ mod tests {
                     direction: 0.0,
                 },
             ],
-        };
+        );
         program.validate().unwrap();
         let (mut body, _) = Body::fixture(BodyFixture::Bare);
         for index in 0..3 {
@@ -2529,16 +2654,16 @@ mod tests {
         let mut body = stocked(&original, &[0.02, 0.03, 0.04]);
         add_complete(&mut body, &original, 0);
         let old = body.cellular.as_ref().unwrap().assemblies[0].clone();
-        let replacement = CellularProgram {
-            products: vec![product("Motor", ProductKind::Scaffold)],
-            assemblies: vec![AssemblyDef {
+        let replacement = CellularProgram::new(
+            vec![product("Motor", ProductKind::Scaffold)],
+            vec![AssemblyDef {
                 name: "Swim".into(),
                 kind: AssemblyKind::Organelle(OrganelleKind::Cortex),
                 parts: vec![(0, 0.02)],
                 at: 0.0,
                 direction: 0.0,
             }],
-        };
+        );
         replacement.validate().unwrap();
         let mut energy = 100.0;
         let mut minerals = 2.0;

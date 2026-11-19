@@ -8,13 +8,18 @@ use crate::body::{
 use crate::cellular::{AssemblyKind, CellularWorkScratch, MechanismKind};
 use crate::environment::{Environment, PATCHES};
 use crate::genome::{
-    EvalScratch, Inputs, MutationKind, OrganelleInput, Outputs, Program, ReceptorInput, Registers,
+    EvalScratch, Inputs, MutationKind, OrganelleInput, Outputs, Program, ReceptorInput, Registers, Sensor,
 };
 use std::f64::consts::{PI, TAU};
 use std::fmt::Write;
 use std::rc::Rc;
+mod adhesion;
 mod checkpoint;
 mod chemistry;
+mod contact;
+use contact::{avoids_contact, CellSignal};
+#[cfg(test)]
+mod contact_tests;
 #[cfg(test)]
 mod chemistry_tests;
 mod presentation;
@@ -34,6 +39,8 @@ mod predation_tests;
 mod foraging_tests;
 #[cfg(test)]
 mod environment_tests;
+#[cfg(test)]
+mod performance_tests;
 
 pub const WIDTH: f64 = 1200.0;
 pub const HEIGHT: f64 = 760.0;
@@ -330,6 +337,9 @@ pub struct Cell {
     pub internal_inorganic_carbon: f64,
     pub respiration_rate: f64,
     pub carbon_fixation_rate: f64,
+    /// Bilateral contacts and signed junction receipts during the last adhesion phase.
+    pub adhered_neighbors: u32,
+    pub junction_net: [f64; 3],
     pub gut_energy: f64,
     pub gut_nutrients: f64,
     pub gut: [OrganicMatter; 3],
@@ -550,12 +560,16 @@ struct AttackEvent {
 
 #[derive(Default)]
 struct PhaseWorkspace {
+    junctions: adhesion::JunctionWorkspace,
+    /// Cell-indexed public messages and receiver settings from before this tick's writes.
+    signals: Vec<CellSignal>,
     geometry: CellGeometry,
     cell_grid: Grid,
     food_grid: Grid,
     candidates: Vec<usize>,
     nearby: Vec<usize>,
     groups: Vec<Vec<(usize, f64)>>,
+    group_patches: Vec<u64>,
     photo_requests: Vec<(usize, usize, f64)>,
     footprint: Vec<(usize, f64)>,
     totals: Vec<f64>,
@@ -574,6 +588,33 @@ struct PhaseWorkspace {
     meals: Vec<(f64, f64)>,
     requests: Vec<f64>,
     budgets: Vec<f64>,
+    spill_capacities: Vec<BodyCapacities>,
+}
+
+/// Visit only occupied patches, in the same ascending order as the dense pass.
+fn occupied_patches(words: &[u64]) -> impl Iterator<Item = usize> + '_ {
+    words.iter().enumerate().flat_map(|(word, &bits)| {
+        let mut remaining = bits;
+        std::iter::from_fn(move || {
+            if remaining == 0 { return None; }
+            let bit = remaining.trailing_zeros() as usize;
+            remaining &= remaining - 1;
+            Some(word * 64 + bit)
+        })
+    })
+}
+
+impl PhaseWorkspace {
+    fn clear_groups(&mut self, count: usize) {
+        for patch in occupied_patches(&self.group_patches) { self.groups[patch].clear(); }
+        self.groups.resize_with(count, Vec::new);
+        self.group_patches.resize(count.div_ceil(64), 0);
+        self.group_patches.fill(0);
+    }
+    fn group_request(&mut self, patch: usize, request: (usize, f64)) {
+        self.group_patches[patch / 64] |= 1_u64 << (patch % 64);
+        self.groups[patch].push(request);
+    }
 }
 
 /// Reusable derived storage is not part of the checkpoint or simulated state.
@@ -616,6 +657,8 @@ pub struct World {
     next_food_id: u64,
     rng: Rng,
     seed: u32,
+    // Derived from the previous adhesion phase, rebuilt from cells when restoring.
+    had_adhesive_contacts: bool,
     // Derived evaluation storage is reusable, never serialized as world state.
     eval_scratch: EvalScratch,
     workspace: TickWorkspace,
@@ -649,6 +692,7 @@ impl World {
             next_food_id: 1,
             rng: Rng::new(seed),
             seed,
+            had_adhesive_contacts: false,
             eval_scratch: EvalScratch::default(),
             workspace: TickWorkspace::default(),
         }
@@ -676,18 +720,27 @@ impl World {
             (food.x,food.y)=self.environment.move_circle((food.x,food.y),(food.x,food.y),2.5);
         }
     }
+    /// Create the historical register-empty founders. Use the registry-aware
+    /// reset when creating a program with an authored publication initializer.
     pub fn reset(&mut self, seed: u32, genome_id: u32) {
         self.try_reset(seed, genome_id)
             .expect("Unable to allocate simulation")
     }
     pub fn try_reset(&mut self, seed: u32, genome_id: u32) -> Result<(), String> {
+        self.reset_population(seed, genome_id, None)
+    }
+    pub fn try_reset_in_registry(&mut self, seed: u32, genome_id: u32, genomes: &[Genome]) -> Result<(), String> {
+        let program = Self::founder_program(genome_id, genomes)?;
+        self.reset_population(seed, genome_id, Some(program))
+    }
+    fn reset_population(&mut self, seed: u32, genome_id: u32, program: Option<&Program>) -> Result<(), String> {
         let mut next = Self::empty(seed);
         next.environment = self.environment.clone();
         next.environment.reset_dynamic();
         next.mutation_rate = self.mutation_rate;
         next.food_rate = self.food_rate;
         next.try_add_food(-1.0, -1.0, 360)?;
-        next.try_seed_cells(genome_id, 22, -1.0, -1.0)?;
+        next.seed_bodies(genome_id, 22, -1.0, -1.0, Body::founder, program)?;
         *self = next;
         Ok(())
     }
@@ -732,6 +785,8 @@ impl World {
                     + (c.organic_carbon + c.body.structural_mass() * STRUCTURAL_CARBON_PER_MASS) * CHEMICAL_ENERGY_PER_CARBON)
                 .sum::<f64>()
     }
+    /// Registry-free seeding retains its register-empty founder contract.
+    /// Program-aware native and WASM callers use `try_seed_cells_in_registry`.
     pub fn seed_cells(&mut self, id: u32, count: usize, x: f64, y: f64) -> usize {
         self.try_seed_cells(id, count, x, y)
             .expect("Unable to allocate seeded cells")
@@ -743,7 +798,17 @@ impl World {
         x: f64,
         y: f64,
     ) -> Result<usize, String> {
-        self.seed_bodies(id, count, x, y, Body::founder)
+        self.seed_bodies(id, count, x, y, Body::founder, None)
+    }
+    fn founder_program(genome_id: u32, genomes: &[Genome]) -> Result<&Program, String> {
+        genomes.get(genome_id.wrapping_sub(1) as usize).map(|genome| &genome.program)
+            .ok_or_else(|| "Unknown genome: compile a valid program first.".into())
+    }
+    pub fn try_seed_cells_in_registry(
+        &mut self, id: u32, count: usize, x: f64, y: f64, genomes: &[Genome],
+    ) -> Result<usize, String> {
+        let program = Self::founder_program(id, genomes)?;
+        self.seed_bodies(id, count, x, y, Body::founder, Some(program))
     }
     /// Preassembled specimens are available only to native regression tests.
     #[cfg(test)]
@@ -755,7 +820,7 @@ impl World {
         y: f64,
         fixture: BodyFixture,
     ) -> Result<usize, String> {
-        self.seed_bodies(genome_id, count, x, y, || Body::fixture(fixture))
+        self.seed_bodies(genome_id, count, x, y, || Body::fixture(fixture), None)
     }
     fn seed_bodies(
         &mut self,
@@ -764,6 +829,7 @@ impl World {
         x: f64,
         y: f64,
         mut create_body: impl FnMut() -> (Body, FounderBudget),
+        program: Option<&Program>,
     ) -> Result<usize, String> {
         if count > (u32::MAX - self.next_id) as usize {
             return Err("Cannot add organisms: the cell identifier sequence is exhausted.".into());
@@ -783,6 +849,8 @@ impl World {
             let angle = self.rng.unit() * TAU;
             let (body, budget) = create_body();
             let birth_area = body.area;
+            let mut memory = Registers::default();
+            if let Some(program) = program { program.initialize_message(&mut memory); }
             let (cx,cy)=self.environment.move_circle((cx,cy),(cx,cy),CELL_RADIUS*body.area.sqrt());
             self.cells.push(Cell {
                 id: self.next_id,
@@ -797,7 +865,7 @@ impl World {
                 generation: 0,
                 parent_id: 0,
                 cooldown: DIVISION_COOLDOWN,
-                memory: Registers::default(),
+                memory,
                 integrity: 1.0,
                 body,
                 nutrient_stored: budget.minerals,
@@ -806,6 +874,8 @@ impl World {
                 internal_inorganic_carbon: 0.0,
                 respiration_rate: 0.0,
                 carbon_fixation_rate: 0.0,
+                adhered_neighbors: 0,
+                junction_net: [0.0; 3],
                 gut_energy: 0.0,
                 gut_nutrients: 0.0,
                 gut: [OrganicMatter::default(); 3],
@@ -906,7 +976,7 @@ impl World {
     fn observations(&self, selected: Option<usize>) -> (Vec<Inputs>, Vec<Tracking>) {
         let caps: Vec<_> = self.cells.iter().map(|c| c.body.capacities()).collect();
         let mut workspace = ObservationWorkspace::default();
-        self.observations_into(selected, &caps, &mut workspace);
+        self.observations_into(selected, &caps, &mut workspace, None);
         (workspace.inputs, workspace.tracking)
     }
     fn observations_into(
@@ -914,6 +984,7 @@ impl World {
         selected: Option<usize>,
         capacities: &[BodyCapacities],
         workspace: &mut ObservationWorkspace,
+        genomes: Option<&[Genome]>,
     ) {
         let ObservationWorkspace {
             inputs: result,
@@ -956,6 +1027,10 @@ impl World {
                 continue;
             }
             let caps = &capacities[index];
+            // Inspection requests every field. Ticking only needs pure values
+            // reachable from this program; tracking still runs in full below.
+            let program = genomes.map(|genomes| &genomes[(cell.genome_id - 1) as usize].program);
+            let reads = |sensor| program.is_none_or(|program| program.reads_sensor(sensor));
             let space = cell.body.space();
             let surface = cell.body.surface();
             // Preserve nested cellular buffers when resetting the scalar snapshot.
@@ -1036,64 +1111,65 @@ impl World {
             if caps.light_sensing > 0.0 {
                 input.light_available = true;
                 input.light_valid = true;
-                input.light_level = measure(
+                if reads(Sensor::LightLevel) { input.light_level = measure(
                     self.environment.light_at(cell.x, cell.y),
                     caps.light_sensing,
                     0.0005,
                 )
-                .clamp(0.0, 1.0);
-                input.light_bearing = measure(
+                .clamp(0.0, 1.0); }
+                if reads(Sensor::LightBearing) { input.light_bearing = measure(
                     bearing(self.environment.light_gradient(cell.x, cell.y)),
                     caps.light_sensing,
                     0.002,
-                );
+                ); }
             }
             if caps.heat_sensing > 0.0 {
                 input.heat_available = true;
                 input.heat_valid = true;
-                input.heat_value = measure(
+                if reads(Sensor::HeatValue) { input.heat_value = measure(
                     self.environment.temperature_at(cell.x, cell.y),
                     caps.heat_sensing,
                     0.0005,
                 )
-                .clamp(0.0, 1.0);
-                input.heat_bearing = measure(
+                .clamp(0.0, 1.0); }
+                if reads(Sensor::HeatBearing) { input.heat_bearing = measure(
                     bearing(self.environment.temperature_gradient(cell.x, cell.y)),
                     caps.heat_sensing,
                     0.002,
-                );
+                ); }
             }
             if caps.chemical_sensing > 0.0 {
                 input.chemical_available = true;
                 input.chemical_valid = true;
-                input.chemical_mineral = measure(
+                if reads(Sensor::ChemicalMineral) { input.chemical_mineral = measure(
                     self.environment.nutrient_at(cell.x, cell.y),
                     caps.chemical_sensing,
                     0.001,
                 )
-                .max(0.0);
-                input.chemical_organic = measure(
+                .max(0.0); }
+                if reads(Sensor::ChemicalOrganic) { input.chemical_organic = measure(
                     self.environment.organic_at(cell.x, cell.y),
                     caps.chemical_sensing,
                     0.001,
                 )
-                .max(0.0);
-                input.chemical_mineral_bearing = measure(
+                .max(0.0); }
+                if reads(Sensor::ChemicalMineralBearing) { input.chemical_mineral_bearing = measure(
                     bearing(self.environment.nutrient_gradient(cell.x, cell.y)),
                     caps.chemical_sensing,
                     0.002,
-                );
-                input.chemical_organic_bearing = measure(
+                ); }
+                if reads(Sensor::ChemicalOrganicBearing) { input.chemical_organic_bearing = measure(
                     bearing(self.environment.organic_gradient(cell.x, cell.y)),
                     caps.chemical_sensing,
                     0.002,
-                );
+                ); }
             }
             if caps.mechanical_sensing > 0.0 {
-                let (vx, vy) = self.environment.flow_at(cell.x, cell.y, self.time());
                 input.flow_available = true;
                 input.flow_valid = true;
                 input.contact_available = true;
+                if reads(Sensor::FlowVector) || reads(Sensor::FlowSpeed) || reads(Sensor::FlowBearing) {
+                let (vx, vy) = self.environment.flow_at(cell.x, cell.y, self.time());
                 input.flow_vector = local_vector(vx - cell.vx, vy - cell.vy, cell.angle)
                     .map(|v| measure(v, caps.mechanical_sensing, 0.03));
                 input.flow_speed = input.flow_vector[0].hypot(input.flow_vector[1]);
@@ -1102,6 +1178,7 @@ impl World {
                 } else {
                     0.0
                 };
+                }
             }
             input.object_available = caps.optical_sensing > 0.0;
             let tracking = &mut tracks[output_index];
@@ -1388,14 +1465,15 @@ impl World {
         self.decay_food_in(phases);
         // Phase 1: one immutable observation/capability snapshot. Memory and
         // tracking commit only after every cell has observed that same world.
-        self.observations_into(None, caps, observations);
+        self.freeze_contact_signals(genomes, &mut phases.signals);
+        self.observations_into(None, caps, observations, Some(genomes));
         for (index, (cell, input)) in self.cells.iter().zip(observations.inputs.iter_mut()).enumerate() {
             let program = &genomes[(cell.genome_id - 1) as usize].program;
             if let Some(definition) = program.cellular() {
                 cell.body.cellular_inputs_into(definition, &mut input.products, &mut input.assemblies);
                 self.receptor_inputs_into(index, program, input, caps,
                     &observations.geometry, &observations.cell_grid, &observations.food_grid,
-                    observations.max_radius, &mut observations.receptor_masses);
+                    observations.max_radius, &mut observations.receptor_masses, false, &phases.signals);
             }
         }
         let inputs = &observations.inputs;
@@ -1523,6 +1601,7 @@ impl World {
         self.resolve_collisions_in(phases);
         self.settle_barriers();
         if !self.environment.barriers.is_empty() { phases.geometry.rebuild(&self.cells,false,false); }
+        self.apply_adhesion_in(phases);
         self.eat_in(outputs, caps, phases);
         self.photosynthesize_in(outputs, caps, processing, phases);
         self.resolve_predation_in(outputs, caps, phases);
@@ -1571,7 +1650,7 @@ impl World {
             cell.recycling_rate = report.recycled_mass / DT;
             cell.repair_rate = report.repaired_mass / DT;
         }
-        self.spill_excess_stores_in(phases);
+        self.spill_excess_stores_in(phases, true);
         let originals = self.cells.len();
         for i in 0..originals {
             if !outputs[i].divide
@@ -1611,6 +1690,7 @@ impl World {
             daughter.generation += 1;
             daughter.age = 0.0;
             daughter.memory = Registers::default();
+            genomes[(genome_id - 1) as usize].program.initialize_message(&mut daughter.memory);
             daughter.tracking = Tracking::default();
             daughter.scan_target = Rc::from("");
             daughter.body = daughter_body;
@@ -1622,6 +1702,8 @@ impl World {
             daughter.internal_inorganic_carbon *= 0.5;
             daughter.respiration_rate = 0.0;
             daughter.carbon_fixation_rate = 0.0;
+            daughter.adhered_neighbors = 0;
+            daughter.junction_net = [0.0; 3];
             daughter.scale_gut(0.5);
             daughter.x = wrap(cell.x + dx, self.environment.width);
             daughter.y = wrap(cell.y + dy, self.environment.height);
@@ -1653,11 +1735,14 @@ impl World {
             cell.cooldown = DIVISION_COOLDOWN;
             self.next_id += 1;
             self.births += 1;
+            // Only division changes bodies between the two spill passes.
+            phases.spill_capacities[i] = cell.body.capacities();
+            phases.spill_capacities.push(daughter.body.capacities());
             self.cells.push(daughter);
         }
         // Uneven, discrete compartment inheritance can reduce capacity; transfer
         // overflow to the local environment rather than cloning a compartment.
-        self.spill_excess_stores_in(phases);
+        self.spill_excess_stores_in(phases, false);
         phases.emissions.clear();
         // A newborn can immediately lose all usable energy when its inherited
         // storage overflows. Return its tissue too; only pre-birth cells could
@@ -1704,11 +1789,7 @@ impl World {
         caps: &[BodyCapacities],
         workspace: &mut PhaseWorkspace,
     ) {
-        let groups = &mut workspace.groups;
-        groups.resize_with(self.environment.patch_count(), Vec::new);
-        for group in groups.iter_mut() {
-            group.clear();
-        }
+        workspace.clear_groups(self.environment.patch_count());
         for (i, c) in self.cells.iter().enumerate() {
             if !c.alive() {
                 continue;
@@ -1717,13 +1798,11 @@ impl World {
                 .min((caps[i].minerals - c.nutrient_stored).max(0.0))
                 .min((c.energy - 0.05 * caps[i].energy).max(0.0));
             if request > 0.0 {
-                groups[self.environment.patch_index(c.x, c.y)].push((i, request));
+                workspace.group_request(self.environment.patch_index(c.x, c.y), (i, request));
             }
         }
-        for (patch, group) in groups.iter_mut().enumerate() {
-            if group.is_empty() {
-                continue;
-            }
+        for patch in occupied_patches(&workspace.group_patches) {
+            let group = &mut workspace.groups[patch];
             group.sort_by_key(|&(i, _)| self.cells[i].id);
             let demand: f64 = group.iter().map(|(_, v)| v).sum();
             let available = self.environment.take_nutrients(patch, demand);
@@ -1800,14 +1879,18 @@ impl World {
         }
         self.emit_organic_pending(workspace);
     }
-    fn spill_excess_stores_in(&mut self, workspace: &mut PhaseWorkspace) {
+    fn spill_excess_stores_in(&mut self, workspace: &mut PhaseWorkspace, refresh: bool) {
+        if refresh {
+            workspace.spill_capacities.clear();
+            workspace.spill_capacities.extend(self.cells.iter().map(|cell| cell.body.capacities()));
+        }
+        debug_assert_eq!(workspace.spill_capacities.len(), self.cells.len());
         let spills = &mut workspace.emissions;
         spills.clear();
-        for c in &mut self.cells {
+        for (c, cap) in self.cells.iter_mut().zip(&workspace.spill_capacities) {
             if !c.alive() {
                 continue;
             }
-            let cap = c.body.capacities();
             let excess = (c.nutrient_stored - cap.minerals).max(0.0);
             c.nutrient_stored -= excess;
             self.environment.recycle_nutrients(c.x, c.y, excess);
@@ -1931,15 +2014,16 @@ impl World {
                 }
                 let dx = delta(geometry.positions[j][0] - x, self.environment.width);
                 let dy = delta(geometry.positions[j][1] - y, self.environment.height);
-                if self.environment.segment_blocked((x,y),(x+dx,y+dy)) { continue; }
                 let gap = dx.hypot(dy) - geometry.radii[i] - geometry.radii[j];
                 if gap > reach || relative_angle(dy.atan2(dx) - geometry.angles[i]).abs() > PI * 0.6
                 {
                     continue;
                 }
-                if gap < best
+                if avoids_contact(&workspace.signals, i, j) { continue; }
+                if (gap < best
                     || (gap == best
-                        && target.is_none_or(|old: usize| geometry.ids[j] < geometry.ids[old]))
+                        && target.is_none_or(|old: usize| geometry.ids[j] < geometry.ids[old])))
+                    && !self.environment.segment_blocked((x,y),(x+dx,y+dy))
                 {
                     best = gap;
                     target = Some(j);
@@ -2204,8 +2288,8 @@ impl World {
             for &index in nearby.iter() {
                 let food = &mut self.food[index];
                 if food.kind != kind
-                    || self.environment.segment_blocked((x,y),(food.x,food.y))
                     || delta(food.x - x, self.environment.width).hypot(delta(food.y - y, self.environment.height)) > 24.0
+                    || self.environment.segment_blocked((x,y),(food.x,food.y))
                 {
                     continue;
                 }
@@ -2306,12 +2390,12 @@ impl World {
                 }
                 let dx = delta(geometry.positions[j][0] - geometry.positions[i][0], self.environment.width);
                 let dy = delta(geometry.positions[j][1] - geometry.positions[i][1], self.environment.height);
-                if self.environment.segment_blocked((a.x,a.y),(b.x,b.y)) {continue;}
                 let distance = dx.hypot(dy);
                 let contact = geometry.radii[i] + geometry.radii[j];
                 if distance >= contact {
                     continue;
                 }
+                if self.environment.segment_blocked((a.x,a.y),(b.x,b.y)) {continue;}
                 let (nx, ny) = if distance > 1e-5 {
                     (dx / distance, dy / distance)
                 } else {
@@ -2347,6 +2431,7 @@ impl World {
         caps: &[BodyCapacities],
         workspace: &mut PhaseWorkspace,
     ) {
+        if self.food.is_empty() || self.cells.is_empty() { return; }
         let PhaseWorkspace {
             geometry,
             cell_grid: grid,
@@ -2354,7 +2439,7 @@ impl World {
             ..
         } = workspace;
         grid.configure(self.environment.width,self.environment.height);
-        let max_radius = grid.index_cells(geometry);
+        grid.clear();
         budgets.clear();
         budgets.extend(
             caps.iter()
@@ -2366,7 +2451,23 @@ impl World {
                     c.capture * 1200.0 * feed * DT
                 }),
         );
+        if !budgets.iter().any(|&budget| budget > 0.0) { return; }
+        // Zero-energy packets can still carry minerals in isolated phase calls.
+        // Normal post-decay particles all require some free gut energy capacity.
+        let zero_energy_food = self.food.iter().any(|food| food.energy <= 0.0);
+        let mut active = 0_usize;
+        let mut max_radius: f64 = 0.0;
+        for (i, cell) in self.cells.iter().enumerate() {
+            if geometry.alive[i] && budgets[i] > 0.0
+                && (zero_energy_food || cell.gut_energy < caps[i].gut_energy) {
+                grid.insert(geometry.positions[i][0], geometry.positions[i][1], i);
+                max_radius = max_radius.max(geometry.radii[i]);
+                active += 1;
+            }
+        }
+        if active == 0 { return; }
         self.food.retain_mut(|food| {
+            if active == 0 { return true; }
             let mut winner = None;
             let mut best = f64::INFINITY;
             for i in grid.nearby_radius(food.x, food.y, max_radius + 2.5) {
@@ -2380,10 +2481,10 @@ impl World {
                 let distance = delta(geometry.positions[i][0] - food.x, self.environment.width)
                     .hypot(delta(geometry.positions[i][1] - food.y, self.environment.height));
                 if distance <= geometry.radii[i] + 2.5
-                    && !self.environment.segment_blocked((c.x,c.y),(food.x,food.y))
                     && (distance < best
                         || (distance == best
                             && winner.is_none_or(|old: usize| geometry.ids[i] < geometry.ids[old])))
+                    && !self.environment.segment_blocked((c.x,c.y),(food.x,food.y))
                 {
                     best = distance;
                     winner = Some(i);
@@ -2401,6 +2502,12 @@ impl World {
                 food.energy = (food.energy - energy).max(0.0);
                 food.nutrients = (food.nutrients - minerals).max(0.0);
                 budgets[i] = (budgets[i] - energy).max(0.0);
+                if budgets[i] <= 0.0 || (!zero_energy_food && c.gut_energy >= caps[i].gut_energy) {
+                    // Capture only fills stores; an exhausted cell cannot become
+                    // eligible again until a later phase/tick.
+                    budgets[i] = 0.0;
+                    active -= 1;
+                }
                 if food.energy == 0.0 {
                     self.environment
                         .recycle_nutrients(food.x, food.y, food.nutrients);
@@ -2445,7 +2552,7 @@ impl World {
     }
     #[cfg(test)]
     fn spill_excess_stores(&mut self) {
-        self.spill_excess_stores_in(&mut PhaseWorkspace::default());
+        self.spill_excess_stores_in(&mut PhaseWorkspace::default(), true);
     }
     #[cfg(test)]
     fn emit_organic_batch(&mut self, emissions: Vec<OrganicEmission>) {
@@ -2509,6 +2616,8 @@ impl World {
             );
         }
         json.push(']');
+        let [energy_net, mineral_net, carbon_net] = c.junction_net;
+        let _ = write!(json, ",\"colony\":{{\"neighbors\":{},\"energyNet\":{energy_net},\"mineralNet\":{mineral_net},\"carbonNet\":{carbon_net}}}", c.adhered_neighbors);
         let cellular_program = genomes.get((c.genome_id - 1) as usize)
             .and_then(|genome| genome.program.cellular());
         if cellular_program.is_some() || c.body.cellular.is_some() {
@@ -2736,7 +2845,7 @@ mod workspace_tests {
             }
             let bytes = state(&reused);
             let mut reader = Reader::new(&bytes);
-            let mut fresh = World::read_checkpoint(&mut reader, programs.len(), 9).unwrap();
+            let mut fresh = World::read_checkpoint(&mut reader, programs.len(), crate::checkpoint::VERSION).unwrap();
             assert!(reader.finished());
             assert!(fresh.workspace.capacities.is_empty());
             let mut fresh_programs = programs.clone();

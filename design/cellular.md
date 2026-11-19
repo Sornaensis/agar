@@ -87,7 +87,8 @@ building another enzyme does not grant storage or capture.
 | `shield()` | Protection from damage. |
 | `repair()` | Paid repair of existing structure. |
 | `sense(light)`, `sense(heat)`, `sense(chemical)` | Local measurements of the named physical field. |
-| `sense(contact)` | Relative flow and physical contact measurements. |
+| `sense(contact)` | Relative flow, physical contact and the selected cell’s published scalar. |
+| `adhere()` | Active membrane and anchor material couple nearby cells with mutually matching adhesive signals. |
 | `sense(optical)` | Directional visible-object measurements with occlusion. |
 | `grow()` | Paid envelope growth, limited by existing structural support. |
 | `replicate()` | Paid genome copying. |
@@ -111,11 +112,56 @@ Two recipes may consume the same named enzyme stock and compete for it, as shown
 in [separate-digestion.cell](../examples/separate-digestion.cell).
 
 Bare family names such as `digestive`, `core` and `reserve` retain the previous
-combined capabilities for saved sources. The eight default programs now use only
+combined capabilities for saved sources. The default programs now use only
 mechanism constructors. All introduced cells still receive the same paid minimal
 founder core and finite reserves to bootstrap construction; subsequent support,
 translation and storage are explicitly assembled. Daughters can survive entirely
 on the new support machinery and inherit actual storage and translation machines.
+
+## Register memory, contact messages and colonies
+
+Each cell has five private register banks for integers, scalars, booleans, strings and vectors. An occupied slot costs 0.0025 energy per simulated second. Writes and guards read the state from the start of the tick. Writes commit together, and a simultaneous clear wins. For example, an active contact receptor named Touch can copy a neighbor’s publication into local memory.
+
+```text
+publish rf001 = 17;
+avoid_message rf001;
+rf002 = sensed.Touch.message when sensed.Touch.message_valid;
+```
+
+| Declaration | Effect |
+| --- | --- |
+| `publish rf001 = 17;` | Initializes the cell’s outbound scalar to 17 at birth. Assigning or clearing it later changes what neighbors can read next tick. Omit the initializer to begin silent. |
+| `avoid_message rf001;` | Excludes a potential victim when its occupied publication equals this cell’s occupied selector. Piercing, biting and engulfment check each reachable candidate individually. |
+| `signal rf021 = 0;` | Exposes a separate scalar payload on contact. An optional initial value applies at birth. Assignments and clears take effect on the next contact sample. |
+| `adhere_message rf020;` | Selects the publication this cell will adhere to. Both partners must accept one another and have active, completed adhesive machinery. |
+
+Each declaration accepts one scalar address. The recognition marker and signal payload have distinct addresses. Each can be used independently. All other slots are private. A working named contact receptor reports `message_valid` and `message` for its particular contact. Particles, silent cells and missing contacts return false and zero. A cell publishing zero returns true and zero. All cells exchange values from the same start-of-tick snapshot. The same receptor reports an independently valid payload through `signal_valid` and `signal` for that very same contact. A daughter initializes any declared marker and signal from its inherited program. Other registers start empty. Restoring a world preserves the actual registers, including a cleared publication.
+
+**Predator** uses marker 17. Its motors turn away from recognized peers, and each weapon checks its actual victim independently. Unrelated programs can copy that marker. **Colony phototroph** publishes and accepts marker 31, builds `adhere()` from membrane and anchor material, and requests extra energy storage when its contact receptor recognizes a neighbor. Within one surface-gap unit, the weaker active adhesive surface limits the impulse that resists separation and sliding. Walls block coupling, and loss of contact, activity or reciprocal recognition releases the pair. Each member retains its own resources, genome and lifecycle. [Colony program](../examples/colony.cell)
+
+### Exchange across an attached pair
+
+```text
+product Skin = membrane();
+product Carrier = transporter();
+assembly CarbonPort: junction(carbon) {
+  Skin: 0.01;
+  Carrier: 0.01;
+  activity: if carbon.organic > 0 then 1 else 0.5;
+}
+```
+
+The pair needs reciprocal adhesion and a completed, active junction of the same kind on each side. A junction moves its resource from the fuller compartment toward the emptier one, using the fraction of each cell’s own storage capacity. Energy means immediately usable energy, mineral means free mineral reserve, and carbon means stored organic carbon. No resource leaves the two cells during this transfer.
+
+| Junction | Maximum units per second per active junction mass |
+| --- | ---: |
+| `junction(energy)` | 120 |
+| `junction(mineral)` | 1.5 |
+| `junction(carbon)` | 6 |
+
+The fractional imbalance and the weaker side’s active mass limit the amount on each connection. All of a cell’s connections share its throughput for that resource. The exchange uses starting inventories for every pair in the phase. Material received in a tick can travel farther through the colony on a later tick. Closing a junction stops that resource exchange while adhesion and signaling can continue. The Body inspector records each cell’s net change in the last exchange. Separate production, respiration and spending still run for each cell.
+
+**Nurse rosette** uses its recognition marker for attachment and its signal register for a juvenile request. **Pulse swimmer** uses the same language features for an excitable motor response with a refractory interval. Both programs grow their own machinery from the same founding body. [Nurse rosette](../examples/nurse-rosette.cell) · [Pulse swimmer](../examples/pulse-swimmer.cell)
 
 ## Physical memory and pure functions
 
@@ -214,7 +260,7 @@ Cellular expressions can read internal energy, body geometry, stored minerals,
 gut contents, age, speed and integrity. External light, heat, chemical, flow,
 contact and optical observations require actual functioning receptors. Cellular
 mode excludes global time/IDs, the legacy division-ready command signal,
-organelle diagnostics and sparse register reads/writes. Player inspection can
+and legacy organelle diagnostics. Player inspection can
 show richer state than a genome can sense.
 
 ## Movement and lifecycle
@@ -303,13 +349,12 @@ ingredients, assembly identities, activities and genetic progress. Formats 3, 4,
 5 and 6 remain readable. Existing sources default to unrestricted initiation and
 zero recycling. Corrected optical coverage and directional primitive interactions
 can change affected trajectories. Save/restore replay is deterministic within the
-current engine. The WASM ABI remains 10 and language schema remains 3, with
-additive receptor-field, recipe-control and pure-function metadata.
+current engine. The current WASM ABI is 15. Checkpoint 11 saves both contact channels, junction machinery, and the latest measured exchange. It reads versions 3 through 10. Language schema 3 describes register access and contact messaging in its cellular metadata.
 
 This is a coarse cellular language: named aggregate material pools and discrete
 machines implementing a fixed set of small physical operations. There is no
 molecule simulation, spatial intracellular transport, user-defined reaction
-chemistry or multicellular adhesion yet.
+chemistry or colony-wide resource pool.
 
 ## Material allocation
 

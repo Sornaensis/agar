@@ -13,10 +13,12 @@ export function createSimulationWorkerHandler(send: Send, load: () => Promise<En
   const methods = new Set<string>(ENGINE_METHODS);
 
   function presentation(options: PresentationOptions = {}): WirePresentation {
-    const frame = engine!.renderSnapshotData();
-    const result: WirePresentation = { frame };
+    const frame = options.frame === false ? undefined : engine!.renderSnapshotData();
+    const result: WirePresentation = frame
+      ? { tick: frame[0], summary: { time: frame[1], population: frame[2], food: frame[3], births: frame[4], deaths: frame[5], generation: frame[11] }, frame }
+      : engine!.status();
     if (options.metrics) result.metrics = engine!.metricsSnapshotData();
-    if (options.environment) result.environment = engine!.environment();
+    if (options.environment) result.environment = options.environment === 'metadata' ? engine!.environmentMetadata() : engine!.environment();
     return result;
   }
 
@@ -61,7 +63,7 @@ export function createSimulationWorkerHandler(send: Send, load: () => Promise<En
           const record = result as Partial<WirePresentation & CapturedCheckpoint> & { samples?: Float32Array };
           if (record.frame) transfer.push(record.frame.buffer as ArrayBuffer);
           if (record.metrics) transfer.push(record.metrics.buffer as ArrayBuffer);
-          if (record.environment) transfer.push(record.environment.samples.buffer as ArrayBuffer);
+          if (record.environment && 'samples' in record.environment) transfer.push(record.environment.samples.buffer as ArrayBuffer);
           if (record.state) transfer.push(record.state.buffer as ArrayBuffer);
           if (record.samples) transfer.push(record.samples.buffer as ArrayBuffer);
         }

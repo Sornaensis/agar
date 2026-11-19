@@ -1,0 +1,182 @@
+# Shared products supply independently regulated physical recipes.
+# Genes make stock; start_when permits new machines; activity runs built ones.
+cellular;
+
+product Catalyst = enzyme();
+product Wall = membrane();
+product Mount = anchor();
+product Pigment = pigment();
+product Detector = receptor();
+product Tail = filament();
+product Rotor = motor();
+product Frame = scaffold();
+product Carrier = transporter();
+product Replicase = replicase();
+product Ring = constrictor();
+
+# Tolerate modest wear while repair restores working capacity. The allowance
+# stays below one machine, even when a larger body needs many copies.
+fn missing(installed, required, unit) = installed + 0.000001 < required - min(required * 0.1, unit * 0.2);
+fn enough(installed, required) = installed + 0.000001 >= required * 0.9;
+fn buffered(stock, effort) = if stock < 0.001 then effort else 0;
+
+let funded = (energy > 10 || gut.energy > 0) && nutrient.stored > 0.001;
+let expanding = body.area > body.birth_area * 1.6;
+let powered = enough(built.Solar, 0.12) && enough(built.Respiration, 0.04);
+let equipped = powered;
+let surplus = equipped && energy > 55;
+# Adhesion requires mutually recognized, active adhesive surfaces.
+publish rf020 = 73;
+adhere_message rf020;
+let left_peer = sensed.LeftJunction.message_valid && sensed.LeftJunction.message == rf020;
+let right_peer = sensed.RightJunction.message_valid && sensed.RightJunction.message == rf020;
+let paired_contact = left_peer || right_peer;
+# The identity marker stays stable while rf021 carries a changing pulse.
+signal rf021;
+let left_wave = left_peer && sensed.LeftJunction.signal_valid && sensed.LeftJunction.signal > 0.5;
+let right_wave = right_peer && sensed.RightJunction.signal_valid && sensed.RightJunction.signal > 0.5;
+let pacemaker = paired_contact && age > 40 && sin(age * 0.9) > 0.985;
+let trigger = ri031 == 0 && (pacemaker || left_wave || right_wave);
+let firing = trigger || ri031 > 162;
+# Each pulse lasts roughly 0.6 seconds. The six-second refractory period
+# prevents the same pulse from bouncing repeatedly between two cells.
+ri031 = if trigger then 180 else if ri031 > 0 then ri031 - 1 else 0;
+rf021 = if firing then 1 else 0;
+
+let need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);
+let need_Solar = funded && (true) && missing(built.Solar, (if expanding then 0.24 else 0.12), 0.12);
+let need_Adhesin = funded && (powered) && missing(built.Adhesin, (if expanding then 0.04 else 0.02), 0.02);
+let need_LeftJunction = funded && (powered) && missing(built.LeftJunction, (if expanding then 0.02 else 0.01), 0.01);
+let need_RightJunction = funded && (powered) && missing(built.RightJunction, (if expanding then 0.02 else 0.01), 0.01);
+let need_PulseMotor = funded && (powered) && missing(built.PulseMotor, (if expanding then 0.05 else 0.025), 0.025);
+let need_Translation = funded && (powered) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);
+let need_Minerals = funded && (powered) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);
+let need_EnergyStore = funded && (powered) && missing(built.EnergyStore, if expanding || paired_contact then 0.08 else 0.04, 0.04);
+let need_MineralStore = funded && (powered && body.area > 1.2) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);
+let need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);
+let need_Support = funded && (powered && energy > 45) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);
+let need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);
+let need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);
+let need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);
+
+gene supply_Catalyst: Catalyst = buffered(pool.Catalyst, (if need_Respiration then 1 else 0) + (if need_Solar then 0.25 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0));
+gene supply_Wall: Wall = buffered(pool.Wall, (if need_Respiration then 0.6 else 0) + (if need_Adhesin then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0));
+gene supply_Mount: Mount = buffered(pool.Mount, (if need_Solar then 0.25 else 0) + (if need_Adhesin then 1 else 0) + (if need_LeftJunction then 0.333333 else 0) + (if need_RightJunction then 0.333333 else 0) + (if need_PulseMotor then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_Division then 0.5 else 0));
+gene supply_Pigment: Pigment = buffered(pool.Pigment, (if need_Solar then 1 else 0));
+gene supply_Detector: Detector = buffered(pool.Detector, (if need_LeftJunction then 1 else 0) + (if need_RightJunction then 1 else 0));
+gene supply_Tail: Tail = buffered(pool.Tail, (if need_LeftJunction then 0.333333 else 0) + (if need_RightJunction then 0.333333 else 0) + (if need_PulseMotor then 1 else 0));
+gene supply_Rotor: Rotor = buffered(pool.Rotor, (if need_PulseMotor then 1 else 0) + (if need_Division then 1 else 0));
+gene supply_Frame: Frame = buffered(pool.Frame, (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0));
+gene supply_Carrier: Carrier = buffered(pool.Carrier, (if need_Minerals then 1 else 0));
+gene supply_Replicase: Replicase = buffered(pool.Replicase, (if need_Replication then 1 else 0));
+gene supply_Ring: Ring = buffered(pool.Ring, (if need_Division then 1 else 0));
+
+assembly Respiration: respire(oxygen) {
+  Catalyst: 0.025;
+  Wall: 0.015;
+  start_when: need_Respiration;
+  activity: if oxygen > 0 && energy.fraction < 0.98 && (carbon.organic > 0.2 * body.area || energy < 20) then 1 else 0;
+}
+
+assembly Solar: harvest(light) {
+  Mount: 0.02;
+  Pigment: 0.08;
+  Catalyst: 0.02;
+  start_when: need_Solar;
+  activity: 1;
+}
+
+assembly Adhesin: adhere() {
+  Mount: 0.01;
+  Wall: 0.01;
+  start_when: need_Adhesin;
+  activity: if energy > 12 then 1 else 0;
+}
+
+assembly LeftJunction: sense(contact) {
+  Mount: 0.002;
+  Detector: 0.006;
+  Tail: 0.002;
+  start_when: need_LeftJunction;
+  activity: 1;
+  at: 1.570796;
+}
+
+assembly RightJunction: sense(contact) {
+  Mount: 0.002;
+  Detector: 0.006;
+  Tail: 0.002;
+  start_when: need_RightJunction;
+  activity: 1;
+  at: -1.570796;
+}
+
+assembly PulseMotor: propel() {
+  Mount: 0.005;
+  Rotor: 0.01;
+  Tail: 0.01;
+  start_when: need_PulseMotor;
+  activity: if firing then 0.6 else 0;
+  at: 0;
+  direction: 0;
+}
+
+assembly Translation: translate() {
+  Frame: 0.02;
+  Catalyst: 0.02;
+  start_when: need_Translation;
+  activity: 1;
+}
+
+assembly Minerals: import(mineral) {
+  Mount: 0.005;
+  Carrier: 0.02;
+  start_when: need_Minerals;
+  activity: if nutrient.fraction < 0.9 then 1 else 0;
+}
+
+assembly EnergyStore: store(energy) {
+  Wall: 0.04;
+  start_when: need_EnergyStore;
+  activity: 1;
+}
+
+assembly MineralStore: store(mineral) {
+  Wall: 0.02;
+  start_when: need_MineralStore;
+  activity: 1;
+}
+
+assembly Repair: repair() {
+  Catalyst: 0.025;
+  start_when: need_Repair;
+  activity: 1;
+}
+
+assembly Support: support() {
+  Frame: 0.06;
+  start_when: need_Support;
+  activity: 1;
+}
+
+assembly Envelope: grow() {
+  Wall: 0.015;
+  Catalyst: 0.005;
+  start_when: need_Envelope;
+  activity: if energy > 90 && body.area < body.birth_area * 2 then 0.8 else 0;
+}
+
+assembly Replication: replicate() {
+  Frame: 0.005;
+  Replicase: 0.015;
+  start_when: need_Replication;
+  activity: if energy > 80 then 1 else 0;
+}
+
+assembly Division: constrict() {
+  Mount: 0.004;
+  Rotor: 0.008;
+  Ring: 0.008;
+  start_when: need_Division;
+  activity: if body.area + 0.000001 >= body.birth_area * 2 && energy > 100 then 1 else 0;
+}

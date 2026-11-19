@@ -8,7 +8,7 @@ import { catalog, compile, seed, save, restore, error, snapshot, STRIDE } from '
 // Compare release WASM engines on identical worlds. Timers exclude setup,
 // checkpoint comparison, JS hydration, worker transfers and browser rendering.
 const args = process.argv.slice(2);
-let baselinePath, outputPath, scenarioName, samples = 5, ticks = 300;
+let baselinePath, outputPath, scenarioName, samples = 3, ticks = 60;
 for (let i = 0; i < args.length; i += 2) {
   const value = args[i + 1];
   assert.ok(value, `Missing value for ${args[i]}`);
@@ -33,18 +33,45 @@ for (const [name, path] of baselinePath ? [['baseline', baselinePath], ['optimiz
 const { PRESETS, BUILTIN_ENVIRONMENTS } = await catalog();
 const pond = BUILTIN_ENVIRONMENTS.find(item => item.id === 'builtin:environment:sunlit-pond').config;
 const calm = { ambientTemperature: 0.5, ambientLight: 0.8, currentStrength: 0, initialNutrients: 1, foodRate: 0, sources: [] };
+const gasCalm = { ...calm, ambientLight: 0.85, initialNutrients: 3,
+  gases: { initialOxygen: 1, initialCarbon: 1, mode: 'open', exchangeRate: 0.02, oxygenEquilibrium: 1, carbonEquilibrium: 1 } };
+const fieldConfig = (current, floating) => ({ ...gasCalm, width: 4800, height: 3040,
+  ambientLight: 0.6, initialNutrients: 0.3, currentStrength: current,
+  sources: [
+    { kind: 6, x: 2400, y: 1368, strength: 0.5, radius: 547.2, angle: 0.12, length: 4800 },
+    { kind: 2, x: 3360, y: 1672, strength: 0.4, radius: 668.8 },
+    { kind: 1, x: 1200, y: 912, strength: 0.4, radius: 864 },
+    { kind: 3, x: 1440, y: 1216, strength: 0.6, radius: 100 },
+    { kind: 4, x: 3600, y: 2128, strength: 0.4, radius: 100 },
+    { kind: 8, x: 1920, y: 1064, strength: 0.5, radius: 100 },
+    { kind: 10, x: 2880, y: 1976, strength: 0.5, radius: 100 },
+  ], barriers: Array.from({ length: floating === null ? 0 : 3 }, (_, i) => ({
+    x: 4800 * (0.25 + 0.22 * i), y: 3040 * (0.35 + 0.1 * i), length: 180, width: 30,
+    angle: 0.2 + i * 0.35, floating,
+  })),
+});
 const dormantSource = Array.from({ length: 512 }, (_, i) =>
   `let dormant${i} = sin(energy + ${i}.0) + cos(age + ${i}.0);`).join('\n')
   + '\nthrust=0;turn=0;divide=false;feed=0;absorb=0;';
 const scenarios = [
-  { name: 'mixed-ecosystem', config: pond, food: 0, warmup: 1800, populations: [['Phototroph', 72], ['Forager', 6], ['Mixotroph', 4], ['Predator', 2]], mutationRate: 0.1 },
-  { name: 'dense-producers', config: calm, food: 0, warmup: 900, populations: [['Phototroph', 400]] },
-  { name: 'particle-heavy', config: calm, food: 10000, warmup: 600, populations: [['Forager', 80]] },
-  { name: 'dynamic-fields', config: pond, food: 0, warmup: 300, populations: [] },
+  { name: 'mixed-84', config: pond, food: 0, warmup: 900, populations: [['Phototroph', 72], ['Forager', 6], ['Mixotroph', 4], ['Predator', 2]] },
+  { name: 'mixed-floating-barriers', config: { ...pond, barriers: [
+    { x: 350, y: 280, length: 180, width: 30, angle: 0.2, floating: true },
+    { x: 700, y: 380, length: 180, width: 30, angle: 0.55, floating: true },
+    { x: 960, y: 480, length: 180, width: 30, angle: 0.9, floating: false },
+  ] }, food: 0, warmup: 600, populations: [['Phototroph', 72], ['Forager', 6], ['Mixotroph', 4], ['Predator', 2]], mutationRate: 0.1 },
+  { name: 'producers-1000-default', config: gasCalm, food: 0, warmup: 600, populations: [['Phototroph', 1000]] },
+  { name: 'producers-1000-large', config: { ...gasCalm, width: 4800, height: 3040 }, food: 0, warmup: 600, populations: [['Phototroph', 1000]] },
+  { name: 'foragers-1000-large', config: { ...gasCalm, width: 4800, height: 3040 }, food: 20000, warmup: 600, populations: [['Forager', 1000]] },
+  { name: 'particles-20000-default', config: { ...gasCalm, currentStrength: 8 }, food: 20000, warmup: 10, populations: [] },
+  { name: 'particles-100000-large', config: { ...gasCalm, width: 4800, height: 3040, currentStrength: 8 }, food: 100000, warmup: 10, populations: [] },
+  { name: 'maximum-fields-current8', config: fieldConfig(8, null), food: 0, warmup: 30, populations: [] },
+  { name: 'maximum-fields-current8-fixed3', config: fieldConfig(8, false), food: 0, warmup: 30, populations: [] },
+  { name: 'maximum-fields-current8-floating3', config: fieldConfig(8, true), food: 0, warmup: 30, populations: [] },
   // Optional synthetic stress: 512 unused dynamic bindings, not a preset forecast.
   { name: 'dormant-graph', optional: true, config: calm, food: 0, warmup: 90, populations: [['Dormant graph', 80]], source: dormantSource },
 ];
-const chosen = scenarioName ? scenarios.filter(item => item.name === scenarioName) : scenarios.filter(item => !item.optional);
+const chosen = scenarioName ? scenarios.filter(item => scenarioName.split(',').includes(item.name)) : scenarios.filter(item => !item.optional);
 assert.ok(chosen.length, `Unknown scenario ${scenarioName}`);
 function advance(api, count) {
   for (let left = count; left > 0; left -= 120) {
@@ -53,12 +80,25 @@ function advance(api, count) {
 }
 async function create(engine, scenario) {
   const api = (await WebAssembly.instantiate(engine.module, {})).exports;
+  assert.ok(api.abi_version() >= 12, 'Gas-aware benchmark requires ABI12 or later');
   const c = scenario.config;
+  assert.equal(api.set_world_size(c.width ?? 1200, c.height ?? 760), 1, error(api));
   api.set_environment(c.ambientTemperature, c.ambientLight, c.currentStrength);
   api.set_initial_nutrients(c.initialNutrients);
   api.set_food_rate(c.foodRate);
   api.set_mutation_rate(scenario.mutationRate ?? 0);
-  for (const source of c.sources) assert.ok(api.add_source(source.kind, source.x, source.y, source.strength, source.radius));
+  const gases = c.gases ?? {};
+  assert.equal(api.set_initial_gases(gases.initialOxygen ?? 1, gases.initialCarbon ?? 1), 1, error(api));
+  assert.equal(api.set_gas_exchange(gases.mode === 'open' ? 1 : 0, gases.exchangeRate ?? 0.02,
+    gases.oxygenEquilibrium ?? 1, gases.carbonEquilibrium ?? 1), 1, error(api));
+  for (const source of c.sources ?? []) {
+    const id = api.add_source(source.kind, source.x, source.y, source.strength, source.radius);
+    assert.ok(id, error(api));
+    assert.equal(api.update_source(id, source.kind, source.x, source.y, source.strength,
+      source.radius, source.angle ?? 0, source.length ?? 600), 1, error(api));
+  }
+  for (const barrier of c.barriers ?? []) assert.ok(api.add_barrier(barrier.x, barrier.y,
+    barrier.length, barrier.width, barrier.angle, Number(barrier.floating)), error(api));
   assert.equal(api.reset_empty(42, scenario.food), 1, error(api));
   for (const [name, count] of scenario.populations) {
     const source = scenario.source ?? PRESETS.find(item => item.name === name)?.source;
@@ -125,6 +165,7 @@ function expectedMetrics(api, full) {
     api.predation_count(), api.attack_count(), api.photosynthesis_total(), api.energy_total(), api.energy_input_total(),
     api.nutrient_total(), api.nutrient_input_total(), api.nutrient_dissolved_total(), api.nutrient_food_total(), api.nutrient_cell_total(),
     ...trophic, ...flow, ...organic, groups.size,
+    ...projection(api, 'metrics_snapshot_ptr').slice(36, 51),
     ...[...groups].sort((a, b) => a[0] - b[0]).flatMap(([id, group]) => [id, ...group]),
   ]);
 }
@@ -142,8 +183,22 @@ function validateProjections(api, referenceApi, full, label) {
   const selectedId = full[2] ? full[12] : null;
   if (selectedId !== null) sameBytes(projection(api, 'cell_snapshot_ptr', selectedId), full.slice(12, 12 + STRIDE), `${label} selected cell`);
   const summary = projection(api, 'summary_snapshot_ptr');
-  sameBytes(summary, new Float64Array([full[1], full[2], full[3], full[4], full[5], expected[7]]), `${label} summary`);
-  return { selectedId, genomeBytes, payloadBytes: { compactRender: render.byteLength, metrics: metrics.byteLength, selectedCell: selectedId === null ? 0 : STRIDE * 8, summary: summary.byteLength } };
+  sameBytes(summary, new Float64Array([full[1], full[2], full[3], full[4], full[5], expected[7],
+    ...(api.abi_version() >= 13 ? [full[0]] : [])]), `${label} summary`);
+  let metadataBytes;
+  if (api.environment_metadata_ptr) {
+    const full = rawSnapshot(api).environment;
+    const ptr = api.environment_metadata_ptr();
+    const metadata = new Float32Array(api.memory.buffer, ptr, api.environment_metadata_len()).slice();
+    sameBytes(metadata, new Float32Array([...full.slice(0, 21), ...full.slice(21 + full[0] * full[1] * 7)]), `${label} metadata`);
+    metadataBytes = metadata.byteLength;
+  }
+  const carbonError = metrics[36] + metrics[49] - metrics[37];
+  const oxygenError = metrics[44] + metrics[45] + metrics[48] + metrics[41] + metrics[42] - metrics[40] - metrics[47];
+  assert.ok(Math.abs(carbonError) < 1e-7 + metrics[37] * 1e-10, `${label} carbon conservation`);
+  assert.ok(Math.abs(oxygenError) < 1e-7 + (metrics[47] + metrics[40]) * 1e-10, `${label} oxygen conservation`);
+  return { selectedId, genomeBytes, payloadBytes: { compactRender: render.byteLength, metrics: metrics.byteLength,
+    selectedCell: selectedId === null ? 0 : STRIDE * 8, summary: summary.byteLength, environmentMetadata: metadataBytes } };
 }
 function exportMeasurements(api, selectedId) {
   const operations = {
@@ -157,6 +212,7 @@ function exportMeasurements(api, selectedId) {
     operations.summary = () => api.summary_snapshot_ptr();
     if (selectedId !== null) operations.selectedCell = () => api.cell_snapshot_ptr(selectedId);
   }
+  if (api.environment_metadata_ptr) operations.environmentMetadata = () => api.environment_metadata_ptr();
   const result = {};
   for (const [name, operation] of Object.entries(operations)) {
     operation();
@@ -168,7 +224,7 @@ function exportMeasurements(api, selectedId) {
 }
 const report = {
   runtime: process.version, runtimeFlags: process.execArgv, platform: process.platform, architecture: process.arch,
-  seed: 42, measuredTicks: ticks, samples, warmupCheckInterval: 120, exportCallsPerSample: 30,
+  seed: 42, measuredTicks: ticks, samples, scratchWarmTicks: 5, warmupCheckInterval: 120, exportCallsPerSample: 30,
   note: 'Release WASM in Node/V8. Tick and Rust export timings exclude JS hydration/copies, worker transfer/scheduling, main-thread rendering and setup. Medians of identical trajectories with alternating engine order.',
   equivalence: 'Canonical checkpoints and legacy world/environment buffers must match exactly. Compact projections match those legacy values; only metrics header[13] (genomeBytes) is normalized because derived execution-plan storage is now counted.',
   engines: engines.map(({ name, sha256 }) => ({ name, sha256 })), scenarios: [],
@@ -182,7 +238,7 @@ for (const scenario of chosen) {
   }
   const starting = apis.map(save);
   // Warm branches in the measured trajectory; --no-liftoff avoids tier changes.
-  for (const api of apis) advance(api, ticks);
+  for (const api of apis) advance(api, 5 + ticks);
   if (apis.length === 2) sameBytes(save(apis[0]), save(apis[1]), `${scenario.name} trial`);
   const timings = engines.map(() => []), exportTimings = engines.map(() => []);
   const payloads = [], accounting = [];
@@ -194,6 +250,7 @@ for (const scenario of chosen) {
     for (const index of order) {
       const api = apis[index];
       assert.equal(restore(api, starting[index]), 1, error(api));
+      advance(api, 5);
       const start = performance.now();
       advance(api, ticks);
       timings[index].push((performance.now() - start) / ticks);
@@ -218,7 +275,8 @@ for (const scenario of chosen) {
     }
   }
   const result = {
-    name: scenario.name, synthetic: scenario.optional ?? false, warmupTicks: scenario.warmup, initialPopulations: scenario.populations, initialParticles: scenario.food,
+    name: scenario.name, width: scenario.config.width ?? 1200, height: scenario.config.height ?? 760,
+    synthetic: scenario.optional ?? false, warmupTicks: scenario.warmup, initialPopulations: scenario.populations, initialParticles: scenario.food,
     finalPopulation: finalState.population, finalParticles: finalState.food.length,
     births: finalState.births, deaths: finalState.deaths, mutations: finalState.mutations,
     checkpointIdentical: apis.length === 2, legacyBuffersIdentical: apis.length === 2, compactProjectionsValidated: apis.some(api => api.render_snapshot_ptr),
@@ -226,7 +284,7 @@ for (const scenario of chosen) {
     legacyWorldSha256: sha256(bytesOf(finalRaw.world)), environmentSha256: sha256(bytesOf(finalRaw.environment)),
     measurements: engines.map((engine, i) => {
       const exports = Object.fromEntries(Object.keys(exportTimings[i][0]).map(name => [name, median(exportTimings[i].map(sample => sample[name]))]));
-      return { engine: engine.name, tickMs: median(timings[i]), tickSamplesMs: timings[i], snapshotExportMs: exports.legacyCombined, exportMs: exports, exportSamplesMs: exportTimings[i], payloadBytes: payloads[i], genomeBytes: accounting[i].current };
+      return { engine: engine.name, tickMs: median(timings[i]), tickSamplesMs: timings[i], snapshotExportMs: exports.legacyCombined, exportMs: exports, exportSamplesMs: exportTimings[i], payloadBytes: payloads[i], genomeBytes: accounting[i].current, wasmMemoryBytes: apis[i].memory.buffer.byteLength };
     }),
   };
   if (engines.length === 2) {
@@ -234,6 +292,7 @@ for (const scenario of chosen) {
     result.tickTimeReductionPercent = 100 * (1 - result.measurements[1].tickMs / result.measurements[0].tickMs);
   }
   report.scenarios.push(result);
+  if (outputPath) await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`);
   console.log(JSON.stringify({ name: result.name, checkpointIdentical: result.checkpointIdentical, measurements: result.measurements.map(({ engine, tickMs, exportMs, payloadBytes }) => ({ engine, tickMs, exportMs, payloadBytes })), speedup: result.speedup }));
 }
 if (outputPath) await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`);

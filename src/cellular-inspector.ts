@@ -43,6 +43,17 @@ function assemblyCard(assembly:CellularAssembly, recipe:CellularRecipe|undefined
   </details>`;
 }
 
+function colonyExchange(body:BodyInspection):string {
+  const state = body.colony;
+  if (!state || !(state.neighbors || body.cellular?.recipes.some(recipe => recipe.kind === 'adhere()' || recipe.kind.startsWith('junction(')))) return '';
+  const signed = (value:number) => value === 0 ? '0' : (value > 0 ? '+' : '−') + Number(Math.abs(value).toPrecision(3));
+  return `<section class="cellular-section"><h4>Colony exchange</h4><div class="cellular-work">
+    <span>Attached neighbors <strong>${state.neighbors}</strong></span>
+    <span>Energy <strong>${signed(state.energyNet)}</strong></span><span>Minerals <strong>${signed(state.mineralNet)}</strong></span>
+    <span>Organic carbon <strong>${signed(state.carbonNet)}</strong></span>
+    <small>Net transfer last tick · + received · − donated</small></div></section>`;
+}
+
 /** Render only measured inventories. Unbuilt blueprints remain visibly distinct from machines. */
 export function renderCellularBody(body:BodyInspection, expanded:ReadonlySet<string|undefined> = new Set(), firstPaint = false):string {
   const cellular = body.cellular;
@@ -57,6 +68,7 @@ export function renderCellularBody(body:BodyInspection, expanded:ReadonlySet<str
     <div class="cellular-body-heading"><div><span class="cellular-eyebrow">PRODUCTS → MACHINERY</span><h3>Living composition</h3></div><span class="cellular-mode-label">Cellular</span></div>
     <div class="cellular-totals"><div><strong>${mass(stock)}</strong><span>free product mass</span></div><div><strong>${finished}<small> / ${cellular.assemblies.length}</small></strong><span>complete machines</span></div><div><strong>${incomplete}</strong><span>in progress</span></div></div>
     <div class="cellular-work"><span>Synthesis <strong>${mass(body.synthesisRate)}</strong></span><span>Assembly <strong>${mass(body.constructionRate)}</strong></span><span>Recycling <strong>${mass(body.recyclingRate)}</strong></span><span>Translation work <strong>${mass(body.assemblyCapacity)}</strong></span><small>material / s · shared work capacity</small></div>
+    ${colonyExchange(body)}
     <div class="cellular-life">${meter('Replication',cellular.replication.progress,`${mass(cellular.replication.mass)} / ${mass(cellular.replication.requiredMass)} material`)}${meter('Constriction',cellular.constriction.progress,'Growth and replication must finish')}</div>
     <details class="cellular-section" data-kind="cellular-products"${expanded.has('cellular-products')?' open':''}><summary><span>Products & expression</span><strong>${cellular.products.length}</strong></summary><p class="cellular-section-note">Pools are available stock. Concentration is mass per envelope area. Expression shows the last tick’s requested effort and achieved material per second, summed across genes for each product.</p>
       <table class="cellular-products"><thead><tr><th>Product</th><th>Pool / concentration</th><th>Expression</th></tr></thead><tbody>${cellular.products.map(product=>`<tr><td><span class="cellular-product-name"><i style="background:${ROLE_COLORS[product.role]}"></i>${esc(product.name)}</span><small>${esc(product.role)}${product.halfLife>0?` · t½ ${product.halfLife}s`:''}${product.current?'':' · inherited'}</small></td><td><strong>${mass(product.mass)}</strong><small>${mass(product.concentration)} / area</small></td><td><strong>${Math.round(product.expressionRequested*100)}%</strong><small>${mass(product.expressionRate)} / s</small></td></tr>`).join('')}</tbody></table>

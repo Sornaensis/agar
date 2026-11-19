@@ -190,8 +190,8 @@ export class GenomeVisualizer {
     const count=(kind:NetworkNode['kind']):number=>this.network!.nodes.filter(node=>node.kind===kind).length;
     this.summary.textContent=([['input','inputs'],['operation','builtins'],['register','registers']] as const)
       .filter(([kind])=>count(kind)>0).map(([kind,label])=>count(kind)+' '+label).join(' · ')||(graph.mode==='cellular'?'Constant expression & controls':'Constant actions');
-    this.search.placeholder=graph.mode==='cellular'?'Receptor, product, gene…':'Signal, builtin, register…';
-    this.search.setAttribute('aria-label',graph.mode==='cellular'?'Find a receptor, product stock, gene or assembly control':'Find a signal, builtin, or register');
+    this.search.placeholder=graph.mode==='cellular'?'Receptor, gene, register…':'Signal, builtin, register…';
+    this.search.setAttribute('aria-label',graph.mode==='cellular'?'Find a receptor, product stock, gene, assembly control or register':'Find a signal, builtin, or register');
     this.summary.title=this.network.expressionCount.toLocaleString()+' / 8,192 expressions; '+this.network.constantCount+' literal nodes and '+this.network.aliasCount+' aliases folded into labels; '+this.network.unusedCount+' unused expressions omitted.';
     for(const [kind,item] of this.legendItems)item.hidden=!this.network.edges.some(edge=>edge.kind===kind);
     this.memoryNote.hidden=count('register')===0;this.legend.hidden=!this.network.edges.length&&this.memoryNote.hidden;
@@ -399,6 +399,15 @@ export class GenomeVisualizer {
           :node.label==='populated'||node.label.startsWith('populated(')?'Checks previous register occupancy, including stored zero, false, or empty text.'
             :'Pure operation, recomputed from its inputs each tick.';
     if(node.bindings.length)info.textContent+=' Aliases: '+node.bindings.join(', ')+'.';this.details.append(header,info);
+    const policy = this.graph?.contactMessages;
+    if (node.kind === 'register' && policy) {
+      const descriptions = [];
+      if (node.label === policy.publish) descriptions.push('Publishes its occupied scalar to contacting cells.' + (policy.initial === null ? '' : ` Starts at ${policy.initial} at birth.`));
+      if (node.label === policy.signal) descriptions.push('Publishes a separate contact signal.' + (policy.signalInitial === null ? '' : ` Starts at ${policy.signalInitial} at birth.`));
+      if (node.label === policy.avoid) descriptions.push('Avoids attacking candidates that publish this occupied value.');
+      if (node.label === policy.adhere) descriptions.push('Accepts neighbors that publish this occupied value for mutual adhesion.');
+      if (descriptions.length) this.details.append(element('p', '', descriptions.join(' ')));
+    }
     const literals=element('div','graph-literals');
     for(const value of node.constants){
       const entry=element('span'),role=value.rule?.startsWith('clear:')?'clear ':value.rule?.startsWith('write:')?'write ':'';

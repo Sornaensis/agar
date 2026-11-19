@@ -2,6 +2,21 @@
 
 These are deterministic tests of the simulator, not a biological validation or a guarantee of stable coexistence. Each measurement JSON preserves its engine hash, environment, complete authored genomes, initialization, mutation rate and sampled results.
 
+## Performance update — ABI 13, checkpoint 9
+
+[performance-abi13.json](performance-abi13.json) records ten before/after engine
+benchmarks with identical checkpoint and physical projection bytes.
+[presentation-performance.json](presentation-performance.json) measures the actual
+periodic-image helper with ordered-image equivalence checks.
+[optimization-equivalence.json](optimization-equivalence.json) covers division,
+mutation, runtime edits, resize and checkpoint continuation across ABI 12 and 13.
+[optimization-validation.json](optimization-validation.json) records the 17
+integration checks; all 306 native release tests also pass. Measurements and
+limits are explained in [PERFORMANCE.md](../PERFORMANCE.md).
+
+The ecological rules and the mixed-ecosystem limitations recorded below are
+unchanged by this optimization pass.
+
 ## Gas exchange — ABI 12, checkpoint 9
 
 `gas-exchange-seed42.json` records 600 simulated seconds with the current gas

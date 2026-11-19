@@ -1,6 +1,47 @@
 //! A derived, compact execution graph. The authored graph remains authoritative
 //! for mutation, source spans, inspection and checkpoint serialization.
 use super::*;
+use std::collections::HashMap;
+const SENSOR_WORDS: usize = (Sensor::ALL.len() + 63) / 64;
+
+// Numerical equality would conflate -0 with +0, which is observable by noise.
+// These keys describe exact typed operations, never algebraic equivalence.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ConstantKey {
+    Integer(i32), Scalar(u64), Boolean(bool), Text(Rc<str>), Vector([u64; 2]),
+}
+impl From<&Value> for ConstantKey {
+    fn from(value: &Value) -> Self {
+        match value {
+            Value::Integer(v) => Self::Integer(*v),
+            Value::Scalar(v) => Self::Scalar(v.to_bits()),
+            Value::Boolean(v) => Self::Boolean(*v),
+            Value::Text(v) => Self::Text(v.clone()),
+            Value::Vector(v) => Self::Vector(v.map(f64::to_bits)),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum OperationKey {
+    Constant(ConstantKey), Sensor(Sensor), Pool(usize), Concentration(usize), Built(usize),
+    Receptor(usize, ReceptorField), Register(Register), Populated(Register),
+    Negate(usize), Not(usize), Binary(Binary, usize, usize), Choose(usize, usize, usize),
+    Call(Function, [usize; 3]),
+}
+impl From<&Op> for OperationKey {
+    fn from(op: &Op) -> Self {
+        match op {
+            Op::Constant(value) => Self::Constant(value.into()),
+            Op::Sensor(v) => Self::Sensor(*v), Op::Pool(v) => Self::Pool(*v),
+            Op::Concentration(v) => Self::Concentration(*v), Op::Built(v) => Self::Built(*v),
+            Op::Receptor(i,f) => Self::Receptor(*i,*f), Op::Register(v) => Self::Register(*v),
+            Op::Populated(v) => Self::Populated(*v), Op::Negate(v) => Self::Negate(*v),
+            Op::Not(v) => Self::Not(*v), Op::Binary(op,a,b) => Self::Binary(*op,*a,*b),
+            Op::Choose(c,a,b) => Self::Choose(*c,*a,*b), Op::Call(f,args) => Self::Call(*f,*args),
+            Op::Reference(_) => unreachable!("references alias runtime slots"),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 struct ExecutableNode {
@@ -15,6 +56,7 @@ pub(super) struct ExecutionPlan {
     pub(super) writes: Box<[WriteRule]>,
     pub(super) extra_roots: Box<[usize]>,
     pub(super) receptor_reads: Box<[(usize, ReceptorField)]>,
+    sensor_reads: [u64; SENSOR_WORDS],
     /// All heap storage owned by the plan, including newly folded strings.
     /// Strings shared with the authored graph are already charged there.
     pub(super) allocated_bytes: usize,
@@ -77,6 +119,7 @@ impl ExecutionPlan {
 
         let mut slots = vec![usize::MAX; nodes.len()];
         let mut executable = Vec::new();
+        let mut shared = HashMap::new();
         for (index, node) in nodes.iter().enumerate() {
             if !reached[index] {
                 continue;
@@ -114,8 +157,13 @@ impl ExecutionPlan {
                     Op::Constant(_) | Op::Reference(_) => unreachable!(),
                 }
             };
-            slots[index] = executable.len();
-            executable.push(ExecutableNode { op, ty: node.ty });
+            let key = (node.ty, OperationKey::from(&op));
+            let next = executable.len();
+            let existing = *shared.entry(key).or_insert(next);
+            slots[index] = existing;
+            if existing == next {
+                executable.push(ExecutableNode { op, ty: node.ty });
+            }
         }
         let output_roots = output_roots.map(|root| root.map(|index| slots[index]));
         let extra_roots: Box<[_]> = extra_roots.iter().map(|&index| slots[index]).collect();
@@ -136,6 +184,13 @@ impl ExecutionPlan {
             }
         }
         let nodes = executable.into_boxed_slice();
+        let mut sensor_reads = [0_u64; SENSOR_WORDS];
+        for node in &nodes {
+            if let Op::Sensor(sensor) = node.op {
+                let index = sensor as usize;
+                sensor_reads[index / 64] |= 1 << (index % 64);
+            }
+        }
         let receptor_reads: Box<[_]> = nodes
             .iter()
             .filter_map(|node| {
@@ -168,8 +223,14 @@ impl ExecutionPlan {
             writes,
             extra_roots,
             receptor_reads,
+            sensor_reads,
             allocated_bytes,
         })
+    }
+
+    pub(super) fn reads_sensor(&self, sensor: Sensor) -> bool {
+        let index = sensor as usize;
+        self.sensor_reads[index / 64] & (1 << (index % 64)) != 0
     }
 
     pub(super) fn evaluate(&self, inputs: &Inputs, memory: &Registers, values: &mut Vec<Value>) {
@@ -238,6 +299,11 @@ scan.width = 2 * 3.141592653589793;
         numbers.extend(output.body.target_sizes);
         numbers.extend(output.body.build);
         numbers.extend(output.body.recycle);
+        if let Some(controls) = &output.cellular {
+            numbers.extend(&controls.expression);
+            numbers.extend(&controls.activity);
+            numbers.extend(&controls.recycle);
+        }
         numbers.into_iter().map(f64::to_bits).collect()
     }
 
@@ -277,6 +343,19 @@ scan.width = 2 * 3.141592653589793;
                 energy: [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.0, 0.0, 37.0][tick % 6],
                 age: tick as f64 * 0.13,
                 time: tick as f64 / 30.0,
+                body_area: 0.5 + (tick % 6) as f64 * 0.3,
+                nutrient_stored: (tick % 5) as f64 * 0.12,
+                organic_carbon: (tick % 4) as f64 * 0.2,
+                products: program.cellular().map_or_else(Vec::new, |definition|
+                    (0..definition.products.len()).map(|i| ((tick+i)%7) as f64 * 0.003).collect()),
+                assemblies: program.cellular().map_or_else(Vec::new, |definition|
+                    (0..definition.assemblies.len()).map(|i| ((tick+i)%5) as f64 * 0.02).collect()),
+                receptors: program.cellular().map_or_else(Vec::new, |definition|
+                    (0..definition.assemblies.len()).map(|i| ReceptorInput {
+                        available: (tick+i)%3 != 0, valid: (tick+i)%4 != 0,
+                        value: 0.5, organic: (tick+i) as f64 * 0.0001,
+                        offset: [i as f64, -(tick as f64)], ..ReceptorInput::default()
+                    }).collect()),
                 light_valid: tick % 3 != 0,
                 chemical_valid: tick % 4 == 0,
                 flow_vector: if tick % 5 == 0 {
@@ -294,7 +373,10 @@ scan.width = 2 * 3.141592653589793;
                 ..Inputs::default()
             };
             program.evaluate_nodes(&inputs, &reference_memory, &mut full_values);
-            let expected = Program::outputs_for(&program.output_roots, &full_values);
+            let expected = if let Some(cellular) = &program.cellular {
+                Outputs { cellular: Some(cellular.controls(&cellular.roots(), &full_values)),
+                    ..Outputs::default() }
+            } else { Program::outputs_for(&program.output_roots, &full_values) };
             Program::commit_writes(&program.writes, &mut reference_memory, &full_values);
             let actual = program.evaluate_cell(&inputs, &mut optimized_memory, &mut scratch);
             let reloaded = restored.evaluate_cell(&inputs, &mut restored_memory, &mut scratch);
@@ -354,6 +436,108 @@ scan.width = 2 * 3.141592653589793;
     fn compact_execution_matches_authored_graph_across_types_guards_and_restore() {
         for source in [STATEFUL, DEFAULT_PROGRAM] {
             compare_with_authored_evaluator(&Program::compile(source).unwrap());
+        }
+    }
+
+    #[test]
+    fn exact_typed_sharing_retains_signed_zero_noise_and_old_register_reads() {
+        let program = Program::compile(r#"
+let unused = light.level;
+let first = energy / 100;
+let second = energy / 100;
+rf001 = first + second;
+rf002 = noise(0.0, time);
+rf003 = noise(-0.0, time);
+rs001 = rs002 + "雪";
+rs003 = rs002 + "雪";
+rv001 = flow.vector + vec(-0.0, 0.0);
+rv002 = flow.vector + vec(-0.0, 0.0);
+rf004 = if energy > 1 then 1 else 1.0;
+ri001 = ri001 + 1;
+rf005 = ri001 + 1;
+thrust = first;
+turn = second;
+divide = false;
+"#).unwrap();
+        assert_eq!(program.execution.nodes.iter().filter(|n|
+            matches!(n.op, Op::Sensor(Sensor::Energy))).count(), 1);
+        assert_eq!(program.execution.nodes.iter().filter(|n|
+            matches!(n.op, Op::Binary(Binary::Divide,_,_))).count(), 1);
+        let write = |name| program.execution.writes.iter().find(|rule|
+            rule.register == Register::parse(name).unwrap()).unwrap().value.unwrap();
+        assert_eq!(write("rs001"), write("rs003"));
+        assert_eq!(write("rv001"), write("rv002"));
+        assert_ne!(write("rf002"), write("rf003"));
+        assert!(program.reads_sensor(Sensor::Energy));
+        assert!(!program.reads_sensor(Sensor::LightLevel));
+        let mut memory = Registers::default();
+        program.evaluate_cell(&Inputs::default(), &mut memory, &mut EvalScratch::default());
+        assert_ne!(memory.read(Register::parse("rf002").unwrap()),
+            memory.read(Register::parse("rf003").unwrap()));
+        compare_with_authored_evaluator(&program);
+    }
+
+    #[test]
+    fn cellular_controls_and_mutations_match_the_authored_graph_exactly() {
+        for source in [include_str!("../../../examples/phototroph.cell"),
+                       include_str!("../../../examples/forager.cell")] {
+            compare_with_authored_evaluator(&Program::compile(source).unwrap());
+            for kind in [MutationKind::Constant, MutationKind::Expression,
+                MutationKind::Reference, MutationKind::GeneSilence,
+                MutationKind::GeneDuplicate, MutationKind::Geometry] {
+                for seed in 0..6 {
+                    if let Some(mutation) = Program::mutate_source(source, seed, kind) {
+                        compare_with_authored_evaluator(&mutation.program);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn one_function_conversion_matches_the_previous_sanitation_pipeline() {
+        // Only the redundant sanitation/conversion pipeline changed. Preserve
+        // its old boundaries independently of the production call evaluator.
+        let scalar = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1e20,
+            -2147483649.5, -0.0, 0.0, 0.1, 2147483648.5, 1e20];
+        let mut values: Vec<_> = scalar.into_iter().map(Value::Scalar).collect();
+        values.extend([Value::Integer(i32::MIN), Value::Integer(0),
+            Value::Integer(i32::MAX), Value::Vector([-0.0, 0.0]),
+            Value::Vector([f64::INFINITY, f64::NAN]),
+            Value::Vector([1e20, -1e20]), Value::Text(Rc::from("雪🌱")), Value::Boolean(true)]);
+        for op in Binary::ALL {
+            for first in &values {
+                for second in &values {
+                    let Some(ty) = binary_type(op, first.ty(), second.ty()) else { continue; };
+                    let expected = binary_value(op, first, second, ty).convert(ty);
+                    let actual = evaluate_operation(&Op::Binary(op,0,1),ty,
+                        &Inputs::default(),&Registers::default(),&[first.clone(),second.clone()]);
+                    assert_eq!(ConstantKey::from(&actual),ConstantKey::from(&expected),
+                        "{op:?} with {first:?}, {second:?}");
+                }
+            }
+        }
+        for function in Function::ALL {
+            for first in &values {
+                for second in &values {
+                    let arguments = [first.clone(), second.clone(), Value::Scalar(-0.25)]
+                        .map(|value| { let ty = value.ty(); value.convert(ty) });
+                    let types: Vec<_> = arguments[..function.arity()].iter().map(Value::ty).collect();
+                    let Some(ty) = function.ty(&types) else { continue; };
+                    let raw = function.eval(&[0,1,2], &arguments, ty);
+                    let old_inner = match function {
+                        Function::Identity | Function::Vec | Function::Normalize => raw.clone(),
+                        Function::Int => raw.clone().convert(Type::Integer),
+                        Function::Length if matches!(first, Value::Text(_)) => raw.clone(),
+                        _ => Value::Scalar(finite(raw.number())).convert(ty),
+                    };
+                    let expected = old_inner.convert(ty);
+                    let actual = evaluate_operation(&Op::Call(function,[0,1,2]), ty,
+                        &Inputs::default(), &Registers::default(), &arguments);
+                    assert_eq!(ConstantKey::from(&actual), ConstantKey::from(&expected),
+                        "{function:?} with {arguments:?}");
+                }
+            }
         }
     }
 

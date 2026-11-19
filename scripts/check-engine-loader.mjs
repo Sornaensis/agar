@@ -165,12 +165,58 @@ export async function checkEngineLoader() {
     const organicSaved=organicProbe.saveState();organicProbe.restoreState(organicSaved);
     assert.equal(organicProbe.snapshot().food.length,1401);
     const current=editorA.saveState();
-    assert.equal(new DataView(current.buffer,current.byteOffset,current.byteLength).getUint32(8,true),9);
+    assert.equal(new DataView(current.buffer,current.byteOffset,current.byteLength).getUint32(8,true),11);
     for (const filename of ['trophic-v1.bin','trophic-v2.bin']) {
       const legacy=new Uint8Array(await readFile(new URL('../engine/fixtures/'+filename,import.meta.url)));
       assert.throws(()=>editorA.restoreState(legacy),/Unsupported simulation version.*preserved/);
       assert.deepEqual(editorA.saveState(),current,'Old body saves are rejected atomically, never silently converted');
     }
+    // Produced by the shipped ABI13 WASM (SHA-256 3ecb2671f2d07847a473ffa07817324aa1e258010364deaa00ce82db6e75a1e4).
+    // This founder has a v9 cellular genome and no contact declarations or register state.
+    const historical = await readFile(new URL('../engine/fixtures/contact-migration-v9.bin', import.meta.url));
+    assert.equal(historical.readUInt32LE(8), 9);
+    const migrated = await Engine.load();
+    migrated.restoreState(historical);
+    const upgraded = migrated.saveState();
+    assert.equal(new DataView(upgraded.buffer, upgraded.byteOffset, upgraded.byteLength).getUint32(8,true), 11);
+    // Canonical public projections recorded on ABI14 from the authentic v9 save.
+    // v11 also stores the last exchange counters, so the save layout differs.
+    function physicalStateHash(instance) {
+      const api = instance.wasm;
+      const hash = createHash('sha256');
+      for (const [read, len, width] of [['snapshot_ptr','snapshot_len',8],
+        ['environment_snapshot_ptr','environment_snapshot_len',4], ['metrics_snapshot_ptr','presentation_len',8]]) {
+        const pointer = api[read]();
+        hash.update(new Uint8Array(api.memory.buffer, pointer, api[len]() * width));
+      }
+      return hash.digest('hex');
+    }
+    assert.equal(physicalStateHash(migrated),'d439974bd34c4f23318d1a2439ace4532b08794d7e9687dd18c6c37971dabe93');
+    const replay = await Engine.load();
+    replay.restoreState(upgraded);
+    migrated.tick(60);
+    replay.tick(60);
+    assert.deepEqual(replay.saveState(), migrated.saveState(), 'The migrated founder replays exactly');
+    assert.equal(physicalStateHash(migrated),'31e2eb829c15f2e719b4e4a4c024bcc41a0189c22c467b8e6753e6d9df880291');
+    const markerOnly = await Engine.load();
+    markerOnly.restoreState(await readFile(new URL('../engine/fixtures/signal-migration-v10.bin', import.meta.url)));
+    assert.deepEqual(markerOnly.getMemory(1).map(x => [x.name,x.value]), [['rf002',6]]);
+    assert.deepEqual(markerOnly.getMemory(2).map(x => [x.name,x.value]), [['rf007',17]]);
+    for (const id of [1,2]) {
+      assert.equal(markerOnly.getCellEvaluation(id).contactMessages.signal, null);
+      assert.deepEqual(markerOnly.cellBody(id).colony,{neighbors:0,energyNet:0,mineralNet:0,carbonNet:0});
+    }
+    replay.restoreState(markerOnly.saveState());
+    markerOnly.tick(60); replay.tick(60);
+    assert.deepEqual(markerOnly.saveState(), replay.saveState());
+    for (const [read, len, width, expected] of [
+      ['snapshot_ptr','snapshot_len',8,'b92a12ea3a4b328be261b451d5a685daf5c10679586f52f8f04f7d32f0afcd56'],
+      ['environment_snapshot_ptr','environment_snapshot_len',4,'63f03f4bba309942428d6d49e8bf92a96accdcdf6ce21b52570ae1688a84cbbb'],
+    ]) {
+      const api = markerOnly.wasm, ptr = api[read]();
+      assert.equal(createHash('sha256').update(new Uint8Array(api.memory.buffer,ptr,api[len]()*width)).digest('hex'),expected);
+    }
+
     const body=editorA.cellBody(editorA.snapshot().cells[0].id);
     assert.ok(body.organs.length>0);assert.ok(body.spaceUsed<=body.spaceCapacity);
     const schema=editorA.languageSchema();assert.equal(schema.signals.length,174);assert.equal(schema.outputs.length,81);
@@ -181,7 +227,7 @@ export async function checkEngineLoader() {
   } finally {
     globalThis.fetch = originalFetch; WebAssembly.compile = originalCompile;
   }
-  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, version9 body/product/substrate/mechanism/control/environment/gas continuation and explicit atomic rejection of pre-organelle checkpoints.');
+  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, version11 body/product/substrate/mechanism/control/environment/gas continuation and explicit atomic rejection of pre-organelle checkpoints.');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await checkEngineLoader();

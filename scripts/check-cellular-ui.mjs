@@ -19,7 +19,7 @@ const engineSource = (await readFile(new URL('../src/engine.ts',import.meta.url)
   .replace("import engineUrl from '../engine/pkg/agar_engine.wasm?url';",'const engineUrl="https://agar.invalid/cellular-ui.wasm";')
   .replace("import engineContract from './engine-contract.json';",`const engineContract=${JSON.stringify(contract)};`);
 const engineCode = ts.transpileModule(engineSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
-const { Engine,validateBodyInspection,validateGenomeEvaluation } = await import(`data:text/javascript;base64,${Buffer.from(engineCode).toString('base64')}`);
+const { Engine,decodeRenderSnapshot,validateBodyInspection,validateGenomeEvaluation } = await import(`data:text/javascript;base64,${Buffer.from(engineCode).toString('base64')}`);
 const originalFetch = globalThis.fetch, bytes = await readFile(new URL('../engine/pkg/agar_engine.wasm',import.meta.url));
 globalThis.fetch = async()=>new Response(bytes);
 let engine;
@@ -47,7 +47,29 @@ assert.equal(language.isCellularSource('let x="cellular;";'),false);
 assert.equal(language.tokenizeGenome(source).some(token=>token.kind==='invalid'),false);
 assert.deepEqual(names(language.cellularDeclarations(source).products),['Anchor','Rotor','Tail','Memory']);
 assert.deepEqual(names(language.cellularDeclarations(source+'\n# product Hidden = motor();').products),['Anchor','Rotor','Tail','Memory']);
-assert.deepEqual(names(complete('cellular;\n')),['product','gene','assembly','fn','let']);
+const statements = complete('cellular;\n');
+for (const name of ['product','gene','assembly','fn','let','clear','publish','avoid_message','adhere_message','signal','ri001','rf001','rb001','rs001','rv001']) {
+  assert.ok(names(statements).includes(name), 'Cellular statement offers '+name);
+}
+assert.equal(statements.find(item=>item.name==='rb001').insertText,'rb001 = ');
+assert.ok(!names(statements).includes('thrust'));
+for (const keyword of ['publish','avoid_message','adhere_message','signal']) {
+  const addresses=complete('cellular; '+keyword+' ');
+  assert.ok(addresses.length && addresses.every(item=>item.category==='register' && item.type==='scalar'));
+  assert.ok(names(complete('cellular; '+keyword+' rf21','rf21')).includes('rf210'));
+  assert.deepEqual(complete('cellular; '+keyword+' rb','rb'),[]);
+  assert.deepEqual(complete('cellular; '+keyword+' rf001 = '),[]);
+}
+const occupiedIntegers=Array.from({length:45},(_,i)=>'ri'+String(i+1).padStart(3,'0')+'=1;').join(' ');
+assert.ok(names(complete('cellular; '+occupiedIntegers+' publish r','r')).includes('rf001'));
+for (const rhs of ['clear ', 'let used = populated(', 'fn test(x) = populated(']) {
+  const suggestions=complete('cellular; '+rhs);
+  assert.ok(suggestions.length && suggestions.every(item=>item.category==='register'));
+}
+for (const [part,expected] of [['rb001 = ','boolean'],['rs001 = ','string'],['rv001 = ','vec2'],['rf002 = 1 when ','boolean'],['clear rf001 when ','boolean']]) {
+  const code='cellular; '+part;
+  assert.equal(language.genomeCompletionContext(code,code.length).expected,expected);
+}
 assert.deepEqual(names(complete('cellular; product X = ')),[...language.CELLULAR_PRODUCT_ROLES]);
 assert.deepEqual(names(complete(source+'\ngene new_gene: ')),['Anchor','Rotor','Tail','Memory']);
 assert.ok(names(complete(source+'\nassembly Other: ')).includes('replicator'),'Legacy recipe remains available');
@@ -60,15 +82,22 @@ assert.equal(language.cellularDeclarations('cellular; assembly Vessel: store( fo
 assert.ok(names(complete(source+'\nassembly Other: flagellum {\n')).includes('Rotor'));
 assert.ok(complete(source+'\nassembly Other: flagellum {\n').find(item=>item.name==='Rotor').insertText.endsWith(': '));
 const expressions = complete(source+'\nlet next = ');
-for (const name of ['pool.Memory','concentration.Memory','built.Swim','energy','light.valid','activate','repress']) assert.ok(names(expressions).includes(name),`Cellular expression offers ${name}`);
-for (const name of ['thrust','divide','grow','id','time','protein.flagellum','organelle.core.count','body.division_ready','rf001','populated']) assert.ok(!names(expressions).includes(name),`Cellular completion excludes ${name}`);
+for (const name of ['pool.Memory','concentration.Memory','built.Swim','energy','light.valid','activate','repress','rf001','rs001','populated','memory.used','memory.cost']) assert.ok(names(expressions).includes(name),`Cellular expression offers ${name}`);
+for (const name of ['thrust','divide','grow','id','time','protein.flagellum','organelle.core.count','body.division_ready']) assert.ok(!names(expressions).includes(name),`Cellular completion excludes ${name}`);
 assert.ok(names(complete(source+'\ngene sensed: Rotor = if ')).includes('light.valid'),'A numeric gene can use boolean sensor conditions');
 assert.deepEqual(complete(source+'\n# pool.'),[]);
 assert.ok(language.lookupCellularSymbol('built.Swim',source).description.includes('damage'));
-assert.ok(!language.genomeSignalCatalog('write',source).some(item=>item.category==='output'||item.category==='register'));
+const writes=language.genomeSignalCatalog('write',source);
+assert.ok(!writes.some(item=>item.category==='output'));
+assert.deepEqual(writes.filter(item=>item.category==='register').map(item=>item.name),['ri001','rf001','rb001','rs001','rv001']);
 
 const schema = engine.languageSchema();
 assert.equal(schema.cellular.marker,'cellular;');
+assert.deepEqual(schema.cellular.registers,{prefixes:['ri','rf','rb','rs','rv'],addressesPerType:999,upkeepPerSecond:0.0025,clearWins:true});
+assert.deepEqual(schema.cellular.contactMessages,{
+  declarations:['publish','avoid_message','adhere_message','signal'],registerType:'scalar',receptor:'sense(contact)',
+  validField:'message_valid',valueField:'message',signalValidField:'signal_valid',signalValueField:'signal',initializerLimit:1e12,
+});
 assert.deepEqual(schema.cellular.reads,language.CELLULAR_READ_SIGNALS.map(item=>({name:item.name,type:item.type})));
 assert.deepEqual(names(schema.cellular.products),[...language.CELLULAR_PRODUCT_ROLES]);
 assert.deepEqual(names(schema.cellular.assemblies),names(language.CELLULAR_ASSEMBLY_KINDS));
@@ -177,4 +206,91 @@ badControl.outputs.find(item=>item.name==='start_when.Swim').type='scalar';
 badControl.outputs.find(item=>item.name==='start_when.Swim').value=1;
 assert.throws(()=>validateGenomeEvaluation(badControl,controlId));
 
-console.log('Cellular UI checks passed: mechanism/receptor schema parity, typed local readings and concentrations, pure function scope, initiation/recycling controls, live values, physical inventory validation and escaped rendering.');
+const contactSource=`# café 🌱 — stable UTF-16 ranges
+cellular;
+publish rf001 = 0;
+avoid_message rf002;
+adhere_message rf001;
+signal rf003 = -2;
+product Mount = anchor(); product Port = receptor(); product Fiber = filament();
+assembly Touch: sense(contact) { Mount: 0.01; Port: 0.01; Fiber: 0.01; }
+ri001 = ri001 + 1;
+rf002 = rf001 when populated(rf001);
+rb001 = sensed.Touch.message_valid;
+rs001 = "private";
+rv001 = vec(1 + sensed.Touch.message, -1);
+clear rf001 when ri001 >= 1;`;
+assert.equal(language.lookupCellularSymbol('sensed.Touch.message_valid',contactSource).type,'boolean');
+assert.equal(language.lookupCellularSymbol('sensed.Touch.message',contactSource).type,'scalar');
+assert.equal(language.lookupCellularSymbol('sensed.Touch.message',contactSource.replace('sense(contact)','mechanoreceptor')).type,'scalar');
+assert.equal(language.lookupCellularSymbol('sensed.Eye.message',controlled),undefined);
+for (const keyword of schema.cellular.contactMessages.declarations) {
+  const symbol=language.lookupCellularSymbol(keyword,contactSource);
+  engine.compile('cellular;\n'+language.genomeSymbolDocumentation(symbol).example);
+}
+const contactId=engine.compile(contactSource);
+engine.resetEmpty(72,0); engine.seed(contactId,1);
+const founder=engine.snapshot().cells[0].id;
+const memory=()=>Object.fromEntries(engine.getMemory(founder).map(item=>[item.name,item.value]));
+assert.deepEqual(memory(),{rf001:0,rf003:-2},'Only the explicitly initialized register starts occupied');
+assert.equal(engine.renderSnapshot().cells[0].contactSignal,-2,'Compact player frames expose the current payload');
+const frame=engine.renderSnapshotData();
+for (const [offset, bad] of [[0,2], [1,-1], [2,0.5], [3,NaN]]) {
+  const corrupt=frame.slice();
+  corrupt[corrupt.length-4+offset]=bad;
+  assert.throws(()=>decodeRenderSnapshot(corrupt),/colony/);
+}
+const inventory=engine.cellBody(founder);
+const signedExchanges={...inventory,colony:{neighbors:2,energyNet:0.25,mineralNet:-0.001,carbonNet:0}};
+assert.doesNotThrow(()=>validateBodyInspection(signedExchanges,founder));
+const exchangePanel=renderCellularBody(signedExchanges);
+for (const label of ['Colony exchange','+0.25','−0.001']) assert.ok(exchangePanel.includes(label));
+assert.throws(()=>validateBodyInspection({...inventory,colony:{...signedExchanges.colony,carbonNet:Infinity}},founder));
+const checkpoint=engine.saveState();
+const preview=engine.getCellEvaluation(founder);
+assert.deepEqual(preview.contactMessages,{publish:'rf001',avoid:'rf002',adhere:'rf001',initial:0,signal:'rf003',signalInitial:-2});
+assert.deepEqual(preview.contactMessageDeclarations.map(item=>[item.kind,item.value,contactSource.slice(item.from,item.to)]),[
+  ['publish',0,'publish rf001 = 0;'],['avoid',null,'avoid_message rf002;'],['adhere',0,'adhere_message rf001;'],['signal',-2,'signal rf003 = -2;'],
+]);
+assert.deepEqual(preview.signals.filter(item=>item.name.startsWith('sensed.Touch.message')).map(item=>[item.name,item.value]),[
+  ['sensed.Touch.message_valid',false],['sensed.Touch.message',0],
+]);
+// Exercise the editor's actual cursor and selection lookup against this real
+// frozen trace without requiring a DOM or starting a second simulation.
+const editorFile=ts.createSourceFile('program-editor.ts',await readFile(new URL('../src/program-editor.ts',import.meta.url),'utf8'),ts.ScriptTarget.ES2022,true,ts.ScriptKind.TS);
+const editorClass=editorFile.statements.find(node=>ts.isClassDeclaration(node) && node.name?.text==='ProgramEditor');
+const methods=['evaluatedPart','tokenAt'].map(name=>editorClass.members.find(node=>node.name?.getText(editorFile)===name).getText(editorFile));
+const fragment=ts.transpileModule('class EditorProbe {'+methods.join('\n')+'}',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
+const EditorProbe=new Function('cellularDeclarations','unwrapGenomeSelection',fragment+';return EditorProbe;')(language.cellularDeclarations,language.unwrapGenomeSelection);
+const editor=new EditorProbe(); editor.evaluation=preview; editor.source=contactSource; editor.tokens=language.tokenizeGenome(contactSource); editor.codeTokens=editor.tokens.filter(token=>token.kind!=='comment');
+for (const declaration of preview.contactMessageDeclarations) {
+  const hovered=editor.evaluatedPart(declaration.from+1,declaration.from+1);
+  const selected=editor.evaluatedPart(declaration.from,declaration.to);
+  assert.equal(hovered.value,declaration.value);
+  assert.deepEqual(selected,hovered);
+  assert.equal(selected.to,declaration.to);
+}
+assert.ok(preview.writes.find(item=>item.name==='rf002').applies);
+assert.equal(preview.writes.find(item=>item.name==='rf001').applies,false);
+assert.deepEqual(engine.saveState(),checkpoint,'Register/message previews are read-only');
+for (const corrupt of [
+  trace=>{trace.contactMessages.publish='rb001';},
+  trace=>{trace.contactMessages.initial=Infinity;},
+  trace=>{trace.contactMessages.signal=trace.contactMessages.publish;},
+  trace=>{trace.contactMessages.signalInitial=NaN;},
+  trace=>{trace.contactMessageDeclarations[0].value='0';},
+  trace=>{trace.contactMessageDeclarations[1].to=contactSource.length+1;},
+  trace=>{trace.contactMessageDeclarations[0].from=0;},
+  trace=>{trace.contactMessageDeclarations.pop();},
+]) {
+  const invalid=structuredClone(preview); corrupt(invalid);
+  assert.throws(()=>validateGenomeEvaluation(invalid,founder));
+}
+engine.tick(1);
+assert.deepEqual(memory(),{ri001:1,rf001:0,rf002:0,rf003:-2,rb001:false,rs001:'private',rv001:[1,-1]});
+assert.equal(engine.getCellEvaluation(founder).contactMessageDeclarations.find(item=>item.kind==='avoid').value,0);
+engine.tick(1);
+assert.equal(memory().rf001,undefined);
+assert.equal(engine.getCellEvaluation(founder).contactMessageDeclarations.find(item=>item.kind==='publish').value,null);
+
+console.log('Cellular UI checks passed for register and message completions, authoritative mechanism/receptor schema, pure functions, live UTF-16 declaration spans, frozen memory/write previews, physical inventory and escaped rendering.');

@@ -1,17 +1,26 @@
-import type { EnvironmentSnapshot, MetricsSnapshot, RenderSnapshot, SimulationSummary } from './engine';
+import type { EnvironmentMetadata, EnvironmentSnapshot, MetricsSnapshot, RenderSnapshot, SimulationSummary } from './engine';
 
-export interface PresentationOptions { metrics?: boolean; environment?: boolean }
+export interface PresentationOptions {
+  /** Omit drawing data when only the simulation clock or aggregates are needed. */
+  frame?: boolean;
+  metrics?: boolean;
+  environment?: boolean | 'metadata';
+}
 export interface Presentation {
-  frame: RenderSnapshot;
+  tick: number;
+  summary: SimulationSummary;
+  frame?: RenderSnapshot;
   metrics?: MetricsSnapshot;
-  environment?: EnvironmentSnapshot;
-  /** A tick batch may have advanced before stopping; frame describes that state. */
+  environment?: EnvironmentMetadata | EnvironmentSnapshot;
+  /** A tick batch may have advanced before stopping; tick/summary describe that state. */
   error?: string;
 }
 export interface WirePresentation {
-  frame: Float64Array;
+  tick: number;
+  summary: SimulationSummary;
+  frame?: Float64Array;
   metrics?: Float64Array;
-  environment?: EnvironmentSnapshot;
+  environment?: EnvironmentMetadata | EnvironmentSnapshot;
   error?: string;
 }
 export interface CapturedCheckpoint { state: Uint8Array; summary: SimulationSummary }
@@ -19,11 +28,11 @@ export interface CapturedCheckpoint { state: Uint8Array; summary: SimulationSumm
 export const ENGINE_METHODS = [
   'analyze', 'compile', 'reset', 'resetEmpty', 'saveState', 'restoreState', 'seed', 'addFood',
   'setFoodRate', 'setMutationRate', 'setEnvironment', 'setInitialNutrients', 'addNutrients',
-  'addSource', 'removeSource', 'clearSources', 'getMemory', 'getCellEvaluation', 'languageSchema',
+  'addSource', 'replaceSources', 'removeSource', 'clearSources', 'getMemory', 'getCellEvaluation', 'languageSchema',
   'setWorldSize', 'updateSource', 'addBarrier', 'updateBarrier', 'removeBarrier', 'clearBarriers',
   'setInitialGases', 'setGasExchange',
   'cellBody', 'mutate', 'getGenome', 'getGenomeGraph', 'tick', 'environment', 'renderSnapshot',
-  'metricsSnapshot', 'cellSnapshot', 'summary', 'snapshot',
+  'metricsSnapshot', 'cellSnapshot', 'summary', 'environmentMetadata', 'snapshot',
 ] as const;
 export type EngineMethod = typeof ENGINE_METHODS[number];
 export type WorkerMethod = EngineMethod | 'init' | 'advance' | 'presentation' | 'captureCheckpoint';

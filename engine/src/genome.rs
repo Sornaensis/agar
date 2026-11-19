@@ -85,6 +85,10 @@ pub struct ReceptorInput {
     pub offset: [f64; 2],
     pub pressure: f64,
     pub resistance: f64,
+    pub message_valid: bool,
+    pub message: f64,
+    pub signal_valid: bool,
+    pub signal: f64,
     pub flow: [f64; 2],
     pub speed: f64,
     pub bearing: f64,
@@ -113,9 +117,13 @@ pub enum ReceptorField {
     Contrast,
     Pigment,
     Motion,
+    MessageValid,
+    Message,
+    SignalValid,
+    Signal,
 }
 impl ReceptorField {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 20] = [
         Self::Available,
         Self::Valid,
         Self::Level,
@@ -132,6 +140,10 @@ impl ReceptorField {
         Self::Contrast,
         Self::Pigment,
         Self::Motion,
+        Self::MessageValid,
+        Self::Message,
+        Self::SignalValid,
+        Self::Signal,
     ];
     pub fn name(self) -> &'static str {
         [
@@ -151,6 +163,10 @@ impl ReceptorField {
             "contrast",
             "pigment",
             "motion",
+            "message_valid",
+            "message",
+            "signal_valid",
+            "signal",
         ][self as usize]
     }
     pub fn for_kind(kind: AssemblyKind) -> &'static [Self] {
@@ -168,7 +184,7 @@ impl ReceptorField {
             | AssemblyKind::Organelle(O::Chemoreceptor) => &[Available, Valid, Mineral, Organic],
             AssemblyKind::Mechanism(M::SenseContact)
             | AssemblyKind::Organelle(O::Mechanoreceptor) => &[
-                Available, Valid, Offset, Pressure, Resistance, Flow, Speed, Bearing,
+                Available, Valid, Offset, Pressure, Resistance, Flow, Speed, Bearing, MessageValid, Message, SignalValid, Signal,
             ],
             AssemblyKind::Mechanism(M::SenseOptical) | AssemblyKind::Organelle(O::Optical) => {
                 &[Available, Valid, Offset, Area, Contrast, Pigment, Motion]
@@ -184,7 +200,7 @@ impl ReceptorField {
     }
     fn ty(self) -> Type {
         match self {
-            Self::Available | Self::Valid => Type::Bool,
+            Self::Available | Self::Valid | Self::MessageValid | Self::SignalValid => Type::Bool,
             Self::Offset | Self::Flow | Self::Motion => Type::Vector,
             _ => Type::Number,
         }
@@ -205,6 +221,10 @@ impl ReceptorField {
             return Value::zero(self.ty());
         }
         match self {
+            Self::SignalValid => Value::Boolean(input.signal_valid),
+            Self::Signal => Value::Scalar(if input.signal_valid { finite(input.signal) } else { 0.0 }),
+            Self::MessageValid => Value::Boolean(input.message_valid),
+            Self::Message => Value::Scalar(if input.message_valid { finite(input.message) } else { 0.0 }),
             Self::Offset => Value::Vector(input.offset.map(finite)),
             Self::Flow => Value::Vector(input.flow.map(finite)),
             Self::Motion => Value::Vector(input.motion.map(finite)),
@@ -605,8 +625,8 @@ pub struct EvalScratch {
     values: Vec<Value>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Sensor {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Sensor {
     Energy,
     EnergyFraction,
     EnergyCapacity,
@@ -1367,7 +1387,7 @@ impl Sensor {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Binary {
     Add,
     Subtract,
@@ -1527,7 +1547,7 @@ fn binary_value(op: Binary, a: &Value, b: &Value, ty: Type) -> Value {
     }))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Function {
     Sin,
     Cos,
@@ -1655,14 +1675,15 @@ impl Function {
             },
         }
     }
-    fn eval(self, args: &[usize; 3], values: &[Value], ty: Type) -> Value {
+    fn eval(self, args: &[usize; 3], values: &[Value], _ty: Type) -> Value {
         let a = &values[args[0]];
         let n = a.number();
         let second = || values[args[1]].number();
         let third = || values[args[2]].number();
         let result = match self {
             Self::Identity => return a.clone(),
-            Self::Int => return a.clone().convert(Type::Integer),
+            // evaluate_operation performs the one typed conversion below.
+            Self::Int => return a.clone(),
             Self::Float => n,
             Self::Sin => n.sin(),
             Self::Cos => n.cos(),
@@ -1733,7 +1754,9 @@ impl Function {
                 }
             }
         };
-        Value::Scalar(finite(result)).convert(ty)
+        // The caller applies the node's typed finite/saturation boundary once.
+        // Repeating it here adds work to every scalar call without changing it.
+        Value::Scalar(result)
     }
 }
 fn smooth_noise(seed: f64, phase: f64) -> f64 {
@@ -1824,7 +1847,9 @@ fn evaluate_operation(
             Value::Vector(v) => Value::Vector([-v[0], -v[1]]),
             v => Value::Scalar(-v.number()),
         },
-        Op::Binary(op, a, b) => binary_value(*op, &values[*a], &values[*b], ty),
+        // Binary evaluation already returns the typed, sanitized result. A
+        // second conversion cannot change it, including signed zero.
+        Op::Binary(op, a, b) => return binary_value(*op, &values[*a], &values[*b], ty),
         Op::Choose(condition, yes, no) => values[if values[*condition].boolean() {
             *yes
         } else {
@@ -2182,6 +2207,12 @@ impl SourceMap {
 }
 
 impl Program {
+    /// Reachable scalar/legacy reads in the immutable execution plan. Inspection
+    /// can still request the complete input packet independently of this mask.
+    pub(crate) fn reads_sensor(&self, sensor: Sensor) -> bool {
+        self.execution.reads_sensor(sensor)
+    }
+
     fn from_parts(
         nodes: Vec<Node>,
         bindings: Vec<Binding>,
@@ -2291,6 +2322,9 @@ impl Program {
         std::mem::size_of::<Box<ExecutionPlan>>() + self.execution.allocated_bytes
             // Keep the old authored byte budgets stable for legacy saves.
             + std::mem::size_of::<Option<Box<cellular::CellularGraph>>>()
+            + self.cellular.as_ref().map_or(0, |graph| graph.definition.derived_bytes()
+                + std::mem::size_of::<Option<Box<cellular::ContactMessages>>>()
+                + graph.messages.as_ref().map_or(0, |m| m.legacy_layout_overhead()))
     }
 
     /// Describe the compiler's graph without evaluating it or changing memory.
@@ -2394,7 +2428,10 @@ impl Program {
         if let Some(cellular) = &self.cellular {
             json.push_str(&cellular.graph_roots_json());
         }
+        let mut has_root = !json.ends_with('[');
         for rule in &self.writes {
+            if has_root { json.push(','); }
+            has_root = true;
             let name = rule.register.name();
             let kind = if rule.value.is_some() {
                 "write"
@@ -2408,11 +2445,15 @@ impl Program {
                 .guard
                 .map_or_else(|| "null".into(), |value| value.to_string());
             json.push_str(&format!(
-                ",{{\"id\":{},\"kind\":{},\"name\":{},\"type\":{},\"value\":{value},\"guard\":{guard},\"default\":null}}",
+                "{{\"id\":{},\"kind\":{},\"name\":{},\"type\":{},\"value\":{value},\"guard\":{guard},\"default\":null}}",
                 quote(&format!("{kind}:{name}")), quote(kind), quote(&name), quote(rule.register.ty.label()),
             ));
         }
-        json.push_str("]}");
+        json.push(']');
+        if let Some(messages) = self.contact_messages() {
+            json.push_str(&format!(",\"contactMessages\":{}", messages.to_json()));
+        }
+        json.push('}');
         json
     }
 
@@ -3136,6 +3177,7 @@ struct Parser {
     binding_locations: Vec<Location>,
     node_locations: Vec<source::NodeLocation>,
     write_locations: Vec<Location>,
+    message_locations: [Option<Location>; 4],
     cellular_mode: bool,
     product_names: HashMap<String, usize>,
     assembly_names: HashMap<String, usize>,
@@ -3157,6 +3199,7 @@ impl Parser {
             binding_locations: Vec::new(),
             node_locations: Vec::new(),
             write_locations: Vec::new(),
+            message_locations: [None; 4],
             cellular_mode: false,
             product_names: HashMap::new(),
             assembly_names: HashMap::new(),
@@ -3524,9 +3567,6 @@ impl Parser {
                         })?;
                     self.add(Op::Built(index), Type::Number, location)?
                 } else if let Some(register) = Register::parse(&name) {
-                    if self.cellular_mode {
-                        return Err(location.error("cellular genes use product stocks for persistent state; registers are unavailable."));
-                    }
                     self.add(Op::Register(register), register.ty, location)?
                 } else if Register::reserved(&name) {
                     return Err(Self::register(&name, location).unwrap_err());
@@ -3593,9 +3633,6 @@ impl Parser {
             return self.user_call(name, location, depth);
         }
         if name == "populated" {
-            if self.cellular_mode {
-                return Err(location.error("cellular genes use product stocks for persistent state; populated() is unavailable."));
-            }
             self.expect(Kind::LeftParen, "'('")?;
             let token = self.take();
             let Kind::Name(name) = token.kind else {

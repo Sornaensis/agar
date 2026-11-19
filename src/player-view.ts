@@ -165,9 +165,9 @@ export class PlayerFrameLoop {
       try { this.frame(this.now()); }
       finally { if (this.running && epoch === this.epoch) this.refresh(); }
     };
-    // Browsers stop rAF for hidden documents. A single timer continues stepping
-    // without rendering or accumulating wall-clock catch-up; browsers/OS may
-    // still throttle or suspend it. Visibility changes invalidate stale work.
+    // Hidden documents stop rAF. Keep lightweight checkpoint/UI housekeeping
+    // alive here; the independent simulation loop paces worker batches. Both
+    // remain subject to browser/OS suspension. Visibility invalidates old work.
     this.request = timer ? owner.setTimeout(tick, 100) : owner.requestAnimationFrame(tick);
   }
   private cancelRequest(): void {

@@ -5,12 +5,19 @@ use std::f64::consts::TAU;
 mod checkpoint;
 #[cfg(test)]
 mod control_tests;
+mod flow;
 #[cfg(test)]
 mod gas_tests;
 mod gases;
 mod geometry;
+#[cfg(test)]
+mod optimization_tests;
+mod transport;
+use flow::FlowCache;
 use gases::GasState;
 pub use gases::{DEFAULT_INITIAL_CARBON, DEFAULT_INITIAL_OXYGEN, PATCH_WATER_VOLUME};
+use geometry::BarrierCache;
+use transport::TransportStencil;
 
 pub const COLUMNS: usize = 60;
 pub const ROWS: usize = 38;
@@ -35,6 +42,53 @@ pub struct Source {
     pub length: f64,
 }
 
+/// Parameters for an atomic source-list edit. Identifiers are assigned only
+/// after the whole list has passed validation.
+#[derive(Clone, Copy, Debug)]
+pub struct SourceConfig {
+    pub kind: u32,
+    pub x: f64,
+    pub y: f64,
+    pub strength: f64,
+    pub radius: f64,
+    pub angle: f64,
+    pub length: f64,
+}
+impl SourceConfig {
+    fn valid(&self) -> bool {
+        self.kind <= 12
+            && [
+                self.x,
+                self.y,
+                self.strength,
+                self.radius,
+                self.angle,
+                self.length,
+            ]
+            .iter()
+            .all(|value| value.is_finite())
+    }
+    fn source(&self, id: u32, width: f64, height: f64) -> Source {
+        Source {
+            id,
+            kind: self.kind,
+            x: self.x.rem_euclid(width),
+            y: self.y.rem_euclid(height),
+            strength: self.strength.clamp(
+                if matches!(self.kind, 0 | 3 | 4 | 8..=12) {
+                    0.0
+                } else {
+                    -1.0
+                },
+                1.0,
+            ),
+            radius: self.radius.clamp(20.0, 1000.0),
+            angle: self.angle.rem_euclid(TAU),
+            length: self.length.clamp(40.0, 4800.0),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Barrier {
     pub id: u32,
@@ -52,13 +106,44 @@ pub struct Barrier {
 #[derive(Clone, Default)]
 struct FieldScratch {
     advected: Vec<f64>,
-    patch_flow: Vec<(f64, f64)>,
+    transport: Vec<TransportStencil>,
     face_flow: Vec<(f64, f64)>,
     transfers: Vec<(usize, usize, f64)>,
     outgoing: Vec<f64>,
     limits: Vec<f64>,
     remaining: Vec<f64>,
     incoming: Vec<f64>,
+}
+
+#[derive(Clone)]
+struct PatchGeometry {
+    positions: Vec<(f64, f64)>,
+    /// Left, right, up, down: diffusion retains this original summation order.
+    neighbors: Vec<[usize; 4]>,
+}
+impl PatchGeometry {
+    fn new(width: f64, height: f64, columns: usize, rows: usize) -> Self {
+        let mut positions = Vec::with_capacity(columns * rows);
+        let mut neighbors = Vec::with_capacity(columns * rows);
+        for index in 0..columns * rows {
+            let col = index % columns;
+            let row = index / columns;
+            positions.push((
+                (col as f64 + 0.5) * width / columns as f64,
+                (row as f64 + 0.5) * height / rows as f64,
+            ));
+            neighbors.push([
+                row * columns + (col + columns - 1) % columns,
+                row * columns + (col + 1) % columns,
+                (row + rows - 1) % rows * columns + col,
+                (row + 1) % rows * columns + col,
+            ]);
+        }
+        Self {
+            positions,
+            neighbors,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -77,9 +162,10 @@ pub struct Environment {
     pub(crate) blocked_right: Vec<bool>,
     pub(crate) blocked_down: Vec<bool>,
     pub(crate) solid_patches: Vec<bool>,
-    /// Time-independent emitter-only flow at patch centers and right/down faces.
-    /// Derived, never serialized. Legacy time-varying ambient flow uses direct evaluation.
-    source_flow: Vec<[(f64, f64); 3]>,
+    /// Derived geometry and flow tables, excluded from checkpoint state.
+    flow: FlowCache,
+    barrier_cache: BarrierCache,
+    grid: PatchGeometry,
     temperature: Vec<f64>,
     light: Vec<f64>,
     heating: Vec<f64>,
@@ -106,7 +192,9 @@ impl Default for Environment {
             blocked_right: vec![false; PATCHES],
             blocked_down: vec![false; PATCHES],
             solid_patches: vec![false; PATCHES],
-            source_flow: vec![[(0.0, 0.0); 3]; PATCHES],
+            flow: FlowCache::new(PATCHES),
+            barrier_cache: BarrierCache::new(PATCHES),
+            grid: PatchGeometry::new(WIDTH, HEIGHT, COLUMNS, ROWS),
             nutrient_removed: 0.0,
             next_barrier_id: 1,
             ambient_temperature: 0.5,
@@ -171,32 +259,26 @@ impl Environment {
     pub fn emit_organic(&mut self, x: f64, y: f64, amount: f64) {
         if amount.is_finite() && amount > 0.0 {
             let i = self.patch_index(x, y);
-            self.organic[i] = (self.organic[i] + amount).min(1e6);
+            self.emit_organic_patch(i, amount);
+        }
+    }
+    pub fn emit_organic_patch(&mut self, index: usize, amount: f64) {
+        if amount.is_finite() && amount > 0.0 {
+            if let Some(value) = self.organic.get_mut(index) {
+                *value = (*value + amount).min(1e6);
+            }
         }
     }
     fn step_organic(&mut self) {
-        if self.organic.iter().all(|&v| v == 0.0) {
-            return;
-        }
         self.scratch.advected.resize(self.patch_count(), 0.0);
         for i in 0..self.patch_count() {
-            let (x, y) = self.patch_position(i);
-            let (vx, vy) = self.scratch.patch_flow[i];
-            self.scratch.advected[i] =
-                self.sample_transport(&self.organic, i, x - vx * DT, y - vy * DT);
+            self.scratch.advected[i] = self.scratch.transport[i].sample(&self.organic);
         }
         let advected = &self.scratch.advected;
         let diffusion = 90.0 * DT / PATCH_AREA;
         let retained = (-0.18 * DT).exp();
         for i in 0..self.patch_count() {
-            let col = i % self.columns;
-            let row = i / self.columns;
-            let neighbors = [
-                row * self.columns + (col + self.columns - 1) % self.columns,
-                row * self.columns + (col + 1) % self.columns,
-                ((row + self.rows - 1) % self.rows) * self.columns + col,
-                ((row + 1) % self.rows) * self.columns + col,
-            ];
+            let neighbors = self.grid.neighbors[i];
             self.organic[i] = ((advected[i]
                 + diffusion
                     * (neighbors
@@ -238,7 +320,14 @@ impl Environment {
         let x = if x.is_finite() { x } else { 0.0 };
         let y = if y.is_finite() { y } else { 0.0 };
         let patch = self.patch_index(x, y);
-        self.nutrients[patch] += amount;
+        self.recycle_nutrients_patch(patch, amount);
+    }
+    pub fn recycle_nutrients_patch(&mut self, index: usize, amount: f64) {
+        if amount.is_finite() && amount > 0.0 {
+            if let Some(balance) = self.nutrients.get_mut(index) {
+                *balance += amount;
+            }
+        }
     }
 
     pub fn add_nutrients(&mut self, x: f64, y: f64, amount: f64) -> f64 {
@@ -271,13 +360,29 @@ impl Environment {
     }
 
     pub fn add_source(&mut self, kind: u32, x: f64, y: f64, strength: f64, radius: f64) -> u32 {
-        if kind > 12
-            || self.sources.len() >= MAX_SOURCES
-            || !x.is_finite()
-            || !y.is_finite()
-            || !strength.is_finite()
-            || !radius.is_finite()
-        {
+        self.add_source_configured(kind, x, y, strength, radius, 0.0, 600.0)
+    }
+
+    pub fn add_source_configured(
+        &mut self,
+        kind: u32,
+        x: f64,
+        y: f64,
+        strength: f64,
+        radius: f64,
+        angle: f64,
+        length: f64,
+    ) -> u32 {
+        let config = SourceConfig {
+            kind,
+            x,
+            y,
+            strength,
+            radius,
+            angle,
+            length,
+        };
+        if self.sources.len() >= MAX_SOURCES || !config.valid() {
             return 0;
         }
         let id = self.next_source_id;
@@ -285,25 +390,32 @@ impl Environment {
             return 0;
         };
         self.next_source_id = next;
-        self.sources.push(Source {
-            id,
-            kind,
-            x: x.rem_euclid(self.width),
-            y: y.rem_euclid(self.height),
-            strength: strength.clamp(
-                if matches!(kind, 0 | 3 | 4 | 8..=12) {
-                    0.0
-                } else {
-                    -1.0
-                },
-                1.0,
-            ),
-            radius: radius.clamp(20.0, 1000.0),
-            angle: 0.0,
-            length: 600.0,
-        });
+        self.sources
+            .push(config.source(id, self.width, self.height));
         self.rebuild_sources();
         id
+    }
+
+    /// Equivalent to clear followed by configured adds, with one cache rebuild
+    /// and no partially applied list if validation fails.
+    pub fn replace_sources(&mut self, configs: &[SourceConfig]) -> bool {
+        if configs.len() > MAX_SOURCES || configs.iter().any(|source| !source.valid()) {
+            return false;
+        }
+        let Some(next) = self.next_source_id.checked_add(configs.len() as u32) else {
+            return false;
+        };
+        let sources = configs
+            .iter()
+            .enumerate()
+            .map(|(offset, config)| {
+                config.source(self.next_source_id + offset as u32, self.width, self.height)
+            })
+            .collect();
+        self.sources = sources;
+        self.next_source_id = next;
+        self.rebuild_sources();
+        true
     }
 
     pub fn remove_source(&mut self, id: u32) -> bool {
@@ -322,6 +434,7 @@ impl Environment {
     }
 
     fn rebuild_sources(&mut self) {
+        self.scratch.transport.clear();
         self.nutrient_injection.fill(0.0);
         self.nutrient_absorption.fill(0.0);
         for i in 0..self.patch_count() {
@@ -374,48 +487,6 @@ impl Environment {
         self.rebuild_gas_sources();
     }
 
-    fn rebuild_flow_samples(&mut self) {
-        if self.current_strength != 0.0 {
-            self.source_flow.clear();
-            return;
-        }
-        self.source_flow.resize(self.patch_count(), [(0.0, 0.0); 3]);
-        if !self
-            .sources
-            .iter()
-            .any(|source| matches!(source.kind, 2 | 5 | 6 | 7) && source.strength != 0.0)
-        {
-            self.source_flow.fill([(0.0, 0.0); 3]);
-            return;
-        }
-        for i in 0..self.patch_count() {
-            let (x, y) = self.patch_position(i);
-            self.source_flow[i] = [
-                self.raw_flow_at(x, y, 0.0),
-                self.raw_flow_at(x + 10.0, y, 0.0),
-                self.raw_flow_at(x, y + 10.0, 0.0),
-            ];
-        }
-    }
-
-    /// Face flows are only consumed for an unblocked corresponding grid edge,
-    /// so testing every obstacle again at the face would duplicate the mask.
-    fn grid_flow(&self, index: usize, face: usize, time: f64) -> (f64, f64) {
-        if face == 0 && self.solid_patches[index] {
-            return (0.0, 0.0);
-        }
-        if self.current_strength == 0.0 {
-            return self.source_flow[index][face];
-        }
-        let (mut x, mut y) = self.patch_position(index);
-        if face == 1 {
-            x += 10.0;
-        } else if face == 2 {
-            y += 10.0;
-        }
-        self.raw_flow_at(x, y, time)
-    }
-
     pub fn patch_index(&self, x: f64, y: f64) -> usize {
         let col = (x.rem_euclid(self.width) / self.width * self.columns as f64) as usize;
         let row = (y.rem_euclid(self.height) / self.height * self.rows as f64) as usize;
@@ -423,10 +494,12 @@ impl Environment {
     }
 
     pub fn patch_position(&self, index: usize) -> (f64, f64) {
-        (
-            ((index % self.columns) as f64 + 0.5) * self.width / self.columns as f64,
-            ((index / self.columns) as f64 + 0.5) * self.height / self.rows as f64,
-        )
+        self.grid.positions.get(index).copied().unwrap_or_else(|| {
+            (
+                ((index % self.columns) as f64 + 0.5) * self.width / self.columns as f64,
+                ((index / self.columns) as f64 + 0.5) * self.height / self.rows as f64,
+            )
+        })
     }
 
     pub fn patch_light(&self, index: usize) -> f64 {
@@ -465,68 +538,6 @@ impl Environment {
         }
         self.raw_flow_at(x, y, time)
     }
-    fn raw_flow_at(&self, x: f64, y: f64, time: f64) -> (f64, f64) {
-        let (mut vx, mut vy) = if self.current_strength == 0.0 {
-            (0.0, 0.0)
-        } else {
-            let phase = time * 0.04;
-            let a = TAU * x / self.width + phase;
-            let b = TAU * y / self.height - phase;
-            (
-                self.current_strength * b.sin() * a.cos(),
-                -self.current_strength * self.height / self.width * b.cos() * a.sin(),
-            )
-        };
-        for source in &self.sources {
-            if !matches!(source.kind, 2 | 5 | 6 | 7) || source.strength == 0.0 {
-                continue;
-            }
-            let dx = delta(x - source.x, self.width);
-            let dy = delta(y - source.y, self.height);
-            let along = dx * source.angle.cos() + dy * source.angle.sin();
-            let across = -dx * source.angle.sin() + dy * source.angle.cos();
-            match source.kind {
-                2 | 7 => {
-                    let weight = source.strength * 60.0 / source.radius
-                        * (-2.0 * (dx * dx + dy * dy) / source.radius.powi(2)).exp();
-                    if source.kind == 2 {
-                        vx -= dy * weight;
-                        vy += dx * weight;
-                    } else {
-                        vx += dx * weight;
-                        vy += dy * weight;
-                    }
-                }
-                5 => {
-                    let weight = source.strength
-                        * 60.0
-                        * (-2.0 * (across / source.radius).powi(2)
-                            - 2.0 * (along / (source.length * 0.5)).powi(2))
-                        .exp();
-                    vx += source.angle.cos() * weight;
-                    vy += source.angle.sin() * weight;
-                }
-                6 => {
-                    // Smooth parallel lane. Length controls the flat center;
-                    // radius controls its width and the rounded end falloff.
-                    let end = (along.abs() - source.length * 0.5).max(0.0);
-                    let weight = source.strength
-                        * 60.0
-                        * (-2.0 * (across * across + end * end) / source.radius.powi(2)).exp();
-                    vx += source.angle.cos() * weight;
-                    vy += source.angle.sin() * weight;
-                }
-                _ => {}
-            }
-        }
-        let speed = vx.hypot(vy);
-        if speed > 60.0 {
-            (vx * 60.0 / speed, vy * 60.0 / speed)
-        } else {
-            (vx, vy)
-        }
-    }
-
     pub fn step(&mut self, time: f64) {
         self.step_barriers(time);
         let has_flow = self.prepare_transport_flow(time);
@@ -538,40 +549,28 @@ impl Environment {
                 .temperature
                 .iter()
                 .all(|&v| v == self.ambient_temperature));
-        // Both semi-Lagrangian fields sample flow at the same patch centers and
-        // time. Recompute this derived table each step so source/config changes
-        // cannot leave stale velocities. Mineral fluxes sample different faces.
+        // Heat and organic cues share a backtrace/visibility stencil. Static
+        // flow keeps that derived stencil until a source or barrier edit.
         if organic_active || heat_active {
-            self.scratch
-                .patch_flow
-                .resize(self.patch_count(), (0.0, 0.0));
-            for i in 0..self.patch_count() {
-                self.scratch.patch_flow[i] = self.grid_flow(i, 0, time);
-            }
+            self.prepare_scalar_transport(time);
         }
-        self.step_organic();
+        if organic_active {
+            self.step_organic();
+        }
         // A neutral field stays exactly neutral and incurs no grid solve.
         if !heat_active {
             return;
         }
         self.scratch.advected.resize(self.patch_count(), 0.0);
         for i in 0..self.patch_count() {
-            let (x, y) = self.patch_position(i);
-            let (vx, vy) = self.scratch.patch_flow[i];
-            self.scratch.advected[i] =
-                self.sample_transport(&self.temperature, i, x - vx * DT, y - vy * DT);
+            self.scratch.advected[i] = self.scratch.transport[i].sample(&self.temperature);
         }
         let advected = &self.scratch.advected;
         // Grid spacing is 20 world units: 60 units²/s gives a stable diffusion
         // coefficient of 0.005 per neighbor at the fixed 1/30 s timestep.
         let diffusion = 60.0 * DT / 400.0;
         for i in 0..self.patch_count() {
-            let col = i % self.columns;
-            let row = i / self.columns;
-            let left = row * self.columns + (col + self.columns - 1) % self.columns;
-            let right = row * self.columns + (col + 1) % self.columns;
-            let up = (row + self.rows - 1) % self.rows * self.columns + col;
-            let down = (row + 1) % self.rows * self.columns + col;
+            let [left, right, up, down] = self.grid.neighbors[i];
             let diffusion_delta = diffusion
                 * ([left, right, up, down]
                     .iter()
@@ -585,6 +584,7 @@ impl Environment {
     }
 
     fn prepare_transport_flow(&mut self, time: f64) -> bool {
+        self.prepare_grid_flow(time);
         let has_flow = self.current_strength > 0.0
             || self
                 .sources
@@ -604,8 +604,7 @@ impl Environment {
     fn step_nutrients(&mut self, has_flow: bool) {
         transport_amounts(
             &mut self.nutrients,
-            self.columns,
-            self.rows,
+            &self.grid.neighbors,
             &self.blocked_right,
             &self.blocked_down,
             NUTRIENT_DIFFUSION,
@@ -626,8 +625,7 @@ impl Environment {
         }
     }
 
-    pub fn snapshot(&self, time: f64, target: &mut Vec<f32>) {
-        target.clear();
+    fn snapshot_header(&self, target: &mut Vec<f32>) {
         target.extend_from_slice(&[
             self.columns as f32,
             self.rows as f32,
@@ -651,8 +649,22 @@ impl Environment {
             self.gases.carbon_inputs as f32,
             self.gases.carbon_outputs as f32,
         ]);
+    }
+
+    /// Small live object/configuration export with the same header and record
+    /// layouts as the full snapshot, omitting all patch samples.
+    pub fn metadata_snapshot(&self, target: &mut Vec<f32>) {
+        target.clear();
+        self.snapshot_header(target);
+        self.snapshot_objects(target);
+    }
+
+    pub fn snapshot(&self, time: f64, target: &mut Vec<f32>) {
+        target.clear();
+        self.snapshot_header(target);
+        let phase = self.snapshot_phase(time);
         for i in 0..self.patch_count() {
-            let (vx, vy) = self.grid_flow(i, 0, time);
+            let (vx, vy) = self.grid_flow_with_phase(i, 0, time, &phase);
             target.extend_from_slice(&[
                 self.light[i] as f32,
                 self.temperature[i] as f32,
@@ -663,6 +675,10 @@ impl Environment {
                 self.gases.carbon[i] as f32,
             ]);
         }
+        self.snapshot_objects(target);
+    }
+
+    fn snapshot_objects(&self, target: &mut Vec<f32>) {
         for source in &self.sources {
             target.extend_from_slice(&[
                 source.id as f32,
@@ -696,8 +712,7 @@ impl Environment {
 /// All species use the same per-step face velocities and obstacle topology.
 fn transport_amounts(
     values: &mut [f64],
-    columns: usize,
-    rows: usize,
+    neighbors: &[[usize; 4]],
     blocked_right: &[bool],
     blocked_down: &[bool],
     diffusivity: f64,
@@ -715,10 +730,7 @@ fn transport_amounts(
     let diffusion = diffusivity * DT / PATCH_AREA;
     let advection = DT / PATCH_SIZE;
     for i in 0..count {
-        let column = i % columns;
-        let row = i / columns;
-        let right = row * columns + (column + 1) % columns;
-        let down = (row + 1) % rows * columns + column;
+        let [_, right, _, down] = neighbors[i];
         let (vx, vy) = if has_flow {
             scratch.face_flow[i]
         } else {
@@ -815,57 +827,15 @@ impl Environment {
         )
     }
     fn edge_blocked(&self, i: usize, j: usize) -> bool {
-        let right = i / self.columns * self.columns + (i % self.columns + 1) % self.columns;
-        let down = (i / self.columns + 1) % self.rows * self.columns + i % self.columns;
+        let [left, right, _, down] = self.grid.neighbors[i];
         if j == right {
             self.blocked_right[i]
         } else if j == down {
             self.blocked_down[i]
-        } else if i / self.columns == j / self.columns {
+        } else if j == left {
             self.blocked_right[j]
         } else {
             self.blocked_down[j]
-        }
-    }
-    fn sample_transport(&self, values: &[f64], origin: usize, x: f64, y: f64) -> f64 {
-        if self.barriers.is_empty() {
-            return self.sample(values, x, y);
-        }
-        let from = self.patch_position(origin);
-        if delta(x - from.0, self.width).abs() + delta(y - from.1, self.height).abs() < 1e-12 {
-            return values[origin];
-        }
-        if self.segment_blocked(from, (x, y)) {
-            return values[origin];
-        }
-        let gx = x.rem_euclid(self.width) / PATCH_SIZE - 0.5;
-        let gy = y.rem_euclid(self.height) / PATCH_SIZE - 0.5;
-        let ix = gx.floor() as isize;
-        let iy = gy.floor() as isize;
-        let fx = gx - gx.floor();
-        let fy = gy - gy.floor();
-        let mut value = 0.0;
-        let mut total = 0.0;
-        for (dx, dy, weight) in [
-            (0, 0, (1.0 - fx) * (1.0 - fy)),
-            (1, 0, fx * (1.0 - fy)),
-            (0, 1, (1.0 - fx) * fy),
-            (1, 1, fx * fy),
-        ] {
-            if weight <= 0.0 {
-                continue;
-            }
-            let i = (iy + dy).rem_euclid(self.rows as isize) as usize * self.columns
-                + (ix + dx).rem_euclid(self.columns as isize) as usize;
-            if i == origin || !self.segment_blocked(from, self.patch_position(i)) {
-                value += values[i] * weight;
-                total += weight;
-            }
-        }
-        if total > 0.0 {
-            value / total
-        } else {
-            values[origin]
         }
     }
     fn sample(&self, values: &[f64], x: f64, y: f64) -> f64 {

@@ -1,6 +1,29 @@
 //! Oriented solid obstacles and dimension-aware field geometry.
 use super::*;
 
+#[derive(Clone)]
+struct BarrierShape {
+    angle: f64,
+    cosine: f64,
+    sine: f64,
+}
+#[derive(Clone, Default)]
+pub(super) struct BarrierCache {
+    shapes: Vec<BarrierShape>,
+    candidates: Vec<u64>,
+    neighbors: Vec<u16>,
+    movements: Vec<(f64, f64)>,
+}
+impl BarrierCache {
+    pub(super) fn new(patches: usize) -> Self {
+        Self {
+            candidates: vec![0; patches],
+            neighbors: vec![0; patches],
+            ..Self::default()
+        }
+    }
+}
+
 impl Environment {
     /// Resample by overlap of normalized patch areas. Mineral amounts are split,
     /// never synthesized or discarded. Scalar intensities remain area averages.
@@ -74,6 +97,7 @@ impl Environment {
         self.height = height;
         self.columns = columns;
         self.rows = rows;
+        self.grid = PatchGeometry::new(width, height, columns, rows);
         self.nutrients = minerals;
         self.gases.oxygen = oxygen;
         self.gases.carbon = carbon;
@@ -86,7 +110,6 @@ impl Environment {
         self.blocked_right = vec![false; count];
         self.blocked_down = vec![false; count];
         self.solid_patches = vec![false; count];
-        self.source_flow.clear();
         self.scratch = FieldScratch::default();
         self.rebuild_sources();
         self.rebuild_barriers();
@@ -226,15 +249,36 @@ impl Environment {
     fn barrier_hit(
         &self,
         barrier: &Barrier,
+        shape: &BarrierShape,
         from: (f64, f64),
         movement: (f64, f64),
         radius: f64,
     ) -> Option<(f64, f64, f64)> {
-        let c = barrier.angle.cos();
-        let s = barrier.angle.sin();
+        let c = shape.cosine;
+        let s = shape.sine;
         let dx = delta(from.0 - barrier.x, self.width);
         let dy = delta(from.1 - barrier.y, self.height);
         let half = [barrier.length * 0.5 + radius, barrier.width * 0.5 + radius];
+        // Conservative world-axis bounds reject distant periodic images before
+        // the original oriented slab test. Padding keeps boundary roundoff on
+        // the inclusive side; accepted images retain their original order.
+        let padding = 1e-10 * (1.0 + half[0].abs() + half[1].abs());
+        let extent_x = c.abs() * half[0] + s.abs() * half[1] + padding;
+        let extent_y = s.abs() * half[0] + c.abs() * half[1] + padding;
+        let range_x = [dx.min(dx + movement.0), dx.max(dx + movement.0)];
+        let range_y = [dy.min(dy + movement.1), dy.max(dy + movement.1)];
+        let overlaps = |range: [f64; 2], offset: f64, extent: f64| {
+            range[0] + offset <= extent && range[1] + offset >= -extent
+        };
+        if ![-self.width, 0.0, self.width]
+            .iter()
+            .any(|&offset| overlaps(range_x, offset, extent_x))
+            || ![-self.height, 0.0, self.height]
+                .iter()
+                .any(|&offset| overlaps(range_y, offset, extent_y))
+        {
+            return None;
+        }
         let velocity = [
             movement.0 * c + movement.1 * s,
             -movement.0 * s + movement.1 * c,
@@ -242,6 +286,9 @@ impl Environment {
         let mut closest: Option<(f64, f64, f64)> = None;
         for oy in [-self.height, 0.0, self.height] {
             for ox in [-self.width, 0.0, self.width] {
+                if !overlaps(range_x, ox, extent_x) || !overlaps(range_y, oy, extent_y) {
+                    continue;
+                }
                 let point = [
                     (dx + ox) * c + (dy + oy) * s,
                     -(dx + ox) * s + (dy + oy) * c,
@@ -287,23 +334,86 @@ impl Environment {
         closest
     }
     pub fn segment_blocked(&self, from: (f64, f64), to: (f64, f64)) -> bool {
+        let candidates = if self.barriers.len() == 64 {
+            u64::MAX
+        } else {
+            (1u64 << self.barriers.len()) - 1
+        };
+        self.segment_blocked_candidates(from, to, candidates)
+    }
+    fn segment_blocked_candidates(
+        &self,
+        from: (f64, f64),
+        to: (f64, f64),
+        mut candidates: u64,
+    ) -> bool {
+        if candidates == 0 {
+            return false;
+        }
         let movement = (
             delta(to.0 - from.0, self.width),
             delta(to.1 - from.1, self.height),
         );
-        self.barriers
-            .iter()
-            .any(|b| self.barrier_hit(b, from, movement, 0.0).is_some())
+        while candidates != 0 {
+            let index = candidates.trailing_zeros() as usize;
+            candidates &= candidates - 1;
+            if self
+                .barrier_hit(
+                    &self.barriers[index],
+                    &self.barrier_cache.shapes[index],
+                    from,
+                    movement,
+                    0.0,
+                )
+                .is_some()
+            {
+                return true;
+            }
+        }
+        false
+    }
+    pub(super) fn transport_segment_blocked(&self, origin: usize, to: (f64, f64)) -> bool {
+        let from = self.patch_position(origin);
+        if delta(to.0 - from.0, self.width).abs() <= PATCH_SIZE
+            && delta(to.1 - from.1, self.height).abs() <= PATCH_SIZE
+        {
+            self.segment_blocked_candidates(from, to, self.barrier_cache.candidates[origin])
+        } else {
+            self.segment_blocked(from, to)
+        }
+    }
+    pub(super) fn transport_neighbor_blocked(&self, origin: usize, neighbor: usize) -> bool {
+        let dx = (neighbor % self.columns + self.columns - origin % self.columns) % self.columns;
+        let dy = (neighbor / self.columns + self.rows - origin / self.columns) % self.rows;
+        let coordinate = |value, size| {
+            if value == 0 {
+                Some(1)
+            } else if value == 1 {
+                Some(2)
+            } else if value == size - 1 {
+                Some(0)
+            } else {
+                None
+            }
+        };
+        match (coordinate(dx, self.columns), coordinate(dy, self.rows)) {
+            (Some(x), Some(y)) => self.barrier_cache.neighbors[origin] & (1 << (y * 3 + x)) != 0,
+            _ => self.segment_blocked(self.patch_position(origin), self.patch_position(neighbor)),
+        }
     }
 
     pub fn solid_at(&self, x: f64, y: f64) -> bool {
-        self.barriers.iter().any(|b| {
-            let dx = delta(x - b.x, self.width);
-            let dy = delta(y - b.y, self.height);
-            let c = b.angle.cos();
-            let s = b.angle.sin();
-            (dx * c + dy * s).abs() <= b.length * 0.5 && (-dx * s + dy * c).abs() <= b.width * 0.5
-        })
+        self.barriers
+            .iter()
+            .zip(&self.barrier_cache.shapes)
+            .any(|(b, shape)| {
+                let dx = delta(x - b.x, self.width);
+                let dy = delta(y - b.y, self.height);
+                let c = shape.cosine;
+                let s = shape.sine;
+                (dx * c + dy * s).abs() <= b.length * 0.5
+                    && (-dx * s + dy * c).abs() <= b.width * 0.5
+            })
     }
 
     /// Swept collision prevents tunneling through thin walls. Remaining motion
@@ -315,13 +425,21 @@ impl Environment {
         let mut position = from;
         for _ in 0..8 {
             let mut changed = false;
-            for b in &self.barriers {
-                let c = b.angle.cos();
-                let s = b.angle.sin();
+            for (b, shape) in self.barriers.iter().zip(&self.barrier_cache.shapes) {
+                let c = shape.cosine;
+                let s = shape.sine;
                 let half = [
                     b.length * 0.5 + radius + 0.001,
                     b.width * 0.5 + radius + 0.001,
                 ];
+                let padding = 1e-10 * (1.0 + half[0].abs() + half[1].abs());
+                if delta(position.0 - b.x, self.width).abs()
+                    > c.abs() * half[0] + s.abs() * half[1] + padding
+                    || delta(position.1 - b.y, self.height).abs()
+                        > s.abs() * half[0] + c.abs() * half[1] + padding
+                {
+                    continue;
+                }
                 for oy in [-self.height, 0.0, self.height] {
                     for ox in [-self.width, 0.0, self.width] {
                         let dx = delta(position.0 - b.x, self.width) + ox;
@@ -355,10 +473,16 @@ impl Environment {
             delta(to.0 - from.0, self.width),
             delta(to.1 - from.1, self.height),
         );
+        if movement.0 == 0.0 && movement.1 == 0.0 {
+            return (
+                (position.0 + movement.0).rem_euclid(self.width),
+                (position.1 + movement.1).rem_euclid(self.height),
+            );
+        }
         for _ in 0..4 {
             let mut nearest: Option<(f64, f64, f64)> = None;
-            for b in &self.barriers {
-                if let Some(hit) = self.barrier_hit(b, position, movement, radius) {
+            for (b, shape) in self.barriers.iter().zip(&self.barrier_cache.shapes) {
+                if let Some(hit) = self.barrier_hit(b, shape, position, movement, radius) {
                     if hit.1 == 0.0 && hit.2 == 0.0 {
                         continue;
                     }
@@ -391,16 +515,48 @@ impl Environment {
     }
 
     pub(super) fn rebuild_barriers(&mut self) {
+        self.scratch.transport.clear();
         self.blocked_right.fill(false);
         self.blocked_down.fill(false);
         self.solid_patches.fill(false);
+        let count = self.patch_count();
+        self.barrier_cache.candidates.resize(count, 0);
+        self.barrier_cache.candidates.fill(0);
+        self.barrier_cache.neighbors.resize(count, 0);
+        self.barrier_cache.neighbors.fill(0);
+        for (index, barrier) in self.barriers.iter().enumerate() {
+            if self
+                .barrier_cache
+                .shapes
+                .get(index)
+                .is_some_and(|shape| shape.angle.to_bits() == barrier.angle.to_bits())
+            {
+                continue;
+            }
+            let shape = BarrierShape {
+                angle: barrier.angle,
+                cosine: barrier.angle.cos(),
+                sine: barrier.angle.sin(),
+            };
+            if index < self.barrier_cache.shapes.len() {
+                self.barrier_cache.shapes[index] = shape;
+            } else {
+                self.barrier_cache.shapes.push(shape);
+            }
+        }
+        self.barrier_cache.shapes.truncate(self.barriers.len());
         // Rasterize only the bounding box of each rectangle, including both
         // neighbors at its edge. Periodic indexing handles seam-spanning walls.
-        for b in &self.barriers {
+        for (barrier_index, (b, shape)) in self
+            .barriers
+            .iter()
+            .zip(&self.barrier_cache.shapes)
+            .enumerate()
+        {
             let extent_x =
-                (b.angle.cos().abs() * b.length + b.angle.sin().abs() * b.width) * 0.5 + PATCH_SIZE;
+                (shape.cosine.abs() * b.length + shape.sine.abs() * b.width) * 0.5 + PATCH_SIZE;
             let extent_y =
-                (b.angle.sin().abs() * b.length + b.angle.cos().abs() * b.width) * 0.5 + PATCH_SIZE;
+                (shape.sine.abs() * b.length + shape.cosine.abs() * b.width) * 0.5 + PATCH_SIZE;
             let first_x = ((b.x - extent_x) / PATCH_SIZE).floor() as isize;
             let first_y = ((b.y - extent_y) / PATCH_SIZE).floor() as isize;
             let cols = ((2.0 * extent_x / PATCH_SIZE).ceil() as usize + 2).min(self.columns);
@@ -410,24 +566,59 @@ impl Environment {
                     let x = (first_x + col as isize).rem_euclid(self.columns as isize) as usize;
                     let y = (first_y + row as isize).rem_euclid(self.rows as isize) as usize;
                     let i = y * self.columns + x;
+                    self.barrier_cache.candidates[i] |= 1u64 << barrier_index;
                     let point = self.patch_position(i);
                     let dx = delta(point.0 - b.x, self.width);
                     let dy = delta(point.1 - b.y, self.height);
-                    let c = b.angle.cos();
-                    let s = b.angle.sin();
+                    let c = shape.cosine;
+                    let s = shape.sine;
                     if (dx * c + dy * s).abs() <= b.length * 0.5
                         && (-dx * s + dy * c).abs() <= b.width * 0.5
                     {
                         self.solid_patches[i] = true;
                     }
-                    if self.barrier_hit(b, point, (PATCH_SIZE, 0.0), 0.0).is_some() {
+                    if self
+                        .barrier_hit(b, shape, point, (PATCH_SIZE, 0.0), 0.0)
+                        .is_some()
+                    {
                         self.blocked_right[i] = true;
                     }
-                    if self.barrier_hit(b, point, (0.0, PATCH_SIZE), 0.0).is_some() {
+                    if self
+                        .barrier_hit(b, shape, point, (0.0, PATCH_SIZE), 0.0)
+                        .is_some()
+                    {
                         self.blocked_down[i] = true;
                     }
                 }
             }
+        }
+        for origin in 0..count {
+            let candidates = self.barrier_cache.candidates[origin];
+            if candidates == 0 {
+                continue;
+            }
+            let col = (origin % self.columns) as isize;
+            let row = (origin / self.columns) as isize;
+            let from = self.patch_position(origin);
+            let mut blocked = 0;
+            for dy in -1isize..=1 {
+                for dx in -1isize..=1 {
+                    if dx == 0 && dy == 0 {
+                        continue;
+                    }
+                    let neighbor = (row + dy).rem_euclid(self.rows as isize) as usize
+                        * self.columns
+                        + (col + dx).rem_euclid(self.columns as isize) as usize;
+                    if self.segment_blocked_candidates(
+                        from,
+                        self.patch_position(neighbor),
+                        candidates,
+                    ) {
+                        blocked |= 1 << ((dy + 1) * 3 + dx + 1);
+                    }
+                }
+            }
+            self.barrier_cache.neighbors[origin] = blocked;
         }
     }
 
@@ -435,21 +626,19 @@ impl Environment {
         if !self.barriers.iter().any(|b| b.floating) {
             return;
         }
-        let movements: Vec<_> = self
-            .barriers
-            .iter()
-            .map(|b| {
-                if b.floating {
-                    let (fx, fy) = self.raw_flow_at(b.x, b.y, time);
-                    let follow = 1.0 - (-0.7 * DT).exp();
-                    (b.vx + (fx - b.vx) * follow, b.vy + (fy - b.vy) * follow)
-                } else {
-                    (0.0, 0.0)
-                }
-            })
-            .collect();
+        let mut movements = std::mem::take(&mut self.barrier_cache.movements);
+        movements.clear();
+        movements.extend(self.barriers.iter().map(|b| {
+            if b.floating {
+                let (fx, fy) = self.raw_flow_at(b.x, b.y, time);
+                let follow = 1.0 - (-0.7 * DT).exp();
+                (b.vx + (fx - b.vx) * follow, b.vy + (fy - b.vy) * follow)
+            } else {
+                (0.0, 0.0)
+            }
+        }));
         let mut changed = false;
-        for (b, (vx, vy)) in self.barriers.iter_mut().zip(movements) {
+        for (b, (vx, vy)) in self.barriers.iter_mut().zip(movements.iter().copied()) {
             b.vx = vx;
             b.vy = vy;
             if vx.abs() + vy.abs() > 1e-12 {
@@ -458,6 +647,7 @@ impl Environment {
                 b.y = (b.y + vy * DT).rem_euclid(self.height);
             }
         }
+        self.barrier_cache.movements = movements;
         // Resolve overlapping moving rectangles by the separating-axis test.
         // Static walls stay fixed; floating/floating pairs share displacement.
         for _ in 0..8 {

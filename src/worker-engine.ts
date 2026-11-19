@@ -1,5 +1,5 @@
 import { decodeMetricsSnapshot, decodeRenderSnapshot } from './engine';
-import type { BodyInspection, Cell, EnvironmentSnapshot, GasExchangeConfig, GenomeAnalysis, GenomeEvaluation, GenomeGraph, GenomeRecord, LanguageSchema, MetricsSnapshot, MutationKind, MutationResult, RegisterEntry, RenderSnapshot, SimulationSummary, SourceKind, WorldSnapshot } from './engine';
+import type { BodyInspection, Cell, EnvironmentMetadata, EnvironmentSnapshot, GasExchangeConfig, GenomeAnalysis, GenomeEvaluation, GenomeGraph, GenomeRecord, LanguageSchema, MetricsSnapshot, MutationKind, MutationResult, RegisterEntry, RenderSnapshot, SimulationSummary, SourceKind, WorldSnapshot } from './engine';
 import type { CapturedCheckpoint, Presentation, PresentationOptions, WirePresentation, WorkerMethod, WorkerRequest, WorkerResponse } from './simulation-protocol';
 export type { CapturedCheckpoint, Presentation, PresentationOptions } from './simulation-protocol';
 
@@ -69,7 +69,8 @@ export class WorkerEngine {
   }
 
   private decodePresentation(value: WirePresentation): Presentation {
-    const result: Presentation = { frame: decodeRenderSnapshot(value.frame) };
+    const result: Presentation = { tick: value.tick, summary: value.summary };
+    if (value.frame) result.frame = decodeRenderSnapshot(value.frame);
     if (value.metrics) result.metrics = decodeMetricsSnapshot(value.metrics);
     if (value.environment) result.environment = value.environment;
     if (value.error) result.error = value.error;
@@ -105,6 +106,7 @@ export class WorkerEngine {
   setGasExchange(config: GasExchangeConfig): Promise<boolean> { return this.call('setGasExchange', [config]); }
   addNutrients(x = -1, y = -1, amount = 25): Promise<number> { return this.call('addNutrients', [x, y, amount]); }
   addSource(kind: SourceKind, x: number, y: number, strength: number, radius: number, angle = 0, length = 600): Promise<number> { return this.call('addSource', [kind, x, y, strength, radius, angle, length]); }
+  replaceSources(sources: Parameters<import('./engine').Engine['replaceSources']>[0]): Promise<boolean> { return this.call('replaceSources', [sources]); }
   updateSource(id: number, kind: SourceKind, x: number, y: number, strength: number, radius: number, angle: number, length: number): Promise<boolean> { return this.call('updateSource', [id, kind, x, y, strength, radius, angle, length]); }
   removeSource(id: number): Promise<boolean> { return this.call('removeSource', [id]); }
   clearSources(): Promise<void> { return this.call('clearSources'); }
@@ -121,7 +123,8 @@ export class WorkerEngine {
   getGenomeGraph(id: number): Promise<GenomeGraph> { return this.call('getGenomeGraph', [id]); }
   tick(steps = 1): Promise<void> { return this.call('tick', [steps]); }
   environment(): Promise<EnvironmentSnapshot> { return this.call('environment'); }
-  renderSnapshot(): Promise<RenderSnapshot> { return this.presentation().then(value => value.frame); }
+  environmentMetadata(): Promise<EnvironmentMetadata> { return this.call('environmentMetadata'); }
+  renderSnapshot(): Promise<RenderSnapshot> { return this.presentation().then(value => value.frame!); }
   metricsSnapshot(): Promise<MetricsSnapshot> { return this.call('metricsSnapshot'); }
   cellSnapshot(id: number): Promise<Cell | null> { return this.call('cellSnapshot', [id]); }
   summary(): Promise<SimulationSummary> { return this.call('summary'); }

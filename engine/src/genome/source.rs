@@ -15,6 +15,7 @@ struct ParsedSource {
     nodes: Vec<NodeLocation>,
     bindings: Vec<Location>,
     writes: Vec<Location>,
+    messages: [Option<Location>; 4],
     genes: Vec<cellular::GeneLocation>,
     geometry: Vec<cellular::GeometryLocation>,
 }
@@ -31,6 +32,7 @@ impl ParsedSource {
             nodes: parser.node_locations,
             bindings: parser.binding_locations,
             writes: parser.write_locations,
+            messages: parser.message_locations,
             genes: parser.gene_locations,
             geometry: parser.geometry_locations,
         })
@@ -655,7 +657,22 @@ impl Program {
             json.push_str(&format!("{{\"name\":{},\"kind\":{},\"type\":{},\"value\":{value},\"guard\":{guard},\"applies\":{applies},{}}}",
                 quote(&rule.register.name()), quote(kind), quote(rule.register.ty.label()), range(location.from, location.to)));
         }
-        json.push_str("]}");
+        json.push(']');
+        if let Some(messages) = program.contact_messages() {
+            json.push_str(&format!(",\"contactMessages\":{},\"contactMessageDeclarations\":[", messages.to_json()));
+            let mut declarations = Vec::new();
+            for (role, location) in parsed.messages.into_iter().enumerate() {
+                if let (Some(index), Some(location)) = (messages.addresses[role], location) {
+                    let value = messages.value(role, memory)
+                        .map_or_else(|| "null".into(), |value| value.to_string());
+                    declarations.push(format!("{{\"kind\":{},\"register\":\"rf{index:03}\",\"value\":{value},{}}}",
+                        quote(cellular::ContactMessages::ROLES[role]), range(location.from, location.to)));
+                }
+            }
+            json.push_str(&declarations.join(","));
+            json.push(']');
+        }
+        json.push('}');
         Ok(json)
     }
 }

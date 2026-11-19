@@ -3,6 +3,76 @@ use super::*;
 use super::mechanism_tests::equipped as paid_equipped;
 use crate::checkpoint::Writer;
 
+fn assembly_index(program: &Program, name: &str) -> usize {
+    program.cellular().unwrap().assemblies.iter().position(|recipe| recipe.name == name).unwrap()
+}
+
+fn motor_activities(program: &Program, input: &Inputs, memory: &mut Registers, scratch: &mut EvalScratch) -> [f64; 2] {
+    let controls = program.evaluate_cell(input, memory, scratch).cellular.unwrap();
+    [controls.activity[assembly_index(program, "LeftMotor")], controls.activity[assembly_index(program, "RightMotor")]]
+}
+
+#[test]
+fn shipped_conserver_tracks_energy_hysteresis_in_its_motor_activities() {
+    use crate::genome::Value;
+    let program = Program::compile(include_str!("../../../examples/conserver.cell")).unwrap();
+    let mut memory = Registers::default();
+    let mut scratch = EvalScratch::default();
+    // Zero age and an absent visual cue give equal left/right motor effort.
+    for (energy_fraction, gut_fraction, moving, latched) in [
+        (0.60, 0.0, 0.05, false),
+        (0.55, 0.0, 0.05, false),
+        (0.54, 0.0, 0.25, true),
+        (0.60, 0.0, 0.25, true),
+        (0.65, 0.4, 0.05, true),
+        (0.69, 0.0, 0.25, true),
+        (0.70, 0.0, 0.05, false),
+        (0.60, 0.0, 0.05, false),
+    ] {
+        let input = Inputs { energy_fraction, gut_fraction, ..Inputs::default() };
+        assert_eq!(motor_activities(&program, &input, &mut memory, &mut scratch), [moving; 2],
+            "energy {energy_fraction}, gut {gut_fraction}");
+        assert_eq!(memory.value("rb001"), latched.then_some(&Value::Boolean(true)));
+    }
+}
+
+#[test]
+fn shipped_rememberer_updates_signed_turn_and_expires_at_one_and_a_half_seconds() {
+    use crate::genome::Value;
+    let program = Program::compile(include_str!("../../../examples/rememberer.cell")).unwrap();
+    let left = assembly_index(&program, "LeftChemistry");
+    let right = assembly_index(&program, "RightChemistry");
+    let mut input = Inputs::default();
+    input.receptors.resize(program.cellular().unwrap().assemblies.len(), ReceptorInput::default());
+    input.receptors[left].available = true;
+    input.receptors[right].available = true;
+    input.receptors[left].valid = true;
+    input.receptors[right].valid = true;
+    let mut memory = Registers::default();
+    let mut scratch = EvalScratch::default();
+    let cue = 1.0 / 512.0;
+    let mut last_seen = None;
+    for (age, difference, recent) in [(1.0, cue, true), (1.5, 0.0, true),
+        (2.0, -cue, true), (2.5, 0.0, true), (3.49, 0.0, true), (3.5, 0.0, false)] {
+        input.age = age;
+        input.receptors[left].organic = 1.0 + difference;
+        input.receptors[right].organic = 1.0;
+        if difference != 0.0 { last_seen = Some((age, difference * 100.0)); }
+        let [left_motor, right_motor] = motor_activities(&program, &input, &mut memory, &mut scratch);
+        let (timestamp, turn) = last_seen.unwrap();
+        let steer = if recent { turn } else { (age * 0.5).sin() * 0.3 };
+        assert!((right_motor - left_motor - steer).abs() < 1e-12,
+            "age {age}: motors {left_motor}, {right_motor} should give steering {steer}");
+        if recent {
+            assert_eq!(memory.value("rf010"), Some(&Value::Scalar(turn)));
+            assert_eq!(memory.value("rf011"), Some(&Value::Scalar(timestamp)));
+        } else {
+            assert_eq!(memory.value("rf010"), None);
+            assert_eq!(memory.value("rf011"), None);
+        }
+    }
+}
+
 fn equipped(source: &str) -> (World, Vec<Genome>) {
     let (mut world, genomes) = paid_equipped(source);
     world.cells[0].x = 600.0;
@@ -33,6 +103,74 @@ const EYE: &str = r#"
 assembly Eye: sense(optical) { Mount:0.005; Detector:0.01; Pigment:0.005; at:0; direction:0; }
 gene watch: Catalyst = if sensed.Eye.valid then 0.1 else 0;
 "#;
+
+#[test]
+fn each_requested_receptor_field_matches_complete_inspection() {
+    use crate::genome::ReceptorField as F;
+    fn bits(input: &ReceptorInput, field: F) -> Vec<u64> {
+        let values = match field {
+            F::Available => return vec![input.available as u64],
+            F::Valid => return vec![input.valid as u64],
+            F::Level => vec![input.level], F::Value => vec![input.value],
+            F::Mineral => vec![input.mineral], F::Organic => vec![input.organic],
+            F::Offset => input.offset.to_vec(), F::Pressure => vec![input.pressure],
+            F::Resistance => vec![input.resistance], F::Flow => input.flow.to_vec(),
+            F::Speed => vec![input.speed], F::Bearing => vec![input.bearing],
+            F::Area => vec![input.area], F::Contrast => vec![input.contrast],
+            F::Pigment => vec![input.pigment], F::Motion => input.motion.to_vec(),
+            F::MessageValid => return vec![input.message_valid as u64],
+            F::Message => vec![input.message],
+            F::SignalValid => return vec![input.signal_valid as u64],
+            F::Signal => vec![input.signal],
+        };
+        values.into_iter().map(f64::to_bits).collect()
+    }
+    for (name, kind) in [("light", MechanismKind::SenseLight), ("heat", MechanismKind::SenseHeat),
+        ("chemical", MechanismKind::SenseChemical), ("contact", MechanismKind::SenseContact),
+        ("optical", MechanismKind::SenseOptical)] {
+        for &field in F::for_kind(AssemblyKind::Mechanism(kind)) {
+            let read = format!("sensed.Probe.{}", field.name());
+            let expression = match field {
+                F::Available | F::Valid | F::MessageValid | F::SignalValid => format!("if {read} then 0.1 else 0"),
+                F::Offset | F::Flow | F::Motion => format!("length({read})"),
+                _ => read,
+            };
+            let specialized = match kind {
+                MechanismKind::SenseLight | MechanismKind::SenseOptical => "Pigment:0.005;",
+                MechanismKind::SenseContact => "Hair:0.005;",
+                _ => "",
+            };
+            let source = format!("product Hair=filament();\nassembly Probe:sense({name}) {{ Mount:0.005; Detector:0.015; {specialized} at:0; }}\ngene respond:Catalyst={expression};");
+            let (mut world, genomes) = equipped(&source);
+            world.environment.configure(0.4, 0.8, 8.0);
+            world.environment.emit_organic(600.0, 380.0, 12.0);
+            world.cells[0].vx = 3.0;
+            particle(&mut world, 609.0, 380.0);
+            // A body and a particle exercise selected-cell protection and
+            // selected-particle flow, with wrapped and ordinary origins.
+            world.try_seed_fixture(1, 1, 619.0, 380.0, BodyFixture::Hunter).unwrap();
+            world.cells[1].x = 619.0;
+            world.cells[1].y = 380.0;
+            let program = &genomes[0].program;
+            for shift in [0.0, 595.0] {
+                for cell in &mut world.cells { cell.x = wrap(cell.x + shift, WIDTH); }
+                for food in &mut world.food { food.x = wrap(food.x + shift, WIDTH); }
+                let caps: Vec<_> = world.cells.iter().map(|cell| cell.body.capacities()).collect();
+                let mut workspace = ObservationWorkspace::default();
+                world.observations_into(Some(0), &caps, &mut workspace, None);
+                let mut input = workspace.inputs.pop().unwrap();
+                world.receptor_inputs_into(0, program, &mut input, &caps,
+                    &workspace.geometry, &workspace.cell_grid, &workspace.food_grid,
+                    workspace.max_radius, &mut workspace.receptor_masses, false, &[]);
+                let complete = world.sense_program(1, program).unwrap();
+                for &(recipe, field) in program.receptor_reads() {
+                    assert_eq!(bits(&input.receptors[recipe], field), bits(&complete.receptors[recipe], field),
+                        "{name}.{} at shift {shift}", field.name());
+                }
+            }
+        }
+    }
+}
 
 #[test]
 fn primitive_optics_actually_see_and_named_readings_obey_orientation_occlusion_and_damage() {
@@ -219,7 +357,7 @@ fn cellular_tick_buffers_reuse_allocations_and_v7_continuation_is_exact() {
     assert_eq!(control_ptrs, (controls.expression.as_ptr(), controls.activity.as_ptr(), controls.start.as_ptr(), controls.recycle.as_ptr()));
     let mut original = crate::Engine { world, genomes, ..crate::Engine::new() };
     let saved = crate::checkpoint::save(&original).unwrap();
-    assert_eq!(u32::from_le_bytes(saved[8..12].try_into().unwrap()), 9);
+    assert_eq!(u32::from_le_bytes(saved[8..12].try_into().unwrap()), 11);
     let mut restored = crate::checkpoint::restore(&saved).unwrap();
     assert_eq!(crate::checkpoint::save(&restored).unwrap(), saved);
     for _ in 0..60 {

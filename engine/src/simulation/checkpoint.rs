@@ -74,6 +74,8 @@ impl World {
             w.f64(c.synthesis_rate);
             for v in [c.organic_carbon, c.internal_oxygen, c.internal_inorganic_carbon,
                 c.respiration_rate, c.carbon_fixation_rate] { w.f64(v); }
+            w.u32(c.adhered_neighbors);
+            for amount in c.junction_net { w.f64(amount); }
             c.body.write_checkpoint(w);
             c.memory.write_checkpoint(w);
             w.text(&c.scan_target);
@@ -209,6 +211,14 @@ impl World {
             }
             let mut gases = [0.0; 5];
             if version >= 9 { for value in &mut gases { *value = r.range(0.0, 1e12)?; } }
+            let mut adhered_neighbors = 0;
+            let mut junction_net = [0.0; 3];
+            if version >= 11 {
+                adhered_neighbors = r.u32()?;
+                ensure(adhered_neighbors < next_id.saturating_sub(1), "invalid adhesive neighbor count")?;
+                for amount in &mut junction_net { *amount = r.range(-1e12, 1e12)?; }
+                ensure(adhered_neighbors > 0 || junction_net == [0.0; 3], "junction transfer without a contact")?;
+            }
             let body = Body::read_checkpoint_version(r, version)?;
             let memory = Registers::read_checkpoint(r)?;
             let scan_target = Rc::from(r.text(128)?);
@@ -273,6 +283,7 @@ impl World {
                 body,
                 memory,
                 nutrient_stored,
+                adhered_neighbors, junction_net,
                 organic_carbon: gases[0], internal_oxygen: gases[1], internal_inorganic_carbon: gases[2],
                 respiration_rate: gases[3], carbon_fixation_rate: gases[4],
                 gut_energy,
@@ -364,6 +375,7 @@ impl World {
             });
         }
         let mut world = Self {
+            had_adhesive_contacts: cells.iter().any(|c| c.adhered_neighbors != 0),
             cells,
             food,
             ticks: counts[0],

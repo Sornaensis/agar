@@ -24,7 +24,7 @@ export interface UiPreferences {
   simulationView: 'player' | 'metrics' | 'settings' | 'genomes';
   activeSimulationId: string | null;
   overlay: 'none' | 'light' | 'heat' | 'flow' | 'nutrients' | 'oxygen' | 'carbon';
-  sensors: boolean; trails: boolean;
+  sensors: boolean; trails: boolean; colonyActivity: boolean;
 }
 export interface GenomeDraft { name: string; source: string }
 export interface EnvironmentDraft { name: string; config: EnvironmentConfig }
@@ -43,7 +43,7 @@ const GENOME_DRAFT_KEY = 'cellarium.genome-draft.v1';
 const ENVIRONMENT_DRAFT_KEY = 'cellarium.environment-draft.v1';
 const encoder = new TextEncoder();
 const DEFAULT_PREFERENCES: UiPreferences = {
-  tab: 'simulation', simulationView: 'player', activeSimulationId: null, overlay: 'none', sensors: true, trails: false,
+  tab: 'simulation', simulationView: 'player', activeSimulationId: null, overlay: 'none', sensors: true, trails: false, colonyActivity: true,
 };
 
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -378,6 +378,7 @@ export function loadPreferences(): UiPreferences {
     activeSimulationId: typeof saved.activeSimulationId === 'string' && /^[A-Za-z0-9:_-]{1,160}$/.test(saved.activeSimulationId) && !saved.activeSimulationId.startsWith('builtin:') ? saved.activeSimulationId : null,
     overlay: ['none', 'light', 'heat', 'flow', 'nutrients', 'oxygen', 'carbon'].includes(saved.overlay ?? '') ? saved.overlay! : 'none',
     sensors: typeof saved.sensors === 'boolean' ? saved.sensors : true,
+    colonyActivity: typeof saved.colonyActivity === 'boolean' ? saved.colonyActivity : true,
     trails: typeof saved.trails === 'boolean' ? saved.trails : false,
   };
 }

@@ -1,0 +1,65 @@
+{
+  "measuredAt": "2026-11-18T17:52:26.894Z",
+  "node": "v24.22.1",
+  "execArgv": [
+    "--no-liftoff"
+  ],
+  "productionSource": "src/periodic-visibility.ts",
+  "productionSha256": "558004d701e51a27b4fb8656e1b8ee98bc9a6b5e26f4b1e24ec7652285de6966",
+  "baseline": "Previous renderer wrappedPositions implementation, preserved verbatim in this harness",
+  "baselineSha256": "99d81e37b02b08a82fca8fc877262839c49deb32d73133405e8875f88926fdfa",
+  "exactCases": 6552,
+  "world": {
+    "width": 4800,
+    "height": 3040
+  },
+  "cells": 10000,
+  "particles": 100000,
+  "rows": [
+    {
+      "zoom": 1,
+      "entities": 110000,
+      "images": 110794,
+      "checksum": 150619824.40164933,
+      "previousMedianMs": 64.52127733333327,
+      "optimizedMedianMs": 3.2835626666666635,
+      "previousSamplesMs": [
+        64.95791933333332,
+        64.38835166666665,
+        64.52591166666662,
+        64.52127733333327,
+        61.32636599999993
+      ],
+      "optimizedSamplesMs": [
+        3.2371123333333194,
+        3.356466333333325,
+        3.2835626666666635,
+        3.3147080000000337,
+        2.102481666666639
+      ]
+    },
+    {
+      "zoom": 24,
+      "entities": 110000,
+      "images": 256,
+      "checksum": 348043.4723675251,
+      "previousMedianMs": 59.51993366666678,
+      "optimizedMedianMs": 2.6897730000000593,
+      "previousSamplesMs": [
+        50.21659033333329,
+        82.56887400000005,
+        96.2997779999999,
+        59.51993366666678,
+        59.43285066666673
+      ],
+      "optimizedSamplesMs": [
+        2.7632573333333617,
+        2.672149999999874,
+        2.832938000000013,
+        2.6724170000000718,
+        2.6897730000000593
+      ]
+    }
+  ],
+  "limits": "Node/V8 helper traversal only; no Canvas drawing, browser layout, GPU or whole-application FPS is measured. Both paths assert identical ordered periodic images and full-traversal counts/checksums."
+}

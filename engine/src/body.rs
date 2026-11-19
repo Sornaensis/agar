@@ -774,6 +774,22 @@ impl Body {
         // therefore use their stored activity from the preceding tick, just as
         // optical direction does. Passive storage and structure remain present.
         if let Some(state) = &self.cellular {
+            let mut organs = [0.0; FAMILY_COUNT];
+            let mut assemblies = [-0.0; FAMILY_COUNT];
+            let processing = |kind| matches!(kind, Metabolic | Photoreceptor | Thermoreceptor
+                | Chemoreceptor | Mechanoreceptor | Optical);
+            for organ in &self.organs {
+                if processing(organ.kind) {
+                    organs[organ.kind as usize] += organ.functional_mass();
+                }
+            }
+            for assembly in &state.assemblies {
+                if let AssemblyKind::Organelle(kind) = assembly.recipe.kind {
+                    if processing(kind) {
+                        assemblies[kind as usize] += assembly.functional_mass() * assembly.activity;
+                    }
+                }
+            }
             for kind in [
                 Metabolic,
                 Photoreceptor,
@@ -782,18 +798,9 @@ impl Body {
                 Mechanoreceptor,
                 Optical,
             ] {
-                mass[kind as usize] = self
-                    .organs
-                    .iter()
-                    .filter(|o| o.kind == kind)
-                    .map(Organelle::functional_mass)
-                    .fold(0.0, |sum, value| sum + value)
-                    + state
-                        .assemblies
-                        .iter()
-                        .filter(|a| a.recipe.kind == AssemblyKind::Organelle(kind))
-                        .map(|a| a.functional_mass() * a.activity)
-                        .sum::<f64>();
+                // Preserve the independent family order and the original
+                // positive-zero organ / negative-zero assembly sum identities.
+                mass[kind as usize] = organs[kind as usize] + assemblies[kind as usize];
             }
         }
         let core = mass[Core as usize];
@@ -1590,14 +1597,14 @@ impl Body {
     }
     #[cfg(test)]
     pub(crate) fn read_checkpoint(reader: &mut Reader<'_>) -> CheckpointResult<Self> {
-        Self::read_checkpoint_version(reader, 9)
+        Self::read_checkpoint_version(reader, 11)
     }
     pub(crate) fn read_checkpoint_version(
         reader: &mut Reader<'_>,
         version: u32,
     ) -> CheckpointResult<Self> {
         ensure(
-            matches!(version, 3 | 4 | 5 | 6 | 7 | 8 | 9),
+            (3..=11).contains(&version),
             "unsupported body checkpoint version",
         )?;
         let area = reader.range(MIN_AREA, MAX_AREA)?;
@@ -1792,6 +1799,42 @@ fn allocate(demands: &[Demand], mut resources: [f64; RESOURCE_COUNT]) -> Vec<f64
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fused_processing_capacity_sums_preserve_family_order_and_float_bits() {
+        use crate::cellular::{AssemblyInstance, Ingredient, ProductDef, ProductKind, Recipe, RecipePart};
+        use std::rc::Rc;
+        let families = [OrganelleKind::Metabolic, OrganelleKind::Photoreceptor,
+            OrganelleKind::Thermoreceptor, OrganelleKind::Chemoreceptor,
+            OrganelleKind::Mechanoreceptor, OrganelleKind::Optical];
+        for count in [0,1,6,47] {
+            let (mut body,_) = Body::founder();
+            let mut state = CellularState::default();
+            for i in 0..count {
+                let kind = families[i%families.len()];
+                let mass = 0.031 + i as f64 * 0.00123456789;
+                body.organs.push(Organelle { id: (i+2) as u32, kind, mass,
+                    integrity: if i%4 == 0 {0.1} else {0.873}, embodied_energy: 0.0 });
+                let product = ProductDef { name: "Frame".into(),kind: ProductKind::Scaffold,half_life:0.0 };
+                state.assemblies.push(AssemblyInstance { id:(i+1) as u32,
+                    recipe:Rc::new(Recipe { name:format!("Unit{i}"),kind:AssemblyKind::Organelle(kind),
+                        parts:vec![RecipePart{product,required_mass:mass}],at:0.0,direction:0.0 }),
+                    ingredients:vec![Ingredient{mass:if i%3 == 0 {mass*0.5}else{mass},embodied_energy:0.0}],
+                    integrity:0.917,activity:if i%5==0 {-0.0}else{0.731} });
+            }
+            body.cellular=Some(state);
+            let reference = families.map(|kind| body.organs.iter().filter(|o|o.kind==kind)
+                .map(Organelle::functional_mass).fold(0.0,|sum,mass|sum+mass)
+                + body.cellular.as_ref().unwrap().assemblies.iter()
+                    .filter(|a|a.recipe.kind==AssemblyKind::Organelle(kind))
+                    .map(|a|a.functional_mass()*a.activity).sum::<f64>());
+            let cap=body.capacities();
+            let actual=[cap.metabolism,cap.light_sensing,cap.heat_sensing,
+                cap.chemical_sensing,cap.mechanical_sensing,cap.optical_sensing];
+            let mut expected=reference;
+            expected[0]=20.0*body.functional_mass(OrganelleKind::Core)+60.0*expected[0];
+            assert_eq!(actual.map(f64::to_bits),expected.map(f64::to_bits));
+        }
+    }
     fn close(a: f64, b: f64) {
         assert!((a - b).abs() < 1e-7, "{a} != {b}");
     }
