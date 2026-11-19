@@ -724,7 +724,7 @@ function renderInspector(): void {
   panel.hidden = selectedId === null; if (selectedId === null) return;
   const cell = active.world.cells.find(item => item.id === selectedId);
   panel.innerHTML = `<header class="inspector-header"><div class="organism-title"><h2>${cell ? `<i aria-hidden="true" style="background:${genomeColor(cell.genomeId)}"></i><span data-inspected-genome>${esc(genomeName(cell.genomeId))}</span>` : 'Organism ' + selectedId}</h2>${cell ? `<span class="muted">Organism #${selectedId} · Generation ${cell.generation}</span>` : ''}</div><button class="icon-button" data-action="close-inspector" aria-label="Close organism inspector">${icon('close')}</button></header>
-    ${cell ? cellEditActions() : ''}
+    ${cell ? cellEditActions(Boolean(cell.attachedNeighbors)) : ''}
     <p id="inspector-error" class="compatibility-notice" role="status" hidden></p>
     ${cell ? `<nav class="inspector-tabs" aria-label="Organism details" role="tablist">${(['overview','body','memory','program'] as const).map(view => `<button role="tab" data-inspector-view="${view}" tabindex="${inspectorView === view ? 0 : -1}" aria-selected="${inspectorView === view}" class="${inspectorView === view ? 'active' : ''}">${view[0].toUpperCase()+view.slice(1)}</button>`).join('')}</nav><div id="inspector-content"></div>` : '<p class="muted">This organism has died.</p>'}`;
   if (!cell) return;
@@ -811,10 +811,13 @@ function paintInspector(): void {
   if (!active || selectedId === null || !$('inspector-content')) return;
   const cell = cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.cell : null;
   if (!cell) return;
+  const visible = active.world.cells.find(item => item.id === cell.id);
+  const moveColony = queryUi<HTMLButtonElement>('[data-action="move-colony"]');
+  if (moveColony) moveColony.disabled = !visible?.attachedNeighbors;
   const name = queryUi<HTMLElement>('[data-inspected-genome]');
   if (name) name.textContent = genomeName(cell.genomeId);
   if (inspectorView === 'overview') {
-    updateOrganismOverview($('inspector-content'), cell, active.world.cells.find(item => item.id === cell.id), cellInspection?.body?.foodPotential);
+    updateOrganismOverview($('inspector-content'), cell, visible, cellInspection?.body?.foodPotential);
   } else if (inspectorView === 'body') {
     const target = $('inspector-content'), expanded = new Set([...target.querySelectorAll<HTMLDetailsElement>('details[open]')].map(item => item.dataset.kind));
     const focusedFamily = target.contains(target.ownerDocument.activeElement) ? target.ownerDocument.activeElement?.closest<HTMLDetailsElement>('details[data-kind]')?.dataset.kind : undefined;
@@ -1025,7 +1028,7 @@ function settingsMarkup(): string {
     ${rangeField('mutation','Mutation chance',Math.round(world.mutationRate*100),0,100,1,'%')}
     <p class="muted">Seed ${active!.metadata.seed} · ${esc(active!.metadata.environmentName)}</p></section>
     <section class="settings-panel"><h2>Display</h2><div class="form-field"><label for="setting-overlay">Field</label><select id="setting-overlay" data-setting="overlay">${fieldOptions(prefs.overlay)}</select></div>
-    <label class="toggle-field"><span>Organelle highlights</span><input type="checkbox" role="switch" data-setting="sensors"${prefs.sensors?' checked':''}></label><label class="toggle-field"><span>Colony activity</span><input type="checkbox" role="switch" data-setting="colonyActivity"${prefs.colonyActivity?' checked':''}></label><p class="muted">A teal rim marks an attached cell. Its contact signal appears as a dot for zero, violet for positive or amber for negative.</p><label class="toggle-field"><span>Movement trails</span><input type="checkbox" role="switch" data-setting="trails"${prefs.trails?' checked':''}></label></section>
+    <label class="toggle-field"><span>Organelle highlights</span><input type="checkbox" role="switch" data-setting="sensors"${prefs.sensors?' checked':''}></label><label class="toggle-field"><span>Colony activity</span><input type="checkbox" role="switch" data-setting="colonyActivity"${prefs.colonyActivity?' checked':''}></label><p class="muted">Teal links show direct bonds. A bonded cell’s outgoing signal appears as a gray dot for zero, violet for positive or amber for negative.</p><label class="toggle-field"><span>Movement trails</span><input type="checkbox" role="switch" data-setting="trails"${prefs.trails?' checked':''}></label></section>
     <section class="settings-panel"><h2>Environment</h2><p class="muted">${world.width} × ${world.height} · ${world.environment.sources.length} emitters · ${world.environment.barriers.length} barriers</p><p class="muted">Select emitters and barriers in the player to adjust their strength, size, direction and position.</p><button class="button subtle" data-action="edit-live-environment">${icon('flow')}Edit environment</button></section>
   </div></div>`;
 }
@@ -1135,7 +1138,10 @@ async function action(name:string,id?:string,genomeId?:number):Promise<void>{
   if(name==='play'){await togglePlayback();return;}
   if(name==='cancel-cell-tool'){clearCellTool();$('world')?.focus({preventScroll:true});return;}
   if(name==='move-cell'||name==='move-colony'){
-    if(active&&selectedId!==null)startCellTool({kind:'move',id:selectedId,colony:name==='move-colony'});
+    const colony=name==='move-colony';
+    if(active&&selectedId!==null&&(!colony||active.world.cells.find(c=>c.id===selectedId)?.attachedNeighbors)){
+      startCellTool({kind:'move',id:selectedId,colony});
+    }
     return;
   }
   if(name==='edit-reserves'&&active&&selectedId!==null&&playerElement){

@@ -73,7 +73,7 @@ async function run(template, worldSeed) {
   };
   while (state.ticks < result.seconds * 30) {
     state = advance(api, Math.min(secondsPerSample * 30, result.seconds * 30 - state.ticks));
-    if (crown) sampleCrown(api,state,habitat.config,crown);
+    if (crown) sampleCrown(api,state,crown);
     if (firstBirth === null && state.births) firstBirth = state.seconds;
     if (firstKill === null && state.predations) firstKill = state.seconds;
     for (const cell of state.cells) {
@@ -110,7 +110,7 @@ async function run(template, worldSeed) {
         const parent = state.cells.find(candidate => candidate.id === cell.parentId);
         if (!parent) continue;
         const adult = body(api,parent.id), young = body(api,cell.id);
-        if (adult.colony.neighbors && young.colony.neighbors) {
+        if (adult.colony.neighborIds.includes(cell.id) && young.colony.neighborIds.includes(parent.id)) {
           pairSamples++;
           carbonToYoung = Math.max(carbonToYoung, young.colony.carbonNet);
           if (young.colony.carbonNet > 0 && adult.colony.carbonNet < 0
@@ -123,7 +123,7 @@ async function run(template, worldSeed) {
         if (high && !priorHigh.has(cell.id)) {
           const parent = state.cells.find(candidate => candidate.id === cell.parentId);
           const inventory = body(api,cell.id);
-          if (parent && register(api,parent,'rf021') === 1 && inventory.colony.neighbors
+          if (parent && register(api,parent,'rf021') === 1 && inventory.colony.neighborIds.includes(parent.id)
               && activeMass(inventory,'PulseMotor') > 0) {
             pulsed.add(cell.id);
             pulsesWhileYoung.set(cell.id,(pulsesWhileYoung.get(cell.id) ?? 0) + 1);

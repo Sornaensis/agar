@@ -187,7 +187,7 @@ export class Renderer {
           this.drag = {pointerId:event.pointerId,item:hit,
             offsetX:dx - Math.round(dx / this.worldWidth) * this.worldWidth,
             offsetY:dy - Math.round(dy / this.worldHeight) * this.worldHeight,
-            active:false,target:null,colony:event.altKey};
+            active:false,target:null,colony:event.altKey && hit.kind==='cell' && Boolean(hit.object.attachedNeighbors)};
           grab = true;
         }
       } else if (touch && this.drag) this.clearDrag();
@@ -440,6 +440,7 @@ export class Renderer {
         this.drawCell(cell, this.visibility.points[image], this.visibility.points[image + 1], cell.id === selectedId);
       }
     }
+    if (options.colonyActivity !== false && world.bonds.length) this.drawColonyBonds(world);
     if (selected && details?.id===selected.id && body?.cellId===selected.id && body.cellular && options.sensors!==false) {
       const count = this.visibility.collect(selected.x,selected.y,selected.radius+32/this.scale);
       for (let image = 0; image < count; image += 2) this.drawCellularDetails(details,body,this.visibility.points[image],this.visibility.points[image + 1]);
@@ -807,14 +808,7 @@ export class Renderer {
       context.stroke();
     }
     context.restore();
-    if (this.renderOptions.colonyActivity !== false) {
-      if (cell.attachedNeighbors) {
-        context.beginPath();
-        context.arc(x, y, radius * 0.9, 0, Math.PI * 2);
-        context.strokeStyle = '#60c7ba';
-        context.lineWidth = 1.15;
-        context.stroke();
-      }
+    if (this.renderOptions.colonyActivity !== false && cell.attachedNeighbors) {
       const signal = cell.contactSignal;
       if (signal !== undefined) {
         context.beginPath();
@@ -851,6 +845,30 @@ export class Renderer {
       context.stroke();
       context.restore();
     }
+  }
+
+  /** Paint the junction across the two surfaces, including both images at a world seam. */
+  private drawColonyBonds(world:RenderWorldSnapshot):void {
+    const ctx=this.context;
+    ctx.save();
+    ctx.strokeStyle='#60c7ba';
+    ctx.lineWidth=2.2;
+    ctx.lineCap='round';
+    ctx.beginPath();
+    for (const [a,b] of world.bonds) {
+      const x=b.x-a.x, y=b.y-a.y;
+      const dx=x-Math.round(x/world.width)*world.width, dy=y-Math.round(y/world.height)*world.height;
+      const contact=a.radius/(a.radius+b.radius);
+      const cx=(a.x+contact*dx+world.width)%world.width, cy=(a.y+contact*dy+world.height)%world.height;
+      const count=this.visibility.collect(cx,cy,Math.hypot(dx,dy)*0.3+ctx.lineWidth);
+      for (let i=0;i<count;i+=2) {
+        const px=this.visibility.points[i], py=this.visibility.points[i+1];
+        ctx.moveTo(px-dx*contact*0.3,py-dy*contact*0.3);
+        ctx.lineTo(px+dx*(1-contact)*0.3,py+dy*(1-contact)*0.3);
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
   }
 
   /** A selected cell shows which built families it owns; these marks are not sensing ranges. */

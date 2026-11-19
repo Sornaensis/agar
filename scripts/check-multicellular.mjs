@@ -1,11 +1,39 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { advance, body, catalog, compile, evaluation, fresh, memory, restore, save, seed, snapshot } from './organelle-harness.mjs';
+import { advance, body, catalog, compile, error, evaluation, fresh, memory, restore, save, seed, snapshot } from './organelle-harness.mjs';
 
 const { PRESETS, BUILTIN_ENVIRONMENTS } = await catalog();
 const pool = BUILTIN_ENVIRONMENTS.find(item => item.id === 'builtin:environment:colony-pool').config;
 const exchanges = ['energyNet', 'mineralNet', 'carbonNet'];
 
+// A compatible marker and a live public signal can come from a stranger. Grow
+// both cells normally, then place the stranger against the mature cell's paid
+// flank receptor. Removing just the bond test recreates the false response.
+for (const [name, marker, response] of [['Nurse rosette',42,'nursing'],['Pulse swimmer',73,'firing']]) {
+  const source=PRESETS.find(preset=>preset.name===name).source;
+  for (const requireBond of [true,false]) {
+    const api=await fresh({...pool,seed:42});
+    const adult=compile(api,requireBond?source:source.replace(/sensed\.(LeftJunction|RightJunction)\.bonded && /g,''));
+    assert.equal(api.place_cell(adult,100,200),1,error(api));
+    advance(api,35*30);
+    // An ordinary juvenile nurse already requests support. Make the independent
+    // relay sender publish a sustained pulse for this controlled encounter.
+    const decoy=compile(api,source.replace('rf021 = if firing then 1 else 0;','rf021 = 1;'));
+    assert.equal(api.place_cell(decoy,250,200),2,error(api));
+    const state=advance(api,30*30), [observer,stranger]=state.cells;
+    for (const cell of state.cells) assert.ok(body(api,cell.id).cellular.assemblies.some(a=>a.name==='Adhesin'&&a.complete));
+    const angle=observer.angle+Math.PI/2, distance=observer.radius+stranger.radius+0.05;
+    assert.equal(api.move_cell(stranger.id,observer.x+Math.cos(angle)*distance,observer.y+Math.sin(angle)*distance,0),1,error(api));
+    advance(api,1);
+    const trace=evaluation(api,observer.id), reading=field=>trace.signals.find(item=>item.name==='sensed.LeftJunction.'+field)?.value;
+    assert.equal(body(api,observer.id).colony.neighbors,0);
+    assert.equal(reading('message_valid'),true);assert.equal(reading('message'),marker);
+    assert.equal(reading('signal_valid'),true);assert.equal(reading('signal'),1);
+    if(requireBond) assert.equal(reading('bonded'),false);
+    assert.equal(trace.bindings.find(binding=>binding.name===response)?.value,!requireBond,
+      name+' responds to a signaling stranger only when the direct-bond check is removed');
+  }
+}
 async function growPair(name, transform = source => source) {
   const preset = PRESETS.find(item => item.name === name);
   const example = await readFile(new URL('../examples/' + name.toLowerCase().replaceAll(' ', '-') + '.cell', import.meta.url), 'utf8');

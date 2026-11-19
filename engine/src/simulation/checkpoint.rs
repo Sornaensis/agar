@@ -109,6 +109,10 @@ impl World {
             w.u8(f.kind as u8);
             w.f64(f.extra_energy);
         }
+        w.count(self.contacts.len());
+        for (&(a,b),&ticks) in &self.contacts {
+            w.u32(a); w.u32(b); w.u8(ticks);
+        }
     }
     pub(crate) fn read_checkpoint(
         r: &mut Reader<'_>,
@@ -230,7 +234,7 @@ impl World {
                 adhered_neighbors = r.u32()?;
                 ensure(adhered_neighbors < next_id.saturating_sub(1), "invalid adhesive neighbor count")?;
                 for amount in &mut junction_net { *amount = r.range(-1e12, 1e12)?; }
-                ensure(adhered_neighbors > 0 || junction_net == [0.0; 3], "junction transfer without a contact")?;
+                ensure(version >= 15 || adhered_neighbors > 0 || junction_net == [0.0; 3], "junction transfer without a contact")?;
             }
             let body = Body::read_checkpoint_version(r, version)?;
             ensure(body.structural_mass() > 0.0 || structural_enrichment == 0.0, "stored energy without body material")?;
@@ -390,7 +394,22 @@ impl World {
                 extra_energy,
             });
         }
+        let mut contacts = std::collections::BTreeMap::new();
+        if version >= 15 {
+            let pairs = r.u32()? as usize;
+            let max_pairs = cells.len().saturating_mul(cells.len().saturating_sub(1)) / 2;
+            ensure(pairs <= max_pairs && pairs <= r.remaining()/9, "invalid adhesion pair count")?;
+            let mut previous = (0,0);
+            for _ in 0..pairs {
+                let pair = (r.u32()?,r.u32()?); let ticks = r.u8()?;
+                ensure(previous < pair && pair.0 < pair.1 && ids.contains(&pair.0) && ids.contains(&pair.1)
+                    && (1..=adhesion::CLONAL).contains(&ticks), "invalid adhesion pair")?;
+                contacts.insert(pair,ticks);
+                previous=pair;
+            }
+        }
         let mut world = Self {
+            contacts,
             had_adhesive_contacts: cells.iter().any(|c| c.adhered_neighbors != 0),
             cells,
             food,

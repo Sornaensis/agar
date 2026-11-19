@@ -20,6 +20,44 @@ const engineSource = (await readFile(new URL('../src/engine.ts',import.meta.url)
   .replace("import engineContract from './engine-contract.json';",`const engineContract=${JSON.stringify(contract)};`);
 const engineCode = ts.transpileModule(engineSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
 const { Engine,decodeRenderSnapshot,validateBodyInspection,validateGenomeEvaluation } = await import(`data:text/javascript;base64,${Buffer.from(engineCode).toString('base64')}`);
+// Only explicit edges belong to a colony. Coincident cells, shared genome and
+// outgoing signals have no effect on the graph, including across a world seam.
+{
+  const base=new Float64Array(12+5*21);
+  base[2]=5; base[7]=400; base[8]=400; base[9]=1;
+  for (const [row,[id,x]] of [[8,3],[2,397],[5,12],[13,9],[21,11]].entries()) {
+    base.set([id,1,x,110,0,0,0,7],12+row*21);
+  }
+  const wire=edges=>Float64Array.of(...base,4,0,...edges.flat());
+  const raw=wire([[2,8],[5,8],[5,13],[8,13]]);
+  const projected=decodeRenderSnapshot(raw);
+  const peers=id=>projected.cells.find(c=>c.id===id);
+  assert.deepEqual(peers(8).neighborIds,[2,5,13]);
+  assert.equal(peers(2).attachedNeighbors,1);
+  assert.equal(peers(2).colonySize,4);
+  assert.equal(peers(21).colonySize,undefined);
+  assert.equal(peers(21).contactSignal,0);
+  for (const edges of [[[8,2]],[[2,2]],[[2,99]],[[2,8],[2,8]],[[5,8],[2,8]]]) {
+    assert.throws(()=>decodeRenderSnapshot(wire(edges)),/bond/);
+  }
+  for (const badCount of [-1,0.5,6]) {
+    const bad=raw.slice(); bad[9]=badCount; assert.throws(()=>decodeRenderSnapshot(bad),/layout/);
+  }
+  assert.throws(()=>decodeRenderSnapshot(raw.slice(0,-1)),/layout/);
+  const viewModule=await moduleUrl('../src/periodic-visibility.ts');
+  const { PeriodicVisibility }=await import(viewModule);
+  const { Renderer }=await import(await moduleUrl('../src/renderer.ts',{
+    './organelles':organelles,'./world-camera':await moduleUrl('../src/world-camera.ts'),'./periodic-visibility':viewModule,
+  }));
+  const visibility=new PeriodicVisibility();
+  visibility.width=visibility.right=400;visibility.height=visibility.bottom=400;
+  const segments=[];
+  const context={save(){},restore(){},stroke(){},beginPath(){},moveTo(x,y){segments.push([x,y]);},lineTo(x,y){segments.at(-1).push(x,y);}};
+  Renderer.prototype.drawColonyBonds.call({context,visibility},{...projected,bonds:[projected.bonds[0]]});
+  assert.equal(segments.length,2,'Both images of a cross-seam bond are drawn');
+  assert.ok(segments.some(([x])=>Math.abs(x)<3) && segments.some(([x])=>Math.abs(x-400)<3));
+  assert.ok(segments.every(([xa,ya,xb,yb])=>Math.hypot(xa-xb,ya-yb)<3),'Neither segment crosses the middle of the world');
+}
 const originalFetch = globalThis.fetch, bytes = await readFile(new URL('../engine/pkg/agar_engine.wasm',import.meta.url));
 globalThis.fetch = async()=>new Response(bytes);
 let engine;
@@ -96,7 +134,7 @@ assert.equal(schema.cellular.marker,'cellular;');
 assert.deepEqual(schema.cellular.registers,{prefixes:['ri','rf','rb','rs','rv'],addressesPerType:999,upkeepPerSecond:0.0025,clearWins:true});
 assert.deepEqual(schema.cellular.contactMessages,{
   declarations:['publish','avoid_message','adhere_message','signal'],registerType:'scalar',receptor:'sense(contact)',
-  validField:'message_valid',valueField:'message',signalValidField:'signal_valid',signalValueField:'signal',initializerLimit:1e12,
+  validField:'message_valid',valueField:'message',signalValidField:'signal_valid',signalValueField:'signal',bondedField:'bonded',formationModes:['daughters','recruit'],defaultFormation:'daughters',initializerLimit:1e12,
 });
 assert.deepEqual(schema.cellular.reads,language.CELLULAR_READ_SIGNALS.map(item=>({name:item.name,type:item.type})));
 assert.deepEqual(names(schema.cellular.products),[...language.CELLULAR_PRODUCT_ROLES]);
@@ -211,7 +249,7 @@ const contactSource=`# café 🌱 — stable UTF-16 ranges
 cellular;
 publish rf001 = 0;
 avoid_message rf002;
-adhere_message rf001;
+adhere_message rf001 recruit;
 signal rf003 = -2;
 product Mount = anchor(); product Port = receptor(); product Fiber = filament();
 assembly Touch: sense(contact) { Mount: 0.01; Port: 0.01; Fiber: 0.01; }
@@ -221,6 +259,14 @@ rb001 = sensed.Touch.message_valid;
 rs001 = "private";
 rv001 = vec(1 + sensed.Touch.message, -1);
 clear rf001 when ri001 >= 1;`;
+assert.equal(language.lookupCellularSymbol('sensed.Touch.bonded',contactSource).type,'boolean');
+assert.equal(language.lookupCellularSymbol('sensed.Eye.bonded',controlled),undefined);
+for(const modifier of schema.cellular.contactMessages.formationModes){
+  assert.ok(complete('cellular; adhere_message rf001 ').some(option=>option.name===modifier));
+  assert.ok(!complete('cellular; publish rf001 ').some(option=>option.name===modifier));
+  const id=engine.compile(`cellular; adhere_message rf001 ${modifier};`);
+  assert.equal(engine.getGenomeGraph(id).contactMessages.formation,modifier);
+}
 assert.equal(language.lookupCellularSymbol('sensed.Touch.message_valid',contactSource).type,'boolean');
 assert.equal(language.lookupCellularSymbol('sensed.Touch.message',contactSource).type,'scalar');
 assert.equal(language.lookupCellularSymbol('sensed.Touch.message',contactSource.replace('sense(contact)','mechanoreceptor')).type,'scalar');
@@ -236,22 +282,33 @@ const memory=()=>Object.fromEntries(engine.getMemory(founder).map(item=>[item.na
 assert.deepEqual(memory(),{rf001:0,rf003:-2},'Only the explicitly initialized register starts occupied');
 assert.equal(engine.renderSnapshot().cells[0].contactSignal,-2,'Compact player frames expose the current payload');
 const frame=engine.renderSnapshotData();
-for (const [offset, bad] of [[0,2], [1,-1], [2,0.5], [3,NaN]]) {
+for (const [offset, bad] of [[0,-1], [0,1], [0,0.5], [1,NaN]]) {
   const corrupt=frame.slice();
-  corrupt[corrupt.length-4+offset]=bad;
-  assert.throws(()=>decodeRenderSnapshot(corrupt),/colony/);
+  corrupt[corrupt.length-2+offset]=bad;
+  assert.throws(()=>decodeRenderSnapshot(corrupt),/signal/);
 }
 const inventory=engine.cellBody(founder);
-const signedExchanges={...inventory,colony:{neighbors:2,energyNet:0.25,mineralNet:-0.001,carbonNet:0}};
+assert.deepEqual(inventory.colony.neighborIds,[]);
+assert.equal(engine.renderSnapshot().bonds.length,0,'Publishing a value never invents a bond');
+const blueprint={...inventory,cellular:{...inventory.cellular,assemblies:[],
+  recipes:inventory.cellular.recipes.map(r=>({...r,name:'Bus',kind:'junction(signal)'}))}};
+const planMarkup=renderCellularBody(blueprint);
+assert.ok(planMarkup.includes('Unbuilt recipes'));
+assert.ok(!planMarkup.includes('data-kind="colony-reception"')&&!planMarkup.includes('class="colony-exchange"'),
+  'An unbuilt junction has neither a live receiver nor membership');
+const signedExchanges={...inventory,colony:{neighbors:2,neighborIds:[7,9],energyNet:0.25,mineralNet:-0.001,carbonNet:0}};
 assert.doesNotThrow(()=>validateBodyInspection(signedExchanges,founder));
 const exchangePanel=renderCellularBody(signedExchanges);
-for (const label of ['Colony exchange','+0.25','−0.001']) assert.ok(exchangePanel.includes(label));
+for (const label of ['Colony exchange','Directly bonded to #7, #9','+0.25','−0.001']) assert.ok(exchangePanel.includes(label));
 assert.throws(()=>validateBodyInspection({...inventory,colony:{...signedExchanges.colony,carbonNet:Infinity}},founder));
+for (const neighborIds of [[7],[9,7],[7,7],[founder,9]]) {
+  assert.throws(()=>validateBodyInspection({...inventory,colony:{...signedExchanges.colony,neighborIds}},founder));
+}
 const checkpoint=engine.saveState();
 const preview=engine.getCellEvaluation(founder);
-assert.deepEqual(preview.contactMessages,{publish:'rf001',avoid:'rf002',adhere:'rf001',initial:0,signal:'rf003',signalInitial:-2});
+assert.deepEqual(preview.contactMessages,{publish:'rf001',avoid:'rf002',adhere:'rf001',initial:0,signal:'rf003',signalInitial:-2,formation:'recruit'});
 assert.deepEqual(preview.contactMessageDeclarations.map(item=>[item.kind,item.value,contactSource.slice(item.from,item.to)]),[
-  ['publish',0,'publish rf001 = 0;'],['avoid',null,'avoid_message rf002;'],['adhere',0,'adhere_message rf001;'],['signal',-2,'signal rf003 = -2;'],
+  ['publish',0,'publish rf001 = 0;'],['avoid',null,'avoid_message rf002;'],['adhere',0,'adhere_message rf001 recruit;'],['signal',-2,'signal rf003 = -2;'],
 ]);
 assert.deepEqual(preview.signals.filter(item=>item.name.startsWith('sensed.Touch.message')).map(item=>[item.name,item.value]),[
   ['sensed.Touch.message_valid',false],['sensed.Touch.message',0],
@@ -275,6 +332,7 @@ assert.ok(preview.writes.find(item=>item.name==='rf002').applies);
 assert.equal(preview.writes.find(item=>item.name==='rf001').applies,false);
 assert.deepEqual(engine.saveState(),checkpoint,'Register/message previews are read-only');
 for (const corrupt of [
+  trace=>{trace.contactMessages.formation='any';},
   trace=>{trace.contactMessages.publish='rb001';},
   trace=>{trace.contactMessages.initial=Infinity;},
   trace=>{trace.contactMessages.signal=trace.contactMessages.publish;},
@@ -312,5 +370,30 @@ close(remains.energyWithdrawnTotal,potential.atp);
 close(remains.packetEnergyTotal,potential.total-potential.atp);
 close(remains.packetEnergyTotal,engine.renderSnapshot().food.reduce((sum,packet)=>sum+packet.energy,0));
 close(remains.energyTotal+remains.energyWithdrawnTotal,alive.energyTotal);
+
+// Exercise the same live native projections used by the renderer and inspector.
+// Grow a paid mother–daughter bond; then sever it during a paused edit.
+const nurse=engine.compile(await readFile(new URL('../examples/nurse-rosette.cell',import.meta.url),'utf8'));
+engine.clearSources(); engine.clearBarriers();
+assert.ok(engine.setWorldSize(400,400));
+engine.setEnvironment(.5,.85,0); engine.setInitialNutrients(3); engine.setMutationRate(0);
+assert.ok(engine.setInitialGases(1,1));
+assert.ok(engine.setGasExchange({mode:'open',exchangeRate:.02,oxygenEquilibrium:1,carbonEquilibrium:1}));
+engine.resetEmpty(42);engine.seed(nurse,1,200,200);
+let family=engine.renderSnapshot();
+assert.equal(family.bonds.length,0);
+while (!family.bonds.length && family.time<150) { engine.tick(30); family=engine.renderSnapshot(); }
+assert.equal(family.bonds.length,1,'An actual fission establishes an observable bond');
+const [[mother,daughter]]=family.bonds;
+assert.equal(engine.cellSnapshot(daughter.id).parentId,mother.id);
+assert.equal(mother.colonySize,2);
+assert.deepEqual(engine.cellBody(mother.id).colony.neighborIds,[daughter.id]);
+const attached=engine.saveState();
+assert.equal(engine.moveCell(daughter.id,35,35),1);
+assert.equal(engine.renderSnapshot().bonds.length,0,'Single-cell relocation immediately removes the edge on the paused frame');
+assert.deepEqual(engine.cellBody(mother.id).colony.neighborIds,[]);
+engine.restoreState(attached);
+assert.deepEqual(engine.renderSnapshot().bonds.map(([a,b])=>[a.id,b.id]),[[mother.id,daughter.id]]);
+assert.deepEqual(engine.cellBody(daughter.id).colony.neighborIds,[mother.id]);
 
 console.log('Cellular UI checks passed for register and message completions, authoritative mechanism/receptor schema, pure functions, live UTF-16 declaration spans, frozen memory/write previews, physical inventory and escaped rendering.');

@@ -695,6 +695,7 @@ pub struct World {
     seed: u32,
     // Derived from the previous adhesion phase, rebuilt from cells when restoring.
     had_adhesive_contacts: bool,
+    contacts: std::collections::BTreeMap<(u32, u32), u8>,
     // Derived evaluation storage is reusable, never serialized as world state.
     eval_scratch: EvalScratch,
     workspace: TickWorkspace,
@@ -729,6 +730,7 @@ impl World {
             rng: Rng::new(seed),
             seed,
             had_adhesive_contacts: false,
+            contacts: Default::default(),
             eval_scratch: EvalScratch::default(),
             workspace: TickWorkspace::default(),
         }
@@ -745,6 +747,7 @@ impl World {
             food.x*=width/old.0;food.y*=height/old.1;
             (food.x,food.y)=self.environment.move_circle((food.x,food.y),(food.x,food.y),2.5);
         }
+        self.prune_contacts(None);
         self.workspace=TickWorkspace::default();true
     }
     pub fn settle_barriers(&mut self) {
@@ -1443,6 +1446,9 @@ impl World {
             .ok_or("Simulation paused: organic material exceeds addressable memory.")?;
         self.reserve_organic_packets(packet_energy, packet_overhead)?;
         self.environment.step(self.time());
+        if !self.contacts.is_empty() && self.environment.barriers.iter().any(|b| b.floating) {
+            self.prune_contacts(None);
+        }
         self.decay_food_in(phases);
         // Phase 1: one immutable observation/capability snapshot. Memory and
         // tracking commit only after every cell has observed that same world.
@@ -1632,6 +1638,7 @@ impl World {
         }
         self.spill_excess_stores_in(phases, true);
         let originals = self.cells.len();
+        let mut division_bonds: Option<adhesion::DivisionBonds> = None;
         for i in 0..originals {
             if !outputs[i].divide
                 || !inputs[i].body_division_ready
@@ -1726,13 +1733,33 @@ impl World {
             // Only division changes bodies between the two spill passes.
             phases.spill_capacities[i] = cell.body.capacities();
             phases.spill_capacities.push(daughter.body.capacities());
+            let had_interfaces = cell.adhered_neighbors > 0;
+            // Only an actual division can retain a daughter without recruitment.
+            let parent_signal = CellSignal::from_cell(cell, &genomes[(cell.genome_id - 1) as usize].program);
+            let daughter_signal = CellSignal::from_cell(&daughter, &genomes[(daughter.genome_id - 1) as usize].program);
+            if parent_signal.accepts(daughter_signal)
+                && adhesion::working_contact(&self.environment, cell, &daughter, adhesion::CONTACT_GAP) {
+                self.contacts.insert((cell.id, daughter.id), adhesion::CLONAL);
+                cell.adhered_neighbors += 1;
+                daughter.adhered_neighbors = 1;
+                self.had_adhesive_contacts = true;
+            }
             self.cells.push(daughter);
+            let daughter_row = self.cells.len()-1;
+            if let Some(index) = division_bonds.as_mut() {
+                index.append_daughter(self,i,daughter_row);
+            }
+            if had_interfaces {
+                let index = division_bonds.get_or_insert_with(||adhesion::DivisionBonds::new(self));
+                self.inherit_bond_interfaces(i,daughter_row,genomes,index);
+            }
         }
         // Uneven, discrete compartment inheritance can reduce capacity; transfer
         // overflow to the local environment rather than cloning a compartment.
         self.spill_excess_stores_in(phases, false);
         self.remove_dead_in(phases);
         self.settle_barriers();
+        self.prune_contacts(Some(genomes));
         self.ticks += 1;
         Ok(())
     }
@@ -2657,7 +2684,10 @@ impl World {
         write!(json, ",\"foodPotential\":{{\"body\":{},\"reserve\":{},\"gut\":{},\"atp\":{},\"total\":{}}}",
             potential.body, potential.reserve, potential.gut, potential.atp, potential.total()).unwrap();
         let [energy_net, mineral_net, carbon_net] = c.junction_net;
-        let _ = write!(json, ",\"colony\":{{\"neighbors\":{},\"energyNet\":{energy_net},\"mineralNet\":{mineral_net},\"carbonNet\":{carbon_net}}}", c.adhered_neighbors);
+        let neighbor_ids: Vec<u32> = self.bond_pairs().filter_map(|(a, b)| {
+            if a == id { Some(b) } else if b == id { Some(a) } else { None }
+        }).collect();
+        let _ = write!(json, ",\"colony\":{{\"neighbors\":{},\"neighborIds\":{:?},\"energyNet\":{energy_net},\"mineralNet\":{mineral_net},\"carbonNet\":{carbon_net}}}", neighbor_ids.len(), neighbor_ids);
         let cellular_program = genomes.get((c.genome_id - 1) as usize)
             .and_then(|genome| genome.program.cellular());
         if cellular_program.is_some() || c.body.cellular.is_some() {

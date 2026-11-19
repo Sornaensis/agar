@@ -24,9 +24,9 @@ let expanding = body.area > body.birth_area * 1.6;
 let powered = enough(built.Solar, 0.12) && enough(built.Respiration, 0.04);
 let equipped = powered;
 let surplus = equipped && energy > 55;
-# Each cell asks to adhere to any functioning partner carrying the same marker.
+# Keep a direct daughter at division when both cells have functioning adhesive surfaces.
 publish rf020 = 87;
-adhere_message rf020;
+adhere_message rf020 daughters;
 signal rf021 = 0;
 let paired_contact = sensed.Bus.valid;
 let partners = sensed.Bus.count;

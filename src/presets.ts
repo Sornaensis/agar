@@ -522,7 +522,7 @@ let surplus = equipped && rb061 && energy > min(32, 0.65 * energy.capacity);`;
     behavior = `# After recognizing a producer, build reciprocal junctions for future encounters.
 publish rf090 = 72;
 rf091 = 41;
-adhere_message rf091;
+adhere_message rf091 recruit;
 let docked = sensed.Touch.message_valid && sensed.Touch.message == rf091;
 rb093 = true when docked;
 ${behavior}`;
@@ -530,7 +530,7 @@ ${behavior}`;
     behavior = `# A receptive grazer can share surplus fixed carbon and dissolved minerals.
 publish rf090 = 41;
 rf091 = 72;
-adhere_message rf091;
+adhere_message rf091 recruit;
 ${behavior}`;
   }
   return options.local ? controlledProgram(recipes, `let powered = ${ready};\nlet equipped = ${equipped};\n${surplusRule}\n${behavior}`, options.memory, hunting ? 1.75 : 1.6)
@@ -638,11 +638,11 @@ let shade_feed = sensed.Canopy.valid && (sensed.Canopy.level < 0.35
 let steer = if shade_feed then sin(age * 0.7) * 0.35 else 0;
 let move = if shade_feed && gut.fraction < 0.5 then 0.4 else 0;`;
 
-const colonyContact = (marker: number) => `# Adhesion requires mutually recognized, active adhesive surfaces.
+const colonyContact = (marker: number) => `# Retain a daughter at division using matching markers and active adhesive surfaces.
 publish rf020 = ${marker};
-adhere_message rf020;
-let left_peer = sensed.LeftJunction.message_valid && sensed.LeftJunction.message == rf020;
-let right_peer = sensed.RightJunction.message_valid && sensed.RightJunction.message == rf020;
+adhere_message rf020 daughters;
+let left_peer = sensed.LeftJunction.bonded && sensed.LeftJunction.message_valid && sensed.LeftJunction.message == rf020;
+let right_peer = sensed.RightJunction.bonded && sensed.RightJunction.message_valid && sensed.RightJunction.message == rf020;
 let paired_contact = left_peer || right_peer;`;
 
 const nurseBehavior = `${colonyContact(42)}
@@ -669,9 +669,9 @@ let firing = trigger || ri031 > 162;
 ri031 = if trigger then 180 else if ri031 > 0 then ri031 - 1 else 0;
 rf021 = if firing then 1 else 0;`;
 
-const crownBehavior = `# Each cell asks to adhere to any functioning partner carrying the same marker.
+const crownBehavior = `# Keep a direct daughter at division when both cells have functioning adhesive surfaces.
 publish rf020 = 87;
-adhere_message rf020;
+adhere_message rf020 daughters;
 signal rf021 = 0;
 let paired_contact = sensed.Bus.valid;
 let partners = sensed.Bus.count;

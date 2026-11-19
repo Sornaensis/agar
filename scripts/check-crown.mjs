@@ -19,7 +19,7 @@ for (const [label, program] of [['open',source],['closed',disabled]]) {
   const observation=crownObservation();
   while(state.seconds<360 && !observation.firstSpecialization){
     state=advance(api,60);
-    sampleCrown(api,state,config,observation);
+    sampleCrown(api,state,observation);
   }
   assert.ok(state.births>=2 && observation.maximumAttachedNeighbors>=2,'One founder paid for a multi-contact colony');
   assert.equal(Boolean(observation.firstSpecialization), label==='open');

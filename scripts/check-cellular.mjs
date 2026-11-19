@@ -127,7 +127,7 @@ const pairedGaps = [];
 for (const adhesive of [true, false]) {
   const api = await fresh({ width:400, height:400, ambientLight:0.85, initialNutrients:3,
     gases:{ mode:'open', exchangeRate:0.5 } });
-  const genome = compile(api, adhesive ? colonySource : colonySource.replace('adhere_message rf020;', ''));
+  const genome = compile(api, adhesive ? colonySource : colonySource.replace('adhere_message rf020 daughters;', ''));
   seed(api, genome, 1, 200, 200);
   let state = snapshot(api);
   while (!state.births && state.seconds < 150) state = advance(api, state.cells[0].area < 1.9 ? 30 : 1);
@@ -233,7 +233,7 @@ for (const preset of PRESETS) {
 
   const firstDivisionSeconds = (state.ticks-startTick)/30;
   const bytes = save(api), resumed = await fresh();
-  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 14);
+  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 15);
   assert.equal(restore(resumed, bytes), 1, error(resumed));
   assert.deepEqual(save(resumed), bytes);
   advance(api, 90); advance(resumed, 90);
@@ -249,5 +249,5 @@ for (const preset of PRESETS) {
     firstDivisionSeconds: Math.round(firstDivisionSeconds * 100) / 100, timeLimitSeconds: cycleSeconds });
 }
 
-console.log(`Cellular checks passed: ${PRESETS.length} authored genomes, ${importable.length} importable examples, local receptor separation, bright/shade motor recycling and regrowth, paid development, frozen inspection, resource conservation, whole-machine fission with functioning consumer daughters, gene/placement mutations, and exact v14 continuation.`);
+console.log(`Cellular checks passed: ${PRESETS.length} authored genomes, ${importable.length} importable examples, local receptor separation, bright/shade motor recycling and regrowth, paid development, frozen inspection, resource conservation, whole-machine fission with functioning consumer daughters, gene/placement mutations, and exact v15 continuation.`);
 console.log(JSON.stringify({ conditions: 'One founder in lit water. Consumer trials start beside a finite patch of tissue and exudate from a bloom of 25 Phototrophs grown for 60 seconds and killed by thermal stress. No subsequent inputs.', cycles }));

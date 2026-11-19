@@ -29,7 +29,7 @@ impl World {
             self.eaten as f64,
             self.environment.width,
             self.environment.height,
-            0.0, // Reserved former provision-rate slot.
+            0.0, // Number of sparse outgoing signals appended after particles.
             self.mutation_rate,
             0.0,
         ]);
@@ -81,21 +81,22 @@ impl World {
         );
     }
 
-    /// Sparse visual data follows the ordinary frame. The row index refers to
-    /// the cell in this same snapshot, so it also works after deaths or fission.
+    /// Outgoing signals and physical bonds are separate observations. A signal
+    /// may come from a solitary cell; only the accepted registry supplies links.
     pub(crate) fn append_colony_activity(&self, genomes: &[Genome], target: &mut Vec<f64>) {
-        if !genomes.iter().any(|g| g.program.participates_in_contact_signaling()) {
-            return;
-        }
-        for (index, cell) in self.cells.iter().enumerate() {
-            let program = &genomes[(cell.genome_id - 1) as usize].program;
-            let payload = program.contact_signal(&cell.memory);
-            if cell.adhered_neighbors > 0 || payload.is_some() {
-                target.extend_from_slice(&[
-                    index as f64, cell.adhered_neighbors as f64,
-                    u8::from(payload.is_some()) as f64, payload.unwrap_or(0.0),
-                ]);
+        let mut signal_count = 0;
+        if genomes.iter().any(|g| g.program.participates_in_contact_signaling()) {
+            for (index, cell) in self.cells.iter().enumerate() {
+                let program = &genomes[(cell.genome_id - 1) as usize].program;
+                if let Some(value) = program.contact_signal(&cell.memory) {
+                    target.extend_from_slice(&[index as f64, value]);
+                    signal_count += 1;
+                }
             }
+        }
+        target[9] = signal_count as f64;
+        for (a, b) in self.bond_pairs() {
+            target.extend_from_slice(&[a as f64, b as f64]);
         }
     }
 

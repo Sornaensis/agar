@@ -183,7 +183,7 @@ export async function checkEngineLoader() {
     organicProbe.restoreState(organicSaved); organicProbe.tick(300);
     assert.deepEqual(organicProbe.saveState(), future);
     const current=editorA.saveState();
-    assert.equal(new DataView(current.buffer,current.byteOffset,current.byteLength).getUint32(8,true),14);
+    assert.equal(new DataView(current.buffer,current.byteOffset,current.byteLength).getUint32(8,true),15);
     for (const filename of ['trophic-v1.bin','trophic-v2.bin']) {
       const legacy=new Uint8Array(await readFile(new URL('../engine/fixtures/'+filename,import.meta.url)));
       assert.throws(()=>editorA.restoreState(legacy),/Unsupported simulation version.*preserved/);
@@ -215,7 +215,7 @@ export async function checkEngineLoader() {
     const migrated = await Engine.load();
     migrated.restoreState(historical);
     const upgraded = migrated.saveState();
-    assert.equal(new DataView(upgraded.buffer, upgraded.byteOffset, upgraded.byteLength).getUint32(8,true), 14);
+    assert.equal(new DataView(upgraded.buffer, upgraded.byteOffset, upgraded.byteLength).getUint32(8,true), 15);
     // Canonical public projections recorded on ABI14 from the authentic v9 save.
     // v11 also stores the last exchange counters, so the save layout differs.
     function physicalStateHash(instance, omitHeldEnergy = false) {
@@ -254,7 +254,7 @@ export async function checkEngineLoader() {
     assert.deepEqual(markerOnly.getMemory(2).map(x => [x.name,x.value]), [['rf007',17]]);
     for (const id of [1,2]) {
       assert.equal(markerOnly.getCellEvaluation(id).contactMessages.signal, null);
-      assert.deepEqual(markerOnly.cellBody(id).colony,{neighbors:0,energyNet:0,mineralNet:0,carbonNet:0});
+      assert.deepEqual(markerOnly.cellBody(id).colony,{neighbors:0,neighborIds:[],energyNet:0,mineralNet:0,carbonNet:0});
     }
     // ABI17's import-time physical projections, with retired rate slot 11 zeroed.
     for (const [read, len, width, expected] of [
@@ -279,7 +279,7 @@ export async function checkEngineLoader() {
   } finally {
     globalThis.fetch = originalFetch; WebAssembly.compile = originalCompile;
   }
-  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, version14 body/product/substrate/mechanism/control/environment/gas continuation and explicit atomic rejection of pre-organelle checkpoints.');
+  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, version15 body/product/substrate/mechanism/control/environment/gas continuation and explicit atomic rejection of pre-organelle checkpoints.');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await checkEngineLoader();

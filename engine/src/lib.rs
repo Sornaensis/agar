@@ -127,7 +127,7 @@ thread_local! { static ENGINE: RefCell<Engine> = RefCell::new(Engine::new()); }
 
 #[no_mangle]
 pub extern "C" fn abi_version() -> u32 {
-    18
+    19
 }
 
 /// Allocate a writable, zero-initialized byte buffer. The caller must deallocate
@@ -688,14 +688,14 @@ pub extern "C" fn add_barrier(x:f32,y:f32,length:f32,width:f32,angle:f32,floatin
         if floating>1 {e.error="Floating must be zero or one.".into();return 0;}
         let id=e.world.environment.add_barrier(x as f64,y as f64,length as f64,width as f64,angle as f64,floating!=0);
         if id==0 {e.error="Could not add barrier: use finite values and at most 64 barriers.".into();}
-        else {e.world.settle_barriers();}id})
+        else {e.world.settle_barriers();e.world.prune_contacts(None);}id})
 }
 #[no_mangle]
 pub extern "C" fn update_barrier(id:u32,x:f32,y:f32,length:f32,width:f32,angle:f32,floating:u32)->u32 {
     ENGINE.with(|e|{let mut e=e.borrow_mut();e.error.clear();
         if floating>1 {e.error="Floating must be zero or one.".into();return 0;}
         let ok=e.world.environment.update_barrier(id,x as f64,y as f64,length as f64,width as f64,angle as f64,floating!=0);
-        if !ok {e.error="Unknown barrier or invalid barrier parameters.".into();}else{e.world.settle_barriers();}u32::from(ok)})
+        if !ok {e.error="Unknown barrier or invalid barrier parameters.".into();}else{e.world.settle_barriers();e.world.prune_contacts(None);}u32::from(ok)})
 }
 #[no_mangle]
 pub extern "C" fn remove_barrier(id:u32)->u32 {
@@ -1081,7 +1081,7 @@ mod tests {
         engine.world.cells[0].vy = -1.25;
         engine.world.cells[0].integrity = 0.8;
         engine.world.snapshot(&mut engine.snapshot);
-        assert_eq!(abi_version(), 18);
+        assert_eq!(abi_version(), 19);
         assert_eq!(simulation::CELL_STRIDE, 163);
         assert_eq!(engine.snapshot.len(), 12 + 22 * simulation::CELL_STRIDE);
         assert_eq!(engine.snapshot[7], simulation::WIDTH as f64);

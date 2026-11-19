@@ -1,4 +1,4 @@
-// Same paid, unmodified Phototroph and Predator on both sides of the accounting change.
+// Use the same paid Phototroph and Predator on both sides of the accounting comparison.
 // --baseline path/to/abi16.wasm runs both versions and verifies the paired outcome.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -15,10 +15,13 @@ async function run(file) {
   const { instance } = await WebAssembly.instantiate(bytes, {});
   const api = instance.exports;
   const abi = api.abi_version();
-  assert.ok([16,17,18].includes(abi));
+  assert.ok([16,17,18,19].includes(abi));
   const sha = data => createHash('sha256').update(data).digest('hex');
   const { PRESETS } = await catalog();
-  const source = name => PRESETS.find(preset => preset.name === name).source;
+  // This single-prey assay holds the pre-recruitment genome source constant
+  // so older engines can run the exact same accounting comparison.
+  const source = name => PRESETS.find(preset => preset.name === name).source
+    .replace(/(adhere_message r[if]\d{3}) recruit;/g, '$1;');
   const ok = (status, reason) => assert.ok(status, reason + ' ' + error(api));
   const close = (actual, expected, epsilon = 1e-6) => assert.ok(Math.abs(actual - expected) <= epsilon, `${actual} != ${expected}`);
   const sum = (array, fn) => array.reduce((total, item) => total + fn(item), 0);

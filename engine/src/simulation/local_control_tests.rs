@@ -109,6 +109,7 @@ fn each_requested_receptor_field_matches_complete_inspection() {
     use crate::genome::ReceptorField as F;
     fn bits(input: &ReceptorInput, field: F) -> Vec<u64> {
         let values = match field {
+            F::Bonded => return vec![u64::from(input.bonded)],
             F::Count => return vec![u64::from(input.count)],
             F::Available => return vec![input.available as u64],
             F::Valid => return vec![input.valid as u64],
@@ -132,7 +133,7 @@ fn each_requested_receptor_field_matches_complete_inspection() {
         for &field in F::for_kind(AssemblyKind::Mechanism(kind)) {
             let read = format!("sensed.Probe.{}", field.name());
             let expression = match field {
-                F::Available | F::Valid | F::MessageValid | F::SignalValid => format!("if {read} then 0.1 else 0"),
+                F::Available | F::Valid | F::MessageValid | F::SignalValid | F::Bonded => format!("if {read} then 0.1 else 0"),
                 F::Offset | F::Flow | F::Motion => format!("length({read})"),
                 _ => read,
             };

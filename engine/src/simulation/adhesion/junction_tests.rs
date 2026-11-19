@@ -9,7 +9,7 @@ assembly PoreE: junction(energy) { Wall:0.01; Carrier:0.01; activity:1; }
 assembly PoreM: junction(mineral) { Wall:0.01; Carrier:0.01; activity:1; }
 assembly PoreC: junction(carbon) { Wall:0.01; Carrier:0.01; activity:1; }
 publish rf020 = 31;
-adhere_message rf020;
+adhere_message rf020 recruit;
 "#;
 
 fn close(a: f64, b: f64) {
@@ -44,6 +44,7 @@ fn colony_with(positions: &[(f64, f64)], source: &str) -> (World, Vec<Genome>) {
         let cell = &mut world.cells[i];
         (cell.x, cell.y) = (x, y);
     }
+    advance_contact_phases(&mut world, &genomes, MATURE-1);
     (world, genomes)
 }
 
@@ -238,11 +239,16 @@ fn fission_keeps_the_parents_completed_exchange_and_starts_the_daughter_at_zero(
     close(parent.structural_enrichment + daughter.structural_enrichment, 1.0);
     close(parent.structural_enrichment / parent.body.structural_mass(),
         daughter.structural_enrichment / daughter.body.structural_mass());
-    assert_eq!((parent.adhered_neighbors, peer.adhered_neighbors), (1,1));
+    // This fixture has only one glue assembly to partition. Its completed
+    // transfer remains the parent's, even if that interface moved or broke.
+    assert!(!working_contact(&world.environment,parent,daughter,CONTACT_GAP));
+    let stays=working_contact(&world.environment,parent,peer,RELEASE_GAP);
+    let handed_over=!stays && working_contact(&world.environment,daughter,peer,RELEASE_GAP);
+    assert_eq!((parent.adhered_neighbors,peer.adhered_neighbors,daughter.adhered_neighbors),
+        (u32::from(stays),u32::from(stays || handed_over),u32::from(handed_over)));
     assert!(parent.junction_net[0] < 0.0);
     assert_eq!(peer.junction_net[0],-parent.junction_net[0]);
-    assert_eq!((daughter.parent_id,daughter.adhered_neighbors,daughter.junction_net),
-        (parent.id,0,[0.0;3]));
+    assert_eq!((daughter.parent_id,daughter.junction_net),(parent.id,[0.0;3]));
 }
 
 #[test]
@@ -262,4 +268,96 @@ fn isolated_peers_allocate_no_transfer_account_and_dead_neighbors_drop_out() {
     assert_eq!(phases.junctions.accounts.len(),0);
     assert!(!world.had_adhesive_contacts);
     assert!(world.cells.iter().all(|c| c.adhered_neighbors == 0 && c.junction_net == [0.0;3]));
+}
+
+#[test]
+fn save_one_tick_before_recruitment_and_reject_invalid_bond_state() {
+    let (mut world, genomes) = colony(&[(100.0,100.0),(114.0,100.0)]);
+    world.spill_excess_stores_in(&mut PhaseWorkspace::default(),true);
+    assert_eq!(world.contacts.get(&(1,2)),Some(&(MATURE-1)));
+    let mut engine=crate::Engine::new();
+    engine.genomes=genomes; engine.world=world;
+    let pending=checkpoint::save(&engine).unwrap();
+    let mut restored=checkpoint::restore(&pending).unwrap();
+    assert_eq!(checkpoint::save(&restored).unwrap(),pending);
+    for e in [&mut engine,&mut restored] {
+        phase(&mut e.world,&e.genomes);
+        assert_eq!(e.world.bond_pairs().collect::<Vec<_>>(),[(1,2)]);
+    }
+    assert_eq!(checkpoint::save(&restored).unwrap(),checkpoint::save(&engine).unwrap());
+    for (key,ticks) in [((1,2),0),((1,2),MATURE+1),((2,1),MATURE),((1,999),MATURE)] {
+        restored.world.contacts.clear();
+        restored.world.contacts.insert(key,ticks);
+        assert!(checkpoint::restore(&checkpoint::save(&restored).unwrap()).is_err());
+    }
+    engine.world.cells[0].adhered_neighbors=0;
+    assert!(checkpoint::restore(&checkpoint::save(&engine).unwrap()).is_err());
+}
+
+#[test]
+fn fission_passes_one_existing_interface_to_the_touching_daughter_and_persists_it() {
+    let daughters=CHANNELS.replace("rf020 recruit;","rf020 daughters;");
+    let (mut world, genomes)=colony_with(&[(200.0,200.0),(228.2,200.0),(214.0,200.0),(214.0,214.0)],&daughters);
+    // Two daughters of the same living mother. After a second split the new
+    // daughter occupies the mother's old interface; the other neighbor is
+    // an unrelated founder with identical machinery and public identity.
+    for cell in &mut world.cells[1..3] { cell.parent_id=1;cell.generation=1; }
+    world.contacts.insert((1,2),CLONAL);
+    world.contacts.insert((1,3),CLONAL);
+    world.recount_bonds();
+    let mut index=DivisionBonds::new(&world);
+    world.inherit_bond_interfaces(0,2,&genomes,&mut index);
+    world.prune_contacts(Some(&genomes));
+    assert_eq!(world.bond_pairs().collect::<Vec<_>>(),[(1,3),(2,3)]);
+    assert_eq!(world.cells.iter().map(|c|c.adhered_neighbors).collect::<Vec<_>>(),[1,1,2,0]);
+    world.spill_excess_stores_in(&mut PhaseWorkspace::default(),true);
+    let mut engine=crate::Engine::new();
+    engine.world=world;engine.genomes=genomes;
+    let bytes=checkpoint::save(&engine).unwrap();
+    let mut restored=checkpoint::restore(&bytes).unwrap();
+    assert_eq!(checkpoint::save(&restored).unwrap(),bytes);
+    for _ in 0..10 {
+        engine.world.step(&mut engine.genomes);
+        restored.world.step(&mut restored.genomes);
+    }
+    assert_eq!(checkpoint::save(&restored).unwrap(),checkpoint::save(&engine).unwrap());
+}
+
+#[test]
+fn recruited_interface_handoff_requires_matching_recruiter_hardware_on_the_new_half() {
+    let (mut world,mut genomes)=colony(&[(200.0,200.0),(228.2,200.0),(214.0,200.0)]);
+    let source=genomes[0].source.replace("rf020 recruit;","rf020 daughters;");
+    genomes.push(Genome::new(source.clone(),Program::compile(&source).unwrap(),0,0));
+    world.cells[2].genome_id=2;
+    world.contacts.clear();world.contacts.insert((1,2),MATURE);
+    world.recount_bonds();
+    let mut index=DivisionBonds::new(&world);
+    world.inherit_bond_interfaces(0,2,&genomes,&mut index);
+    world.prune_contacts(Some(&genomes));
+    assert_eq!(world.bond_pairs().count(),0);
+    world.cells[2].genome_id=1;
+    world.contacts.insert((1,2),MATURE);
+    world.recount_bonds();
+    let mut index=DivisionBonds::new(&world);
+    world.inherit_bond_interfaces(0,2,&genomes,&mut index);
+    assert_eq!(world.contacts.get(&(2,3)),Some(&MATURE));
+}
+
+#[test]
+fn two_adjacent_parents_dividing_in_one_tick_handoff_the_same_interface_only_once_each() {
+    let (mut world,genomes)=colony(&[(200.0,200.0),(228.2,200.0),(214.0,200.0)]);
+    world.contacts.clear();
+    world.contacts.insert((1,2),MATURE);
+    world.recount_bonds();
+    let mut index=DivisionBonds::new(&world);
+    world.inherit_bond_interfaces(0,2,&genomes,&mut index);
+    assert_eq!(world.bond_pairs().collect::<Vec<_>>(),[(2,3)]);
+    let mut fourth=world.cells[1].clone();
+    fourth.id=4; fourth.parent_id=2; fourth.adhered_neighbors=0;
+    world.cells[1].x=242.5;
+    world.cells.push(fourth);
+    index.append_daughter(&world,1,3);
+    world.inherit_bond_interfaces(1,3,&genomes,&mut index);
+    assert_eq!(world.bond_pairs().collect::<Vec<_>>(),[(3,4)]);
+    assert_eq!(world.cells.iter().map(|c|c.adhered_neighbors).collect::<Vec<_>>(),[0,0,1,1]);
 }

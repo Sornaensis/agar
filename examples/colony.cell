@@ -25,11 +25,11 @@ let expanding = body.area > body.birth_area * 1.6;
 let powered = enough(built.Solar, 0.12) && enough(built.Respiration, 0.04);
 let equipped = powered;
 let surplus = equipped && energy > 55;
-# Adhesion requires mutually recognized, active adhesive surfaces.
+# Retain a daughter at division using matching markers and active adhesive surfaces.
 publish rf020 = 31;
-adhere_message rf020;
-let paired_contact = (sensed.LeftJunction.message_valid && sensed.LeftJunction.message == rf020)
-  || (sensed.RightJunction.message_valid && sensed.RightJunction.message == rf020);
+adhere_message rf020 daughters;
+let paired_contact = (sensed.LeftJunction.bonded && sensed.LeftJunction.message_valid && sensed.LeftJunction.message == rf020)
+  || (sensed.RightJunction.bonded && sensed.RightJunction.message_valid && sensed.RightJunction.message == rf020);
 # A connected producer builds extra energy storage from its own material.
 
 let need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);

@@ -405,7 +405,7 @@ export class GenomeVisualizer {
       if (node.label === policy.publish) descriptions.push('Publishes its occupied scalar to contacting cells.' + (policy.initial === null ? '' : ` Starts at ${policy.initial} at birth.`));
       if (node.label === policy.signal) descriptions.push('Publishes a separate contact signal.' + (policy.signalInitial === null ? '' : ` Starts at ${policy.signalInitial} at birth.`));
       if (node.label === policy.avoid) descriptions.push('Avoids attacking candidates that publish this occupied value.');
-      if (node.label === policy.adhere) descriptions.push('Accepts neighbors that publish this occupied value for mutual adhesion.');
+      if (node.label === policy.adhere) descriptions.push(policy.formation==='recruit' ? 'Accepts this marker at division and during reciprocal recruitment on contact.' : 'Accepts this marker for retaining a daughter at division.');
       if (descriptions.length) this.details.append(element('p', '', descriptions.join(' ')));
     }
     const literals=element('div','graph-literals');

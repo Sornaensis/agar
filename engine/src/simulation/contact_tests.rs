@@ -295,7 +295,7 @@ assembly Piercer: pierce() { Mount:0.01; Tail:0.03; Catalyst:0.01; }
 const PORT: &str = r#"
 assembly Glue: adhere() { Mount:0.01; Wall:0.01; }
 assembly Bus: junction(signal) { Detector:0.01; Wall:0.01; }
-publish rf001=83; adhere_message rf001;
+publish rf001=83; adhere_message rf001 recruit;
 signal rf003=0;
 rf006=sensed.Bus.count; rb005=sensed.Bus.valid; rf004=sensed.Bus.value;
 "#;
@@ -329,6 +329,7 @@ fn signal_junction_averages_only_attached_paid_publishers_and_accepts_zero() {
         place(&mut peer, 200.0 + offset[0], 200.0 + offset[1], PI);
         world.cells.push(peer);
     }
+    adhesion::advance_contact_phases(&mut world,&genomes,adhesion::MATURE);
     let sample = |w:&World| { let read=read_bus(w,&genomes,1); (read.available,read.valid,read.count,read.value) };
     assert_eq!(sample(&world),(true,true,3,2.0)); // Occupied zero contributes; the fourth port is silent.
     let block = world.environment.add_barrier(207.1,200.0,20.0,10.0,PI*0.5,false);
@@ -357,6 +358,7 @@ fn signal_junction_relays_one_frozen_hop_per_tick() {
         place(cell,200.0 + i as f64 * 14.2,200.0,0.0);
         genomes[(cell.genome_id-1) as usize].program.initialize_message(&mut cell.memory);
     }
+    adhesion::advance_contact_phases(&mut world,&genomes,adhesion::MATURE);
     for expected in [[8.0,0.0,0.0],[8.0,4.0,0.0],[8.0,4.0,4.0]] {
         world.step(&mut genomes);
         for (i,value) in expected.iter().enumerate() {
@@ -365,4 +367,28 @@ fn signal_junction_relays_one_frozen_hop_per_tick() {
         }
         world.cells.reverse();
     }
+}
+
+
+#[test]
+fn touch_reports_only_the_confirmed_bond_to_the_selected_surface() {
+    let (mut world, genomes) = equipped(&format!("{TOUCH}
+        assembly Glue: adhere() {{ Mount:0.01; Wall:0.01; }}
+        publish rf020=41; adhere_message rf020 recruit; rb101=sensed.Touch.bonded;"));
+    place(&mut world.cells[0],100.0,100.0,0.0);
+    genomes[0].program.initialize_message(&mut world.cells[0].memory);
+    let mut partner=world.cells[0].clone();
+    partner.id=world.next_id; world.next_id+=1;
+    partner.x=114.5; world.cells.push(partner);
+    let first=read_touch(&world,&genomes,1);
+    assert!(first.valid && first.message_valid && !first.bonded);
+    adhesion::advance_contact_phases(&mut world,&genomes,adhesion::MATURE);
+    assert!(read_touch(&world,&genomes,1).bonded);
+    // A closer newly arrived cell has the very same public identity.
+    let mut stranger=world.cells[1].clone();
+    stranger.id=world.next_id; world.next_id+=1;
+    stranger.x=114.0; stranger.adhered_neighbors=0; world.cells.push(stranger);
+    let read=read_touch(&world,&genomes,1);
+    assert!(read.valid && read.message_valid && !read.bonded);
+    assert_eq!(read.message,41.0);
 }

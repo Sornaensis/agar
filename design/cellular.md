@@ -133,11 +133,16 @@ rf002 = sensed.Touch.message when sensed.Touch.message_valid;
 | `publish rf001 = 17;` | Initializes the cell’s outbound scalar to 17 at birth. Assigning or clearing it later changes what neighbors can read next tick. Omit the initializer to begin silent. |
 | `avoid_message rf001;` | Excludes a potential victim when its occupied publication equals this cell’s occupied selector. Piercing, biting and engulfment check each reachable candidate individually. |
 | `signal rf021 = 0;` | Exposes a separate scalar payload on contact. An optional initial value applies at birth. Assignments and clears take effect on the next contact sample. |
-| `adhere_message rf020;` | Selects the publication this cell will adhere to. Both partners must accept one another and have active, completed adhesive machinery. |
+| `adhere_message rf020 daughters;` | Retains a matching daughter at division when both cells have functional adhesion surfaces. Omitting the modifier selects this mode. |
+| `adhere_message rf020 recruit;` | Also permits a new bond on encounter. Both partners must declare recruitment and each must accept the other’s published marker. |
 
 Each declaration accepts one scalar address. The recognition marker and signal payload have distinct addresses. Each can be used independently. All other slots are private. A working named contact receptor reports `message_valid` and `message` for its particular contact. Particles, silent cells and missing contacts return false and zero. A cell publishing zero returns true and zero. All cells exchange values from the same start-of-tick snapshot. The same receptor reports an independently valid payload through `signal_valid` and `signal` for that very same contact. A daughter initializes any declared marker and signal from its inherited program. Other registers start empty. Restoring a world preserves the actual registers, including a cleared publication.
 
-**Predator** uses marker 17. Its motors turn away from recognized peers, and each weapon checks its actual victim independently. Unrelated programs can copy that marker. **Colony phototroph** publishes and accepts marker 31, builds `adhere()` from membrane and anchor material, and requests extra energy storage when its contact receptor recognizes a neighbor. Within one surface-gap unit, the weaker active adhesive surface limits the impulse that resists separation and sliding. Walls block coupling, and loss of contact, activity or reciprocal recognition releases the pair. Each member retains its own resources, genome and lifecycle. [Colony program](../examples/colony.cell)
+**Predator** uses marker 17 for attack avoidance. Any program can publish that marker. A contact receptor’s boolean `sensed.Touch.bonded` reports whether the particular cell it touches is a direct physical partner. A particle, barrier, unrelated neighbor or missing contact gives false. The marker and payload remain readable from a functioning contact receptor before a bond forms.
+
+[Colony phototroph](../examples/colony.cell) publishes marker 31, builds `adhere()` from membrane and anchor material, and retains daughters. Its two contact receptors check for a direct bonded partner before it builds additional storage. When a bonded cell divides, an existing interface can follow the daughter that remains against the original neighbor, provided both still have compatible, working adhesive surfaces. [Forager](../examples/forager.cell) and [Phototroph](../examples/phototroph.cell) instead permit encounter recruitment with complementary markers 72 and 41. Each cell still supplies its own adhesive surface. Resource transfer requires working junctions on both ends.
+
+The daughter-retention route models clonal growth observed in the choanoflagellate *Salpingoeca rosetta*. The recruitment timer is a simulation parameter. [Fairclough, Dayel and King, 2010](https://pmc.ncbi.nlm.nih.gov/articles/PMC2978077/)
 
 ### Exchange across an attached pair
 
@@ -161,7 +166,7 @@ The pair needs reciprocal adhesion and a completed, active junction of the same 
 
 The fractional imbalance and the weaker side’s active mass limit the amount on each connection. All of a cell’s connections share its throughput for that resource. The exchange uses starting inventories for every pair in the phase. Material received in a tick can travel farther through the colony on a later tick. Closing a junction stops that resource exchange while adhesion and signaling can continue. The Body inspector records each cell’s net change in the last exchange. Separate production, respiration and spending still run for each cell.
 
-**Nurse rosette** uses its recognition marker for attachment and its signal register for a juvenile request. **Pulse swimmer** uses the same language features for an excitable motor response with a refractory interval. Both programs grow their own machinery from the same founding body. [Nurse rosette](../examples/nurse-rosette.cell) · [Pulse swimmer](../examples/pulse-swimmer.cell)
+**Nurse rosette** and **Pulse swimmer** retain daughters. Their left and right receptors require the measured cell to be a direct bonded partner before a juvenile request or relay pulse can change their behavior. The swimmer’s refractory interval separates successive pulses. Both programs grow their own machinery from the same founding body. [Nurse rosette](../examples/nurse-rosette.cell) · [Pulse swimmer](../examples/pulse-swimmer.cell)
 
 A named `junction(signal)` uses membrane and receptor material. Both cells must be attached and operate signal junctions. For a junction named `Bus`, `sensed.Bus.count` counts directly attached partners with a populated signal register, and `sensed.Bus.value` gives their arithmetic mean. An occupied zero contributes to the mean. With no contributing partners, `sensed.Bus.valid` is false, and count and value are zero. Each cell reads the same start-of-tick publications, so a relay needs a new tick for each hop.
 
@@ -213,7 +218,7 @@ nearby surfaces and relative flow at their attachment point.
 | `sense(light)` | `level` (`light` is an alias) |
 | `sense(heat)` | `value` |
 | `sense(chemical)` | `mineral`, `organic` |
-| `sense(contact)` | `offset`, `pressure`, `resistance`, `flow`, `speed`, `bearing` |
+| `sense(contact)` | `offset`, `pressure`, `resistance`, `flow`, `speed`, `bearing`, `message_valid`, `message`, `signal_valid`, `signal`, `bonded` |
 | `sense(optical)` | `offset`, `area`, `contrast`, `pigment`, `motion` |
 
 Offsets, flow and motion are vectors in body coordinates; observation offsets

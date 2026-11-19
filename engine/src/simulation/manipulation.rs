@@ -42,7 +42,7 @@ impl World {
             .ok_or_else(|| "This organism is no longer alive.".into())
     }
 
-    pub fn move_cell(&mut self, id: u32, x: f64, y: f64, colony: bool, genomes: &[Genome]) -> Result<u32, String> {
+    pub fn move_cell(&mut self, id: u32, x: f64, y: f64, colony: bool, _genomes: &[Genome]) -> Result<u32, String> {
         let seed = self.living_index(id)?;
         let destination = self.edit_point(x, y)?;
         let origin = (self.cells[seed].x, self.cells[seed].y);
@@ -59,20 +59,20 @@ impl World {
         let mut selected = vec![false; self.cells.len()];
         selected[seed] = true;
         let mut bonds = Vec::new();
-        if colony {
-            let mut signals = Vec::new();
-            self.freeze_contact_signals(genomes, &mut signals);
-            if !signals.is_empty() {
-                let mut cursor = 0;
-                while cursor < group.len() {
-                    let i = group[cursor];
-                    cursor += 1;
-                    let cell = &self.cells[i];
-                    for j in grid.nearby_radius(cell.x, cell.y, largest + cell.radius() + adhesion::CONTACT_GAP) {
-                        if i == j || !adhesion::bonded(&self.environment, cell, &self.cells[j], signals[i], signals[j]) { continue; }
-                        if i < j { bonds.push((i, j)); }
-                        if !selected[j] { selected[j] = true; group.push(j); }
-                    }
+        if colony && !self.contacts.is_empty() {
+            let rows: std::collections::HashMap<_,_> = self.cells.iter().enumerate().map(|(i,c)|(c.id,i)).collect();
+            let mut adjacency = std::collections::HashMap::<usize,Vec<usize>>::new();
+            for (a,b) in self.bond_pairs() {
+                let (i,j)=(rows[&a],rows[&b]);
+                adjacency.entry(i).or_default().push(j);
+                adjacency.entry(j).or_default().push(i);
+            }
+            let mut cursor=0;
+            while cursor < group.len() {
+                let i=group[cursor]; cursor+=1;
+                for &j in adjacency.get(&i).into_iter().flatten() {
+                    if i < j { bonds.push((i,j)); }
+                    if !selected[j] { selected[j]=true; group.push(j); }
                 }
             }
         }
@@ -94,34 +94,26 @@ impl World {
                 return Err("A barrier would separate attached organisms at this location.".into());
             }
         }
-        // A single-body edit can break the last observed exchange. Discard its
-        // historical contact indicators and those of former local peers so a
-        // paused frame cannot show a remote bond. A rigidly moved component
-        // retains the transfers that actually occurred between its members.
-        if !colony {
-            self.invalidate_local_exchange(seed, grid.nearby_radius(origin.0, origin.1,
-                largest + self.cells[seed].radius() + adhesion::CONTACT_GAP));
+        // Teleporting an endpoint breaks its contact history with every
+        // stationary peer. A rigidly translated group keeps its internal edges.
+        if !self.contacts.is_empty() {
+            let moved: std::collections::HashSet<_> = group.iter().map(|&i|self.cells[i].id).collect();
+            let mut detached=std::collections::HashSet::new();
+            self.contacts.retain(|&(a,b),ticks|{
+                let keep=moved.contains(&a)==moved.contains(&b);
+                if !keep && *ticks>=adhesion::MATURE { detached.insert(a);detached.insert(b); }
+                keep
+            });
+            if !detached.is_empty() {
+                for c in &mut self.cells { if detached.contains(&c.id) { c.junction_net=[0.0;3]; } }
+                self.recount_bonds();
+            }
         }
         for (i, (x, y)) in group.iter().copied().zip(positions) {
             self.cells[i].x = x;
             self.cells[i].y = y;
         }
         Ok(group.len() as u32)
-    }
-
-    fn invalidate_local_exchange(&mut self, seed: usize, nearby: impl Iterator<Item = usize>) {
-        let source = &self.cells[seed];
-        if source.adhered_neighbors == 0 { return; }
-        let (x, y, radius) = (source.x, source.y, source.radius());
-        for i in nearby {
-            let cell = &mut self.cells[i];
-            let dx = delta(cell.x - x, self.environment.width);
-            let dy = delta(cell.y - y, self.environment.height);
-            if cell.adhered_neighbors != 0 && dx.hypot(dy) <= radius + cell.radius() + adhesion::CONTACT_GAP {
-                cell.adhered_neighbors = 0;
-                cell.junction_net = [0.0; 3];
-            }
-        }
     }
 
     pub fn set_cell_stores(&mut self, id: u32, energy: Option<f64>, minerals: Option<f64>) -> Result<(), String> {
@@ -156,8 +148,8 @@ impl World {
         }
         if !cell.alive() {
             // Removal, gas release and carcass formation use the ordinary lifecycle.
-            self.invalidate_local_exchange(i, 0..self.cells.len());
             self.remove_dead_in(&mut PhaseWorkspace::default());
+            self.prune_contacts(None);
         }
         Ok(())
     }
@@ -199,7 +191,7 @@ mod tests {
 
     #[test]
     fn moves_connected_component_across_seams_and_rejects_any_blocked_member() {
-        let (mut world, genomes) = equipped("assembly Glue: adhere() { Mount:0.01; Wall:0.01; }\npublish rf020 = 31; adhere_message rf020;");
+        let (mut world, genomes) = equipped("assembly Glue: adhere() { Mount:0.01; Wall:0.01; }\npublish rf020 = 31; adhere_message rf020 recruit;");
         genomes[0].program.initialize_message(&mut world.cells[0].memory);
         world.cells[0].x = WIDTH - 13.0;
         world.cells[0].y = 50.0;
@@ -210,6 +202,7 @@ mod tests {
             member.x = x;
             world.cells.push(member);
         }
+        adhesion::advance_contact_phases(&mut world,&genomes,adhesion::MATURE);
         let pts = |w:&World| w.cells.iter().map(|c|(c.x,c.y)).collect::<Vec<_>>();
         assert_eq!(world.move_cell(2,10.0,101.0,true,&genomes).unwrap(),3);
         assert_eq!(pts(&world),vec![(WIDTH-4.5,101.0),(10.0,101.0),(24.5,101.0),(60.0,50.0)]);

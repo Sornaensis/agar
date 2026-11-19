@@ -36,7 +36,7 @@ let surplus = equipped && rb061 && energy > min(32, 0.65 * energy.capacity);
 # After recognizing a producer, build reciprocal junctions for future encounters.
 publish rf090 = 72;
 rf091 = 41;
-adhere_message rf091;
+adhere_message rf091 recruit;
 let docked = sensed.Touch.message_valid && sensed.Touch.message == rf091;
 rb093 = true when docked;
 # Swing around hard obstacles and stay near edible particles.

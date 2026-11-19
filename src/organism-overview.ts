@@ -44,7 +44,7 @@ function feeding(cell: Cell): string {
 export function updateOrganismOverview(root: HTMLElement, cell: Cell, visible?: RenderCell, food?: FoodPotential): void {
   const values: Record<string, string> = {
     feeding: feeding(cell), age: clock(cell.age), maturity: cell.divisionReady ? 'Ready to divide' : percent(cell.maturity),
-    attachment: visible?.attachedNeighbors ? `${visible.attachedNeighbors} attached neighbor${visible.attachedNeighbors === 1 ? '' : 's'}` : 'Free-living',
+    attachment: !visible ? 'Unavailable' : visible.colonySize ? `${visible.colonySize}-cell colony · bonded to ${visible.neighborIds!.map(id=>'#'+id).join(', ')}` : 'Unattached',
     signal: visible?.contactSignal === undefined ? '' : precise(visible.contactSignal),
     area: precise(cell.bodyArea), mass: precise(cell.bodyMass), growth: precise(cell.growthRate), upkeep: precise(cell.basalMetabolism+cell.memoryCost),
     digestion: precise(cell.digestionRate), fixation: precise(cell.carbonFixationRate), respiration: precise(cell.respirationRate),

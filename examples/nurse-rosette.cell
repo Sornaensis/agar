@@ -25,11 +25,11 @@ let expanding = body.area > body.birth_area * 1.6;
 let powered = enough(built.Solar, 0.12) && enough(built.Respiration, 0.04);
 let equipped = powered;
 let surplus = equipped && energy > 55;
-# Adhesion requires mutually recognized, active adhesive surfaces.
+# Retain a daughter at division using matching markers and active adhesive surfaces.
 publish rf020 = 42;
-adhere_message rf020;
-let left_peer = sensed.LeftJunction.message_valid && sensed.LeftJunction.message == rf020;
-let right_peer = sensed.RightJunction.message_valid && sensed.RightJunction.message == rf020;
+adhere_message rf020 daughters;
+let left_peer = sensed.LeftJunction.bonded && sensed.LeftJunction.message_valid && sensed.LeftJunction.message == rf020;
+let right_peer = sensed.RightJunction.bonded && sensed.RightJunction.message_valid && sensed.RightJunction.message == rf020;
 let paired_contact = left_peer || right_peer;
 # Young cells ask their partners for support. Age runs from each cell's own birth.
 signal rf021;

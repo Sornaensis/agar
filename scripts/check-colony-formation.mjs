@@ -1,0 +1,84 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { advance, body, catalog, compile, error, fresh, restore, save, snapshot } from './organelle-harness.mjs';
+
+const { BUILTIN_ENVIRONMENTS, PRESETS } = await catalog();
+const pool = BUILTIN_ENVIRONMENTS.find(env => env.id.endsWith(':colony-pool')).config;
+const nurse = PRESETS.find(genome => genome.name === 'Nurse rosette').source;
+const recruit = nurse.replace('adhere_message rf020 daughters;', 'adhere_message rf020 recruit;');
+assert.notEqual(nurse, recruit);
+
+const degree = (api, id) => body(api, id).colony.neighbors;
+function hasSurface(api, id) {
+  return body(api, id).cellular.assemblies.some(machine =>
+    machine.name === 'Adhesin' && machine.complete && machine.functionalMass * machine.activity > 0);
+}
+function placeBeside(api) {
+  const [a,b] = snapshot(api).cells;
+  assert.equal(api.move_cell(b.id, a.x + a.radius + b.radius + 0.05, a.y, 0), 1, error(api));
+}
+async function growIndependent(first, second) {
+  const api = await fresh({ ...pool, seed:42, mutationRate:0 });
+  assert.equal(api.place_cell(compile(api, first),160,180),1,error(api));
+  assert.equal(api.place_cell(compile(api, second),270,180),2,error(api));
+  let state = snapshot(api);
+  while (state.seconds < 80 && !state.cells.every(cell => hasSurface(api, cell.id))) state = advance(api, 5);
+  assert.equal(state.population,2);
+  assert.ok(state.cells.every(cell => cell.parentId === 0 && hasSurface(api, cell.id)));
+  placeBeside(api);
+  return api;
+}
+
+for (const [label, first, second, expected] of [
+  ['Independent Nurse founders', nurse, nurse, false],
+  ['One recruitment offer', recruit, nurse, false],
+  ['Two recruitment offers', recruit, recruit, true],
+]) {
+  const api = await growIndependent(first,second);
+  let bondedTicks = 0, firstBond = null;
+  for (let tick = 1; tick <= 60; tick++) {
+    const { cells:[a,b] } = advance(api,1);
+    assert.ok(Math.hypot(a.x-b.x,a.y-b.y) <= a.radius+b.radius+1, 'The founders remained in physical contact');
+    const neighbors = degree(api,a.id);
+    assert.equal(degree(api,b.id),neighbors);
+    assert.equal(neighbors, expected && tick >= 15 ? 1 : 0);
+    if (neighbors) { firstBond ??= tick; bondedTicks++; }
+  }
+  assert.equal(api.move_cell(1,120,120,1),expected ? 2 : 1,error(api));
+  console.log(label,{firstBond,bondedTicks});
+}
+
+// An interrupted encounter cannot use contact time accrued before separation.
+// Restore a pending pair and confirm that it completes on the same next tick.
+const offered = await growIndependent(recruit,recruit);
+advance(offered,10);
+assert.equal(offered.move_cell(2,270,180,0),1,error(offered));
+advance(offered,1);
+placeBeside(offered);
+advance(offered,14);
+assert.equal(degree(offered,1),0);
+const pending = save(offered), replay = await fresh();
+assert.equal(restore(replay,pending),1,error(replay));
+for (const api of [offered,replay]) {
+  advance(api,1);
+  assert.equal(degree(api,1),1);
+}
+assert.deepEqual(save(offered),save(replay));
+console.log('Interrupted recruitment restarts; checkpointed recruitment resumes on the same tick.');
+
+// These ABI 18 fixtures both recorded a degree of one at both endpoints.
+for (const [file, expected] of [['independent-founders-v14.bin',0], ['family-v14.bin',1]]) {
+  const api = await fresh();
+  const old = await readFile(new URL('../engine/fixtures/' + file,import.meta.url));
+  assert.equal(old.readUInt32LE(8),14);
+  assert.equal(restore(api,old),1,error(api));
+  assert.equal(degree(api,1),expected);
+  assert.equal(degree(api,2),expected);
+  const upgraded = save(api), copy = await fresh();
+  assert.equal(new DataView(upgraded.buffer).getUint32(8,true),15);
+  assert.equal(restore(copy,upgraded),1,error(copy));
+  advance(api,1); advance(copy,1);
+  assert.equal(degree(api,1),expected);
+  assert.deepEqual(save(api),save(copy));
+}
+console.log('Legacy checkpoints preserve the corroborated family bond and release the independently placed founders.');

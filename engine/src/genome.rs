@@ -88,6 +88,7 @@ pub struct ReceptorInput {
     pub message_valid: bool,
     pub message: f64,
     pub signal_valid: bool,
+    pub bonded: bool,
     pub count: u32,
     pub signal: f64,
     pub flow: [f64; 2],
@@ -123,9 +124,10 @@ pub enum ReceptorField {
     SignalValid,
     Signal,
     Count,
+    Bonded,
 }
 impl ReceptorField {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::Available,
         Self::Valid,
         Self::Level,
@@ -147,6 +149,7 @@ impl ReceptorField {
         Self::SignalValid,
         Self::Signal,
         Self::Count,
+        Self::Bonded,
     ];
     pub fn name(self) -> &'static str {
         [
@@ -171,6 +174,7 @@ impl ReceptorField {
             "signal_valid",
             "signal",
             "count",
+            "bonded",
         ][self as usize]
     }
     pub fn for_kind(kind: AssemblyKind) -> &'static [Self] {
@@ -189,7 +193,7 @@ impl ReceptorField {
             | AssemblyKind::Organelle(O::Chemoreceptor) => &[Available, Valid, Mineral, Organic],
             AssemblyKind::Mechanism(M::SenseContact)
             | AssemblyKind::Organelle(O::Mechanoreceptor) => &[
-                Available, Valid, Offset, Pressure, Resistance, Flow, Speed, Bearing, MessageValid, Message, SignalValid, Signal,
+                Available, Valid, Offset, Pressure, Resistance, Flow, Speed, Bearing, MessageValid, Message, SignalValid, Signal, Bonded,
             ],
             AssemblyKind::Mechanism(M::SenseOptical) | AssemblyKind::Organelle(O::Optical) => {
                 &[Available, Valid, Offset, Area, Contrast, Pigment, Motion]
@@ -205,7 +209,7 @@ impl ReceptorField {
     }
     fn ty(self) -> Type {
         match self {
-            Self::Available | Self::Valid | Self::MessageValid | Self::SignalValid => Type::Bool,
+            Self::Available | Self::Valid | Self::MessageValid | Self::SignalValid | Self::Bonded => Type::Bool,
             Self::Offset | Self::Flow | Self::Motion => Type::Vector,
             _ => Type::Number,
         }
@@ -226,6 +230,7 @@ impl ReceptorField {
             return Value::zero(self.ty());
         }
         match self {
+            Self::Bonded => Value::Boolean(input.bonded),
             Self::SignalValid => Value::Boolean(input.signal_valid),
             Self::Signal => Value::Scalar(if input.signal_valid { finite(input.signal) } else { 0.0 }),
             Self::MessageValid => Value::Boolean(input.message_valid),

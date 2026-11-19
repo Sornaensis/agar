@@ -6,6 +6,7 @@ pub(super) struct CellSignal {
     pub(super) signal: Option<f64>,
     pub(super) avoid: Option<f64>,
     pub(super) adhesion: Option<f64>,
+    pub(super) recruits: bool,
 }
 
 /// Both sides must supply occupied values. A stored zero is a valid signal.
@@ -13,6 +14,23 @@ pub(super) fn avoids_contact(signals: &[CellSignal], actor: usize, candidate: us
     signals.get(actor).and_then(|signal| signal.avoid).is_some_and(|local| {
         signals[candidate].published == Some(local)
     })
+}
+
+impl CellSignal {
+    pub(super) fn from_cell(cell: &Cell, program: &Program) -> Self {
+        Self {
+            published: program.published_message(&cell.memory),
+            signal: program.contact_signal(&cell.memory),
+            avoid: program.avoid_message(&cell.memory),
+            adhesion: program.adhesion_message(&cell.memory),
+            recruits: program.recruits_contacts(),
+        }
+    }
+
+    pub(super) fn accepts(self, peer: Self) -> bool {
+        self.adhesion.is_some() && self.adhesion == peer.published
+            && peer.adhesion.is_some() && peer.adhesion == self.published
+    }
 }
 
 impl World {
@@ -25,12 +43,7 @@ impl World {
         }
         target.extend(self.cells.iter().map(|cell| {
             let program = &genomes[(cell.genome_id - 1) as usize].program;
-            CellSignal {
-                published: program.published_message(&cell.memory),
-                signal: program.contact_signal(&cell.memory),
-                avoid: program.avoid_message(&cell.memory),
-                adhesion: program.adhesion_message(&cell.memory),
-            }
+            CellSignal::from_cell(cell, program)
         }));
     }
 }

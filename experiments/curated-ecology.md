@@ -57,11 +57,17 @@ The **Sunlit food web** starts 48 Phototrophs, 12 Foragers and one Predator toge
 
 | Seed | Phototrophs at 600 s | Foragers at 600 s | Predators at 600 s | Observed Forager descendants | Predation deaths |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 42 | 249 | 21 | 10 | 26 | 57 |
-| 7 | 230 | 48 | 10 | 79 | 56 |
-| 2026 | 243 | 33 | 9 | 55 | 46 |
+| 42 | 267 | 21 | 8 | 32 | 47 |
+| 7 | 226 | 41 | 9 | 62 | 71 |
+| 2026 | 229 | 26 | 10 | 43 | 56 |
 
-All three lineages reproduced on each seed under ABI 18. The previous ABI 16 runs ended with 5, 4 and 7 predators on these seeds. A matched feeding trial isolates the energetic change from differences in population trajectories. The same developed Phototroph yielded 128.29 energy units of carcass tissue under ABI 16 and 352.25 in the current engine. [Full preset results](scenarios.json) · [Matched feeding trial](predation-yield.json)
+All three lineages reproduced on each seed under ABI 19 with bilateral recruitment. The previous ABI 16 runs ended with 5, 4 and 7 predators on these seeds. A matched feeding trial isolates the energetic change from differences in population trajectories. The same developed Phototroph yielded 128.29 energy units of carcass tissue under ABI 16 and 352.25 in the current engine. [Full preset results](scenarios.json) · [Matched feeding trial](predation-yield.json)
+
+## Colony formation
+
+In Colony pool (seed 42), two independently placed Nurse rosette founders built working adhesion surfaces before they were moved into contact. The previous engine counted them as partners on the first tick and throughout all 60 ticks observed. Under ABI 19 the same encounter produced zero bonds. Enabling recruitment on just one founder also produced zero. With bilateral recruitment, the bond appeared on tick 15. Interrupting the encounter reset its accumulated contact time. [Reproduce the encounter](../scripts/check-colony-formation.mjs)
+
+A Crown rosette founded by one cell reached three connected cells at 162 simulated seconds. The middle cell signaled to two partners and an outer cell activated 0.06 mass of additional harvesting machinery. Closing its signal junctions kept the structure intact and eliminated the edge response. [Reproduce the open and closed controls](../scripts/check-crown.mjs)
 
 ## Repeating the comparisons
 

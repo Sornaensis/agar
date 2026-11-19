@@ -114,7 +114,10 @@ impl Program {
                 // Preserve the old representation for programs without contact
                 // declarations. The new sentinel cannot be a bounded node count.
                 let has_signal = messages.addresses[3].is_some();
-                w.u32(if has_signal { u32::MAX - 2 } else { u32::MAX - 1 });
+                let tag = match (messages.recruits_contacts, has_signal) {
+                    (false, false) => 1, (false, true) => 2, (true, false) => 3, (true, true) => 4,
+                };
+                w.u32(u32::MAX - tag);
                 let slots = if has_signal { 4 } else { 3 };
                 for index in &messages.addresses[..slots] { w.u16(index.unwrap_or(0)); }
                 let initializers = [messages.initial, messages.signal_initial];
@@ -255,8 +258,10 @@ impl Program {
 
     pub(crate) fn read_checkpoint_version(r: &mut Reader<'_>, version: u32) -> Result<Self> {
         let header = r.u32()?;
-        let has_signal = header == u32::MAX - 2;
-        let messages = if header == u32::MAX - 1 || has_signal {
+        let recruits = header == u32::MAX - 3 || header == u32::MAX - 4;
+        let has_signal = header == u32::MAX - 2 || header == u32::MAX - 4;
+        let messages = if header == u32::MAX - 1 || has_signal || recruits {
+            ensure(!recruits || version >= 15, "contact recruitment needs checkpoint version 15")?;
             ensure(version >= 10, "contact declarations need checkpoint version 10")?;
             ensure(!has_signal || version >= 11, "contact payloads need checkpoint version 11")?;
             let mut messages = cellular::ContactMessages::default();
@@ -267,6 +272,8 @@ impl Program {
                 *slot = (index != 0).then_some(index);
             }
             ensure(messages.addresses.iter().any(Option::is_some), "missing contact declaration")?;
+            ensure(!recruits || messages.addresses[2].is_some(), "recruitment needs an adhesion register")?;
+            messages.recruits_contacts = recruits;
             if has_signal {
                 ensure(messages.addresses[3].is_some() && messages.addresses[3] != messages.addresses[0],
                     "payload requires an independent scalar register")?;
@@ -413,6 +420,7 @@ impl Program {
                         .copied()
                         .ok_or("Invalid simulation save: unknown receptor field.")?;
                     ensure(version >= 12 || field != ReceptorField::Count, "junction count needs checkpoint version 12")?;
+                    ensure(version >= 15 || field != ReceptorField::Bonded, "bond sensing needs checkpoint version 15")?;
                     ensure(version >= 11 || !matches!(field, ReceptorField::Signal | ReceptorField::SignalValid),
                         "contact payloads need checkpoint version 11")?;
                     ensure(version >= 10 || !matches!(field, ReceptorField::Message | ReceptorField::MessageValid),

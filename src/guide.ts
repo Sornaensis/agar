@@ -138,7 +138,7 @@ clear rs001 when !object.valid &amp;&amp; ri001 &gt; 60;</pre>
       <pre class="guide-code">cellular;
 publish rf001 = 17;
 avoid_message rf001;
-adhere_message rf001;
+adhere_message rf001 daughters;
 product Mount = anchor(); product Skin = membrane();
 gene mounts: Mount = if pool.Mount &lt; 0.04 then 0.2 else 0;
 gene skins: Skin = if pool.Skin &lt; 0.04 then 0.2 else 0;
@@ -146,7 +146,7 @@ assembly Link: adhere() { Mount: 0.02; Skin: 0.02; }</pre>
       <p><code>publish</code> exposes one scalar register. The optional number sets it once at birth. Writing the register updates the message on the next tick. Clearing it withdraws the message. A working <code>sense(contact)</code> recipe named <code>Touch</code> reads the touched cell’s <code>sensed.Touch.message</code> when <code>sensed.Touch.message_valid</code> is true. A published zero is valid.</p>
       <p><code>signal rf002 = 0;</code> selects a second scalar address. Change it to request supplies or relay a pulse while keeping the recognition marker steady. A receptor reads its contact’s <code>signal_valid</code> and <code>signal</code> from the same tick as the marker.</p>
       <p>Attached cells with matching <code>junction(energy)</code>, <code>junction(mineral)</code> or <code>junction(carbon)</code> machinery exchange that resource toward equal storage fractions. Both sides must build and activate the port. Open <b>Body → Colony exchange</b> to see signed transfers. Try <b>Nurse rosette</b> for resource sharing or <b>Pulse swimmers</b> for relayed movement. In <b>Crown rosette</b>, cells with at least two signaling partners send a beacon. Edge cells that receive it activate an extra light harvester. Open <b>Body → Incoming colony signals</b> to see what a signal junction reads.</p>
-      <p><code>avoid_message</code> skips an attack on each candidate whose published value exactly matches the chosen occupied register. <code>adhere_message</code> selects a value for adhesion. Both contacting cells must accept each other’s message and operate built <code>adhere()</code> machinery. Matching values describe a shared signal. Unrelated cells can publish the same value.</p>
+      <p><code>avoid_message</code> skips an attack on each candidate whose published value exactly matches the chosen occupied register. <code>adhere_message</code> selects a value for adhesion. With <code>daughters</code>, a cell can keep its newly divided daughter attached if both recognize each other and have working <code>adhere()</code> surfaces. With <code>recruit</code>, two free cells can also join after both opt in and stay in compatible contact for 15 consecutive ticks (half a simulation second). Separation interrupts recruitment. A contact receptor’s <code>bonded</code> field tells the program whether that particular neighbor has an established bond.</p>
     </details>
     <details class="guide-section"><summary>Mutation and dependency graph</summary>
       <p>Each mutation edits one typed node against the inherited source, preserving unrelated code, comments and layout. Constants, equivalent references and typed expression changes remain valid programs. Validity does not guarantee survival.</p>

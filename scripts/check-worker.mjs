@@ -477,7 +477,7 @@ try {
   assert.ok(migratedGas.metrics.legacyCarbonImported>0,'Legacy organic inventory is explicitly counted at migration');
   checkChemicalBudget(migratedGas.metrics);
   const upgradedGas=await chemistry.saveState();
-  assert.equal(new DataView(upgradedGas.buffer,upgradedGas.byteOffset,upgradedGas.byteLength).getUint32(8,true),14);
+  assert.equal(new DataView(upgradedGas.buffer,upgradedGas.byteOffset,upgradedGas.byteLength).getUint32(8,true),15);
   const migratedFuture=await chemistry.advance(12,{metrics:true,environment:true});
   await chemistry.restoreState(upgradedGas);
   assert.deepEqual(await chemistry.advance(12,{metrics:true,environment:true}),migratedFuture);

@@ -3,6 +3,12 @@
 use super::*;
 
 pub(super) const CONTACT_GAP: f64 = 1.0;
+pub(super) const RELEASE_GAP: f64 = 2.0;
+pub(super) const MATURE: u8 = 15; // Recruited after consecutive ticks.
+pub(super) const CLONAL: u8 = 16; // Retained at fission, possibly passed to a later daughter.
+
+mod topology;
+pub(super) use topology::DivisionBonds;
 const GAP_RELAXATION: f64 = 4.0;
 const SHEAR_DAMPING: f64 = 0.5;
 const ACCELERATION_PER_MASS: f64 = 18_000.0;
@@ -37,22 +43,18 @@ impl ContactPorts {
     }
 }
 
-// The solver precomputes working adhesive masses. Read-only queries use the
-// same geometry and marker predicate against the current immutable state.
-fn contact_geometry(env: &Environment, a: &Cell, b: &Cell, sa: CellSignal, sb: CellSignal)
+fn contact_geometry(env: &Environment, a: &Cell, b: &Cell, max_gap: f64)
     -> Option<(f64, f64, f64, f64)> {
-    if sa.adhesion.is_none() || sb.adhesion.is_none()
-        || sa.adhesion != sb.published || sb.adhesion != sa.published { return None; }
     let dx = delta(b.x - a.x, env.width);
     let dy = delta(b.y - a.y, env.height);
     let distance = dx.hypot(dy);
     let gap = distance - a.radius() - b.radius();
-    if distance <= 1e-9 || gap > CONTACT_GAP || env.segment_blocked((a.x, a.y), (b.x, b.y)) { return None; }
+    if distance <= 1e-9 || gap > max_gap || env.segment_blocked((a.x, a.y), (b.x, b.y)) { return None; }
     Some((dx, dy, distance, gap))
 }
 
-pub(super) fn bonded(env: &Environment, a: &Cell, b: &Cell, sa: CellSignal, sb: CellSignal) -> bool {
-    a.alive() && b.alive() && contact_geometry(env, a, b, sa, sb).is_some()
+pub(super) fn working_contact(env: &Environment, a: &Cell, b: &Cell, max_gap: f64) -> bool {
+    a.alive() && b.alive() && contact_geometry(env, a, b, max_gap).is_some()
         && ContactPorts::of(a).adhesive > 0.0 && ContactPorts::of(b).adhesive > 0.0
 }
 
@@ -200,15 +202,14 @@ impl World {
     pub(super) fn apply_adhesion_in(&mut self, workspace: &mut PhaseWorkspace) {
         if self.had_adhesive_contacts {
             for cell in &mut self.cells {
-                if cell.adhered_neighbors > 0 {
-                    cell.adhered_neighbors = 0;
-                    cell.junction_net = [0.0; 3];
-                }
+                cell.adhered_neighbors = 0;
+                cell.junction_net = [0.0; 3];
             }
             self.had_adhesive_contacts = false;
         }
+        let previous = std::mem::take(&mut self.contacts);
         let signals = &workspace.signals;
-        if !signals.iter().any(|signal| signal.adhesion.is_some() && signal.published.is_some()) {
+        if previous.is_empty() && !signals.iter().any(|s| s.recruits && s.adhesion.is_some() && s.published.is_some()) {
             return;
         }
 
@@ -232,13 +233,21 @@ impl World {
         for i in 0..junctions.ports.len() {
             if junctions.ports[i].adhesive <= 0.0 { continue; }
             let a = &self.cells[i];
-            let search = grid.nearby_radius(a.x, a.y, a.radius() + max_radius + CONTACT_GAP);
+            let search = grid.nearby_radius(a.x, a.y, a.radius() + max_radius + RELEASE_GAP);
             for j in search {
                 if j <= i { continue; }
                 let (before, after) = self.cells.split_at_mut(j);
                 let (a, b) = (&mut before[i], &mut after[0]);
-                let Some((dx, dy, distance, gap)) = contact_geometry(
-                    &self.environment, a, b, signals[i], signals[j]) else { continue; };
+                let (sa, sb) = (signals[i], signals[j]);
+                if !sa.accepts(sb) { continue; }
+                let key = (a.id.min(b.id), a.id.max(b.id));
+                let old = previous.get(&key).copied().unwrap_or(0);
+                if old != CLONAL && !(sa.recruits && sb.recruits) { continue; }
+                let max_gap = if old >= MATURE { RELEASE_GAP } else { CONTACT_GAP };
+                let Some((dx, dy, distance, gap)) = contact_geometry(&self.environment, a, b, max_gap) else { continue; };
+                let progress = if old >= MATURE { old } else { old + 1 };
+                self.contacts.insert(key, progress);
+                if progress < MATURE { continue; }
 
                 self.had_adhesive_contacts = true;
                 a.adhered_neighbors += 1;
@@ -273,12 +282,20 @@ impl World {
 }
 
 #[cfg(test)]
+pub(in crate::simulation) fn advance_contact_phases(world: &mut World, genomes: &[Genome], count: u8) {
+    let mut ws=PhaseWorkspace::default();
+    world.freeze_contact_signals(genomes,&mut ws.signals);
+    ws.geometry.rebuild(&world.cells,false,true);
+    for _ in 0..count { world.apply_adhesion_in(&mut ws); }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use super::super::mechanism_tests::equipped;
 
     fn pair() -> (World, Vec<Genome>) {
-        let (mut world, genomes) = equipped("assembly Glue: adhere() { Mount:0.01; Wall:0.01; }\npublish rf020 = 31; adhere_message rf020;");
+        let (mut world, genomes) = equipped("assembly Glue: adhere() { Mount:0.01; Wall:0.01; }\npublish rf020 = 31; adhere_message rf020 recruit;");
         let a = &mut world.cells[0];
         a.x = WIDTH - 7.25;
         a.y = 100.0;
@@ -305,6 +322,7 @@ mod tests {
     #[test]
     fn adhesive_pairs_pull_across_the_seam_and_conserve_momentum() {
         let (mut world, genomes) = pair();
+        advance_contact_phases(&mut world, &genomes, MATURE-1);
         let mut phases = workspace(&world, &genomes);
         let momentum = |w: &World| w.cells.iter().fold((0.0, 0.0), |(x, y), c| (x + c.inertia()*c.vx, y + c.inertia()*c.vy));
         let before = momentum(&world);
@@ -316,9 +334,41 @@ mod tests {
     }
 
     #[test]
+    fn encounters_need_uninterrupted_bilateral_recruitment_before_any_effect() {
+        let (mut world, genomes) = pair();
+        let mut phases = workspace(&world,&genomes);
+        let original = (world.cells[0].vx, world.cells[1].vx);
+        phases.signals[0].recruits=false;
+        for _ in 0..MATURE { world.apply_adhesion_in(&mut phases); }
+        assert!(world.contacts.is_empty(), "a daughters-only founder cannot be recruited");
+        phases.signals[0].recruits=true;
+        for _ in 0..MATURE-1 { world.apply_adhesion_in(&mut phases); }
+        assert_eq!(world.contacts.values().copied().collect::<Vec<_>>(), [MATURE-1]);
+        assert_eq!(world.bond_pairs().count(),0);
+        assert_eq!((world.cells[0].vx,world.cells[1].vx),original);
+        assert!(world.cells.iter().all(|c|c.adhered_neighbors==0 && c.junction_net==[0.0;3]));
+        assert_eq!(world.move_cell(1,world.cells[0].x,world.cells[0].y,true,&genomes).unwrap(),1);
+        world.cells[1].x+=1.25;
+        world.apply_adhesion_in(&mut phases);
+        assert!(world.contacts.is_empty(), "a partial encounter breaks beyond the acquisition radius");
+        world.cells[1].x-=1.25;
+        for _ in 0..MATURE-1 { world.apply_adhesion_in(&mut phases); }
+        assert_eq!(world.bond_pairs().count(),0);
+        world.apply_adhesion_in(&mut phases);
+        assert_eq!(world.bond_pairs().collect::<Vec<_>>(),[(1,2)]);
+        world.cells[1].x+=1.25;
+        world.apply_adhesion_in(&mut phases);
+        assert!(world.has_bond(2,1),"a formed link tolerates a small stretch");
+        phases.signals[1].adhesion=None;
+        world.apply_adhesion_in(&mut phases);
+        assert!(!world.has_bond(1,2),"either peer can withdraw immediately");
+    }
+
+    #[test]
     fn adhesion_requires_two_reciprocal_signals_and_working_surfaces_in_reach() {
         for condition in ["other marker", "private", "one-sided", "inactive", "damaged", "out of reach", "wall"] {
             let (mut world, genomes) = pair();
+            advance_contact_phases(&mut world, &genomes, MATURE-1);
             let mut phases = workspace(&world, &genomes);
             let adhesive = world.cells[1].body.cellular.as_mut().unwrap().assemblies.last_mut().unwrap();
             match condition {

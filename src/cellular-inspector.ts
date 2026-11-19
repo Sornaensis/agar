@@ -45,10 +45,10 @@ function assemblyCard(assembly:CellularAssembly, recipe:CellularRecipe|undefined
 
 function colonyExchange(body:BodyInspection):string {
   const state = body.colony;
-  if (!state || !(state.neighbors || body.cellular?.recipes.some(recipe => recipe.kind === 'adhere()' || recipe.kind.startsWith('junction(')))) return '';
+  if (!state || !(state.neighbors || state.energyNet || state.mineralNet || state.carbonNet)) return '';
   const signed = (value:number) => value === 0 ? '0' : (value > 0 ? '+' : '−') + Number(Math.abs(value).toPrecision(3));
   return `<section class="colony-exchange"><h4>Colony exchange</h4>
-    <p>${state.neighbors === 0 ? 'No attached neighbors' : `${state.neighbors} attached neighbor${state.neighbors === 1 ? '' : 's'}`}</p>
+    <p>${state.neighbors === 0 ? 'No current bonds' : 'Directly bonded to ' + state.neighborIds.map(id=>'#'+id).join(', ')}</p>
     ${state.neighbors || state.energyNet || state.mineralNet || state.carbonNet ? `<dl>${[['Energy',state.energyNet],['Minerals',state.mineralNet],['Organic carbon',state.carbonNet]].map(([label,value])=>`<div><dt>${label}</dt><dd>${signed(Number(value))}</dd></div>`).join('')}</dl><small>Last tick · + received · − donated</small>` : ''}
   </section>`;
 }
@@ -62,7 +62,7 @@ function receptionPanel(recipes:CellularRecipe[], expanded:ReadonlySet<string|un
     const valid = names.get(prefix+'valid'), available = names.get(prefix+'available');
     const parts = [
       typeof count === 'number' ? `${count} signaling neighbor${count === 1 ? '' : 's'}` : '',
-      valid === false || count === 0 ? 'No incoming signal' : typeof value === 'number' ? `Mean incoming signal ${Number(value.toPrecision(3))}` : valid === true ? 'Receiving' : '',
+      valid === false || count === 0 ? 'No incoming signal' : typeof value === 'number' ? `${valid === true || (typeof count==='number' && count>0) ? 'Mean incoming signal' : 'Signal readout'} ${Number(value.toPrecision(3))}` : valid === true ? 'Receiving' : '',
     ].filter(Boolean);
     const hardware = available === true ? 'Junction available' : available === false ? 'Junction unavailable' : 'No readings used by this program';
     return `<div class="junction-reading"><strong>${esc(recipe.name)}</strong><span>${parts.join(' · ') || hardware}</span></div>`;
@@ -81,7 +81,7 @@ export function renderCellularBody(body:BodyInspection, expanded:ReadonlySet<str
   const meter = (name:string,value:number):string => `<div class="cellular-life-step"><div><span>${name}</span><strong>${percent(value)}</strong></div><progress max="1" value="${progress(value)}" aria-label="${name}"></progress></div>`;
   return `<div class="cellular-body">
     ${colonyExchange(body)}
-    ${receptionPanel(cellular.recipes,expanded,readings)}
+    ${receptionPanel(cellular.recipes.filter(recipe=>cellular.assemblies.some(a=>a.name===recipe.name && a.kind===recipe.kind && a.complete && a.functionalMass>0)),expanded,readings)}
     <div class="body-inventory-title"><h3>Cell machinery</h3><span>${finished} complete · ${incomplete} developing</span></div>
     <div class="cellular-machines">${cellular.assemblies.map(assembly=>assemblyCard(assembly,cellular.recipes.find(recipe=>recipe.name===assembly.name),expanded)).join('') || '<p class="body-empty">No cellular machinery built yet.</p>'}</div>
     <details class="cellular-section" data-kind="cellular-division"${expanded.has('cellular-division')?' open':''}><summary><span>Cell division</span></summary><div class="cellular-life">${meter('Replication',cellular.replication.progress)}${meter('Constriction',cellular.constriction.progress)}</div></details>

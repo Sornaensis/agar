@@ -26,7 +26,7 @@ let surplus = equipped && energy > 55;
 # A receptive grazer can share surplus fixed carbon and dissolved minerals.
 publish rf090 = 41;
 rf091 = 72;
-adhere_message rf091;
+adhere_message rf091 recruit;
 # This stationary producer spends no material on locomotion.
 
 let need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);

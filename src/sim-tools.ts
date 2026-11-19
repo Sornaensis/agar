@@ -2,8 +2,8 @@ import type { Cell } from './engine';
 import type { SimulationSession } from './session';
 import { createDialog, setDialogError } from './ui';
 
-export function cellEditActions(): string {
-  return '<div class="cell-edit-actions" aria-label="Organism tools"><button type="button" class="button small subtle" data-action="move-cell" title="Drag the selected cell or choose its destination">Move cell</button><button type="button" class="button small subtle" data-action="move-colony" title="Move all connected members. You can also Alt-drag the selected cell.">Move colony</button><button type="button" class="button small subtle" data-action="edit-reserves">Edit reserves</button></div>';
+export function cellEditActions(bonded:boolean): string {
+  return `<div class="cell-edit-actions" aria-label="Organism tools"><button type="button" class="button small subtle" data-action="move-cell" title="Drag the selected cell or choose its destination">Move cell</button><button type="button" class="button small subtle" data-action="move-colony"${bonded?'':' disabled'} title="Move all bonded members. You can also Alt-drag a bonded cell.">Move colony</button><button type="button" class="button small subtle" data-action="edit-reserves">Edit reserves</button></div>`;
 }
 
 export async function editReserves(session: SimulationSession, id: number, host: Document, isCurrent: () => boolean): Promise<boolean> {

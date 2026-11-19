@@ -130,6 +130,8 @@ try {
   await action(page,'cancel-cell-tool');
   const placed = await savedWhen(s => s.population === 2);
   assert.ok(atPoint(placed,1,a) && atPoint(placed,2,b),'Both taps land exactly where shown, without seed scatter');
+  await page.waitForFunction(()=>document.querySelector('[data-value="attachment"]')?.textContent==='Unattached');
+  assert.ok(await page.locator('[data-action="move-colony"]').isDisabled(),'Two same-genome founders have no colony action without a bond');
 
   await action(page,'move-cell');
   await page.mouse.click(a.x,a.y);
@@ -243,6 +245,13 @@ try {
     if ((await page.locator('#cell-inspector .organism-title .muted').textContent())?.includes('Organism #'+parent.id+' ·')) break;
     await canvas.press('ArrowRight');
   }
+  const directPeers=body(api,parent.id).colony.neighborIds;
+  const members=new Set([parent.id]);
+  for(const id of members)for(const peer of body(api,id).colony.neighborIds)members.add(peer);
+  assert.ok(directPeers.includes(daughter.id));
+  const expectedMembership=`${members.size}-cell colony · bonded to ${directPeers.map(id=>'#'+id).join(', ')}`;
+  await page.waitForFunction(label=>document.querySelector('[data-value="attachment"]')?.textContent===label,expectedMembership);
+  assert.ok(await page.locator('[data-action="move-colony"]').isEnabled(),'A confirmed mother–daughter bond enables the group move');
   await action(page,'move-colony');
   const dest = await point(page,beforeMove,.34,.59);
   await page.touchscreen.tap(dest.x,dest.y);

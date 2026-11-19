@@ -41,7 +41,7 @@ export interface BodyInspection {
   organs: { id:number; kind:OrganelleKind; mass:number; integrity:number; functional:boolean; minimumMass:number; embodiedEnergy:number }[];
   requested: { kind:OrganelleKind; count:number; size:number; build:number; recycle:number; proteinMass:number }[];
   cellular?:CellularBodyInspection|null;
-  colony?: { neighbors:number; energyNet:number; mineralNet:number; carbonNet:number };
+  colony?: { neighbors:number; neighborIds:number[]; energyNet:number; mineralNet:number; carbonNet:number };
 }
 
 /** Physical inventories are validated before use in the inspector or canvas. */
@@ -60,7 +60,10 @@ export function validateBodyInspection(value: unknown, expectedCellId: number): 
   if (!pools || ![pools.body,pools.reserve,pools.gut,pools.atp,pools.total].every(n => Number.isFinite(n) && n >= 0)
     || Math.abs(pools.total - (pools.body+pools.reserve+pools.gut+pools.atp)) > 1e-8*Math.max(1,pools.total)) return fail();
   if (body.colony !== undefined && (!body.colony || !Number.isSafeInteger(body.colony.neighbors)
-    || body.colony.neighbors < 0 || ![body.colony.energyNet,body.colony.mineralNet,body.colony.carbonNet].every(angle))) return fail();
+    || !Array.isArray(body.colony.neighborIds) || body.colony.neighbors !== body.colony.neighborIds.length
+    || !body.colony.neighborIds.every((id,i,ids)=>Number.isSafeInteger(id) && id>0 && id<=0xffffffff
+      && id!==body.cellId && (i===0 || ids[i-1]<id))
+    || ![body.colony.energyNet,body.colony.mineralNet,body.colony.carbonNet].every(angle))) return fail();
   if (body.cellular != null) {
     const cellular = body.cellular;
     const roles = new Set(['scaffold','anchor','motor','filament','pigment','enzyme','membrane','transporter','receptor','regulator','replicase','constrictor']);
@@ -93,7 +96,7 @@ export interface LanguageSchema {
     mechanisms?:{name:string;constructor:string;target:string|null;requiredRoles:string[];description:string;receptorFields?:{name:string;type:GenomeValueType;requiresValid:boolean}[]}[];
     recipeControls?:{name:string;type:GenomeValueType;default:GenomeValue}[];
     registers:{prefixes:string[];addressesPerType:number;upkeepPerSecond:number;clearWins:boolean};
-    contactMessages:{declarations:string[];registerType:'scalar';receptor:'sense(contact)';validField:'message_valid';valueField:'message';signalValidField:'signal_valid';signalValueField:'signal';initializerLimit:number};
+    contactMessages:{declarations:string[];registerType:'scalar';receptor:'sense(contact)';validField:'message_valid';valueField:'message';signalValidField:'signal_valid';signalValueField:'signal';bondedField:'bonded';formationModes:('daughters'|'recruit')[];defaultFormation:'daughters';initializerLimit:number};
     concentration?:string;userFunctions?:{keyword:'fn';maxParameters:number;parameterType:'scalar';maxFunctions:number;recursive:false};
     reads:{name:string;type:GenomeValueType}[];maxProducts:number;maxAssemblies:number;maxGenes:number };
 }
@@ -188,12 +191,13 @@ export interface GenomeEvaluation {
 }
 
 export type ContactMessageRole = 'publish' | 'avoid' | 'adhere' | 'signal';
-export interface ContactMessages { publish: string | null; avoid: string | null; adhere: string | null; initial: number | null; signal: string | null; signalInitial: number | null }
+export interface ContactMessages { formation?: 'daughters'|'recruit'; publish: string | null; avoid: string | null; adhere: string | null; initial: number | null; signal: string | null; signalInitial: number | null }
 export interface ContactMessageDeclaration { kind: ContactMessageRole; register: string; value: number | null; from: number; to: number }
 const messageRoles = ['publish', 'avoid', 'adhere', 'signal'] as const;
 function validMessagePolicy(policy: ContactMessages): boolean {
   return Boolean(policy && typeof policy === 'object' && messageRoles.some(role => policy[role] !== null)
     && messageRoles.every(role => policy[role] === null || typeof policy[role] === 'string' && /^rf(?!000)\d{3}$/.test(policy[role]!))
+    && (policy.adhere === null ? policy.formation === undefined : policy.formation === 'daughters' || policy.formation === 'recruit')
     && (policy.signal === null || policy.signal !== policy.publish)
     && (policy.signalInitial === null || policy.signal !== null && Number.isFinite(policy.signalInitial) && Math.abs(policy.signalInitial) <= 1e12)
     && (policy.initial === null || policy.publish !== null && Number.isFinite(policy.initial) && Math.abs(policy.initial) <= 1e12));
@@ -345,7 +349,7 @@ export interface WorldSnapshot {
   environment: EnvironmentSnapshot;
 }
 export interface RenderCell {
-  attachedNeighbors?:number; contactSignal?:number;
+  attachedNeighbors?:number; neighborIds?:number[]; colonySize?:number; contactSignal?:number;
   id:number; genomeId:number; x:number; y:number; vx:number; vy:number; angle:number; radius:number;
   energy:number; energyCapacity:number; gutEnergy:number; gutCapacity:number; integrity:number; photosynthesisRate:number;
   flagellumCount:number; flagellumCapacity:number; cortexMass:number; cortexCapacity:number;
@@ -353,7 +357,7 @@ export interface RenderCell {
 }
 export interface RenderSnapshot {
   tick:number; time:number; width:number; height:number; births:number; deaths:number; eaten:number;
-  mutationRate:number; generation:number; cells:RenderCell[]; food:Food[];
+  mutationRate:number; generation:number; cells:RenderCell[]; food:Food[]; bonds:[RenderCell,RenderCell][];
 }
 export type RenderWorldSnapshot = RenderSnapshot & { environment: EnvironmentSnapshot };
 export interface SimulationSummary {
@@ -383,10 +387,11 @@ const METRICS_HEADER = 54;
 /** Decode a worker-transferred compact buffer without any WASM calls. */
 export function decodeRenderSnapshot(data: Float64Array): RenderSnapshot {
   const baseLength = RENDER_HEADER + data[2] * RENDER_CELL_STRIDE + data[3] * FOOD_STRIDE;
-  const extra = data.length - baseLength;
+  const signalCount = data[9], bondsStart = baseLength + signalCount * 2;
   if (data.length < RENDER_HEADER || !Number.isSafeInteger(data[2]) || data[2] < 0
     || !Number.isSafeInteger(data[3]) || data[3] < 0
-    || extra < 0 || extra > data[2] * 4 || extra % 4 !== 0) {
+    || !Number.isSafeInteger(signalCount) || signalCount < 0 || signalCount > data[2]
+    || data.length < bondsStart || (data.length - bondsStart) % 2 !== 0) {
     throw new Error('The render snapshot has an invalid layout.');
   }
   const cells: RenderCell[] = [];
@@ -407,18 +412,48 @@ export function decodeRenderSnapshot(data: Float64Array): RenderSnapshot {
     food.push({x:data[n],y:data[n+1],energy:data[n+2],nutrients:data[n+3],kind});
   }
   let previous = -1;
-  for (let n = baseLength; n < data.length; n += 4) {
-    const index = data[n], neighbors = data[n+1], valid = data[n+2], signal = data[n+3];
-    if (!Number.isInteger(index) || index <= previous || index >= cells.length ||
-        !Number.isSafeInteger(neighbors) || neighbors < 0 || (valid !== 0 && valid !== 1) ||
-        !Number.isFinite(signal) || (!valid && (signal !== 0 || neighbors === 0))) {
-      throw new Error('The render snapshot contains an invalid colony observation.');
+  for (let n = baseLength; n < bondsStart; n += 2) {
+    const index = data[n], value = data[n+1];
+    if (!Number.isInteger(index) || index <= previous || index >= cells.length || !Number.isFinite(value)) {
+      throw new Error('The render snapshot contains an invalid outgoing signal.');
     }
     previous = index;
-    cells[index].attachedNeighbors = neighbors;
-    if (valid) cells[index].contactSignal = signal;
+    cells[index].contactSignal = value;
   }
-  return {tick:data[0],time:data[1],cells,food,births:data[4],deaths:data[5],eaten:data[6],
+  const bonds:[RenderCell,RenderCell][] = [];
+  if (bondsStart < data.length) {
+    const byId = new Map(cells.map(cell=>[cell.id,cell]));
+    if (byId.size!==cells.length || cells.some(cell=>!Number.isSafeInteger(cell.id) || cell.id<=0 || cell.id>0xffffffff)) {
+      throw new Error('The render snapshot contains an invalid colony endpoint.');
+    }
+    let previousA = 0, previousB = 0;
+    for (let n = bondsStart; n < data.length; n += 2) {
+      const a = byId.get(data[n]), b = byId.get(data[n+1]);
+      if (!a || !b || a.id >= b.id || a.id < previousA || (a.id === previousA && b.id <= previousB)) {
+        throw new Error('The render snapshot contains an invalid colony bond.');
+      }
+      previousA = a.id; previousB = b.id;
+      (a.neighborIds ??= []).push(b.id);
+      (b.neighborIds ??= []).push(a.id);
+      bonds.push([a,b]);
+    }
+    // A direct neighbor and a member reached through another cell are distinct.
+    // Each bonded cell is visited once, even for cycles and branched colonies.
+    for (const cell of cells) {
+      if (!cell.neighborIds || cell.colonySize) continue;
+      const members = [cell];
+      cell.colonySize = 1;
+      for (const member of members) {
+        member.attachedNeighbors = member.neighborIds!.length;
+        for (const peerId of member.neighborIds!) {
+          const peer = byId.get(peerId)!;
+          if (!peer.colonySize) { peer.colonySize = 1; members.push(peer); }
+        }
+      }
+      for (const member of members) member.colonySize = members.length;
+    }
+  }
+  return {tick:data[0],time:data[1],cells,food,bonds,births:data[4],deaths:data[5],eaten:data[6],
     width:data[7],height:data[8],mutationRate:data[10],generation:data[11]};
 }
 

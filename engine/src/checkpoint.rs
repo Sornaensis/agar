@@ -8,7 +8,7 @@ use crate::{
 
 pub(crate) const MAX_STATE_BYTES: usize = 128 * 1024 * 1024;
 const MAGIC: &[u8; 8] = b"CELLAR01";
-pub(crate) const VERSION: u32 = 14;
+pub(crate) const VERSION: u32 = 15;
 pub(crate) type Result<T> = std::result::Result<T, String>;
 
 pub(crate) fn ensure(ok: bool, message: &str) -> Result<()> {
@@ -269,7 +269,8 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
             "genome registry exceeds 64 MiB",
         )?;
     }
-    let world = World::read_checkpoint(&mut r, genomes.len(), version)?;
+    let mut world = World::read_checkpoint(&mut r, genomes.len(), version)?;
+    world.validate_or_migrate_contacts(&genomes, version)?;
     ensure(r.finished(), "trailing data")?;
     Ok(Engine {
         genomes,
@@ -569,7 +570,7 @@ mod tests {
         let mut live = live_engine();
         let before = save(&live).unwrap();
         assert!(!live.restore_state(bytes));
-        assert!(live.error.contains("simulation saves 3 through 14"));
+        assert!(live.error.contains("simulation saves 3 through 15"));
         assert_eq!(save(&live).unwrap(), before);
         let mut version2 = before.clone();
         version2[8..12].copy_from_slice(&2u32.to_le_bytes());
