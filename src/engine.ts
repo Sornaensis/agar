@@ -332,6 +332,7 @@ const WRITE_SIGNAL_COUNT = 81;
 const CELL_STRIDE = 163;
 const FOOD_STRIDE = 5;
 export type MutationKind = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+export interface GenomeLineageEntry { id: number; parentId: number; mutationKind: MutationKind }
 export interface GenomeRecord { source: string; parentId: number; mutationKind: MutationKind }
 export interface MutationResult { id: number; changed: boolean; reason: string }
 export interface WorldSnapshot {
@@ -728,6 +729,18 @@ export class Engine {
     // Rust owns the source buffer; decode before another engine call can replace/grow it.
     const source = new TextDecoder().decode(new Uint8Array(this.wasm.memory.buffer, pointer, length));
     return { source, parentId: this.wasm.genome_parent(id), mutationKind: this.wasm.genome_mutation_kind(id) as MutationKind };
+  }
+  /** Registry IDs are append-only until restore. Parent zero denotes an independently registered source. */
+  getGenomeLineage(afterId = 0): GenomeLineageEntry[] {
+    const count = this.wasm.genome_count();
+    if (!Number.isSafeInteger(afterId) || afterId < 0 || afterId > count) {
+      throw new Error('The genome lineage offset is outside this registry.');
+    }
+    const entries: GenomeLineageEntry[] = [];
+    for (let id = afterId + 1; id <= count; id++) {
+      entries.push({ id, parentId: this.wasm.genome_parent(id), mutationKind: this.wasm.genome_mutation_kind(id) as MutationKind });
+    }
+    return entries;
   }
   getGenomeGraph(id: number): GenomeGraph {
     if (!Number.isSafeInteger(id) || id < 1 || id > this.wasm.genome_count()) {

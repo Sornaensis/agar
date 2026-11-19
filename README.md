@@ -53,6 +53,10 @@ Select a cell to see its energy, minerals, integrity, and colony contacts. Drag 
 
 Open **Body** to inspect built machinery, resource exchange and incoming colony signals. Unbuilt recipes, physical budgets and production rates are expandable. **Memory** shows registers and **Program** shows the evaluator. **Metrics** tracks population and feeding capabilities, with food, gas, mineral and energy accounting in expandable sections.
 
+Open **Genomes** inside a simulation to follow its ancestry tree. Each root is a genome registered independently in this run. When a daughter inherits a changed genome, its variant branches from the parent genome. A division that copies the genome stays on the same branch. The same change arising again from the same parent reuses the existing variant.
+
+Each row shows how many living cells carry that exact genome and their highest cell generation. Genomes with zero living carriers stay in the tree, so you can trace a living variant through an ancestor that has died out. Expand or collapse a branch, select a genome to inspect its program or graph, or choose **Newest variant** to reveal its place in the tree. Saved runs retain the parent links and mutation types, including runs saved before this view was added. [See a branching Crown rosette culture](screenshots/genome-lineages.png).
+
 Built-ins stay unchanged. Editing or importing creates independent catalog items. Running simulations own their programs and environment state, so catalog renames and deletions do not alter existing worlds.
 
 ## Floating player

@@ -1,5 +1,5 @@
 import { decodeMetricsSnapshot, decodeRenderSnapshot } from './engine';
-import type { BodyInspection, Cell, EnvironmentMetadata, EnvironmentSnapshot, GasExchangeConfig, GenomeAnalysis, GenomeEvaluation, GenomeGraph, GenomeRecord, LanguageSchema, MetricsSnapshot, MutationKind, MutationResult, RegisterEntry, RenderSnapshot, SimulationSummary, SourceKind, WorldSnapshot } from './engine';
+import type { BodyInspection, Cell, EnvironmentMetadata, EnvironmentSnapshot, GasExchangeConfig, GenomeAnalysis, GenomeEvaluation, GenomeGraph, GenomeLineageEntry, GenomeRecord, LanguageSchema, MetricsSnapshot, MutationKind, MutationResult, RegisterEntry, RenderSnapshot, SimulationSummary, SourceKind, WorldSnapshot } from './engine';
 import type { CapturedCheckpoint, Presentation, PresentationOptions, WirePresentation, WorkerMethod, WorkerRequest, WorkerResponse } from './simulation-protocol';
 export type { CapturedCheckpoint, Presentation, PresentationOptions } from './simulation-protocol';
 
@@ -121,6 +121,7 @@ export class WorkerEngine {
   cellBody(id: number): Promise<BodyInspection> { return this.call('cellBody', [id]); }
   mutate(genomeId: number, seed: number, kind: MutationKind = 0): Promise<MutationResult> { return this.call('mutate', [genomeId, seed, kind]); }
   getGenome(id: number): Promise<GenomeRecord> { return this.call('getGenome', [id]); }
+  getGenomeLineage(afterId = 0): Promise<GenomeLineageEntry[]> { return this.call('getGenomeLineage', [afterId]); }
   getGenomeGraph(id: number): Promise<GenomeGraph> { return this.call('getGenomeGraph', [id]); }
   tick(steps = 1): Promise<void> { return this.call('tick', [steps]); }
   environment(): Promise<EnvironmentSnapshot> { return this.call('environment'); }

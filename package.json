@@ -34,6 +34,7 @@
     "test:multicellular": "node --no-liftoff scripts/check-multicellular.mjs",
     "test:cellular": "node scripts/check-cellular.mjs",
     "test:camera": "node scripts/check-camera.mjs",
+    "test:genome-ancestry": "node scripts/check-genome-ancestry.mjs",
     "test:environment-player": "node scripts/check-environment-player.mjs",
     "test:environment-controls": "node scripts/check-environment-controls.mjs",
     "test:player-view": "node scripts/check-player-view.mjs",

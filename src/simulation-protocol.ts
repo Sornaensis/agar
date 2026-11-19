@@ -31,7 +31,7 @@ export const ENGINE_METHODS = [
   'addSource', 'replaceSources', 'removeSource', 'clearSources', 'getMemory', 'getCellEvaluation', 'languageSchema',
   'setWorldSize', 'updateSource', 'addBarrier', 'updateBarrier', 'removeBarrier', 'clearBarriers',
   'setInitialGases', 'setGasExchange',
-  'cellBody', 'mutate', 'getGenome', 'getGenomeGraph', 'tick', 'environment', 'renderSnapshot',
+  'cellBody', 'mutate', 'getGenome', 'getGenomeLineage', 'getGenomeGraph', 'tick', 'environment', 'renderSnapshot',
   'metricsSnapshot', 'cellSnapshot', 'summary', 'environmentMetadata', 'snapshot',
 ] as const;
 export type EngineMethod = typeof ENGINE_METHODS[number];

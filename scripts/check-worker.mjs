@@ -158,6 +158,42 @@ try {
   assert.deepEqual(await remote.getGenomeGraph(genome), reference.getGenomeGraph(genome));
   assert.deepEqual(await remote.saveState(), reference.saveState(), 'Presentation and inspection are read-only');
 
+  {
+    const { engine: lineage } = await fresh();
+    await lineage.resetEmpty(37);
+    assert.deepEqual(await lineage.getGenomeLineage(), []);
+    const rootSource = 'thrust=.25;turn=0;divide=false;';
+    const root = await lineage.compile(rootSource);
+    assert.equal(await lineage.compile(rootSource), root);
+    const first = (await lineage.mutate(root, 57, 1)).id;
+    const grandchild = (await lineage.mutate(first, 7, 1)).id;
+    const sibling = (await lineage.mutate(root, 31, 2)).id;
+    assert.deepEqual([root, first, grandchild, sibling], [1, 2, 3, 4]);
+    assert.equal((await lineage.mutate(root, 57, 1)).id, first, 'Replaying a mutation reuses its recorded edge');
+    assert.equal((await lineage.mutate(root, 57, 4)).id, root, 'An inapplicable edit adds no lineage edge');
+    const independent = await lineage.compile((await lineage.getGenome(first)).source);
+    assert.equal(independent, 5, 'Compiling identical derived text directly creates an independent root');
+    await lineage.seed(grandchild, 1);
+    const tree = [
+      { id: root, parentId: 0, mutationKind: 0 },
+      { id: first, parentId: root, mutationKind: 1 },
+      { id: grandchild, parentId: first, mutationKind: 1 },
+      { id: sibling, parentId: root, mutationKind: 2 },
+      { id: independent, parentId: 0, mutationKind: 0 },
+    ];
+    const savedTree = await lineage.saveState();
+    assert.deepEqual(await lineage.getGenomeLineage(), tree, 'Include the unoccupied ancestor, sibling and independent root');
+    assert.deepEqual(await lineage.getGenomeLineage(first), tree.slice(2));
+    assert.deepEqual(await lineage.getGenomeLineage(independent), []);
+    await assert.rejects(lineage.getGenomeLineage(-1), /offset/);
+    assert.deepEqual(await lineage.saveState(), savedTree, 'Reading registry metadata preserves simulation state');
+    await lineage.restoreState(new Uint8Array(await readFile(new URL('../engine/fixtures/organelle-v3.bin', import.meta.url))));
+    assert.deepEqual(await lineage.getGenomeLineage(), [tree[0]], 'Oldest supported saves retain registered roots');
+    await assert.rejects(lineage.getGenomeLineage(independent), /offset/);
+    await lineage.restoreState(savedTree);
+    assert.deepEqual(await lineage.getGenomeLineage(), tree, 'Restoring brings back dormant branches');
+  }
+
   const compactOnly = await remote.presentation();
   assert.equal(Object.hasOwn(compactOnly, 'metrics'), false);
   assert.equal(Object.hasOwn(compactOnly, 'environment'), false);

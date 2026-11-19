@@ -2,6 +2,8 @@ import './style.css';
 import './player-view.css';
 import './observation.css';
 import './sim-tools.css';
+import './genome-lineage.css';
+import { GenomeLineage } from './genome-lineage';
 import { cellEditActions, editReserves } from './sim-tools';
 import { PlayerView, PlayerFrameLoop, type PlayerCloseReason } from './player-view';
 import { SimulationLoop, type SimulationWork } from './simulation-loop';
@@ -62,6 +64,7 @@ const frameLoop = new PlayerFrameLoop(playerHost, frame, undefined, () => player
 const simulationLoop = new SimulationLoop(playerHost, simulationWork, advanceSimulation, runError);
 let inspectorEpoch = 0, inspectorPending = false, inspectorStamp = '';
 let cellInspection: { session: SimulationSession; cell: Cell; body?: BodyInspection; memory?: RegisterEntry[]; reception?: GenomeSignalEvaluation[] } | null = null;
+const lineageViews = new WeakMap<SimulationSession,GenomeLineage>();
 const genomeRecords = new WeakMap<SimulationSession, Map<number, Promise<GenomeRecord>>>();
 const evaluatingEditors = new WeakSet<ProgramEditor>();
 const genomeVisualizer = new GenomeVisualizer();
@@ -300,7 +303,7 @@ function disposeSession(session: SimulationSession): void {
     expandedInspections.delete(inspection);
   }
   if (cellInspection?.session === session) cellInspection = null;
-  genomeRecords.delete(session);
+  genomeRecords.delete(session); lineageViews.delete(session);
   session.dispose();
 }
 function runError(session: SimulationSession, error: unknown): void {
@@ -694,8 +697,10 @@ function getGenome(session: SimulationSession, id: number): Promise<GenomeRecord
       if (active === session && !session.metadata.genomeNames[String(id)]) {
         const original = allGenomes().find(item => item.source === record.source);
         const names = session.metadata.genomeNames;
-        names[String(id)] = (original?.name || (record.parentId ? (names[String(record.parentId)] || 'Variant').split(' · ')[0] + ' · ' + id : 'Genome ' + id)).slice(0,80);
-        session.touch();
+        const tree=lineageViews.get(session);
+        const derivedName=record.parentId && tree?.has(id) ? tree.nameOf(id) : undefined;
+        names[String(id)] = (derivedName || original?.name || (record.parentId ? (names[String(record.parentId)] || 'Variant').split(' · ')[0] + ' · ' + id : 'Genome ' + id)).slice(0,80);
+        session.touch(); tree?.refreshNames();
       }
       return record;
     });
@@ -707,6 +712,8 @@ function getGenome(session: SimulationSession, id: number): Promise<GenomeRecord
 function genomeName(id: number): string {
   if (!active) return 'Genome ' + id;
   const name = active.metadata.genomeNames[String(id)];
+  const tree=lineageViews.get(active);
+  if (!name && tree?.has(id)) return tree.nameOf(id);
   if (!name && !transitioning && !lifecycleFlushes) void getGenome(active,id).catch(() => {});
   return name || 'Genome ' + id;
 }
@@ -1023,17 +1030,14 @@ function settingsMarkup(): string {
   </div></div>`;
 }
 function renderActiveGenomes(): void {
-  if (!active) return;
-  const target=$('active-genomes'); if(!target) return;
-  const entries=active.metrics.genomes,signature=entries.map(entry=>entry.id+':'+(active!.metadata.genomeNames[String(entry.id)]||'')).join(',');
-  if(target.dataset.signature!==signature || !target.childElementCount) {
-    target.dataset.signature=signature;
-    target.innerHTML=entries.map(({id})=>`<article class="genome-row"><button class="genome-open" data-action="live-program" data-genome="${id}" aria-label="Inspect ${esc(genomeName(id))}"><i class="genome-dot" style="background:${genomeColor(id)}"></i><span class="genome-row-title"><span class="card-title">${esc(genomeName(id))}</span><span class="muted" data-genome-stats="${id}"></span></span><span class="card-chevron">${icon('chevron')}</span></button><button class="icon-button" data-action="live-graph" data-genome="${id}" aria-label="Graph of ${esc(genomeName(id))}" title="Graph">${icon('graph')}</button></article>`).join('') || '<div class="empty-state">No living organisms. Add an organism from the player.</div>';
+  const session=active, target=$('active-genomes');
+  if (!session || !target) return;
+  let tree=lineageViews.get(session);
+  if (!tree) {
+    tree=new GenomeLineage(session.metadata.genomeNames, afterId=>session.inspect(engine=>engine.getGenomeLineage(afterId)));
+    lineageViews.set(session,tree);
   }
-  for(const {id,population,maxGeneration} of entries) {
-    const target=document.querySelector<HTMLElement>(`[data-genome-stats="${id}"]`)!;
-    target.textContent=population+(population===1?' organism':' organisms')+' · generation '+maxGeneration;
-  }
+  tree.update(target,session.metrics);
 }
 function updateSimulationUi(): void {
   if(!active) return;
