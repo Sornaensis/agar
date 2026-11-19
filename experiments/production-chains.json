@@ -1,0 +1,103 @@
+{
+  "wasmSha256": "69bd748d3c7575391329d32239cab375a2e15a334b903fe6b71f4a878747655b",
+  "ticksPerSecond": 30,
+  "knockoutObservationTicks": 360,
+  "controls": {
+    "complete": {
+      "firstPrecursor": 1,
+      "firstFinished": 2,
+      "firstFunctional": 41,
+      "rawCarbonAndMinerals": 0.028661360846040373,
+      "fabricationATP": 2.029497941079568,
+      "embodiedATP": 1.8265481469716092
+    },
+    "without_backbone": {
+      "firstPrecursor": null,
+      "firstFinished": null,
+      "firstFunctional": null,
+      "rawCarbonAndMinerals": 0.01909825009851055,
+      "fabricationATP": 1.2794212544329753,
+      "embodiedATP": 1.151479128989682
+    },
+    "without_finish": {
+      "firstPrecursor": 1,
+      "firstFinished": null,
+      "firstFunctional": null,
+      "rawCarbonAndMinerals": 0.020270410930324795,
+      "fabricationATP": 1.321861530853579,
+      "embodiedATP": 1.189675377768225
+    },
+    "without_mount": {
+      "firstPrecursor": 1,
+      "firstFinished": 2,
+      "firstFunctional": null,
+      "rawCarbonAndMinerals": 0.01994201860213158,
+      "fabricationATP": 1.4025475125778146,
+      "embodiedATP": 1.2622927613200363
+    },
+    "without_skin": {
+      "firstPrecursor": 1,
+      "firstFinished": 2,
+      "firstFunctional": null,
+      "rawCarbonAndMinerals": 0.01994201860213158,
+      "fabricationATP": 1.4956334624902206,
+      "embodiedATP": 1.3460701162411968
+    }
+  },
+  "founders": [
+    {
+      "name": "Forager",
+      "firstInstall": 2,
+      "firstActive": 191,
+      "firstMachine": "ExudateEnzyme"
+    },
+    {
+      "name": "Rememberer",
+      "firstInstall": 2,
+      "firstActive": 191,
+      "firstMachine": "ExudateEnzyme"
+    },
+    {
+      "name": "Phototroph",
+      "firstInstall": 2,
+      "firstActive": 223,
+      "firstMachine": "Respiration"
+    },
+    {
+      "name": "Predator",
+      "firstInstall": 2,
+      "firstActive": 206,
+      "firstMachine": "Respiration"
+    },
+    {
+      "name": "Crown rosette",
+      "firstInstall": 2,
+      "firstActive": 223,
+      "firstMachine": "Respiration"
+    },
+    {
+      "name": "Nurse rosette",
+      "firstInstall": 2,
+      "firstActive": 141,
+      "firstMachine": "Respiration"
+    },
+    {
+      "name": "Pulse swimmer",
+      "firstInstall": 2,
+      "firstActive": 223,
+      "firstMachine": "Respiration"
+    },
+    {
+      "name": "Mixotroph",
+      "firstInstall": 2,
+      "firstActive": 317,
+      "firstMachine": "Respiration"
+    }
+  ],
+  "catalog": {
+    "sources": 16,
+    "recipes": 227,
+    "ingredientDeclarations": 437,
+    "adhesiveRecipes": 6
+  }
+}

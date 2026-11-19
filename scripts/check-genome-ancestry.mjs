@@ -63,14 +63,19 @@ async function generate() {
   assert.ok(entries[grandchild.id-1].living>0);
   const main=record(api,'simulation:ancestry-branch','Branching culture',{
     [founder]:'Crown lineage',[otherRoot]:'Spring sample',[unused]:'Unseeded control'});
-  const blank=await fresh(habitat);
+  const blank=await fresh({...habitat,ambientLight:0,gases:{mode:'sealed',initialOxygen:0,initialCarbon:0}});
   const isolatedRoot=compile(blank,'# Separate culture\ncellular;');seed(blank,isolatedRoot,1);
+  assert.equal(blank.set_cell_stores(1,1,3,0),1,error(blank));
   const other=record(blank,'simulation:ancestry-isolated','Separate culture',{[isolatedRoot]:'Separate founder'});
+  const independentEntries=registry(blank);
+  let spent=snapshot(blank);
+  while(spent.population && spent.seconds<30) spent=advance(blank,1);
+  assert.equal(spent.population,0,'The lone sterile founder naturally dies without a registry change');
   const emptyApi=await fresh(habitat);
   const emptyId=compile(emptyApi,'# Never occupied\ncellular;');
   const empty=record(emptyApi,'simulation:ancestry-empty','Unseeded culture',{[emptyId]:'Never occupied'});
   return {api,main,other,empty,initial:entries,ancestor,grandchild:grandchild.id,unused,founder,otherRoot,
-    independentEntries:registry(blank),emptyEntries:registry(emptyApi),expectedSource:source(api,ancestor),firstNewId,nextParent};
+    independentEntries,deathSeconds:spent.seconds,emptyEntries:registry(emptyApi),expectedSource:source(api,ancestor),firstNewId,nextParent};
 }
 
 // The spontaneous fixture above covers normal biology. These use the native
@@ -85,9 +90,13 @@ async function stressFixture(deep) {
   }
   assert.equal(api.genome_count(),limit,'Native registry contains the entire test pedigree');
   seed(api,limit,1,180,200);
+  if(!deep){
+    for(let attempt=0;api.genome_count()===limit&&attempt<100;attempt++)api.mutate_genome(root,7000+attempt,1);
+    assert.equal(api.genome_count(),limit+1,'The youngest sibling has no carriers');
+  }
   const label=deep ? 'Deep family' : 'Wide family';
   return {record:record(api,'simulation:ancestry-'+(deep?'deep':'wide'),label,{[root]:label}),
-    last:limit,parent:api.genome_parent(limit)};
+    last:limit,newestRegistered:api.genome_count(),parent:api.genome_parent(limit)};
 }
 
 const trial=await generate();
@@ -104,11 +113,21 @@ const node=id=>page.locator(`[data-lineage-node="${id}"]`);
 const toggle=id=>page.locator(`[data-lineage-toggle="${id}"]`);
 const stats=id=>page.locator(`[data-genome-stats="${id}"]`);
 const tab=name=>page.locator(`[data-view="${name}"]`).click();
+const showExtinct=page.getByRole('checkbox',{name:'Show Extinct'});
 const open=async record=>{
   await page.locator(`[data-action="open-simulation"][data-id="${record.id}"]`).click();
   await tab('genomes');
 };
 const close=()=>page.locator('[data-action="close-simulation"]').click();
+
+function livePaths(entries) {
+  const retained=new Set();
+  for(const entry of entries.filter(e=>e.living)){
+    let id=entry.id;
+    while(id&&!retained.has(id)){retained.add(id);id=entries.find(e=>e.id===id).parent;}
+  }
+  return entries.filter(e=>retained.has(e.id));
+}
 
 async function assertTree(expected) {
   await page.waitForFunction(n=>document.querySelectorAll('[data-lineage-node]').length===n,expected.length);
@@ -171,6 +190,11 @@ try {
   }),[trial.main,trial.other,trial.empty,...largeFamilies.map(f=>f.record)]);
   await page.reload();
   await open(trial.main);
+  assert.equal(await showExtinct.isChecked(),false);
+  await assertTree(livePaths(trial.initial));
+  assert.equal(await node(trial.unused).count(),0);
+  assert.match(await stats(trial.ancestor).innerText(),/living descendants/);
+  await showExtinct.check();
   await assertTree(trial.initial);
   assert.doesNotMatch(await stats(trial.unused).textContent(),/extinct|died/i);
 
@@ -212,6 +236,7 @@ try {
   await graph.locator('.graph-node-list button').first().waitFor();
   await graph.getByRole('button',{name:'Close genome visualizer'}).click();
 
+  await showExtinct.uncheck();
   await tab('player');
   await page.getByRole('button',{name:'Play simulation'}).click();
   await tab('genomes');
@@ -225,14 +250,28 @@ try {
   const after=registry(trial.api);
   assert.ok(after.length>trial.initial.length);
   await tab('genomes');
-  await assertTree(after);
+  await assertTree(livePaths(after));
   await page.reload();
-  await assertTree(after);
+  await assertTree(livePaths(after));
+  assert.equal(await showExtinct.isChecked(),false);
   await close();
   await open(trial.other);
   await assertTree(trial.independentEntries);
   assert.match(await node(1).innerText(),/Separate founder/);
   assert.doesNotMatch(await page.locator('#active-genomes').innerText(),/Crown lineage|Spring sample/);
+  await tab('player');
+  await page.getByRole('button',{name:'Play simulation'}).click();
+  await tab('genomes');
+  await page.locator('[data-action="live-program"][data-genome="1"]').focus();
+  await page.locator('.lineage-status').filter({hasText:'No living organisms in this simulation'}).waitFor({timeout:Math.ceil(trial.deathSeconds*1000)+10000});
+  assert.equal(await node(1).count(),0);
+  assert.match(await page.locator('[data-lineage-summary]').innerText(),/0 of 1 registered/);
+  assert.ok(await showExtinct.evaluate(input=>input===document.activeElement),'When the focused lineage disappears, focus returns to the filter');
+  await showExtinct.check();
+  await assertTree(trial.independentEntries.map(e=>({...e,living:0})));
+  await page.reload();
+  await showExtinct.waitFor();
+  assert.equal(await showExtinct.isChecked(),true,'Historical view preference survives reload');
   await close();
   await open(trial.empty);
   await assertTree(trial.emptyEntries);
@@ -248,6 +287,12 @@ try {
   for(const family of largeFamilies) {
     await close();
     await open(family.record);
+    if(family.newestRegistered!==family.last){
+      await showExtinct.check();
+      await page.locator('[data-lineage-newest]').filter({hasText:'Newest variant #'+family.newestRegistered}).click();
+      assert.match(await stats(family.newestRegistered).innerText(),/No living organisms/);
+    }
+    await showExtinct.uncheck();
     const jump=page.locator('[data-lineage-newest]').filter({hasText:'Newest variant #'+family.last});
     await jump.waitFor();
     const started=Date.now();
@@ -257,12 +302,17 @@ try {
     const last=node(family.last);
     assert.equal(Number(await last.getAttribute('data-lineage-parent')),family.parent);
     assert.match(await stats(family.last).textContent(),/\b1 organism\b/);
+    if(family.newestRegistered!==family.last){
+      assert.equal(await node(family.newestRegistered).count(),0);
+      assert.match(await page.locator('[data-lineage-summary]').innerText(),new RegExp('2 of '+family.newestRegistered+' registered'));
+      assert.equal(await page.locator('[data-lineage-page]').count(),0,'Filtered sibling pages clamp when only one child remains');
+    }
     assert.ok(await page.evaluate(()=>{
       const r=document.activeElement.getBoundingClientRect();
       return r.width>0 && r.left>=0 && r.right<=innerWidth+1 && r.bottom>0 && r.top<innerHeight
         && document.documentElement.scrollWidth<=document.documentElement.clientWidth+1;
     }),'Jump puts the last genome on-screen without horizontal overflow');
-    stress.push({registrySize:family.last,lastParent:family.parent,jumpMs:elapsed});
+    stress.push({registrySize:family.newestRegistered,newestLiving:family.last,lastParent:family.parent,jumpMs:elapsed});
   }
   assert.deepEqual(failures,[]);
   console.log(JSON.stringify({fixtureTick:Math.round(trial.main.summary.time*30),initial:trial.initial,

@@ -129,10 +129,15 @@ impl Program {
                 w.u32(u32::MAX);
             }
             w.count(cellular.definition.products.len());
-            for product in &cellular.definition.products {
+            for (index, product) in cellular.definition.products.iter().enumerate() {
                 w.text(&product.name);
                 w.text(product.kind.name());
                 w.f64(product.half_life);
+                if product.kind == ProductKind::Adhesin {
+                    // Only new product records carry an input index, keeping old graphs byte-identical.
+                    w.u32(cellular.definition.precursors.get(index).copied().flatten()
+                        .and_then(|i| u32::try_from(i).ok()).unwrap_or(u32::MAX));
+                }
             }
             w.count(cellular.definition.assemblies.len());
             for assembly in &cellular.definition.assemblies {
@@ -293,7 +298,8 @@ impl Program {
             ensure(version >= 5, "cellular programs need checkpoint version 5")?;
             let count = r.count(cellular::MAX_PRODUCTS)?;
             let mut products = Vec::with_capacity(count);
-            for _ in 0..count {
+            let mut precursors = Vec::new();
+            for index in 0..count {
                 let name = r.text(64)?;
                 ensure(cellular::valid_name(&name), "invalid product name")?;
                 let kind = ProductKind::from_name(&r.text(64)?)
@@ -307,6 +313,11 @@ impl Program {
                     },
                     "invalid product half-life",
                 )?;
+                if kind == ProductKind::Adhesin {
+                    ensure(version >= 16, "adhesin synthesis needs checkpoint version 16")?;
+                    if precursors.is_empty() { precursors = vec![None; count]; }
+                    precursors[index] = Some(r.index(count)?);
+                }
                 products.push(ProductDef {
                     name,
                     kind,
@@ -352,12 +363,10 @@ impl Program {
                     direction,
                 });
             }
-            let definition = CellularProgram::new(
-                products,
-                assemblies,
-            );
+            let mut definition = CellularProgram::new(products, assemblies);
+            definition.precursors = precursors;
             definition
-                .validate()
+                .validate_stored()
                 .map_err(|error| format!("Invalid simulation save: {error}"))?;
             Some(definition)
         } else {

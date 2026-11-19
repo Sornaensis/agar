@@ -33,7 +33,7 @@ let prefs: UiPreferences;
 try { prefs = loadPreferences(); }
 catch (error) {
   preferenceWarning = error;
-  prefs = { tab: 'simulation', simulationView: 'player', activeSimulationId: null, overlay: 'none', builderOverlay: 'light', sensors: true, trails: false, colonyActivity: true };
+  prefs = { tab: 'simulation', simulationView: 'player', activeSimulationId: null, overlay: 'none', builderOverlay: 'light', sensors: true, trails: false, colonyActivity: true, showExtinct: false };
 }
 let storage: Storage;
 let savedGenomes: GenomeDocument[] = [], savedEnvironments: EnvironmentDocument[] = [], simulations: SimulationMetadata[] = [];
@@ -1040,7 +1040,7 @@ function renderActiveGenomes(): void {
     tree=new GenomeLineage(session.metadata.genomeNames, afterId=>session.inspect(engine=>engine.getGenomeLineage(afterId)));
     lineageViews.set(session,tree);
   }
-  tree.update(target,session.metrics);
+  tree.update(target,session.metrics,prefs.showExtinct);
 }
 function updateSimulationUi(): void {
   if(!active) return;
@@ -1226,6 +1226,7 @@ function handleUiChange(event: Event): void {
       if(playerIsVisible())void session.refresh({frame:false,environment:prefs.overlay!=='none' ? true : 'metadata'}).catch(error=>runError(session,error));
       return;
     }
+    if(key==='showExtinct'){prefs.showExtinct=input.checked;persistPreferences();renderActiveGenomes();return;}
     if(key==='sensors'||key==='trails'||key==='colonyActivity'){prefs[key]=input.checked;persistPreferences();return;}
     if(key==='name'){
       session.metadata.name=validateName(input.value);

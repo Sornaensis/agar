@@ -43,31 +43,31 @@ All three revised lineages ended with three living hunters in the compact pool. 
 
 ## Still water and Light and shade
 
-Still water is a quiet, lit 640 × 480 habitat. In the ten-minute test, one Predator shares the habitat with 48 Phototroph founders. On seeds 42, 7 and 2026, their hunts produced 35, 17 and 33 kills. The predator lineage ended with 5, 2 and 6 living cells respectively. Matched lone hunters in empty water exhausted their starting stores by 102 seconds on all three seeds.
+Still water is a quiet, lit 640 × 480 habitat. In the earlier ten-minute survival test, one Predator shares the habitat with 48 Phototroph founders. On seeds 42, 7 and 2026, their hunts produced 35, 17 and 33 kills. The predator lineage ended with 5, 2 and 6 living cells respectively. Matched lone hunters in empty water exhausted their starting stores by 102 seconds on all three seeds.
 
-Light and shade starts 32 Phototrophs, 12 Mixotrophs and two Rememberers in a 400 × 400 pool with a lamp and a current. It starts with zero particles. Across the same three seeds, 7, 7 and 8 individual Mixotrophs both fixed carbon in light and digested real food in shade. Both Rememberers in every run steered using a recently lost chemical cue.
+Light and shade starts 32 Phototrophs, 12 Mixotrophs and two Rememberers in a 400 × 400 pool with a lamp and a current. It starts with zero particles. Across the same three seeds, 6, 7 and 9 individual Mixotrophs both fixed carbon in light and digested real food in shade. Both Rememberers in every run steered using a recently lost chemical cue.
 
 ## The food web
 
 Foragers could double their area yet lose a daughter on the division tick. In the failing case the original core held all the ATP storage. The revised grazer pays for storage that can pass to a daughter and allows offspring with smaller compartments to build on what they inherit.
 
-A Forager also recognizes a Phototroph by contact, then can build the matching adhesion, carbon and mineral machinery. Both partners pay to make these structures. Resource transfer follows the difference in their stored fractions. Foragers still scavenge loose particles and tissue when detached. In a controlled 70-second encounter, an attached grazer fed on real donor tissue, received 4.89 units of organic carbon and returned 0.531 units of minerals. Closing just the grazer’s two junctions reduced both transfers to zero.
+A Forager also recognizes a Phototroph by contact, then can build the matching adhesion, carbon and mineral machinery. Both partners pay to make these structures. Resource transfer follows the difference in their stored fractions. Foragers still scavenge loose particles and tissue when detached. In a controlled 70-second encounter, an attached grazer fed on real donor tissue, received 5.11 units of organic carbon and returned 0.720 units of minerals. Closing just the grazer’s two junctions reduced both transfers to zero.
 
 The **Sunlit food web** starts 48 Phototrophs, 12 Foragers and one Predator together in 400 × 400 cool water. Light powers primary production, and the water exchanges gases with the atmosphere. Each founder starts with ordinary body reserves. No organic particles are supplied at launch or afterward.
 
 | Seed | Phototrophs at 600 s | Foragers at 600 s | Predators at 600 s | Observed Forager descendants | Predation deaths |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 42 | 267 | 21 | 8 | 32 | 47 |
-| 7 | 226 | 41 | 9 | 62 | 71 |
-| 2026 | 229 | 26 | 10 | 43 | 56 |
+| 42 | 253 | 27 | 8 | 37 | 46 |
+| 7 | 252 | 7 | 10 | 13 | 54 |
+| 2026 | 219 | 37 | 10 | 64 | 64 |
 
-All three lineages reproduced on each seed under ABI 19 with bilateral recruitment. The previous ABI 16 runs ended with 5, 4 and 7 predators on these seeds. A matched feeding trial isolates the energetic change from differences in population trajectories. The same developed Phototroph yielded 128.29 energy units of carcass tissue under ABI 16 and 352.25 in the current engine. [Full preset results](scenarios.json) · [Matched feeding trial](predation-yield.json)
+All three lineages reproduced on each seed under ABI 20 with manufactured adhesin and finite binding sites. The previous ABI 16 runs ended with 5, 4 and 7 predators on these seeds. A matched feeding trial isolates the energetic change from differences in population trajectories. The same developed Phototroph, with docking switched off in both engines, yielded 127.69 energy units of carcass tissue under ABI 16 and 350.84 under ABI 20. [Full preset results](scenarios.json) · [Matched feeding trial](predation-yield.json)
 
 ## Colony formation
 
 In Colony pool (seed 42), two independently placed Nurse rosette founders built working adhesion surfaces before they were moved into contact. The previous engine counted them as partners on the first tick and throughout all 60 ticks observed. Under ABI 19 the same encounter produced zero bonds. Enabling recruitment on just one founder also produced zero. With bilateral recruitment, the bond appeared on tick 15. Interrupting the encounter reset its accumulated contact time. [Reproduce the encounter](../scripts/check-colony-formation.mjs)
 
-A Crown rosette founded by one cell reached three connected cells at 162 simulated seconds. The middle cell signaled to two partners and an outer cell activated 0.06 mass of additional harvesting machinery. Closing its signal junctions kept the structure intact and eliminated the edge response. [Reproduce the open and closed controls](../scripts/check-crown.mjs)
+A Crown rosette founded by one cell reached three connected cells at 164 simulated seconds. The middle cell signaled to two partners and an outer cell activated 0.06 mass of additional harvesting machinery. Closing its signal junctions kept the structure intact and eliminated the edge response. [Reproduce the open and closed controls](../scripts/check-crown.mjs)
 
 ## Repeating the comparisons
 

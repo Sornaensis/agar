@@ -1,5 +1,5 @@
 {
-  "abi": 19,
+  "abi": 20,
   "memory": "memory",
   "functions": [
     "abi_version",

@@ -109,6 +109,7 @@ for (const [part,expected] of [['rb001 = ','boolean'],['rs001 = ','string'],['rv
   assert.equal(language.genomeCompletionContext(code,code.length).expected,expected);
 }
 assert.deepEqual(names(complete('cellular; product X = ')),[...language.CELLULAR_PRODUCT_ROLES]);
+assert.deepEqual(names(complete('cellular; product Coat = scaffold(); product Wall = membrane(); product Glue = adhesin(')), ['Coat']);
 assert.deepEqual(names(complete(source+'\ngene new_gene: ')),['Anchor','Rotor','Tail','Memory']);
 assert.ok(names(complete(source+'\nassembly Other: ')).includes('replicator'),'Legacy recipe remains available');
 for (const name of ['store(food)','digest(tissue)','translate()','propel()']) assert.ok(names(complete(source+'\nassembly Other: ')).includes(name));
@@ -138,6 +139,9 @@ assert.deepEqual(schema.cellular.contactMessages,{
 });
 assert.deepEqual(schema.cellular.reads,language.CELLULAR_READ_SIGNALS.map(item=>({name:item.name,type:item.type})));
 assert.deepEqual(names(schema.cellular.products),[...language.CELLULAR_PRODUCT_ROLES]);
+assert.deepEqual(schema.cellular.products.find(p=>p.name==='adhesin').arguments, ['precursor']);
+const adhesin=language.CELLULAR_CONSTRUCTORS.find(p=>p.name==='adhesin');
+engine.compile('cellular;\n'+language.genomeSymbolDocumentation(adhesin).example);
 assert.deepEqual(names(schema.cellular.assemblies),names(language.CELLULAR_ASSEMBLY_KINDS));
 assert.deepEqual(names(schema.cellular.mechanisms),names(language.CELLULAR_MECHANISMS));
 assert.equal(schema.cellular.mechanisms.find(item=>item.name==='store(food)').target,'food');
@@ -387,7 +391,10 @@ assert.equal(family.bonds.length,1,'An actual fission establishes an observable 
 const [[mother,daughter]]=family.bonds;
 assert.equal(engine.cellSnapshot(daughter.id).parentId,mother.id);
 assert.equal(mother.colonySize,2);
-assert.deepEqual(engine.cellBody(mother.id).colony.neighborIds,[daughter.id]);
+const motherBody=engine.cellBody(mother.id);
+assert.equal(motherBody.cellular.products.find(p=>p.name==='Glue').precursor,'CoatPrecursor');
+assert.match(renderCellularBody(motherBody,new Set(['cellular-products'])),/adhesin from CoatPrecursor/);
+assert.deepEqual(motherBody.colony.neighborIds,[daughter.id]);
 const attached=engine.saveState();
 assert.equal(engine.moveCell(daughter.id,35,35),1);
 assert.equal(engine.renderSnapshot().bonds.length,0,'Single-cell relocation immediately removes the edge on the paused frame');

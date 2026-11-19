@@ -2,6 +2,10 @@
 
 [Curated ecology](curated-ecology.md) records the current predator investigation and preset outcomes. Older runs below used the catalogs and engines identified in each section.
 
+## Production and adhesion
+
+[Production measurements](production-chains.json) summarize the tick-by-tick material and ATP checks in a closed, dark founder assay, the outcomes of four single-gene knockouts, and the first functional machinery in each playable founder. The source check covers all 227 assembly recipes in the 16 shipped examples. [Costs and methods](../README.md#what-it-costs-to-build-a-capability)
+
 ## Performance update — ABI 13, checkpoint 9
 
 [performance-abi13.json](performance-abi13.json) records ten before/after engine

@@ -1,6 +1,56 @@
 use super::*;
 use crate::checkpoint::{ensure, Reader, Result, Writer};
+fn stored_contents_fit(cell: &Cell, caps: &BodyCapacities) -> bool {
+    cell.energy <= caps.energy + 1e-9
+        && cell.organic_carbon <= caps.energy / CHEMICAL_ENERGY_PER_CARBON + 1e-9
+        && cell.nutrient_stored <= caps.minerals + 1e-9
+        && cell.gut_energy <= caps.gut_energy + 1e-9
+        && cell.gut_nutrients <= caps.gut_minerals + 1e-9
+}
+
 impl World {
+    /// Old tolerance occasionally activated a store without all its ingredients.
+    /// Its actual contents were validated under the historical physical rule.
+    /// Preserve excess ATP as potential on the existing structural carbon carrier
+    /// and use normal closed-system spill/lysis for other displaced material.
+    pub(crate) fn migrate_pre_v16_compartments(&mut self) -> Result<()> {
+        let mut changed = Vec::new();
+        let mut packet_energy = 0.0;
+        let mut packet_overhead = 0usize;
+        for (row, cell) in self.cells.iter_mut().enumerate() {
+            let caps = cell.body.capacities();
+            if cell.alive() && stored_contents_fit(cell, &caps) { continue; }
+            changed.push((row, caps));
+            let excess_atp = (cell.energy - caps.energy).max(0.0);
+            cell.energy -= excess_atp;
+            cell.structural_enrichment += excess_atp;
+            if !cell.alive() {
+                packet_energy += cell.food_potential().total();
+                packet_overhead += 4;
+            } else {
+                let carbon = (cell.organic_carbon - caps.energy / CHEMICAL_ENERGY_PER_CARBON).max(0.0);
+                if carbon > 0.0 {
+                    packet_energy += carbon * CHEMICAL_ENERGY_PER_CARBON + cell.reserve_extra_for(carbon);
+                    packet_overhead += 1;
+                }
+                if cell.gut_energy > caps.gut_energy || cell.gut_nutrients > caps.gut_minerals {
+                    packet_energy += cell.gut_energy;
+                    packet_overhead += 3;
+                }
+            }
+        }
+        if !changed.is_empty() {
+            if packet_overhead != 0 { self.reserve_organic_packets(packet_energy, packet_overhead)?; }
+            let mut phases = PhaseWorkspace::default();
+            for (row, caps) in changed {
+                Self::collect_store_overflow(&mut self.cells[row], &caps, &mut self.environment, &mut phases.emissions);
+            }
+            self.emit_organic_pending(&mut phases);
+            self.remove_dead_in(&mut phases);
+        }
+        Ok(())
+    }
+
     pub(crate) fn write_checkpoint(&self, w: &mut Writer) {
         for v in [
             self.ticks,
@@ -329,18 +379,18 @@ impl World {
             };
             let caps = c.body.capacities();
             ensure(
-                c.alive()
+                (c.alive() || version < 16 && c.energy > 0.0 && c.integrity > 0.0
+                    && c.body.cellular.as_ref().is_some_and(|state| state.assemblies.iter().any(|a|
+                        matches!(a.recipe.kind, AssemblyKind::Organelle(Kind::Core) | AssemblyKind::Mechanism(MechanismKind::Support))
+                            && a.pre_v16_functional_mass() > 0.0)))
                     && c.body.area <= MAX_AREA
                     && birth_area > 0.0
                     && birth_area <= c.body.area + 1e-10,
                 "invalid living body",
             )?;
             ensure(
-                energy <= caps.energy + 1e-9
-                    && c.organic_carbon <= caps.energy / CHEMICAL_ENERGY_PER_CARBON + 1e-9
-                    && nutrient_stored <= caps.minerals + 1e-9
-                    && gut_energy <= caps.gut_energy + 1e-9
-                    && gut_nutrients <= caps.gut_minerals + 1e-9,
+                stored_contents_fit(&c, &caps)
+                    || version < 16 && stored_contents_fit(&c, &c.body.pre_v16_capacities()),
                 "contents exceed physical compartments",
             )?;
             ensure(
@@ -489,6 +539,59 @@ fn read_substrate_enrichment(reader: &mut Reader<'_>, version: u32, energy: f64)
 mod tests {
     use super::*;
     use crate::{checkpoint, Engine};
+
+    #[test]
+    fn v15_trace_storage_validates_historical_capacity_and_moves_only_real_contents() {
+        let mut old = Engine::new();
+        let id = old.compile("cellular; product Wall=membrane(); product Trace=scaffold(); gene make: Wall=1;
+            assembly E: store(energy) { Wall:0.04; Trace:0.0000000000001; }
+            assembly M: store(mineral) { Wall:0.04; Trace:0.0000000000001; }
+            assembly G: store(food) { Wall:0.04; Trace:0.0000000000001; }");
+        old.world.reset_empty(41);
+        old.world.place_cell(id, 200.0, 100.0, &old.genomes).unwrap();
+        for _ in 0..1200 { old.world.step(&mut old.genomes); }
+        let c = &mut old.world.cells[0];
+        let historical = c.body.pre_v16_capacities();
+        let corrected = c.body.capacities();
+        assert!(historical.energy > corrected.energy + 20.0 && historical.minerals > corrected.minerals + 0.1
+            && historical.gut_energy >= 3.0 && corrected.gut_energy == 0.0);
+        let energy = corrected.energy + 20.0;
+        let carbon = corrected.energy / CHEMICAL_ENERGY_PER_CARBON + 0.5;
+        let mineral = corrected.minerals + 0.1;
+        old.world.energy_imports += energy - c.energy + (carbon - c.organic_carbon) * CHEMICAL_ENERGY_PER_CARBON + 3.0;
+        old.world.carbon_imports += carbon - c.organic_carbon + 0.1;
+        old.world.nutrient_imports += mineral - c.nutrient_stored + 0.01;
+        c.energy = energy;
+        c.organic_carbon = carbon;
+        c.nutrient_stored = mineral;
+        c.ingest_enriched(OrganicKind::Tissue, 3.0, 0.01, 1.0);
+        let as_v15 = |engine: &Engine| {
+            // This source uses no v16 graph or body tags; the old wire payload is identical.
+            let mut bytes = checkpoint::save(engine).unwrap();
+            bytes[8..12].copy_from_slice(&15_u32.to_le_bytes());
+            bytes
+        };
+        let mut migrated = checkpoint::restore(&as_v15(&old)).unwrap();
+        let c = &migrated.world.cells[0];
+        let close = |a: f64, b: f64| assert!((a-b).abs() < 1e-8, "{a} != {b}");
+        close(c.energy, corrected.energy);
+        close(c.structural_enrichment, 20.0);
+        close(c.nutrient_stored, corrected.minerals);
+        close(c.organic_carbon, corrected.energy / CHEMICAL_ENERGY_PER_CARBON);
+        close(c.gut_energy, 0.0);
+        assert!(migrated.world.food.iter().any(|p| p.kind == OrganicKind::Tissue && p.extra_energy > 0.0));
+        close(old.world.energy_total(), migrated.world.energy_total());
+        close(old.world.nutrient_total(), migrated.world.nutrient_total());
+        close(old.world.carbon_total(), migrated.world.carbon_total());
+        let canonical = checkpoint::save(&migrated).unwrap();
+        assert_eq!(checkpoint::save(&checkpoint::restore(&canonical).unwrap()).unwrap(), canonical);
+        let impossible = historical.energy + 1.0;
+        old.world.energy_imports += impossible - old.world.cells[0].energy;
+        old.world.cells[0].energy = impossible;
+        assert!(!migrated.restore_state(&as_v15(&old)));
+        assert!(migrated.error.contains("contents exceed physical compartments"));
+        assert_eq!(checkpoint::save(&migrated).unwrap(), canonical);
+    }
 
     #[test]
     fn enrichment_roundtrips_and_requires_carrier_carbon() {

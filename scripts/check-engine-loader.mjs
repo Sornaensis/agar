@@ -183,7 +183,7 @@ export async function checkEngineLoader() {
     organicProbe.restoreState(organicSaved); organicProbe.tick(300);
     assert.deepEqual(organicProbe.saveState(), future);
     const current=editorA.saveState();
-    assert.equal(new DataView(current.buffer,current.byteOffset,current.byteLength).getUint32(8,true),15);
+    assert.equal(new DataView(current.buffer,current.byteOffset,current.byteLength).getUint32(8,true),16);
     for (const filename of ['trophic-v1.bin','trophic-v2.bin']) {
       const legacy=new Uint8Array(await readFile(new URL('../engine/fixtures/'+filename,import.meta.url)));
       assert.throws(()=>editorA.restoreState(legacy),/Unsupported simulation version.*preserved/);
@@ -215,10 +215,10 @@ export async function checkEngineLoader() {
     const migrated = await Engine.load();
     migrated.restoreState(historical);
     const upgraded = migrated.saveState();
-    assert.equal(new DataView(upgraded.buffer, upgraded.byteOffset, upgraded.byteLength).getUint32(8,true), 15);
-    // Canonical public projections recorded on ABI14 from the authentic v9 save.
-    // v11 also stores the last exchange counters, so the save layout differs.
-    function physicalStateHash(instance, omitHeldEnergy = false) {
+    assert.equal(new DataView(upgraded.buffer, upgraded.byteOffset, upgraded.byteLength).getUint32(8,true), 16);
+    // Recorded on the shipped ABI19 engine using this authentic v9 founder.
+    // Compare biology independently of the current genome registry's memory budget.
+    function physicalStateHash(instance) {
       const api = instance.wasm;
       const hash = createHash('sha256');
       for (const [read, len, width] of [['snapshot_ptr','snapshot_len',8],
@@ -226,20 +226,15 @@ export async function checkEngineLoader() {
         const pointer = api[read]();
         const bytes = new Uint8Array(api.memory.buffer, pointer, api[len]() * width);
         if (read === 'metrics_snapshot_ptr') {
-          // Project the shared historical metric layout. New exports include
-          // two player withdrawal counters and total packet energy before the genome rows.
-          const counters = new Float64Array(api.memory.buffer, pointer + 51 * width, 2);
-          assert.deepEqual([...counters], [0,0]);
-          if (omitHeldEnergy) {
-            hash.update(bytes.subarray(0, 18 * width));
-            hash.update(bytes.subarray(19 * width, 51 * width));
-          } else hash.update(bytes.subarray(0, 51 * width));
-          hash.update(bytes.subarray(54 * width));
+          // A cellular definition now holds an extra three-word Vec header on WASM32.
+          assert.equal(new DataView(bytes.buffer,bytes.byteOffset).getFloat64(13 * width,true),5543+12);
+          hash.update(bytes.subarray(0, 13 * width));
+          hash.update(bytes.subarray(14 * width));
         } else hash.update(bytes);
       }
       return hash.digest('hex');
     }
-    assert.equal(physicalStateHash(migrated),'d439974bd34c4f23318d1a2439ace4532b08794d7e9687dd18c6c37971dabe93');
+    assert.equal(physicalStateHash(migrated),'3dfd0bb386b35fec378afb1d0f9325adf4c68dcc6a36db93755a7868ef17a329');
     const replay = await Engine.load();
     replay.restoreState(upgraded);
     migrated.tick(60);
@@ -247,7 +242,7 @@ export async function checkEngineLoader() {
     assert.deepEqual(replay.saveState(), migrated.saveState(), 'The migrated founder replays exactly');
     // New fabrication retains more of the same expenditure after the import.
     assert.ok(migrated.wasm.energy_total() > 150.7418515626691);
-    assert.equal(physicalStateHash(migrated,true),'5556e158ee5479e23ef9e9c1f058086efdfa802adaabb2a8deb3e7bc54869413');
+    assert.equal(physicalStateHash(migrated),'c0d70763471fc3daf573e6329b35ac35f884674c7bc2a7789b20716023b6c748');
     const markerOnly = await Engine.load();
     markerOnly.restoreState(await readFile(new URL('../engine/fixtures/signal-migration-v10.bin', import.meta.url)));
     assert.deepEqual(markerOnly.getMemory(1).map(x => [x.name,x.value]), [['rf002',6]]);
@@ -279,7 +274,7 @@ export async function checkEngineLoader() {
   } finally {
     globalThis.fetch = originalFetch; WebAssembly.compile = originalCompile;
   }
-  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, version15 body/product/substrate/mechanism/control/environment/gas continuation and explicit atomic rejection of pre-organelle checkpoints.');
+  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, version16 body/product/substrate/mechanism/control/environment/gas continuation and explicit atomic rejection of pre-organelle checkpoints.');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await checkEngineLoader();

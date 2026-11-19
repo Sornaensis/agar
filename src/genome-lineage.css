@@ -1,5 +1,9 @@
 .active-genomes-page { container-type:inline-size; }
 .lineage-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:22px; }
+.lineage-actions, .lineage-actions label { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.lineage-actions { gap:16px; }
+.lineage-actions label { cursor:pointer; font-size:13px; }
+.lineage-actions input { accent-color:var(--mint); }
 .lineage-heading h2 { font-size:22px; }
 .lineage-heading p, .lineage-status { color:var(--muted); font-size:13px; }
 .lineage-heading p { margin-top:4px; }

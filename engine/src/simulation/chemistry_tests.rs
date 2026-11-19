@@ -230,3 +230,34 @@ fn legacy_migration_classifies_old_carbon_once_and_preserves_it_on_resave() {
     assert_eq!(new.world.legacy_carbon_imports, old.world.legacy_carbon_imports);
     assert_eq!(crate::checkpoint::save(&new).unwrap(), saved);
 }
+
+#[test]
+fn translation_in_a_living_founder_requires_both_free_mineral_and_organic_carbon() {
+    let mut genomes = programs("cellular; product Blank=scaffold(); gene make: Blank=1;");
+    for (with_carbon, with_mineral) in [(false, true), (true, false), (true, true)] {
+        let mut w = World::empty(41);
+        w.environment.set_initial_gases(0.0, 0.0);
+        w.environment.set_initial_nutrients(0.0);
+        w.environment.configure(0.5, 0.0, 0.0);
+        w.reset_empty(41);
+        w.place_cell(1, 200.0, 200.0, &genomes).unwrap();
+        let c = &mut w.cells[0];
+        if !with_carbon {
+            // Transfer the founder's real carbon to unavailable dissolved inorganic C.
+            w.environment.release_inorganic_carbon(c.x, c.y, std::mem::take(&mut c.organic_carbon));
+        }
+        if !with_mineral {
+            w.environment.recycle_nutrients(c.x, c.y, std::mem::take(&mut c.nutrient_stored));
+        }
+        let initial = (c.organic_carbon, c.nutrient_stored);
+        for _ in 0..6 { w.step(&mut genomes); }
+        let c = &w.cells[0];
+        assert!(c.energy > 0.0);
+        let pool = &c.body.cellular.as_ref().unwrap().pools[0];
+        assert_eq!(pool.expression_requested, 1.0);
+        assert_eq!(pool.mass > 0.0, with_carbon && with_mineral);
+        close(initial.0 - c.organic_carbon, pool.mass);
+        close(initial.1 - c.nutrient_stored, pool.mass);
+        balances(&w);
+    }
+}

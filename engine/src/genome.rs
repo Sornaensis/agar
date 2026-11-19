@@ -2242,13 +2242,22 @@ impl Program {
     }
 
     pub fn compile(source: &str) -> Result<Self, String> {
+        Self::compile_source(source, false)
+    }
+
+    /// Restored and inherited genomes may still describe a historical, inert adhesion surface.
+    pub(crate) fn compile_stored(source: &str) -> Result<Self, String> {
+        Self::compile_source(source, true)
+    }
+
+    fn compile_source(source: &str, stored: bool) -> Result<Self, String> {
         if source.len() > MAX_SOURCE_BYTES {
             return Err(format!(
                 "Line 1, column 1: program exceeds {MAX_SOURCE_BYTES} bytes."
             ));
         }
         lex(source)
-            .and_then(|tokens| Parser::new(tokens).program())
+            .and_then(|tokens| Parser::new(tokens).program_for(stored))
             .map_err(|error| error.to_string())
     }
 
@@ -3312,8 +3321,12 @@ impl Parser {
         })
     }
     fn program(&mut self) -> Result<Program, CompileError> {
+        self.program_for(false)
+    }
+
+    fn program_for(&mut self, stored: bool) -> Result<Program, CompileError> {
         if self.peek().kind == Kind::Name("cellular".to_string()) {
-            return self.cellular_program();
+            return self.cellular_program(stored);
         }
         let mut outputs = [None; OUTPUT_NAMES.len()];
         let mut writes = Vec::new();

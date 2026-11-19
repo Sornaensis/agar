@@ -11,7 +11,9 @@ mod topology;
 pub(super) use topology::DivisionBonds;
 const GAP_RELAXATION: f64 = 4.0;
 const SHEAR_DAMPING: f64 = 0.5;
-const ACCELERATION_PER_MASS: f64 = 18_000.0;
+// A site is a reusable quantity of installed, intact, exposed material.
+const ADHESIN_PER_SITE: f64 = 0.0015;
+const ACCELERATION_PER_SITE: f64 = 360.0;
 
 // Maximum amounts crossing one unit of active junction mass per second at a
 // full concentration difference. Carbon is measured in reserve units, ATP in energy units.
@@ -19,7 +21,7 @@ const JUNCTION_RATES: [f64; 3] = [120.0, 1.5, 6.0];
 
 #[derive(Default, Clone, Copy)]
 struct ContactPorts {
-    adhesive: f64,
+    sites: u32,
     junction: [f64; 3],
     // One-based handle into the sparse list of endpoints sharing a compatible port.
     account: usize,
@@ -29,9 +31,18 @@ impl ContactPorts {
     fn of(cell: &Cell) -> Self {
         use MechanismKind::*;
         let mut ports = Self::default();
+        let mut exposed_adhesin = 0.0;
         for assembly in cell.body.cellular.iter().flat_map(|state| &state.assemblies) {
             let mass = match assembly.recipe.kind {
-                AssemblyKind::Mechanism(Adhere) => &mut ports.adhesive,
+                AssemblyKind::Mechanism(Adhere) => {
+                    if assembly.functional_mass() > 0.0 {
+                        let material: f64 = assembly.ingredients.iter().zip(&assembly.recipe.parts)
+                            .filter(|(_, p)| p.product.kind == crate::cellular::ProductKind::Adhesin)
+                            .map(|(ingredient, _)| ingredient.mass).sum();
+                        exposed_adhesin += material * assembly.integrity * assembly.activity;
+                    }
+                    continue;
+                }
                 AssemblyKind::Mechanism(JunctionEnergy) => &mut ports.junction[0],
                 AssemblyKind::Mechanism(JunctionMineral) => &mut ports.junction[1],
                 AssemblyKind::Mechanism(JunctionCarbon) => &mut ports.junction[2],
@@ -39,6 +50,7 @@ impl ContactPorts {
             };
             *mass += assembly.functional_mass() * assembly.activity;
         }
+        ports.sites = (exposed_adhesin / ADHESIN_PER_SITE + 1e-12).floor() as u32;
         ports
     }
 }
@@ -53,9 +65,11 @@ fn contact_geometry(env: &Environment, a: &Cell, b: &Cell, max_gap: f64)
     Some((dx, dy, distance, gap))
 }
 
+pub(super) fn binding_sites(cell: &Cell) -> u32 { ContactPorts::of(cell).sites }
+
 pub(super) fn working_contact(env: &Environment, a: &Cell, b: &Cell, max_gap: f64) -> bool {
     a.alive() && b.alive() && contact_geometry(env, a, b, max_gap).is_some()
-        && ContactPorts::of(a).adhesive > 0.0 && ContactPorts::of(b).adhesive > 0.0
+        && binding_sites(a) > 0 && binding_sites(b) > 0
 }
 
 #[derive(Default, Clone, Copy)]
@@ -103,7 +117,15 @@ pub(super) struct JunctionWorkspace {
     ports: Vec<ContactPorts>,
     edges: Vec<JunctionEdge>,
     accounts: Vec<JunctionAccount>,
+    candidates: Vec<BondCandidate>,
 }
+struct BondCandidate {
+    rows: (usize, usize),
+    ids: (u32, u32),
+    previous_stage: u8,
+    geometry: (f64, f64, f64, f64),
+}
+
 struct JunctionAccount {
     cell: usize,
     stores: [Store; 3],
@@ -217,6 +239,7 @@ impl World {
         junctions.ports.clear();
         junctions.edges.clear();
         junctions.accounts.clear();
+        junctions.candidates.clear();
         let grid = &mut workspace.cell_grid;
         grid.configure(self.environment.width, self.environment.height);
         grid.clear();
@@ -225,57 +248,74 @@ impl World {
             let can_attach = cell.alive() && signal.adhesion.is_some() && signal.published.is_some();
             let ports = if can_attach { ContactPorts::of(cell) } else { ContactPorts::default() };
             junctions.ports.push(ports);
-            if ports.adhesive > 0.0 {
+            if ports.sites > 0 {
                 grid.insert(cell.x, cell.y, index);
                 max_radius = max_radius.max(cell.radius());
             }
         }
         for i in 0..junctions.ports.len() {
-            if junctions.ports[i].adhesive <= 0.0 { continue; }
+            if junctions.ports[i].sites == 0 { continue; }
             let a = &self.cells[i];
             let search = grid.nearby_radius(a.x, a.y, a.radius() + max_radius + RELEASE_GAP);
             for j in search {
                 if j <= i { continue; }
-                let (before, after) = self.cells.split_at_mut(j);
-                let (a, b) = (&mut before[i], &mut after[0]);
+                let b = &self.cells[j];
                 let (sa, sb) = (signals[i], signals[j]);
                 if !sa.accepts(sb) { continue; }
                 let key = (a.id.min(b.id), a.id.max(b.id));
                 let old = previous.get(&key).copied().unwrap_or(0);
                 if old != CLONAL && !(sa.recruits && sb.recruits) { continue; }
                 let max_gap = if old >= MATURE { RELEASE_GAP } else { CONTACT_GAP };
-                let Some((dx, dy, distance, gap)) = contact_geometry(&self.environment, a, b, max_gap) else { continue; };
-                let progress = if old >= MATURE { old } else { old + 1 };
-                self.contacts.insert(key, progress);
-                if progress < MATURE { continue; }
-
-                self.had_adhesive_contacts = true;
-                a.adhered_neighbors += 1;
-                b.adhered_neighbors += 1;
-                junctions.connect(i, j, a, b);
-
-                // Dampen sliding and restore surface contact without pulling an
-                // overlapping pair closer. Collision response owns repulsion.
-                let nx = dx / distance;
-                let ny = dy / distance;
-                let (vx, vy) = (b.vx - a.vx, b.vy - a.vy);
-                let radial = vx * nx + vy * ny;
-                let pull = (radial + GAP_RELAXATION * gap.max(0.0)).max(0.0);
-                let change_x = nx * pull + SHEAR_DAMPING * (vx - radial * nx);
-                let change_y = ny * pull + SHEAR_DAMPING * (vy - radial * ny);
-                let magnitude = change_x.hypot(change_y);
-                if magnitude == 0.0 { continue; }
-                let limit = ACCELERATION_PER_MASS * junctions.ports[i].adhesive.min(junctions.ports[j].adhesive) * DT;
-                let scale = (limit / magnitude).min(1.0);
-                let (ma, mb) = (a.inertia(), b.inertia());
-                let impulse = scale * ma * mb / (ma + mb);
-                a.vx += change_x * impulse / ma;
-                a.vy += change_y * impulse / ma;
-                b.vx -= change_x * impulse / mb;
-                b.vy -= change_y * impulse / mb;
-                workspace.geometry.velocities[i] = [a.vx, a.vy];
-                workspace.geometry.velocities[j] = [b.vx, b.vy];
+                if let Some(geometry) = contact_geometry(&self.environment, a, b, max_gap) {
+                    junctions.candidates.push(BondCandidate {
+                        rows: (i, j), ids: key, previous_stage: old, geometry,
+                    });
+                }
             }
+        }
+        // Mature contacts hold their sites. Longer uninterrupted trials precede
+        // new arrivals. Stable organism IDs break ties independently of grid order.
+        junctions.candidates.sort_unstable_by_key(|c|
+            (std::cmp::Reverse(c.previous_stage.min(MATURE)), c.ids));
+        for k in 0..junctions.candidates.len() {
+            let candidate = &junctions.candidates[k];
+            let (i, j) = candidate.rows;
+            if junctions.ports[i].sites == 0 || junctions.ports[j].sites == 0 { continue; }
+            junctions.ports[i].sites -= 1;
+            junctions.ports[j].sites -= 1;
+            let old = candidate.previous_stage;
+            let progress = if old >= MATURE { old } else { old + 1 };
+            self.contacts.insert(candidate.ids, progress);
+            if progress < MATURE { continue; }
+            let (dx, dy, distance, gap) = candidate.geometry;
+            let (before, after) = self.cells.split_at_mut(j);
+            let (a, b) = (&mut before[i], &mut after[0]);
+            self.had_adhesive_contacts = true;
+            a.adhered_neighbors += 1;
+            b.adhered_neighbors += 1;
+            junctions.connect(i, j, a, b);
+
+            // Dampen sliding and restore surface contact without pulling an
+            // overlapping pair closer. Collision response owns repulsion.
+            let nx = dx / distance;
+            let ny = dy / distance;
+            let (vx, vy) = (b.vx - a.vx, b.vy - a.vy);
+            let radial = vx * nx + vy * ny;
+            let pull = (radial + GAP_RELAXATION * gap.max(0.0)).max(0.0);
+            let change_x = nx * pull + SHEAR_DAMPING * (vx - radial * nx);
+            let change_y = ny * pull + SHEAR_DAMPING * (vy - radial * ny);
+            let magnitude = change_x.hypot(change_y);
+            if magnitude == 0.0 { continue; }
+            let limit = ACCELERATION_PER_SITE * DT;
+            let scale = (limit / magnitude).min(1.0);
+            let (ma, mb) = (a.inertia(), b.inertia());
+            let impulse = scale * ma * mb / (ma + mb);
+            a.vx += change_x * impulse / ma;
+            a.vy += change_y * impulse / ma;
+            b.vx -= change_x * impulse / mb;
+            b.vy -= change_y * impulse / mb;
+            workspace.geometry.velocities[i] = [a.vx, a.vy];
+            workspace.geometry.velocities[j] = [b.vx, b.vy];
         }
         junctions.share(&mut self.cells, &mut workspace.geometry);
     }
@@ -295,7 +335,7 @@ mod tests {
     use super::super::mechanism_tests::equipped;
 
     fn pair() -> (World, Vec<Genome>) {
-        let (mut world, genomes) = equipped("assembly Glue: adhere() { Mount:0.01; Wall:0.01; }\npublish rf020 = 31; adhere_message rf020 recruit;");
+        let (mut world, genomes) = equipped("product GlueMaterial = adhesin(Frame); assembly Glue: adhere() { GlueMaterial:0.006; Mount:0.01; Wall:0.01; }\npublish rf020 = 31; adhere_message rf020 recruit;");
         let a = &mut world.cells[0];
         a.x = WIDTH - 7.25;
         a.y = 100.0;

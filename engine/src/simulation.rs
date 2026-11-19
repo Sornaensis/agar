@@ -1734,24 +1734,30 @@ impl World {
             phases.spill_capacities[i] = cell.body.capacities();
             phases.spill_capacities.push(daughter.body.capacities());
             let had_interfaces = cell.adhered_neighbors > 0;
-            // Only an actual division can retain a daughter without recruitment.
-            let parent_signal = CellSignal::from_cell(cell, &genomes[(cell.genome_id - 1) as usize].program);
-            let daughter_signal = CellSignal::from_cell(&daughter, &genomes[(daughter.genome_id - 1) as usize].program);
-            if parent_signal.accepts(daughter_signal)
-                && adhesion::working_contact(&self.environment, cell, &daughter, adhesion::CONTACT_GAP) {
-                self.contacts.insert((cell.id, daughter.id), adhesion::CLONAL);
-                cell.adhered_neighbors += 1;
-                daughter.adhered_neighbors = 1;
-                self.had_adhesive_contacts = true;
-            }
             self.cells.push(daughter);
-            let daughter_row = self.cells.len()-1;
+            let daughter_row = self.cells.len() - 1;
             if let Some(index) = division_bonds.as_mut() {
-                index.append_daughter(self,i,daughter_row);
+                index.append_daughter(daughter_row);
             }
             if had_interfaces {
-                let index = division_bonds.get_or_insert_with(||adhesion::DivisionBonds::new(self));
-                self.inherit_bond_interfaces(i,daughter_row,genomes,index);
+                let index = division_bonds.get_or_insert_with(|| adhesion::DivisionBonds::new(self));
+                self.inherit_bond_interfaces(i, daughter_row, genomes, index);
+            }
+            // Established physical interfaces get first use of the hardware
+            // actually inherited by each half. Retention uses one remaining site.
+            let parent = &self.cells[i];
+            let daughter = &self.cells[daughter_row];
+            let parent_signal = CellSignal::from_cell(parent, &genomes[(parent.genome_id - 1) as usize].program);
+            let daughter_signal = CellSignal::from_cell(daughter, &genomes[(daughter.genome_id - 1) as usize].program);
+            if parent_signal.accepts(daughter_signal)
+                && parent.adhered_neighbors < adhesion::binding_sites(parent)
+                && daughter.adhered_neighbors < adhesion::binding_sites(daughter)
+                && adhesion::working_contact(&self.environment, parent, daughter, adhesion::CONTACT_GAP) {
+                self.contacts.insert((parent.id, daughter.id), adhesion::CLONAL);
+                self.cells[i].adhered_neighbors += 1;
+                self.cells[daughter_row].adhered_neighbors += 1;
+                self.had_adhesive_contacts = true;
+                if let Some(index) = division_bonds.as_mut() { index.add(i, daughter_row); }
             }
         }
         // Uneven, discrete compartment inheritance can reduce capacity; transfer
@@ -1883,50 +1889,54 @@ impl World {
         let spills = &mut workspace.emissions;
         spills.clear();
         for (c, cap) in self.cells.iter_mut().zip(&workspace.spill_capacities) {
-            if !c.alive() {
-                continue;
-            }
-            let excess = (c.nutrient_stored - cap.minerals).max(0.0);
-            c.nutrient_stored -= excess;
-            self.environment.recycle_nutrients(c.x, c.y, excess);
-            let energy = (c.energy - cap.energy).max(0.0);
-            c.energy -= energy;
-            let carbon_overflow = (c.organic_carbon - cap.energy / CHEMICAL_ENERGY_PER_CARBON).max(0.0);
-            let extra = c.reserve_extra_for(carbon_overflow);
-            c.reserve_enrichment -= extra;
-            c.organic_carbon -= carbon_overflow;
-            if carbon_overflow > 0.0 {
-                spills.push(OrganicEmission::new(
-                    OrganicKind::Exudate,
-                    c.x,
-                    c.y,
-                    carbon_overflow * CHEMICAL_ENERGY_PER_CARBON + extra,
-                    0.0,
-                ).enriched(extra));
-            }
-            let kept = if c.gut_energy > 0.0 {
-                (cap.gut_energy / c.gut_energy).min(1.0)
-            } else {
-                1.0
-            }
-            .min(if c.gut_nutrients > 0.0 {
-                (cap.gut_minerals / c.gut_nutrients).min(1.0)
-            } else {
-                1.0
-            });
-            for kind in OrganicKind::ALL {
-                let pool = c.gut[kind as usize];
-                spills.push(OrganicEmission::new(
-                    kind,
-                    c.x,
-                    c.y,
-                    pool.energy * (1.0 - kept),
-                    pool.nutrients * (1.0 - kept),
-                ).enriched(pool.extra_energy * (1.0 - kept)));
-            }
-            c.scale_gut(kept);
+            Self::collect_store_overflow(c, cap, &mut self.environment, spills);
         }
         self.emit_organic_pending(workspace);
+    }
+    fn collect_store_overflow(c: &mut Cell, cap: &BodyCapacities, environment: &mut Environment,
+        spills: &mut Vec<OrganicEmission>) {
+        if !c.alive() {
+            return;
+        }
+        let excess = (c.nutrient_stored - cap.minerals).max(0.0);
+        c.nutrient_stored -= excess;
+        environment.recycle_nutrients(c.x, c.y, excess);
+        let energy = (c.energy - cap.energy).max(0.0);
+        c.energy -= energy;
+        let carbon_overflow = (c.organic_carbon - cap.energy / CHEMICAL_ENERGY_PER_CARBON).max(0.0);
+        let extra = c.reserve_extra_for(carbon_overflow);
+        c.reserve_enrichment -= extra;
+        c.organic_carbon -= carbon_overflow;
+        if carbon_overflow > 0.0 {
+            spills.push(OrganicEmission::new(
+                OrganicKind::Exudate,
+                c.x,
+                c.y,
+                carbon_overflow * CHEMICAL_ENERGY_PER_CARBON + extra,
+                0.0,
+            ).enriched(extra));
+        }
+        let kept = if c.gut_energy > 0.0 {
+            (cap.gut_energy / c.gut_energy).min(1.0)
+        } else {
+            1.0
+        }
+        .min(if c.gut_nutrients > 0.0 {
+            (cap.gut_minerals / c.gut_nutrients).min(1.0)
+        } else {
+            1.0
+        });
+        for kind in OrganicKind::ALL {
+            let pool = c.gut[kind as usize];
+            spills.push(OrganicEmission::new(
+                kind,
+                c.x,
+                c.y,
+                pool.energy * (1.0 - kept),
+                pool.nutrients * (1.0 - kept),
+            ).enriched(pool.extra_energy * (1.0 - kept)));
+        }
+        c.scale_gut(kept);
     }
     fn photosynthesize_in(
         &mut self, outputs: &[Outputs], caps: &[BodyCapacities], _processing: &mut [f64],

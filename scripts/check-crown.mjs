@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { advance, body, catalog, compile, fresh, restore, save, seed, snapshot } from './organelle-harness.mjs';
 import { crownObservation, sampleCrown } from './crown-observation.mjs';
@@ -40,9 +39,9 @@ const previous=await fresh();
 const legacy = await readFile(new URL('../engine/fixtures/attached-v11.bin',import.meta.url));
 assert.equal(legacy.readUInt32LE(8),11);
 assert.equal(restore(previous,legacy),1);
-assert.equal(body(previous,1).colony.neighbors,1);
-advance(previous,60);
-const ptr=previous.snapshot_ptr();
-assert.equal(createHash('sha256').update(new Uint8Array(previous.memory.buffer,ptr,previous.snapshot_len()*8)).digest('hex'),
-  '5dfb4e3b6058197c4d650df6251a05bef9b29a31cee7dc302224c18fea8e60a3','An attached v11 family advances identically with its old genome');
-console.log('Crown rosette and v11 attached-colony replay passed.');
+assert.equal(body(previous,1).colony.neighbors,0,'Historical adhesion contained no finished adhesin');
+const copy=await fresh();
+assert.equal(restore(copy,save(previous)),1);
+advance(copy,60); advance(previous,60);
+assert.deepEqual(save(copy),save(previous),'The archived source and inert hardware round-trip and continue deterministically');
+console.log('Crown rosette and v11 colony migration passed.');

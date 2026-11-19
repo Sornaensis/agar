@@ -4,7 +4,7 @@
 //! World pays or recovers the carbon quota around this mineral-conserving worker.
 //! Growth energy is split into embodied fabrication energy and heat; neither
 //! targets nor damage create or erase material. World handles storage overflow.
-use crate::cellular::{AssemblyKind, CellularState, MechanismKind, RecipeIdentity};
+use crate::cellular::{AssemblyInstance, AssemblyKind, CellularState, MechanismKind, RecipeIdentity};
 use crate::checkpoint::{ensure, Reader, Result as CheckpointResult, Writer};
 
 #[cfg(test)]
@@ -750,6 +750,12 @@ impl Body {
                 .sum::<f64>()
     }
     pub fn capacities(&self) -> BodyCapacities {
+        self.capacities_with_measure(AssemblyInstance::functional_mass)
+    }
+    pub(crate) fn pre_v16_capacities(&self) -> BodyCapacities {
+        self.capacities_with_measure(AssemblyInstance::pre_v16_functional_mass)
+    }
+    fn capacities_with_measure(&self, measure: impl Fn(&AssemblyInstance) -> f64 + Copy) -> BodyCapacities {
         let mut mass = [0.0; FAMILY_COUNT];
         for organ in &self.organs {
             mass[organ.kind as usize] += organ.functional_mass();
@@ -757,11 +763,11 @@ impl Body {
         if let Some(state) = &self.cellular {
             for assembly in &state.assemblies {
                 if let AssemblyKind::Organelle(kind) = assembly.recipe.kind {
-                    mass[kind as usize] += assembly.functional_mass();
+                    mass[kind as usize] += measure(assembly);
                 }
             }
         }
-        self.capacities_from_functional_mass(mass)
+        self.capacities_from_functional_mass(mass, measure)
     }
     /// Reuse an already collected family snapshot without another organ scan.
     pub fn capacities_from_summaries(
@@ -770,9 +776,9 @@ impl Body {
     ) -> BodyCapacities {
         // capacities() starts its accumulation at positive zero, unlike the
         // independent family query sums used by family_summaries().
-        self.capacities_from_functional_mass(summaries.map(|s| 0.0 + s.functional_mass))
+        self.capacities_from_functional_mass(summaries.map(|s| 0.0 + s.functional_mass), AssemblyInstance::functional_mass)
     }
-    fn capacities_from_functional_mass(&self, mut mass: [f64; FAMILY_COUNT]) -> BodyCapacities {
+    fn capacities_from_functional_mass(&self, mut mass: [f64; FAMILY_COUNT], measure: impl Fn(&AssemblyInstance) -> f64) -> BodyCapacities {
         use OrganelleKind::*;
         // Sensing precedes gene evaluation. Receptors and processing enzymes
         // therefore use their stored activity from the preceding tick, just as
@@ -790,7 +796,7 @@ impl Body {
             for assembly in &state.assemblies {
                 if let AssemblyKind::Organelle(kind) = assembly.recipe.kind {
                     if processing(kind) {
-                        assemblies[kind as usize] += assembly.functional_mass() * assembly.activity;
+                        assemblies[kind as usize] += measure(assembly) * assembly.activity;
                     }
                 }
             }
@@ -858,7 +864,7 @@ impl Body {
             bite_extraction_fraction: 1.0,
         };
         if let Some(state) = &self.cellular {
-            state.add_mechanism_capacities(&mut capacities, self.area);
+            state.add_mechanism_capacities(&mut capacities, self.area, measure);
         }
         capacities
     }

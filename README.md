@@ -23,6 +23,22 @@ Cellular programs can store private values between ticks and publish a recogniti
 
 Select a cell and open **Memory** to see its registers or **Program** to inspect a contact reading. Each cell in a colony still builds its own machinery and pays its own energy costs. The basic adhesion program is also available as an [editable example](examples/colony.cell).
 
+### What it costs to build a capability
+
+A new founder receives a paid core and starting reserves. Its specialized machines start unbuilt. The core supplies a finite amount of work each tick, shared by all competing production stages. A product becomes available to the next stage on the following tick.
+
+| Stage | Inputs actually consumed | Where the investment goes |
+| --- | --- | --- |
+| Make a primary product | One free organic carbon and one free mineral per unit of product, its role-specific ATP cost, and 0.6 core work | The product pool acquires that mass and retains 90% of the ATP spent. |
+| Finish adhesin | One unit of the **named scaffold precursor**, 25 ATP and 0.6 core work per unit | The precursor’s mass and stored energy move into finished adhesin, which also retains 90% of the finishing cost. |
+| Assemble a machine | Its specified ingredients from existing pools, installation ATP and 0.4 core work per unit installed | The installed parts carry their previous investment plus 90% of installation ATP. The machine only works after it receives every ingredient. |
+| Grow and replicate | Working growth or replication machinery, one carbon and one mineral per unit of new frame or replica, 80 ATP and one core work per unit | New frame and genetic material retain their mass and fabrication energy. Constriction then consumes time and ATP. Division charges 12 ATP per unit of parent area and partitions the existing body. |
+| Repair or recycle cellular machinery | Repair uses 60 ATP and one core work per unit restored. Recycling uses 20 ATP and 0.4 core work per unit dismantled. Both require the corresponding machinery. | Repair restores integrity. Recycling returns the actual ingredients, up to their recorded synthesis and finishing investment. Installation energy dissipates. Death releases the remaining investment in tissue. |
+
+An adhesive surface must contain anchor, membrane and finished adhesin, each at least 10% of its recipe mass. One binding site requires 0.0015 units of exposed, active adhesin at each end of a bond. Damage or deactivation can reduce this capacity. In the isolated production test, the cell made scaffold on tick 1, finished adhesin on tick 2 and completed its first working surface on tick 41. Removing any of the four producer genes prevented the surface from working. Run `npm run test:production-chains` to repeat the measurements. [Production measurements](experiments/production-chains.json)
+
+Light harvesting draws on local light and inorganic carbon to produce organic carbon and oxygen. Digestion moves the ingested substrate into reserves and waste. Aerobic respiration consumes organic carbon and oxygen, releases inorganic carbon and yields ATP. These reactions supply the reserves charged by the construction steps above. [Gas and carbon accounting](design/gas-exchange.md)
+
 **How colonies form.** Nurse rosettes, Crown rosettes and Pulse swimmers grow by retaining daughter cells at division. When a bonded cell divides again, each existing attachment can stay with the half that still touches its partner. Separately placed rosette or swimmer founders stay independent when they touch. Phototrophs and Foragers can recruit each other for exchange. Each publishes a marker, recognizes the other’s marker and needs an active adhesive surface. Recruitment takes 15 consecutive ticks of contact (half a simulation second). Only an established bond permits junction transport or a group move.
 
 **Crown rosette** starts with a single founder. Cells with multiple signaling neighbors emit a beacon. An edge cell receiving that beacon can use a second light harvester. The [editable genome](examples/crown-rosette.cell) reads the count and mean signal of partners linked by active signal junctions. [See the three-cell colony in the player](screenshots/cellular-body.jpg).
@@ -39,7 +55,7 @@ New body material retains 90% of the fabrication energy spent on it. When a cell
 
 A hunter must capture, digest and respire the meal to raise its own ATP. Food energy and carbon are tracked separately, so two tissue fragments with the same carbon content can have different food values. With room in its reserves, a predator assimilates 65% of the tissue it processes and leaves 35% in waste. Oxygen-supported respiration converts 80% of the assimilated potential to ATP. A 100-energy tissue meal can therefore supply 52 ATP on the first pass, before the predator’s own costs. Recycled parts contribute only what the cell still holds.
 
-In the matched seed-42 encounter, the same grown Phototroph released 128.29 energy units under the earlier rules and 352.25 under the corrected rules. The predator ended the 60-second encounter with 67.56 and 132.17 ATP respectively. A fasting predator of the same age ended with 18.05 ATP in both versions. Run `node scripts/check-predation-yield.mjs` to reproduce the current newborn, grown, carcass-only and fasting trials. [Measured outcomes](experiments/predation-yield.json)
+In a matched seed-42 encounter, the same grown Phototroph released 127.69 energy units under ABI 16 and 350.84 under ABI 20. The predator ended the 60-second encounter with 67.57 and 132.04 ATP respectively. A fasting predator of the same age ended with 18.05 ATP in both versions. Both engines used the same prey with docking switched off to isolate feeding. Run `node scripts/check-predation-yield.mjs` to measure the current catalog genomes, or provide the ABI 16 module with `--baseline` to repeat the paired comparison. [Measured outcomes](experiments/predation-yield.json)
 
 ## Workspace
 
@@ -57,7 +73,7 @@ Open **Body** to inspect built machinery, resource exchange and incoming colony 
 
 Open **Genomes** inside a simulation to follow its ancestry tree. Each root is a genome registered independently in this run. When a daughter inherits a changed genome, its variant branches from the parent genome. A division that copies the genome stays on the same branch. The same change arising again from the same parent reuses the existing variant.
 
-Each row shows how many living cells carry that exact genome and their highest cell generation. Genomes with zero living carriers stay in the tree, so you can trace a living variant through an ancestor that has died out. Expand or collapse a branch, select a genome to inspect its program or graph, or choose **Newest variant** to reveal its place in the tree. Saved runs retain the parent links and mutation types, including runs saved before this view was added. [See a branching Crown rosette culture](screenshots/genome-lineages.png).
+Each row shows how many living cells carry that exact genome and their highest cell generation. The hierarchy initially shows lineages with living carriers, including extinct ancestors on their paths. Turn on **Show Extinct** to see branches that have died out. The player remembers this preference across runs. Expand or collapse a branch, select a genome to inspect its program or graph, or choose **Newest variant** to reveal its place in the tree. Saved runs retain the parent links and mutation types, including runs saved before this view was added. [See a branching Crown rosette culture](screenshots/genome-lineages.png).
 
 Built-ins stay unchanged. Editing or importing creates independent catalog items. Running simulations own their programs and environment state, so catalog renames and deletions do not alter existing worlds.
 
@@ -242,7 +258,7 @@ In an organism's read-only Program view, hover, place the caret or select an exp
 
 IndexedDB stores documents and complete worlds; localStorage stores preferences and editor drafts. Changing runs checkpoint every two seconds and after key actions, and reopen paused. The save indicator reports failures. The active simulation advances when its main view is visible or its floating player is open, including while the main app shows a catalog. An open player uses a timer when both windows are hidden; browser throttling can slow it. There is no offline catch-up. Web Locks protect a run from competing writers in multiple tabs. Clearing browser site data removes its local saves; export genomes and environments for portable copies.
 
-**Current formats: engine ABI 19, checkpoint 15, genome language 3 with additive cellular metadata.** Genome JSON exports use `agar.genome` version 2 with `languageVersion: 3`; environment JSON remains version 1. Plain `.cell` source is checked with the current compiler. Checkpoint-3 simulations retain their actual organs, resources, memory and source. Their previously unclassified organic particles and gut contents import as tissue; their new protein pools start empty. Checkpoints 4 through 14 also remain readable. Older saves store neighbor counts. The importer retains identifiable, physically compatible parent–daughter bonds supported by those counts. New saves record the actual partners and any recruitment in progress. Previously supplied particles and their accounted resources carry over. Automatic food supply ends at import. Previously built parts keep their recorded investment and existing food keeps its original carbon and energy. Older runs start with zero player withdrawals. Older states receive explicit initial gases and a one-time ledger for existing carbon; their future follows the new chemistry. New saves retain cellular products, ingredient ledgers, replication, mechanism identities and construction controls. Existing recipes default to allowing new starts and requesting no recycling. Corrected optical coverage and directional primitive interactions intentionally change affected trajectories. The old `build.*` source spelling remains an alias for expression.
+**Current formats: engine ABI 20, checkpoint 16, genome language 3 with additive cellular metadata.** Genome JSON exports use `agar.genome` version 2 with `languageVersion: 3`; environment JSON remains version 1. Plain `.cell` source is checked with the current compiler. Checkpoint-3 simulations retain their actual organs, resources, memory and source. Their previously unclassified organic particles and gut contents import as tissue; their new protein pools start empty. Checkpoints 4 through 15 also remain readable. Their two-part adhesive hardware keeps its material and stored energy but cannot bind without finished adhesin. Historical attachments and recruitment progress on those surfaces are cleared. If an older save used a compartment with a missing trace ingredient, it reopens with the corrected capacity. Excess stored ATP stays in the cell as chemical energy bound to its existing tissue. New saves retain the actual precursor declarations, installed ingredients, partners and recruitment progress. Previously supplied particles and their accounted resources carry over. Automatic food supply ends at import. Previously built parts keep their recorded investment and existing food keeps its original carbon and energy. Older runs start with zero player withdrawals. Older states receive explicit initial gases and a one-time ledger for existing carbon; their future follows the new chemistry. New saves retain cellular products, ingredient ledgers, replication, mechanism identities and construction controls. Existing recipes default to allowing new starts and requesting no recycling. Corrected optical coverage and directional primitive interactions intentionally change affected trajectories. The old `build.*` source spelling remains an alias for expression.
 
 The organelle model is an intentional compatibility break. Checkpoints 1/2 are rejected before replacing the engine state. Older saved genomes remain viewable, renameable and exportable, but must be manually updated in a new copy before introduction. Their investment fractions and omniscient sensors are not silently converted into free organs. Saved records and old files remain preserved. New and old browser documents keep the same storage namespace.
 
@@ -307,6 +323,7 @@ npm run test:player-view
 npm run test:environment-controls
 npm run test:worker
 npm run test:cellular
+npm run test:production-chains
 npm run test:colony-formation
 npm run test:multicellular
 npm run test:cellular-ui
@@ -351,7 +368,7 @@ checkpoint and render-buffer equality at sampled boundaries.
 
 ```sh
 npm run bench:simulation
-npm run bench:simulation -- --baseline /path/to/compatible-ABI19/engine/pkg/agar_engine.wasm --output experiments/comparison.json
+npm run bench:simulation -- --baseline /path/to/compatible-ABI20/engine/pkg/agar_engine.wasm --output experiments/comparison.json
 ```
 
 The benchmark uses V8's optimizing WASM tier from the start to avoid timing tier

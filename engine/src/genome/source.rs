@@ -26,7 +26,7 @@ impl ParsedSource {
             return Err(format!("program exceeds {MAX_SOURCE_BYTES} bytes."));
         }
         let mut parser = Parser::new(lex(source).map_err(|error| error.to_string())?);
-        let program = parser.program().map_err(|error| error.to_string())?;
+        let program = parser.program_for(true).map_err(|error| error.to_string())?;
         Ok(Self {
             program,
             nodes: parser.node_locations,
@@ -295,7 +295,7 @@ impl Program {
         patched.push_str(&source[..from]);
         patched.push_str(&replacement);
         patched.push_str(&source[to..]);
-        let compiled = Self::compile(&patched).ok()?;
+        let compiled = Self::compile_stored(&patched).ok()?;
         if matches!(kind, MutationKind::Constant | MutationKind::Reference) {
             // A one-leaf mutation must leave the entire remaining graph intact,
             // not merely yield some other well-typed parse of the patched text.
@@ -361,7 +361,7 @@ impl Program {
         patched.push_str(&source[..from]);
         patched.push_str(&replacement);
         patched.push_str(&source[to..]);
-        let program = Self::compile(&patched).ok()?;
+        let program = Self::compile_stored(&patched).ok()?;
         Some(Mutation {
             program,
             source: patched,
@@ -415,7 +415,7 @@ impl Program {
         patched.push_str(&source[..from]);
         patched.push_str(&replacement);
         patched.push_str(&source[to..]);
-        let program = Self::compile(&patched).ok()?;
+        let program = Self::compile_stored(&patched).ok()?;
         Some(Mutation {
             program,
             source: patched,

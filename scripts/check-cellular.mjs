@@ -3,11 +3,26 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fresh, compile, seed, snapshot, advance, graph, body, evaluation, save, restore, source, error, catalog } from './organelle-harness.mjs';
 
-const { PRESETS } = await catalog();
+const { PRESETS, CELLULAR_FAMILY_PRESETS, MECHANISM_PRESETS_V6 } = await catalog();
 const conserved = state => {
   assert.ok(Math.abs(state.material - state.materialIntroduced) < Math.max(1e-7, state.materialIntroduced * 1e-10), 'Material transfers remain conserved');
   assert.ok(state.energy <= state.energyIntroduced + state.photosynthesis + 1e-7, 'Fabrication and metabolism cannot create energy');
 };
+
+function assertIngredientSupply(program, name) {
+  // An imported blueprint can be intentionally incomplete, but every stock used
+  // in these authored organisms has a synthesis gene, including finishing inputs.
+  const declarations = program.replace(/#[^\n]*/g,'');
+  const supplied = new Set([...declarations.matchAll(/\bgene\s+\w+\s*:\s*(\w+)\s*=/g)].map(match=>match[1]));
+  const ingredients = [...declarations.matchAll(/\bassembly\s+\w+[^{}]*\{([^}]*)\}/g)]
+    .flatMap(match=>[...match[1].matchAll(/\b(\w+)\s*:\s*[-+.]?\d/g)].map(part=>part[1]))
+    .filter(part=>!['at','direction','activity','recycle','start_when'].includes(part));
+  for (const input of declarations.matchAll(/=\s*adhesin\(\s*(\w+)\s*\)/g)) ingredients.push(input[1]);
+  for (const ingredient of ingredients) assert.ok(supplied.has(ingredient), name+' supplies '+ingredient);
+}
+for (const preset of [...CELLULAR_FAMILY_PRESETS, ...MECHANISM_PRESETS_V6]) {
+  assertIngredientSupply(preset.source, preset.name);
+}
 
 // Every authored example must compile, including files users can import directly.
 const playable = new Map(PRESETS.map(preset => [preset.name.toLowerCase().replaceAll(' ', '-'), preset]));
@@ -16,6 +31,7 @@ for (const name of importable) {
   const api = await fresh({ ambientLight: 0.85, initialNutrients: 3 });
   const example = await readFile(new URL(`../examples/${name}.cell`, import.meta.url), 'utf8');
   if (playable.has(name)) assert.equal(example.trimEnd(), playable.get(name).source, name+' example matches its live catalog program');
+  assertIngredientSupply(example, name);
   const genome = compile(api, example);
   if (name === 'solar' || name === 'regulated-motor') {
     seed(api, genome, 1);
@@ -233,7 +249,7 @@ for (const preset of PRESETS) {
 
   const firstDivisionSeconds = (state.ticks-startTick)/30;
   const bytes = save(api), resumed = await fresh();
-  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 15);
+  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 16);
   assert.equal(restore(resumed, bytes), 1, error(resumed));
   assert.deepEqual(save(resumed), bytes);
   advance(api, 90); advance(resumed, 90);
@@ -249,5 +265,5 @@ for (const preset of PRESETS) {
     firstDivisionSeconds: Math.round(firstDivisionSeconds * 100) / 100, timeLimitSeconds: cycleSeconds });
 }
 
-console.log(`Cellular checks passed: ${PRESETS.length} authored genomes, ${importable.length} importable examples, local receptor separation, bright/shade motor recycling and regrowth, paid development, frozen inspection, resource conservation, whole-machine fission with functioning consumer daughters, gene/placement mutations, and exact v15 continuation.`);
+console.log(`Cellular checks passed: ${PRESETS.length} authored genomes, ${importable.length} importable examples, local receptor separation, bright/shade motor recycling and regrowth, paid development, frozen inspection, resource conservation, whole-machine fission with functioning consumer daughters, gene/placement mutations, and exact v16 continuation.`);
 console.log(JSON.stringify({ conditions: 'One founder in lit water. Consumer trials start beside a finite patch of tissue and exudate from a bloom of 25 Phototrophs grown for 60 seconds and killed by thermal stress. No subsequent inputs.', cycles }));

@@ -293,7 +293,7 @@ assembly Piercer: pierce() { Mount:0.01; Tail:0.03; Catalyst:0.01; }
 }
 
 const PORT: &str = r#"
-assembly Glue: adhere() { Mount:0.01; Wall:0.01; }
+product GlueMaterial = adhesin(Frame); assembly Glue: adhere() { GlueMaterial:0.006; Mount:0.01; Wall:0.01; }
 assembly Bus: junction(signal) { Detector:0.01; Wall:0.01; }
 publish rf001=83; adhere_message rf001 recruit;
 signal rf003=0;
@@ -373,7 +373,7 @@ fn signal_junction_relays_one_frozen_hop_per_tick() {
 #[test]
 fn touch_reports_only_the_confirmed_bond_to_the_selected_surface() {
     let (mut world, genomes) = equipped(&format!("{TOUCH}
-        assembly Glue: adhere() {{ Mount:0.01; Wall:0.01; }}
+        product GlueMaterial = adhesin(Frame); assembly Glue: adhere() {{ GlueMaterial:0.006; Mount:0.01; Wall:0.01; }}
         publish rf020=41; adhere_message rf020 recruit; rb101=sensed.Touch.bonded;"));
     place(&mut world.cells[0],100.0,100.0,0.0);
     genomes[0].program.initialize_message(&mut world.cells[0].memory);

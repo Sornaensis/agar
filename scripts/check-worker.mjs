@@ -317,21 +317,40 @@ try {
     await edit.restoreState(afterDeath);
     assert.deepEqual(await edit.saveState(),afterDeath);
 
-    // A saved attached pair has actual mature adhesive machinery and registers.
+    // Historical two-part adhesion surfaces retain their matter without granting a site.
     await edit.restoreState(new Uint8Array(await readFile(new URL('../engine/fixtures/attached-v11.bin', import.meta.url))));
-    const pair = (await edit.snapshot()).cells;
+    const oldPair = (await edit.snapshot()).cells;
+    assert.equal(oldPair.length,2);
+    const oldBody = await edit.cellBody(oldPair[0].id);
+    assert.deepEqual(oldBody.colony.neighborIds,[]);
+    assert.ok(oldBody.cellular.assemblies.some(a=>a.kind==='adhere()' && a.mass>0 && a.functionalMass===0));
+    assert.equal(await edit.moveCell(oldPair[0].id,25,50,true),1);
+    assert.deepEqual(await edit.cellSnapshot(oldPair[1].id),oldPair[1]);
+
+    // Grow a mother and daughter with paid adhesive surfaces through the same worker commands.
+    const {engine: colony} = await fresh();
+    const nurse = await colony.compile(await readFile(new URL('../examples/nurse-rosette.cell',import.meta.url),'utf8'));
+    await colony.setWorldSize(400,400);
+    await colony.setEnvironment(0.5,0.85,0);
+    await colony.setInitialNutrients(3);
+    await colony.setGasExchange({mode:'open',exchangeRate:0.02,oxygenEquilibrium:1,carbonEquilibrium:1});
+    await colony.setMutationRate(0);
+    await colony.resetEmpty(42);
+    await colony.seed(nurse,1,200,200);
+    for (let ticks=0;ticks<4500 && (await colony.summary()).population===1;ticks+=120) await colony.tick(120);
+    const pair=(await colony.snapshot()).cells;
     assert.equal(pair.length,2);
-    assert.equal((await edit.cellBody(pair[0].id)).colony.neighbors,1);
-    assert.equal(await edit.moveCell(pair[0].id,25,50,true),2);
-    const transported = (await edit.snapshot()).cells;
+    assert.deepEqual((await colony.cellBody(pair[0].id)).colony.neighborIds,[pair[1].id]);
+    assert.equal(await colony.moveCell(pair[0].id,25,50,true),2);
+    const transported = (await colony.snapshot()).cells;
     assert.equal(transported[0].x,25);
     assert.equal(transported[0].y,50);
     for (const axis of ['x','y']) assert.ok(Math.abs(transported[1][axis]-transported[0][axis]-
       (pair[1][axis]-pair[0][axis]))<1e-9);
-    assert.equal(await edit.moveCell(pair[0].id,280,140,false),1);
-    assert.deepEqual((await edit.snapshot()).cells[1],transported[1]);
-    assert.equal((await edit.cellBody(pair[1].id)).colony.neighbors,0);
-    assert.equal(await edit.moveCell(pair[0].id,290,150,true),1);
+    assert.equal(await colony.moveCell(pair[0].id,280,140,false),1);
+    assert.deepEqual((await colony.snapshot()).cells[1],transported[1]);
+    assert.equal((await colony.cellBody(pair[1].id)).colony.neighbors,0);
+    assert.equal(await colony.moveCell(pair[0].id,290,150,true),1);
   }
 
   const { engine: habitat } = await fresh();
@@ -477,7 +496,7 @@ try {
   assert.ok(migratedGas.metrics.legacyCarbonImported>0,'Legacy organic inventory is explicitly counted at migration');
   checkChemicalBudget(migratedGas.metrics);
   const upgradedGas=await chemistry.saveState();
-  assert.equal(new DataView(upgradedGas.buffer,upgradedGas.byteOffset,upgradedGas.byteLength).getUint32(8,true),15);
+  assert.equal(new DataView(upgradedGas.buffer,upgradedGas.byteOffset,upgradedGas.byteLength).getUint32(8,true),16);
   const migratedFuture=await chemistry.advance(12,{metrics:true,environment:true});
   await chemistry.restoreState(upgradedGas);
   assert.deepEqual(await chemistry.advance(12,{metrics:true,environment:true}),migratedFuture);

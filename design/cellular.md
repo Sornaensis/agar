@@ -43,7 +43,7 @@ assembly Swimmer: propel() {
 | `fn name(args) = expression;` | A pure function with up to eight numeric parameters. Calls expand into the bounded expression graph. |
 
 Products can be `scaffold`, `anchor`, `motor`, `filament`, `pigment`, `enzyme`,
-`membrane`, `transporter`, `receptor`, `regulator`, `replicase` or `constrictor`.
+`membrane`, `transporter`, `receptor`, `regulator`, `replicase`, `constrictor` or `adhesin`.
 The compiler validates recipe roles, positive quantities, size and finite angles.
 Each required role must supply at least 10% of recipe mass. A propulsion mechanism therefore
 cannot be manufactured from scaffold alone. Products of the same role can have
@@ -77,7 +77,7 @@ building another enzyme does not grant storage or capture.
 | `store(energy)` | Energy capacity. |
 | `store(mineral)` | Free-mineral capacity. |
 | `store(food)` | Undigested-food capacity. |
-| `harvest(light)` | Uses the local shared photon supply to produce energy. |
+| `harvest(light)` | Uses local light and dissolved inorganic carbon to fix organic carbon and release oxygen. |
 | `import(mineral)` | Paid uptake of dissolved minerals into free storage. |
 | `import(particle)` | Captures nearby organic particles into food storage. |
 | `engulf()` | Transfers sufficiently small, damaged organisms into food storage. |
@@ -88,7 +88,7 @@ building another enzyme does not grant storage or capture.
 | `repair()` | Paid repair of existing structure. |
 | `sense(light)`, `sense(heat)`, `sense(chemical)` | Local measurements of the named physical field. |
 | `sense(contact)` | Relative flow, physical contact and the selected cell’s published scalar. |
-| `adhere()` | Active membrane and anchor material couple nearby cells with mutually matching adhesive signals. |
+| `adhere()` | Installs finished adhesin, membrane and anchors into a surface with finite binding sites. Each contact occupies a site on both cells. |
 | `sense(optical)` | Directional visible-object measurements with occlusion. |
 | `grow()` | Paid envelope growth, limited by existing structural support. |
 | `replicate()` | Paid genome copying. |
@@ -98,6 +98,29 @@ building another enzyme does not grant storage or capture.
 Constructor targets are typed identifiers, not strings or expressions. For example,
 `digest(light)` and `store(tissue)` are compile errors. Recipe material roles and
 minimum physical size are checked for every mechanism.
+
+For an adhesive surface, express the named scaffold precursor first. A second gene
+finishes one unit of that stock into one unit of adhesin. Finishing costs 25 ATP
+and 0.6 units of shared translation work per unit mass. It transfers the
+precursor’s material and stored fabrication energy. Each stage draws from stock
+present at the beginning of the tick.
+
+```text
+product Blank = scaffold();
+product Glue = adhesin(Blank);
+product Mount = anchor();
+product Skin = membrane();
+gene blanks: Blank = if pool.Blank < 0.001 then 1 else 0;
+gene finish: Glue = if pool.Glue < 0.001 then 1 else 0;
+gene mounts: Mount = if pool.Mount < 0.001 then 1 else 0;
+gene skins: Skin = if pool.Skin < 0.001 then 1 else 0;
+assembly Coat: adhere() { Mount: 0.008; Skin: 0.008; Glue: 0.004; }
+```
+
+Fully active, intact surfaces provide one binding site per 0.0015 installed
+adhesin mass. The example can hold two neighbors when both also have a free site.
+Damage and reduced activity lower capacity. A released site can serve another
+contact. An old saved two-part surface retains its materials but has zero sites.
 
 Storage and support are passive physical structures: setting activity to zero
 does not erase their capacity. Active enzymes, importers and motors obey activity.
@@ -140,7 +163,7 @@ Each declaration accepts one scalar address. The recognition marker and signal p
 
 **Predator** uses marker 17 for attack avoidance. Any program can publish that marker. A contact receptor’s boolean `sensed.Touch.bonded` reports whether the particular cell it touches is a direct physical partner. A particle, barrier, unrelated neighbor or missing contact gives false. The marker and payload remain readable from a functioning contact receptor before a bond forms.
 
-[Colony phototroph](../examples/colony.cell) publishes marker 31, builds `adhere()` from membrane and anchor material, and retains daughters. Its two contact receptors check for a direct bonded partner before it builds additional storage. When a bonded cell divides, an existing interface can follow the daughter that remains against the original neighbor, provided both still have compatible, working adhesive surfaces. [Forager](../examples/forager.cell) and [Phototroph](../examples/phototroph.cell) instead permit encounter recruitment with complementary markers 72 and 41. Each cell still supplies its own adhesive surface. Resource transfer requires working junctions on both ends.
+[Colony phototroph](../examples/colony.cell) publishes marker 31, finishes a scaffold precursor into adhesin and installs it alongside membranes and anchors, and retains daughters. Its two contact receptors check for a direct bonded partner before it builds additional storage. When a bonded cell divides, an existing interface can follow the daughter that remains against the original neighbor, provided both still have compatible, working adhesive surfaces. [Forager](../examples/forager.cell) and [Phototroph](../examples/phototroph.cell) instead permit encounter recruitment with complementary markers 72 and 41. Each cell still supplies its own adhesive surface. Resource transfer requires working junctions on both ends.
 
 The daughter-retention route models clonal growth observed in the choanoflagellate *Salpingoeca rosetta*. The recruitment timer is a simulation parameter. [Fairclough, Dayel and King, 2010](https://pmc.ncbi.nlm.nih.gov/articles/PMC2978077/)
 

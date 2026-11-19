@@ -5,7 +5,7 @@ import engineContract from './engine-contract.json';
 export const ORGANELLE_KINDS = ['core','photosynthetic','metabolic','digestive','reserve','transporter','phagocyte','flagellum','piercer','cortex','repair','photoreceptor','thermoreceptor','chemoreceptor','mechanoreceptor','optical'] as const;
 export type OrganelleKind = typeof ORGANELLE_KINDS[number];
 export interface OrganelleSummary { kind: OrganelleKind; count:number; mass:number; capacity:number; damaged:number; building:number; functionalMass:number; protein:number }
-export type ProductRole = 'scaffold' | 'anchor' | 'motor' | 'filament' | 'pigment' | 'enzyme' | 'membrane' | 'transporter' | 'receptor' | 'regulator' | 'replicase' | 'constrictor';
+export type ProductRole = 'scaffold' | 'anchor' | 'motor' | 'filament' | 'pigment' | 'enzyme' | 'membrane' | 'transporter' | 'receptor' | 'regulator' | 'replicase' | 'constrictor' | 'adhesin';
 export const MECHANISM_KINDS = [
   'support()', 'translate()', 'store(energy)', 'store(mineral)', 'store(food)', 'harvest(light)',
   'import(mineral)', 'import(particle)', 'engulf()', 'digest(exudate)', 'digest(tissue)', 'digest(waste)',
@@ -17,7 +17,7 @@ export type MechanismKind = typeof MECHANISM_KINDS[number];
 export type CellularAssemblyKind = OrganelleKind | 'membrane' | 'replicator' | 'constrictor' | MechanismKind;
 export interface CellularProduct {
   name:string;role:ProductRole;mass:number;concentration:number;halfLife:number;
-  expressionRequested:number;expressionRate:number;current:boolean;
+  expressionRequested:number;expressionRate:number;current:boolean;precursor?:string|null;
 }
 export interface CellularRecipe {
   name:string;kind:CellularAssemblyKind;requiredMass:number;at:number;direction:number;
@@ -66,7 +66,7 @@ export function validateBodyInspection(value: unknown, expectedCellId: number): 
     || ![body.colony.energyNet,body.colony.mineralNet,body.colony.carbonNet].every(angle))) return fail();
   if (body.cellular != null) {
     const cellular = body.cellular;
-    const roles = new Set(['scaffold','anchor','motor','filament','pigment','enzyme','membrane','transporter','receptor','regulator','replicase','constrictor']);
+    const roles = new Set(['scaffold','anchor','motor','filament','pigment','enzyme','membrane','transporter','receptor','regulator','replicase','constrictor','adhesin']);
     const name=(n:unknown):boolean=>typeof n==='string' && /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(n);
     const recipe=(r:CellularRecipe):boolean=>Boolean(r) && name(r.name) && (kind(r.kind)||['membrane','replicator','constrictor'].includes(r.kind)||MECHANISM_KINDS.includes(r.kind as MechanismKind))
       && finite(r.requiredMass) && angle(r.at) && angle(r.direction) && Array.isArray(r.components) && r.components.length<=64
@@ -76,6 +76,7 @@ export function validateBodyInspection(value: unknown, expectedCellId: number): 
       && r.components.every(part=>part && name(part.name) && roles.has(part.role) && finite(part.requiredMass));
     if (!Array.isArray(cellular.products) || cellular.products.length>1024
       || !cellular.products.every(p=>p && name(p.name) && roles.has(p.role) && typeof p.current==='boolean'
+        && (p.precursor==null || (p.current && p.role==='adhesin' && name(p.precursor)))
         && [p.mass,p.concentration,p.halfLife,p.expressionRequested,p.expressionRate].every(finite))
       || !Array.isArray(cellular.recipes) || cellular.recipes.length>64 || !cellular.recipes.every(recipe)
       || !Array.isArray(cellular.assemblies) || cellular.assemblies.length>32768

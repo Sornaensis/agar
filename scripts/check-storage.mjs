@@ -205,9 +205,11 @@ storage.savePreferences({ tab: 'genomes', simulationView: 'metrics', activeSimul
 assert.equal(storage.loadPreferences().simulationView, 'metrics');
 assert.equal(storage.loadPreferences().overlay, 'nutrients');
 assert.equal(storage.loadPreferences().builderOverlay, 'light', 'Old player preferences receive an independent builder field');
-storage.savePreferences({...storage.loadPreferences(), builderOverlay:'carbon'});
+assert.equal(storage.loadPreferences().showExtinct,false,'Historical preference records default to living lineages');
+storage.savePreferences({...storage.loadPreferences(), builderOverlay:'carbon',showExtinct:true});
 assert.equal(storage.loadPreferences().overlay,'nutrients');
 assert.equal(storage.loadPreferences().builderOverlay,'carbon');
+assert.equal(storage.loadPreferences().showExtinct,true);
 for (const overlay of ['oxygen','carbon']) {
   storage.savePreferences({...storage.loadPreferences(),overlay});
   assert.equal(storage.loadPreferences().overlay,overlay);

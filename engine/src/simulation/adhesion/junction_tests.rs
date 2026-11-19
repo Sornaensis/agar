@@ -4,7 +4,7 @@ use crate::checkpoint::{self, Reader, Writer};
 
 const CHANNELS: &str = r#"
 product Carrier = transporter();
-assembly Glue: adhere() { Mount:0.01; Wall:0.01; activity:1; }
+product GlueMaterial = adhesin(Frame); assembly Glue: adhere() { GlueMaterial:0.006; Mount:0.01; Wall:0.01; activity:1; }
 assembly PoreE: junction(energy) { Wall:0.01; Carrier:0.01; activity:1; }
 assembly PoreM: junction(mineral) { Wall:0.01; Carrier:0.01; activity:1; }
 assembly PoreC: junction(carbon) { Wall:0.01; Carrier:0.01; activity:1; }
@@ -189,6 +189,11 @@ fn exchanged_junction_state_roundtrips_and_v10_rejects_new_body_tags() {
     assert!(world.cells[1].junction_net[0] > 0.0);
     let mut writer=Writer::new();
     let mut historical = world.cells[0].body.clone();
+    // Exercise the original v11 junction tags on material that existed then.
+    // A modern adhesive ingredient deliberately cannot enter this old payload.
+    let state = historical.cellular.as_mut().unwrap();
+    state.assemblies.retain(|a| a.recipe.kind != AssemblyKind::Mechanism(MechanismKind::Adhere));
+    state.pools.retain(|p| p.product.kind != crate::cellular::ProductKind::Adhesin);
     historical.apply_pre_v13_energy_yield();
     historical.write_checkpoint(&mut writer);
     assert!(Body::read_checkpoint_version(&mut Reader::new(&writer.0),10).is_err());
@@ -356,8 +361,41 @@ fn two_adjacent_parents_dividing_in_one_tick_handoff_the_same_interface_only_onc
     fourth.id=4; fourth.parent_id=2; fourth.adhered_neighbors=0;
     world.cells[1].x=242.5;
     world.cells.push(fourth);
-    index.append_daughter(&world,1,3);
+    index.append_daughter(3);
     world.inherit_bond_interfaces(1,3,&genomes,&mut index);
     assert_eq!(world.bond_pairs().collect::<Vec<_>>(),[(3,4)]);
     assert_eq!(world.cells.iter().map(|c|c.adhered_neighbors).collect::<Vec<_>>(),[0,0,1,1]);
+}
+
+#[test]
+fn binding_sites_are_paid_finite_and_reused_after_release() {
+    let (mut world, genomes) = colony(&[(200.0, 200.0), (300.0, 200.0), (185.8, 200.0)]);
+    let set_activity = |world: &mut World, value: f64| {
+        let center = world.cells.iter_mut().find(|c| c.id == 1).unwrap();
+        let glue = center.body.cellular.as_mut().unwrap().assemblies.iter_mut().find(
+            |a| a.recipe.kind == AssemblyKind::Mechanism(MechanismKind::Adhere)).unwrap();
+        glue.activity = value;
+    };
+    set_activity(&mut world, 0.26); // 0.006 installed × 0.26 gives exactly one usable site.
+    phase(&mut world, &genomes);
+    assert_eq!(world.bond_pairs().collect::<Vec<_>>(), [(1, 3)]);
+    world.cells[1].x = 214.2;
+    world.cells.reverse();
+    advance_contact_phases(&mut world, &genomes, MATURE);
+    assert_eq!(world.contacts.len(), 1);
+    assert!(world.has_bond(1, 3), "an established interface keeps its occupied site");
+    world.cells.iter_mut().find(|c| c.id == 3).unwrap().x = 300.0;
+    advance_contact_phases(&mut world, &genomes, MATURE);
+    assert_eq!(world.bond_pairs().collect::<Vec<_>>(), [(1, 2)]);
+    world.cells.iter_mut().find(|c| c.id == 3).unwrap().x = 185.8;
+    set_activity(&mut world, 0.55);
+    advance_contact_phases(&mut world, &genomes, MATURE);
+    assert_eq!(world.bond_pairs().collect::<Vec<_>>(), [(1, 2), (1, 3)]);
+    set_activity(&mut world, 0.26);
+    world.prune_contacts(Some(&genomes));
+    assert_eq!(world.bond_pairs().collect::<Vec<_>>(), [(1, 2)], "equal mature claims use stable IDs");
+    set_activity(&mut world, 0.20);
+    world.prune_contacts(Some(&genomes));
+    assert!(world.contacts.is_empty());
+    assert_eq!(world.cells.iter().map(|c| c.adhered_neighbors).sum::<u32>(), 0);
 }

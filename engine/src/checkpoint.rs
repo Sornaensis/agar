@@ -8,7 +8,7 @@ use crate::{
 
 pub(crate) const MAX_STATE_BYTES: usize = 128 * 1024 * 1024;
 const MAGIC: &[u8; 8] = b"CELLAR01";
-pub(crate) const VERSION: u32 = 15;
+pub(crate) const VERSION: u32 = 16;
 pub(crate) type Result<T> = std::result::Result<T, String>;
 
 pub(crate) fn ensure(ok: bool, message: &str) -> Result<()> {
@@ -232,7 +232,7 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
         let source = r.text(MAX_SOURCE_BYTES)?;
         // Both the retained exact expression graph and its editable source are validated.
         let compiled =
-            Program::compile(&source).map_err(|error| format!("Invalid saved genome: {error}"))?;
+            Program::compile_stored(&source).map_err(|error| format!("Invalid saved genome: {error}"))?;
         let program = Program::read_checkpoint_version(&mut r, version)?;
         ensure(
             program.checkpoint_source_matches(&compiled, &source, parent == 0),
@@ -271,6 +271,7 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
     }
     let mut world = World::read_checkpoint(&mut r, genomes.len(), version)?;
     world.validate_or_migrate_contacts(&genomes, version)?;
+    if version < 16 { world.migrate_pre_v16_compartments()?; }
     ensure(r.finished(), "trailing data")?;
     Ok(Engine {
         genomes,
@@ -570,7 +571,7 @@ mod tests {
         let mut live = live_engine();
         let before = save(&live).unwrap();
         assert!(!live.restore_state(bytes));
-        assert!(live.error.contains("simulation saves 3 through 15"));
+        assert!(live.error.contains("simulation saves 3 through 16"));
         assert_eq!(save(&live).unwrap(), before);
         let mut version2 = before.clone();
         version2[8..12].copy_from_slice(&2u32.to_le_bytes());

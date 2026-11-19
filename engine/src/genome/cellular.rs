@@ -98,6 +98,7 @@ impl CellularGraph {
         std::mem::size_of::<Self>()
             - std::mem::size_of::<CellularProgram>() + CellularProgram::authored_inline_bytes()
             + self.definition.products.capacity() * std::mem::size_of::<ProductDef>()
+            + self.definition.precursors.capacity() * std::mem::size_of::<Option<usize>>()
             + self.definition.assemblies.capacity() * std::mem::size_of::<AssemblyDef>()
             + self.genes.capacity() * std::mem::size_of::<GeneRoot>()
             + self.activity.capacity() * std::mem::size_of::<Option<usize>>()
@@ -386,7 +387,8 @@ pub(super) fn valid_name(name: &str) -> bool {
         && Sensor::lookup(name).is_none()
         && Function::lookup(name).is_none()
         && output_index(name).is_none()
-        && ProductKind::from_name(name).is_none()
+        // The finishing constructor is contextual, so previously valid identifiers stay usable.
+        && (name == "adhesin" || ProductKind::from_name(name).is_none())
         && AssemblyKind::from_name(name).is_none()
 }
 
@@ -513,12 +515,13 @@ impl Parser {
             })
     }
 
-    pub(super) fn cellular_program(&mut self) -> Result<Program, CompileError> {
+    pub(super) fn cellular_program(&mut self, stored: bool) -> Result<Program, CompileError> {
         self.cellular_mode = true;
         self.keyword("cellular")?;
         self.expect(Kind::Semicolon, "';' after cellular")?;
         self.cellular_names()?;
         let mut products = Vec::new();
+        let mut finishes = Vec::new();
         let mut assemblies = Vec::new();
         let mut activity = Vec::new();
         let mut start = Vec::new();
@@ -553,6 +556,15 @@ impl Parser {
                         }
                         value
                     } else { 0.0 };
+                    if kind == ProductKind::Adhesin {
+                        let precursor = self.take();
+                        let Kind::Name(precursor_name) = &precursor.kind else {
+                            return Err(precursor.location.error("adhesin requires one named scaffold precursor, such as adhesin(Frame)."));
+                        };
+                        let index = self.product_names.get(precursor_name).copied().ok_or_else(||
+                            precursor.location.error(format!("unknown adhesin precursor '{precursor_name}'.")))?;
+                        finishes.push((products.len(), index, precursor.location));
+                    }
                     self.expect(Kind::RightParen, "')' after product constructor arguments")?;
                     self.expect(Kind::Semicolon, "';' after product declaration")?;
                     if self.product_names.get(&name) != Some(&products.len()) {
@@ -720,10 +732,18 @@ impl Parser {
                 _ => return Err(declaration.location.error(format!("'{keyword}' is unavailable in cellular mode; express products with genes and assemble physical machinery."))),
             }
         }
-        let definition = CellularProgram::new(
-            products,
-            assemblies,
-        );
+        let mut definition = CellularProgram::new(products, assemblies);
+        if !finishes.is_empty() {
+            let mut precursors = vec![None; definition.products.len()];
+            for (product, input, location) in finishes {
+                if definition.products[input].kind != ProductKind::Scaffold {
+                    return Err(location.error("an adhesin precursor must be a named scaffold product."));
+                }
+                precursors[product] = Some(input);
+            }
+            definition.precursors = precursors;
+        }
+        let validate = if stored { CellularProgram::validate_stored } else { CellularProgram::validate };
         for &(index, field, location) in &self.receptor_references {
             if !ReceptorField::for_kind(definition.assemblies[index].kind).contains(&field) {
                 return Err(location.error(format!(
@@ -735,14 +755,14 @@ impl Parser {
         }
         for (assembly, location) in definition.assemblies.iter().zip(assembly_locations) {
             // Report recipe failures at their declaration, not at end-of-file.
-            let single = CellularProgram::new(
+            let mut single = CellularProgram::new(
                 definition.products.clone(),
                 vec![assembly.clone()],
             );
-            single.validate().map_err(|error| location.error(error))?;
+            single.precursors.clone_from(&definition.precursors);
+            validate(&single).map_err(|error| location.error(error))?;
         }
-        definition
-            .validate()
+        validate(&definition)
             .map_err(|error| self.peek().location.error(error))?;
         Ok(Program::from_cellular(
             std::mem::take(&mut self.nodes),
@@ -761,31 +781,13 @@ impl Parser {
 }
 
 pub(super) fn schema_json() -> String {
-    let products = [
-        "scaffold",
-        "anchor",
-        "motor",
-        "filament",
-        "pigment",
-        "enzyme",
-        "membrane",
-        "transporter",
-        "receptor",
-        "regulator",
-        "replicase",
-        "constrictor",
-    ]
-    .iter()
-    .map(|name| {
-        format!(
-            "{{\"name\":{},\"arguments\":[{}]}}",
-            quote(name),
-            if *name == "regulator" {
-                "\"halfLife\""
-            } else {
-                ""
-            }
-        )
+    let products = ProductKind::ALL.iter().map(|kind| {
+        let arguments = match kind {
+            ProductKind::Regulator => "\"halfLife\"",
+            ProductKind::Adhesin => "\"precursor\"",
+            _ => "",
+        };
+        format!("{{\"name\":{},\"arguments\":[{arguments}]}}", quote(kind.name()))
     })
     .collect::<Vec<_>>()
     .join(",");
@@ -1397,16 +1399,53 @@ clear rf001 when ri001 == 1;
         }
     }
 
+    #[test]
+    fn adhesin_names_a_physical_scaffold_precursor_and_persists_its_identity() {
+        // Forward references are supported. The other scaffold has the same material
+        // role but cannot substitute for the one chosen by this product.
+        let source = "cellular; product Glue=adhesin(Blank); product Other=scaffold();
+            product Blank=scaffold(); product M=membrane(); product A=anchor();
+            gene precursor: Blank=1; gene finish: Glue=1;
+            assembly Surface: adhere() { A:0.008; M:0.008; Glue:0.004; }";
+        let program = Program::compile(source).unwrap();
+        assert_eq!(program.cellular().unwrap().precursors[0], Some(2));
+        let mut bytes = Writer::new();
+        program.write_checkpoint(&mut bytes);
+        let restored = Program::read_checkpoint_version(&mut Reader::new(&bytes.0), 16).unwrap();
+        assert!(restored.checkpoint_source_matches(&program, source, true));
+        let other = Program::compile(&source.replace("adhesin(Blank)", "adhesin(Other)")).unwrap();
+        assert!(!restored.checkpoint_source_matches(&other, source, true));
+        assert!(Program::read_checkpoint_version(&mut Reader::new(&bytes.0), 15).is_err());
+        for (constructor, diagnostic) in [("adhesin()", "precursor"), ("adhesin(1)", "precursor"),
+            ("adhesin(NoStock)", "unknown"), ("adhesin(Glue)", "scaffold"), ("adhesin(A)", "scaffold")] {
+            let error = Program::compile(&source.replace("adhesin(Blank)", constructor)).unwrap_err();
+            assert!(error.contains(diagnostic), "{error}");
+        }
+        let missing = source.replace("Glue:0.004;", "")
+            .replace("A:0.008;", "A:0.012;");
+        assert!(Program::compile(&missing).unwrap_err().contains("adhesin"));
+        let old = "cellular; product A=anchor(); product M=membrane();
+            assembly Surface: adhere() { A:0.01; M:0.01; }";
+        let previous = Program::compile_stored(old).unwrap();
+        let mut old_bytes = Writer::new();
+        previous.write_checkpoint(&mut old_bytes);
+        for version in [10,15,16] {
+            let restored = Program::read_checkpoint_version(&mut Reader::new(&old_bytes.0), version).unwrap();
+            assert!(restored.checkpoint_source_matches(&previous, old, true));
+        }
+        assert!(Program::compile("cellular; product adhesin=scaffold(); gene stock:adhesin=1;").is_ok());
+    }
+
     fn all_mechanisms_source() -> String {
         let mut source = String::from("cellular;\n");
         for (index, kind) in ProductKind::ALL.iter().enumerate() {
             source.push_str(&format!(
                 "product Part{index} = {}({});\n",
                 kind.name(),
-                if *kind == ProductKind::Regulator {
-                    "8"
-                } else {
-                    ""
+                match kind {
+                    ProductKind::Regulator => "8",
+                    ProductKind::Adhesin => "Part0",
+                    _ => "",
                 },
             ));
         }
@@ -1528,14 +1567,10 @@ assembly Digest: digest(tissue) { Catalyst: 0.04; activity: if gut.tissue.energy
         }
         let mut writer = Writer::new();
         program.write_checkpoint(&mut writer);
-        assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 5).is_err());
-        assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 6).is_err());
-        assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 7).is_err());
-        assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 8).is_err());
-        assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 9).is_err());
-        assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 10).is_err());
-        assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 11).is_err());
-        let restored = Program::read_checkpoint_version(&mut Reader::new(&writer.0), 12).unwrap();
+        for previous in 5..16 {
+            assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), previous).is_err());
+        }
+        let restored = Program::read_checkpoint_version(&mut Reader::new(&writer.0), 16).unwrap();
         assert_eq!(program.cellular(), restored.cellular());
         assert_eq!(program.evaluate(&inputs()), restored.evaluate(&inputs()));
         assert!(restored.checkpoint_source_matches(&program, &source, true));

@@ -241,17 +241,20 @@ interface CellularRecipe {
 
 const sharedProduct: Record<string,string> = {
   scaffold:'Frame',anchor:'Mount',motor:'Rotor',filament:'Tail',pigment:'Pigment',enzyme:'Catalyst',
-  membrane:'Wall',transporter:'Carrier',receptor:'Detector',replicase:'Replicase',constrictor:'Ring',
+  membrane:'Wall',transporter:'Carrier',receptor:'Detector',replicase:'Replicase',constrictor:'Ring',adhesin:'Glue',
 };
 
 /** Explicit initiation lets independently regulated recipes share physical stocks. */
 function controlledProgram(recipes: CellularRecipe[], logic: string, regulator = false, duplicationArea = 1.6): string {
   const roles = [...new Set(recipes.flatMap(recipe => recipe.parts.map(([role]) => role)))];
+  const adhesion = recipes.find(recipe => recipe.kind === 'adhere()');
   return `# Shared products supply independently regulated physical recipes.
 # Genes make stock; start_when permits new machines; activity runs built ones.
 cellular;
 
-${roles.map(role => `product ${sharedProduct[role]} = ${role}();`).join('\n')}
+${roles.map(role => role === 'adhesin'
+  ? 'product CoatPrecursor = scaffold();\nproduct Glue = adhesin(CoatPrecursor);'
+  : `product ${sharedProduct[role]} = ${role}();`).join('\n')}
 ${regulator ? 'product Persistence = regulator(8);\n' : ''}
 # Tolerate modest wear while repair restores working capacity. The allowance
 # stays below one machine, even when a larger body needs many copies.
@@ -269,7 +272,7 @@ ${recipes.map(recipe => {
     return `let need_${recipe.name} = funded && (${recipe.ready ?? 'true'}) && missing(built.${recipe.name}, ${goal}, ${amount(mass)});`;
   }).join('\n')}
 
-${roles.map(role => {
+${adhesion ? `gene supply_CoatPrecursor: CoatPrecursor = if need_${adhesion.name} && pool.Glue < 0.001 then buffered(pool.CoatPrecursor, 1) else 0;\n` : ''}${roles.map(role => {
     const requests = recipes.flatMap(recipe => {
       const part = recipe.parts.find(([kind]) => kind === role);
       if (!part) return [];
@@ -421,7 +424,7 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
   if (tradingProducer || options.scavenger) {
     const ready = tradingProducer ? 'powered' : 'equipped && rb093';
     recipes.push(
-      { name:'Dock', kind:'adhere()', parts:[['anchor',0.01],['membrane',0.01]], ready },
+      { name:'Dock', kind:'adhere()', parts:[['anchor',0.008],['membrane',0.008],['adhesin',0.004]], ready },
       { name:'CarbonPort', kind:'junction(carbon)', parts:[['membrane',0.025],['transporter',0.025]], ready,
         activity:tradingProducer ? 'if carbon.organic > 0.45 * body.area && energy > 24 then 1 else 0' : 'if carbon.organic < 1.8 * body.area then 1 else 0' },
       { name:'MineralPort', kind:'junction(mineral)', parts:[['membrane',0.01],['transporter',0.01]], ready,
@@ -429,7 +432,7 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
     );
   }
   if (options.colony) recipes.push(
-    { name:'Adhesin', kind:'adhere()', parts:[['anchor',0.01],['membrane',0.01]], ready:'powered', activity:'if energy > 12 then 1 else 0' },
+    { name:'Adhesin', kind:'adhere()', parts:[['anchor',0.008],['membrane',0.008],['adhesin',0.004]], ready:'powered', activity:'if energy > 12 then 1 else 0' },
     ...(options.multicellular === 'crown' ? [] : ['LeftJunction', 'RightJunction']).map((name, index) => ({
       name, kind:'sense(contact)', parts:[['anchor',0.002],['receptor',0.006],['filament',0.002]] as CellularPart[],
       at:index === 0 ? Math.PI/2 : -Math.PI/2, ready:'powered',

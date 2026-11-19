@@ -19,6 +19,7 @@ pub const MAX_PRODUCTS: usize = 64;
 pub const MAX_ASSEMBLIES: usize = 64;
 const MAX_POOLS: usize = 1024;
 const MAX_INSTANCES: usize = 32768;
+const ADHESIN_FINISH_COST: f64 = 25.0;
 const EPS: f64 = 1e-12;
 const TRANSLATION_WORK: f64 = 0.6;
 const INSTALLATION_WORK: f64 = 0.4;
@@ -42,9 +43,10 @@ pub enum ProductKind {
     Regulator,
     Replicase,
     Constrictor,
+    Adhesin,
 }
 impl ProductKind {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Scaffold,
         Self::Anchor,
         Self::Motor,
@@ -57,6 +59,7 @@ impl ProductKind {
         Self::Regulator,
         Self::Replicase,
         Self::Constrictor,
+        Self::Adhesin,
     ];
     pub fn name(self) -> &'static str {
         [
@@ -72,6 +75,7 @@ impl ProductKind {
             "regulator",
             "replicase",
             "constrictor",
+            "adhesin",
         ][self as usize]
     }
     pub fn from_name(name: &str) -> Option<Self> {
@@ -80,6 +84,8 @@ impl ProductKind {
     pub fn synthesis_cost(self) -> f64 {
         [
             40.0, 50.0, 70.0, 45.0, 70.0, 65.0, 40.0, 65.0, 70.0, 35.0, 80.0, 60.0,
+            // A finished unit contains one translated scaffold plus the finishing work.
+            40.0 + ADHESIN_FINISH_COST,
         ][self as usize]
     }
 }
@@ -174,7 +180,7 @@ impl MechanismKind {
             Self::EnergyStorage | Self::MineralStorage | Self::FoodStorage => &[Membrane],
             Self::LightHarvest => &[Anchor, Pigment, Enzyme],
             Self::RespireOxygen => &[Enzyme, Membrane],
-            Self::Adhere => &[Anchor, Membrane],
+            Self::Adhere => &[Anchor, Membrane, Adhesin],
             Self::JunctionSignal => &[Membrane, Receptor],
             Self::JunctionEnergy | Self::JunctionMineral | Self::JunctionCarbon => &[Membrane, Transporter],
             Self::MineralImport => &[Anchor, Transporter],
@@ -316,18 +322,20 @@ pub struct CellularProgram(Rc<CellularDefinition>);
 #[derive(Debug, Default)]
 pub struct CellularDefinition {
     pub products: Vec<ProductDef>,
+    /// Empty for ordinary translation. Otherwise indexed by output product.
+    pub precursors: Vec<Option<usize>>,
     pub assemblies: Vec<AssemblyDef>,
     recipes: OnceCell<Vec<Rc<Recipe>>>,
 }
 impl Clone for CellularDefinition {
     fn clone(&self) -> Self {
-        Self { products: self.products.clone(), assemblies: self.assemblies.clone(),
+        Self { products: self.products.clone(), precursors: self.precursors.clone(), assemblies: self.assemblies.clone(),
             recipes: OnceCell::new() }
     }
 }
 impl PartialEq for CellularDefinition {
     fn eq(&self, other: &Self) -> bool {
-        self.products == other.products && self.assemblies == other.assemblies
+        self.products == other.products && self.precursors == other.precursors && self.assemblies == other.assemblies
     }
 }
 impl Deref for CellularProgram {
@@ -343,7 +351,7 @@ impl DerefMut for CellularProgram {
 }
 impl CellularProgram {
     pub fn new(products: Vec<ProductDef>, assemblies: Vec<AssemblyDef>) -> Self {
-        Self(Rc::new(CellularDefinition { products, assemblies, recipes: OnceCell::new() }))
+        Self(Rc::new(CellularDefinition { products, precursors: Vec::new(), assemblies, recipes: OnceCell::new() }))
     }
     fn same_definition(&self, other: &Self) -> bool { Rc::ptr_eq(&self.0, &other.0) }
     fn recipe(&self, index: usize) -> Rc<Recipe> {
@@ -358,7 +366,8 @@ impl CellularProgram {
     /// never changes a genome's retained allocation budget or save bytes.
     pub(crate) fn derived_bytes(&self) -> usize {
         let rc_header = 2 * std::mem::size_of::<usize>();
-        rc_header + std::mem::size_of::<OnceCell<Vec<Rc<Recipe>>>>()
+        rc_header + std::mem::size_of::<Vec<Option<usize>>>()
+            + std::mem::size_of::<OnceCell<Vec<Rc<Recipe>>>>()
             + self.assemblies.len() * std::mem::size_of::<Rc<Recipe>>()
             + self.assemblies.iter().map(|def| rc_header + std::mem::size_of::<Recipe>()
                 + def.name.len() + def.parts.len() * std::mem::size_of::<RecipePart>()
@@ -366,6 +375,30 @@ impl CellularProgram {
                 .sum::<usize>()
     }
     pub fn validate(&self) -> Result<(), String> {
+        self.validate_program(false)
+    }
+    pub(crate) fn validate_stored(&self) -> Result<(), String> {
+        self.validate_program(true)
+    }
+    fn validate_program(&self, allow_inert_surfaces: bool) -> Result<(), String> {
+        if !self.precursors.is_empty() && self.precursors.len() != self.products.len() {
+            return Err("Precursor table must match the product declarations.".into());
+        }
+        for (index, product) in self.products.iter().enumerate() {
+            let input = self.precursors.get(index).copied().flatten();
+            if product.kind == ProductKind::Adhesin {
+                if !input.is_some_and(|i| self.products.get(i).is_some_and(|p| p.kind == ProductKind::Scaffold)) {
+                    return Err(format!("Product '{}' needs a named scaffold precursor: adhesin(Frame).", product.name));
+                }
+            } else if input.is_some() {
+                return Err(format!("Product '{}' uses ordinary translation.", product.name));
+            }
+        }
+        self.validate_material_recipes(allow_inert_surfaces)
+    }
+    // Physical stocks/ingredients contain the finished material identity. The
+    // reaction that made them belongs to the producing program, possibly long gone.
+    fn validate_material_recipes(&self, allow_inert_surfaces: bool) -> Result<(), String> {
         if self.products.len() > MAX_PRODUCTS || self.assemblies.len() > MAX_ASSEMBLIES {
             return Err("At most 64 products and 64 assemblies are supported.".into());
         }
@@ -400,7 +433,7 @@ impl CellularProgram {
                     assembly.name
                 ));
             }
-            let mut roles = [0.0; 12];
+            let mut roles = [0.0; ProductKind::ALL.len()];
             let mut used = std::collections::HashSet::new();
             let mut total = 0.0;
             for &(index, amount) in &assembly.parts {
@@ -438,6 +471,11 @@ impl CellularProgram {
                 ));
             }
             for &role in assembly.kind.required_roles() {
+                // Historical two-component mounting hardware remains inspectable
+                // and recyclable. It exposes zero binding sites.
+                if allow_inert_surfaces && role == ProductKind::Adhesin && roles[role as usize] == 0.0 {
+                    continue;
+                }
                 if roles[role as usize] + EPS < total * 0.1 {
                     return Err(format!(
                         "Assembly '{}' needs at least 10% {} material.",
@@ -540,6 +578,11 @@ pub struct AssemblyInstance {
     pub integrity: f64,
     pub activity: f64,
 }
+// A tolerance scaled to this particular ingredient permits rounding at full
+// installation without treating a small, explicitly declared ingredient as free.
+fn ingredient_complete(mass: f64, required: f64) -> bool {
+    mass > 0.0 && required - mass <= required * EPS
+}
 impl AssemblyInstance {
     pub fn mass(&self) -> f64 {
         self.ingredients.iter().map(|p| p.mass).sum()
@@ -551,10 +594,22 @@ impl AssemblyInstance {
         self.ingredients
             .iter()
             .zip(&self.recipe.parts)
-            .all(|(part, recipe)| part.mass + EPS >= recipe.required_mass)
+            .all(|(part, recipe)| ingredient_complete(part.mass, recipe.required_mass))
+    }
+    fn has_functional_recipe(&self) -> bool {
+        self.recipe.kind != AssemblyKind::Mechanism(MechanismKind::Adhere)
+            || self.recipe.parts.iter().any(|part| part.product.kind == ProductKind::Adhesin)
+    }
+    /// Decoder-only interpretation of the completion rule in v5–15. Uses the
+    /// actual installed mass and integrity; it never adds a missing ingredient.
+    pub(crate) fn pre_v16_functional_mass(&self) -> f64 {
+        if self.integrity >= MIN_FUNCTIONAL_INTEGRITY && self.ingredients.iter()
+            .zip(&self.recipe.parts).all(|(p, r)| p.mass + EPS >= r.required_mass) {
+            self.mass() * self.integrity
+        } else { 0.0 }
     }
     pub fn functional_mass(&self) -> f64 {
-        if self.complete() && self.integrity >= MIN_FUNCTIONAL_INTEGRITY {
+        if self.has_functional_recipe() && self.complete() && self.integrity >= MIN_FUNCTIONAL_INTEGRITY {
             self.mass() * self.integrity
         } else {
             0.0
@@ -710,9 +765,9 @@ impl AssemblyMeasures {
         let mut complete = true;
         for (ingredient, part) in assembly.ingredients.iter().zip(&assembly.recipe.parts) {
             mass += ingredient.mass;
-            complete &= ingredient.mass + EPS >= part.required_mass;
+            complete &= ingredient_complete(ingredient.mass, part.required_mass);
         }
-        Self { mass, complete, functional: if complete && assembly.integrity >= MIN_FUNCTIONAL_INTEGRITY {
+        Self { mass, complete, functional: if complete && assembly.has_functional_recipe() && assembly.integrity >= MIN_FUNCTIONAL_INTEGRITY {
             mass * assembly.integrity
         } else { 0.0 } }
     }
@@ -853,11 +908,12 @@ pub struct CellularActions {
 }
 
 impl CellularState {
-    pub fn add_mechanism_capacities(&self, cap: &mut crate::body::BodyCapacities, area: f64) {
+    pub fn add_mechanism_capacities(&self, cap: &mut crate::body::BodyCapacities, area: f64,
+        functional: impl Fn(&AssemblyInstance) -> f64) {
         use MechanismKind::*;
         for assembly in &self.assemblies {
             let AssemblyKind::Mechanism(kind) = assembly.recipe.kind else { continue; };
-            let mass = assembly.functional_mass();
+            let mass = functional(assembly);
             let active = mass * assembly.activity;
             match kind {
                 // Capacity is physical room. Switching activity off never
@@ -1067,7 +1123,7 @@ impl CellularState {
                 }],
             );
             ensure(
-                program.validate().is_ok(),
+                program.validate_material_recipes(true).is_ok(),
                 "invalid installed assembly recipe",
             )?;
             ensure(
@@ -1191,7 +1247,7 @@ impl CellularState {
         let count = reader.count(MAX_POOLS)?;
         for _ in 0..count {
             state.pools.push(ProductPool {
-                product: read_product(reader)?,
+                product: read_product(reader, version)?,
                 mass: reader.f64()?,
                 embodied_energy: reader.f64()?,
                 expression_requested: reader.f64()?,
@@ -1226,7 +1282,7 @@ impl CellularState {
             let mut ingredients = Vec::with_capacity(count);
             for _ in 0..count {
                 parts.push(RecipePart {
-                    product: read_product(reader)?,
+                    product: read_product(reader, version)?,
                     required_mass: reader.f64()?,
                 });
                 ingredients.push(Ingredient {
@@ -1292,11 +1348,12 @@ fn write_product(writer: &mut Writer, product: &ProductDef) {
     writer.u8(product.kind as u8);
     writer.f64(product.half_life);
 }
-fn read_product(reader: &mut Reader<'_>) -> CheckpointResult<ProductDef> {
+fn read_product(reader: &mut Reader<'_>, version: u32) -> CheckpointResult<ProductDef> {
     let name = reader.text(128)?;
     let kind = *ProductKind::ALL
         .get(reader.u8()? as usize)
         .ok_or("Invalid simulation save: unknown product role.")?;
+    ensure(kind != ProductKind::Adhesin || version >= 16, "adhesin requires checkpoint version 16")?;
     let product = ProductDef {
         name,
         kind,
@@ -1587,18 +1644,21 @@ impl Body {
                     nonnegative(controls.expression.get(product).copied().unwrap_or(0.0))
                         .min(256.0);
                 state.pools[pool].expression_requested = expression;
-                if expression > 0.0 {
-                    demands.push(CellDemand::new(
-                        CellOperation::Synthesis(pool),
-                        0.12 * self.area.sqrt() * dt * expression,
-                        [
-                            program.products[product].kind.synthesis_cost(),
-                            1.0,
-                            1.0,
-                            0.0,
-                            TRANSLATION_WORK,
-                        ],
-                    ));
+                if expression <= 0.0 { continue; }
+                let requested = 0.12 * self.area.sqrt() * dt * expression;
+                if program.products[product].kind == ProductKind::Adhesin {
+                    let Some(input) = program.precursors.get(product).copied().flatten()
+                        .and_then(|i| current_pools.get(i).copied().flatten()) else { continue; };
+                    // Conversion and installation compete for the same frozen
+                    // input stock. Processing occupies the precursor's old space.
+                    let mut demand = CellDemand::new(CellOperation::Finish(input, pool), requested,
+                        [ADHESIN_FINISH_COST, 0.0, 0.0, 0.0, TRANSLATION_WORK]);
+                    demand.stock = Some(input);
+                    demands.push(demand);
+                } else {
+                    demands.push(CellDemand::new(CellOperation::Synthesis(pool), requested, [
+                        program.products[product].kind.synthesis_cost(), 1.0, 1.0, 0.0, TRANSLATION_WORK,
+                    ]));
                 }
             }
         }
@@ -1665,7 +1725,7 @@ impl Body {
             }
             for (part, recipe) in assembly.recipe.parts.iter().enumerate() {
                 let needed = (recipe.required_mass - assembly.ingredients[part].mass).max(0.0);
-                if needed <= EPS {
+                if ingredient_complete(assembly.ingredients[part].mass, recipe.required_mass) {
                     continue;
                 }
                 let Some(pool) = bindings.ingredient_pool[index][part]
@@ -1774,6 +1834,18 @@ impl Body {
                     state.pools[pool].mass += amount;
                     state.pools[pool].embodied_energy += spent * EMBODIED_FRACTION;
                     state.pools[pool].expression_rate += amount / dt;
+                    report.synthesized_mass += amount;
+                    report.dissipated_energy += spent * (1.0 - EMBODIED_FRACTION);
+                }
+                CellOperation::Finish(input, output) => {
+                    let carried = amount * density[input];
+                    let source = &mut state.pools[input];
+                    source.mass = (source.mass - amount).max(0.0);
+                    source.embodied_energy = (source.embodied_energy - carried).max(0.0);
+                    let finished = &mut state.pools[output];
+                    finished.mass += amount;
+                    finished.embodied_energy += carried + spent * EMBODIED_FRACTION;
+                    finished.expression_rate += amount / dt;
                     report.synthesized_mass += amount;
                     report.dissipated_energy += spent * (1.0 - EMBODIED_FRACTION);
                 }
@@ -1918,20 +1990,30 @@ impl Body {
         use std::fmt::Write;
         let mut json = String::from("{\"products\":[");
         let mut first = true;
+        let finish_product = |json: &mut String, definition: Option<(&CellularProgram, usize)>| {
+            if let Some((program, index)) = definition {
+                if let Some(input) = program.precursors.get(index).copied().flatten() {
+                    write!(json, ",\"precursor\":{:?}", program.products[input].name).unwrap();
+                }
+            }
+            json.push('}');
+        };
         if let Some(state) = &self.cellular {
             for pool in &state.pools {
                 if !first {
                     json.push(',');
                 }
                 first = false;
-                let current = program.is_some_and(|p| p.products.contains(&pool.product));
-                write!(&mut json, "{{\"name\":{:?},\"role\":{:?},\"mass\":{},\"concentration\":{},\"halfLife\":{},\"expressionRequested\":{},\"expressionRate\":{},\"current\":{}}}",
+                let definition = program.and_then(|p|
+                    p.products.iter().position(|item| item == &pool.product).map(|i| (p, i)));
+                write!(&mut json, "{{\"name\":{:?},\"role\":{:?},\"mass\":{},\"concentration\":{},\"halfLife\":{},\"expressionRequested\":{},\"expressionRate\":{},\"current\":{}",
                     pool.product.name, pool.product.kind.name(), pool.mass, pool.mass / self.area,
-                    pool.product.half_life, pool.expression_requested, pool.expression_rate, current).unwrap();
+                    pool.product.half_life, pool.expression_requested, pool.expression_rate, definition.is_some()).unwrap();
+                finish_product(&mut json, definition);
             }
         }
         if let Some(program) = program {
-            for product in &program.products {
+            for (index, product) in program.products.iter().enumerate() {
                 if self
                     .cellular
                     .as_ref()
@@ -1943,8 +2025,9 @@ impl Body {
                     json.push(',');
                 }
                 first = false;
-                write!(&mut json, "{{\"name\":{:?},\"role\":{:?},\"mass\":0,\"concentration\":0,\"halfLife\":{},\"expressionRequested\":0,\"expressionRate\":0,\"current\":true}}",
+                write!(&mut json, "{{\"name\":{:?},\"role\":{:?},\"mass\":0,\"concentration\":0,\"halfLife\":{},\"expressionRequested\":0,\"expressionRate\":0,\"current\":true",
                     product.name, product.kind.name(), product.half_life).unwrap();
+                finish_product(&mut json, Some((program, index)));
             }
         }
         json.push_str("],\"assemblies\":[");
@@ -2045,6 +2128,7 @@ impl Body {
 #[derive(Clone, Copy)]
 enum CellOperation {
     Synthesis(usize),
+    Finish(usize, usize),
     Install(usize, usize, usize),
     Grow,
     Replicate,
@@ -2233,6 +2317,128 @@ mod tests {
         );
         body.validate().unwrap();
         report
+    }
+
+    fn adhesive_program() -> CellularProgram {
+        let mut program = CellularProgram::new(vec![
+            product("Frame", ProductKind::Scaffold), product("Finish", ProductKind::Adhesin),
+            product("Mount", ProductKind::Anchor), product("Wall", ProductKind::Membrane),
+        ], vec![AssemblyDef { name: "Glue".into(), kind: AssemblyKind::Mechanism(MechanismKind::Adhere),
+            parts: vec![(1, 0.006), (2, 0.01), (3, 0.01)], at: 0.0, direction: 0.0 }]);
+        program.precursors = vec![None, Some(0), None, None];
+        program.validate().unwrap();
+        program
+    }
+
+    #[test]
+    fn finishing_consumes_only_prior_named_stock_and_transfers_its_exact_paid_investment() {
+        let program = adhesive_program();
+        let (founder, _) = Body::founder();
+        assert!(founder.cellular_json(Some(&program)).contains("\"current\":true,\"precursor\":\"Frame\""));
+        let mut body = stocked(&program, &[0.0, 0.0, 0.01, 0.01]);
+        let mut request = controls(&program, 0.0);
+        request.expression = vec![1.0, 1.0, 0.0, 0.0];
+        request.start = vec![false];
+        let (mut atp, mut minerals) = (100.0, 0.012);
+        let initial = (body.structural_mass() + minerals, body.embodied_energy() + atp);
+        let a = work(&mut body, &program, &request, &mut atp, &mut minerals, 1.0);
+        let pools = &body.cellular.as_ref().unwrap().pools;
+        close(pools[0].mass, 0.012);
+        close(pools[1].mass, 0.0);
+        close(a.energy_spent, 0.012 * 40.0);
+        close(minerals, 0.0);
+        request.expression[0] = 0.0;
+        // Independent prior investment, e.g. a partially paid historical stock.
+        body.cellular.as_mut().unwrap().pools[0].embodied_energy *= 0.5;
+        let density = 40.0 * 0.9 * 0.5;
+        let removed = 0.012 * density;
+        let mut halted = body.clone();
+        let (mut zero, mut none) = (0.0, 0.0);
+        let blocked = work(&mut halted, &program, &request, &mut zero, &mut none, 1.0);
+        close(blocked.synthesized_mass, 0.0);
+        let mut short = body.clone();
+        let (mut limited_atp, mut none) = (0.025, 0.0);
+        work(&mut short, &program, &request, &mut limited_atp, &mut none, 1.0);
+        close(short.cellular.as_ref().unwrap().pools[1].mass, 0.001);
+        let mut no_worker = body.clone();
+        no_worker.organs.clear();
+        let (mut ready, mut none) = (10.0, 0.0);
+        no_worker.cellular_work(&program, &request, &mut ready, &mut none, 1.0, MAX_AREA, false);
+        close(no_worker.cellular.as_ref().unwrap().pools[1].mass, 0.0);
+        request.start[0] = true;
+        let b = work(&mut body, &program, &request, &mut atp, &mut minerals, 0.2);
+        let state = body.cellular.as_ref().unwrap();
+        let finished = state.pools[1].mass;
+        assert!(finished > 0.0 && finished < 0.012);
+        close(state.pools[0].mass + finished, 0.012);
+        close(state.pools[1].embodied_energy, finished * (density + 25.0 * 0.9));
+        close(b.energy_spent, finished * 25.0 + b.constructed_mass * 30.0);
+        close(b.minerals_spent, 0.0);
+        close(state.assemblies[0].ingredients[0].mass, 0.0);
+        close(state.assemblies[0].functional_mass(), 0.0);
+        let mut heat = a.dissipated_energy + b.dissipated_energy;
+        for _ in 0..10 {
+            let r = work(&mut body, &program, &request, &mut atp, &mut minerals, 1.0);
+            heat += r.dissipated_energy;
+        }
+        assert!(body.cellular.as_ref().unwrap().assemblies[0].functional_mass() > 0.0);
+        close(body.structural_mass() + minerals, initial.0);
+        close(body.embodied_energy() + atp + heat + removed, initial.1);
+        assert!(body.cellular_json(Some(&program)).contains("\"precursor\":\"Frame\""));
+        let mut writer = Writer::new();
+        body.write_checkpoint(&mut writer);
+        assert_eq!(body, Body::read_checkpoint(&mut Reader::new(&writer.0)).unwrap());
+        assert!(Body::read_checkpoint_version(&mut Reader::new(&writer.0), 15).is_err());
+    }
+
+    #[test]
+    fn two_finishing_reactions_and_an_installer_share_one_named_stock() {
+        let mut program = CellularProgram::new(vec![
+            product("Blank", ProductKind::Scaffold), product("Other", ProductKind::Scaffold),
+            product("A", ProductKind::Adhesin), product("B", ProductKind::Adhesin),
+        ], vec![AssemblyDef { name: "Structure".into(), kind: AssemblyKind::Mechanism(MechanismKind::Support),
+            parts: vec![(0, 0.04)], at: 0.0, direction: 0.0 }]);
+        program.precursors = vec![None, None, Some(0), Some(0)];
+        program.validate().unwrap();
+        let mut body = stocked(&program, &[0.006, 0.05, 0.0, 0.0]);
+        let (mut atp, mut minerals) = (20.0, 0.0);
+        let mut request = controls(&program, 0.0);
+        request.expression = vec![0.0, 0.0, 1.0, 1.0];
+        let before = (body.structural_mass(), body.embodied_energy() + atp);
+        let r = work(&mut body, &program, &request, &mut atp, &mut minerals, 2.0);
+        let state = body.cellular.as_ref().unwrap();
+        let (a, b, installed) = (state.pools[2].mass, state.pools[3].mass, state.assemblies[0].mass());
+        assert!(a > 0.0 && b > 0.0 && installed > 0.0);
+        close(a, b);
+        close(a + b + installed, 0.006);
+        close(r.energy_spent, 25.0 * (a + b) + 30.0 * installed);
+        close(state.pools[0].mass, 0.0);
+        close(state.pools[1].mass, 0.05);
+        close(body.structural_mass(), before.0);
+        close(body.embodied_energy() + atp + r.dissipated_energy, before.1);
+        let idle = work(&mut body, &program, &request, &mut atp, &mut minerals, 1.0);
+        close(idle.energy_spent, 0.0);
+    }
+
+    #[test]
+    fn tiny_named_ingredient_must_arrive_before_a_paid_machine_can_operate() {
+        let mut program = flagellum_program();
+        program.products.push(product("Trace", ProductKind::Scaffold));
+        program.assemblies[0].parts.push((3, 1e-13));
+        program.validate().unwrap();
+        let mut body = stocked(&program, &[0.005, 0.01, 0.025, 0.0]);
+        let (mut atp, mut minerals) = (10.0, 1.0);
+        let mut request = controls(&program, 0.0);
+        work(&mut body, &program, &request, &mut atp, &mut minerals, 10.0);
+        assert_eq!(body.cellular.as_ref().unwrap().assemblies[0].functional_mass(), 0.0);
+        request.expression[3] = 1.0;
+        work(&mut body, &program, &request, &mut atp, &mut minerals, 1.0);
+        assert_eq!(body.cellular.as_ref().unwrap().assemblies[0].functional_mass(), 0.0);
+        request.expression[3] = 0.0;
+        work(&mut body, &program, &request, &mut atp, &mut minerals, 1.0);
+        let machine = &body.cellular.as_ref().unwrap().assemblies[0];
+        assert_eq!(machine.ingredients[3].mass, 1e-13);
+        assert!(machine.functional_mass() > 0.0);
     }
 
     #[test]

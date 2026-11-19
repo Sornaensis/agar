@@ -29,7 +29,7 @@ export interface UiPreferences {
   simulationView: 'player' | 'metrics' | 'settings' | 'genomes';
   activeSimulationId: string | null;
   overlay: FieldOverlay; builderOverlay: FieldOverlay;
-  sensors: boolean; trails: boolean; colonyActivity: boolean;
+  sensors: boolean; trails: boolean; colonyActivity: boolean; showExtinct: boolean;
 }
 export interface GenomeDraft { name: string; source: string }
 export interface EnvironmentDraft { name: string; config: EnvironmentConfig }
@@ -48,7 +48,7 @@ const GENOME_DRAFT_KEY = 'cellarium.genome-draft.v1';
 const ENVIRONMENT_DRAFT_KEY = 'cellarium.environment-draft.v1';
 const encoder = new TextEncoder();
 const DEFAULT_PREFERENCES: UiPreferences = {
-  tab: 'simulation', simulationView: 'player', activeSimulationId: null, overlay: 'none', builderOverlay: 'light', sensors: true, trails: false, colonyActivity: true,
+  tab: 'simulation', simulationView: 'player', activeSimulationId: null, overlay: 'none', builderOverlay: 'light', sensors: true, trails: false, colonyActivity: true, showExtinct: false,
 };
 
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -383,6 +383,7 @@ export function loadPreferences(): UiPreferences {
     overlay: readOverlay(saved.overlay, DEFAULT_PREFERENCES.overlay),
     builderOverlay: readOverlay(saved.builderOverlay, DEFAULT_PREFERENCES.builderOverlay),
     sensors: typeof saved.sensors === 'boolean' ? saved.sensors : true,
+    showExtinct: saved.showExtinct === true,
     colonyActivity: typeof saved.colonyActivity === 'boolean' ? saved.colonyActivity : true,
     trails: typeof saved.trails === 'boolean' ? saved.trails : false,
   };

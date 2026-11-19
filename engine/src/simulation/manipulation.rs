@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn moves_connected_component_across_seams_and_rejects_any_blocked_member() {
-        let (mut world, genomes) = equipped("assembly Glue: adhere() { Mount:0.01; Wall:0.01; }\npublish rf020 = 31; adhere_message rf020 recruit;");
+        let (mut world, genomes) = equipped("product GlueMaterial = adhesin(Frame); assembly Glue: adhere() { GlueMaterial:0.006; Mount:0.01; Wall:0.01; }\npublish rf020 = 31; adhere_message rf020 recruit;");
         genomes[0].program.initialize_message(&mut world.cells[0].memory);
         world.cells[0].x = WIDTH - 13.0;
         world.cells[0].y = 50.0;

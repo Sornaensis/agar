@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
-import { advance, body, catalog, compile, error, restore, save, snapshot } from './organelle-harness.mjs';
+import { advance, body, catalog, compile, error, restore, save, snapshot, source as genomeSource } from './organelle-harness.mjs';
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 2) {
@@ -15,13 +15,9 @@ async function run(file) {
   const { instance } = await WebAssembly.instantiate(bytes, {});
   const api = instance.exports;
   const abi = api.abi_version();
-  assert.ok([16,17,18,19].includes(abi));
+  assert.ok([16,17,18,19,20].includes(abi));
   const sha = data => createHash('sha256').update(data).digest('hex');
   const { PRESETS } = await catalog();
-  // This single-prey assay holds the pre-recruitment genome source constant
-  // so older engines can run the exact same accounting comparison.
-  const source = name => PRESETS.find(preset => preset.name === name).source
-    .replace(/(adhere_message r[if]\d{3}) recruit;/g, '$1;');
   const ok = (status, reason) => assert.ok(status, reason + ' ' + error(api));
   const close = (actual, expected, epsilon = 1e-6) => assert.ok(Math.abs(actual - expected) <= epsilon, `${actual} != ${expected}`);
   const sum = (array, fn) => array.reduce((total, item) => total + fn(item), 0);
@@ -41,13 +37,26 @@ async function run(file) {
   ok(api.set_initial_gases(1,1), 'initial gases');
   ok(api.set_gas_exchange(1,.5,1,1), 'open reservoir');
   ok(abi < 18 ? api.reset_empty(42,0) : api.reset_empty(42), 'reset');
-  const photo = compile(api,source('Phototroph')), predator = compile(api,source('Predator'));
+  // Historical comparisons start both engines with exactly the same two
+  // compiled programs, before the introduction of the first founder. The
+  // shared producer disables docking so differences in adhesive fabrication
+  // cannot change its development during the cross-version comparison.
+  // Single-engine runs measure the current catalog.
+  let photo, predator;
+  if (args.has('--baseline') || abi < 20) {
+    ok(restore(api, await readFile(new URL('../engine/fixtures/predation-assay-v12.bin',import.meta.url))), 'restore paired assay');
+    assert.equal(api.genome_count(),2);
+    [photo,predator] = [1,2];
+  } else {
+    photo = compile(api,PRESETS.find(p=>p.name==='Phototroph').source);
+    predator = compile(api,PRESETS.find(p=>p.name==='Predator').source);
+  }
   const grownId = api.place_cell(photo,100,100);
   ok(grownId,'seed Phototroph');
   let state = snapshot(api);
   const report = {
     abi, wasmSha256:sha(bytes),
-    sources:{ Phototroph:sha(source('Phototroph')), Predator:sha(source('Predator')) },
+    sources:{ Phototroph:sha(genomeSource(api,photo)), Predator:sha(genomeSource(api,predator)) },
     setup:{seed:42,width:800,height:480,initialMineralsPerPatch:3,temperature:.5,
       light:.85,oxygenEquilibrium:1,inorganicCarbonEquilibrium:1,reservoirExchangePerSecond:.5,
       mutationRate:0,initialFood:0,organicInputPerSecond:0,encounterSeconds:60},
@@ -189,11 +198,15 @@ if (args.has('--baseline')) {
   for (const name of ['newborn','grown']) {
     const old = before.encounters[name], now = current.encounters[name];
     assert.equal(now.kill.seconds,old.kill.seconds,'Compare the same completed hunt');
+    for (const field of ['preHitBodyCarbon','preHitReserveCarbon','preHitATP']) {
+      assert.ok(Math.abs(now.kill[field] - old.kill[field]) < 1e-8, 'Matched prey ' + field);
+    }
     assert.ok(now.kill.tissueReleased > old.kill.tissueReleased);
     assert.ok(now.grossRespiratoryATP > old.grossRespiratoryATP);
   }
   assert.ok(current.encounters.carcassOnly.grossRespiratoryATP > before.encounters.carcassOnly.grossRespiratoryATP);
-  assert.equal(current.encounters.fasting.grossRespiratoryATP,before.encounters.fasting.grossRespiratoryATP);
+  assert.ok(Math.abs(current.encounters.fasting.grossRespiratoryATP
+    - before.encounters.fasting.grossRespiratoryATP) < 1e-8, 'Matched fasting respiration');
   output = {before,after:current};
 }
 const json = JSON.stringify(output,null,2) + '\n';

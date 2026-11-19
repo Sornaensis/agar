@@ -66,19 +66,29 @@ for (const api of [offered,replay]) {
 assert.deepEqual(save(offered),save(replay));
 console.log('Interrupted recruitment restarts; checkpointed recruitment resumes on the same tick.');
 
-// These ABI 18 fixtures both recorded a degree of one at both endpoints.
-for (const [file, expected] of [['independent-founders-v14.bin',0], ['family-v14.bin',1]]) {
+// Earlier versions recorded bonds between two-part surfaces. Preserve the
+// organisms' real inventories and genome sources, without installing new glue.
+for (const [file,version] of [['independent-founders-v14.bin',14],['family-v14.bin',14],['unprocessed-adhesion-v15.bin',15]]) {
   const api = await fresh();
   const old = await readFile(new URL('../engine/fixtures/' + file,import.meta.url));
-  assert.equal(old.readUInt32LE(8),14);
+  assert.equal(old.readUInt32LE(8),version);
   assert.equal(restore(api,old),1,error(api));
-  assert.equal(degree(api,1),expected);
-  assert.equal(degree(api,2),expected);
+  for (const id of [1,2]) {
+    assert.equal(degree(api,id),0);
+    const data=body(api,id);
+    const oldGlue=data.cellular.assemblies.find(m=>m.kind==='adhere()' && m.mass>0);
+    assert.ok(oldGlue && oldGlue.functionalMass===0,'Historical material remains present and inert');
+    assert.ok(!data.cellular.products.some(p=>p.role==='adhesin' && p.mass>0));
+    if (version===15) {
+      const previousBody = [86.04656449973311,81.83648886430608][id-1];
+      assert.ok(Math.abs(data.foodPotential.body-previousBody)<1e-8,'Migrating a bond preserves the paid body investment');
+    }
+  }
   const upgraded = save(api), copy = await fresh();
-  assert.equal(new DataView(upgraded.buffer).getUint32(8,true),15);
+  assert.equal(new DataView(upgraded.buffer).getUint32(8,true),16);
   assert.equal(restore(copy,upgraded),1,error(copy));
   advance(api,1); advance(copy,1);
-  assert.equal(degree(api,1),expected);
+  assert.equal(degree(api,1),0);
   assert.deepEqual(save(api),save(copy));
 }
-console.log('Legacy checkpoints preserve the corroborated family bond and release the independently placed founders.');
+console.log('Historic adhesive material and investment persist without granting unproduced glue or bonds.');

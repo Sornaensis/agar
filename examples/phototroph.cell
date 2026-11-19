@@ -6,6 +6,8 @@ product Catalyst = enzyme();
 product Wall = membrane();
 product Mount = anchor();
 product Pigment = pigment();
+product CoatPrecursor = scaffold();
+product Glue = adhesin(CoatPrecursor);
 product Carrier = transporter();
 product Frame = scaffold();
 product Replicase = replicase();
@@ -44,10 +46,12 @@ let need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Env
 let need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);
 let need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);
 
+gene supply_CoatPrecursor: CoatPrecursor = if need_Dock && pool.Glue < 0.001 then buffered(pool.CoatPrecursor, 1) else 0;
 gene supply_Catalyst: Catalyst = buffered(pool.Catalyst, (if need_Respiration then 1 else 0) + (if need_Solar then 0.25 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0));
 gene supply_Wall: Wall = buffered(pool.Wall, (if need_Respiration then 0.6 else 0) + (if need_Dock then 1 else 0) + (if need_CarbonPort then 1 else 0) + (if need_MineralPort then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0));
 gene supply_Mount: Mount = buffered(pool.Mount, (if need_Solar then 0.25 else 0) + (if need_Dock then 1 else 0) + (if need_Minerals then 0.25 else 0) + (if need_Division then 0.5 else 0));
 gene supply_Pigment: Pigment = buffered(pool.Pigment, (if need_Solar then 1 else 0));
+gene supply_Glue: Glue = buffered(pool.Glue, (if need_Dock then 0.5 else 0));
 gene supply_Carrier: Carrier = buffered(pool.Carrier, (if need_CarbonPort then 1 else 0) + (if need_MineralPort then 1 else 0) + (if need_Minerals then 1 else 0));
 gene supply_Frame: Frame = buffered(pool.Frame, (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0));
 gene supply_Replicase: Replicase = buffered(pool.Replicase, (if need_Replication then 1 else 0));
@@ -70,8 +74,9 @@ assembly Solar: harvest(light) {
 }
 
 assembly Dock: adhere() {
-  Mount: 0.01;
-  Wall: 0.01;
+  Mount: 0.008;
+  Wall: 0.008;
+  Glue: 0.004;
   start_when: need_Dock;
   activity: 1;
 }

@@ -190,12 +190,13 @@ export const LANGUAGE_KEYWORDS: readonly GenomeSymbol[] = Object.freeze([
 /** Cellular declarations are kept separate from the v3 compatibility catalog. */
 export const CELLULAR_PRODUCT_ROLES = Object.freeze([
   'scaffold', 'anchor', 'motor', 'filament', 'pigment', 'enzyme', 'membrane', 'transporter',
-  'receptor', 'regulator', 'replicase', 'constrictor',
+  'receptor', 'regulator', 'replicase', 'constrictor', 'adhesin',
 ] as const);
 export const CELLULAR_CONSTRUCTORS: readonly GenomeSymbol[] = Object.freeze(CELLULAR_PRODUCT_ROLES.map(role =>
-  symbol(role, 'function', 'product', `${role}(${role === 'regulator' ? 'halfLife: number' : ''}) → product`,
+  symbol(role, 'function', 'product', `${role}(${role === 'regulator' ? 'halfLife: number' : role === 'adhesin' ? 'precursor: scaffold product' : ''}) → product`,
     role === 'regulator'
       ? 'Declares a persistent regulatory product. Its positive half-life is measured in seconds; pool.Name reads its physical stock. Synthesis costs material and energy, and stock partitions at division.'
+      : role === 'adhesin' ? 'Finishes a named scaffold precursor into a binding protein. Expression consumes existing precursor stock, usable energy and translation work. Adhesion surfaces install the finished protein together with membrane and anchor material.'
       : `Declares a ${role} product. Genes synthesize its stock; assembly recipes consume it as a physical component. A declaration by itself creates no material.`)));
 const FORMATION_MODES: readonly GenomeSymbol[] = [
   symbol('daughters','keyword','formation mode','adhere_message rf001 daughters;','Retain a compatible daughter when the cell divides. This is the default.'),
@@ -235,7 +236,7 @@ const mechanismConstructorByName = new Map(MECHANISM_CATALOG.map(item => [item.c
 const cellularSymbolByName = new Map([...CELLULAR_CONSTRUCTORS, ...CELLULAR_KEYWORDS].map(item => [item.name, item]));
 
 export interface CellularDeclarations {
-  products: { name: string; role: string; from: number; to: number }[];
+  products: { name: string; role: string; precursor?: string; from: number; to: number }[];
   genes: { name: string; product: string; from: number; to: number }[];
   assemblies: { name: string; kind: string; from: number; to: number }[];
   functions: { name: string; parameters: string[]; from: number; to: number; end: number }[];
@@ -251,7 +252,11 @@ export function cellularDeclarations(source: string): CellularDeclarations {
     const declaration = tokens[index].text, name = tokens[index + 1];
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name.text)) continue;
     const detail = tokens[index + 3].text;
-    if (declaration === 'product' && tokens[index + 2].text === '=') result.products.push({ name: name.text, role: detail, from: name.from, to: name.to });
+    if (declaration === 'product' && tokens[index + 2].text === '=') {
+      const input = detail === 'adhesin' && tokens[index+4]?.text==='(' ? tokens[index+5]?.text : undefined;
+      result.products.push({ name:name.text, role:detail, from:name.from, to:name.to,
+        ...(input && /^[A-Za-z_][A-Za-z0-9_]*$/.test(input) ? {precursor:input} : {}) });
+    }
     if (declaration === 'gene' && tokens[index + 2].text === ':') result.genes.push({ name: name.text, product: detail, from: name.from, to: name.to });
     if (declaration === 'assembly' && tokens[index + 2].text === ':') {
       let kind = detail;
@@ -326,7 +331,7 @@ export function lookupCellularSymbol(name: string, source: string): GenomeSymbol
   if (dynamic) return dynamic;
   const declarations = cellularDeclarations(source);
   const product = declarations.products.find(item => item.name === name);
-  if (product) return symbol(name, 'binding', `${product.role} product`, `${name}: ${product.role}`, `Physical product declared by this genome. Use pool.${name} to read its available mass, or name it in an assembly recipe with a positive material amount.`);
+  if (product) return symbol(name, 'binding', `${product.role} product`, `${name}: ${product.role}`, `${product.precursor ? `Finishing consumes an equal mass of existing ${product.precursor} stock.` : 'Physical product declared by this genome.'} Use pool.${name} to read its available mass, or name it in an assembly recipe with a positive material amount.`);
   const gene = declarations.genes.find(item => item.name === name);
   if (gene) return symbol(name, 'binding', 'gene', `gene ${name}: ${gene.product}`, `Expression effort for ${gene.product}. The Body inspector compares requested expression with actual material synthesized.`);
   const declaredFunction = declarations.functions.find(item => item.name === name);
@@ -522,7 +527,7 @@ export function searchGenomeSymbols(query: string, bindings: readonly GenomeBind
 }
 
 export interface GenomeCompletionContext {
-  kind: 'statement' | 'expression' | 'register' | 'none' | 'constructor' | 'product' | 'assembly-kind' | 'component' | 'mechanism-target' | 'formation-mode';
+  kind: 'statement' | 'expression' | 'register' | 'none' | 'constructor' | 'product' | 'assembly-kind' | 'component' | 'mechanism-target' | 'formation-mode' | 'scaffold-precursor';
   mechanismConstructor?: string;
   /** A useful editing hint, never a substitute for the Rust type checker. */
   expected?: PrimitiveType | 'number' | 'register' | 'vec2 | string';
@@ -564,7 +569,10 @@ function cellularCompletionContext(source: string, position: number): GenomeComp
     const statement = source.slice(tokens[0].from, position);
     return genomeCompletionContext(statement, statement.length);
   }
-  if (tokens[0].text === 'product') return { kind: assignment && !tokens.some(token=>token.text==='(') ? 'constructor' : 'none' };
+  if (tokens[0].text === 'product') {
+    if (tokens.length === 5 && tokens[3].text === 'adhesin' && tokens[4].text === '(') return {kind:'scaffold-precursor'};
+    return { kind: assignment && !tokens.some(token=>token.text==='(') ? 'constructor' : 'none' };
+  }
   if (tokens[0].text === 'gene') {
     if (!assignment) return { kind: colon ? 'product' : 'none' };
     const expression = `thrust = ${source.slice(tokens.find(token=>token.text==='=')!.to,position)}`;
@@ -653,12 +661,13 @@ export function genomeCompletions(source: string, position: number, prefix = '',
   const available = new Map<string, GenomeSymbol>();
   const add = (item: GenomeSymbol): void => { if (!needle || item.name.toLowerCase().startsWith(needle)) available.set(item.name, item); };
   if (context.kind==='formation-mode') return FORMATION_MODES.filter(item=>item.name.startsWith(needle));
-  if (cellular && ['constructor', 'product', 'assembly-kind', 'component', 'mechanism-target'].includes(context.kind)) {
+  if (cellular && ['constructor', 'product', 'assembly-kind', 'component', 'mechanism-target', 'scaffold-precursor'].includes(context.kind)) {
     if (context.kind === 'constructor') CELLULAR_CONSTRUCTORS.forEach(add);
     if (context.kind === 'mechanism-target') MECHANISM_CATALOG.filter(item=>item.constructor===context.mechanismConstructor && item.target).forEach(item=>add(symbol(item.target!, 'keyword', 'target', item.kind, item.description)));
     if (context.kind === 'assembly-kind') [...CELLULAR_MECHANISMS,...CELLULAR_ASSEMBLY_KINDS].forEach(item => add({ ...item, insertText: `${item.name} {\n  activity: 1;\n}` }));
-    if (context.kind === 'product' || context.kind === 'component') {
+    if (context.kind === 'product' || context.kind === 'component' || context.kind === 'scaffold-precursor') {
       cellularDeclarations(source).products.forEach(item => {
+        if (context.kind === 'scaffold-precursor' && item.role !== 'scaffold') return;
         const product = lookupCellularSymbol(item.name, source)!;
         add(context.kind === 'component' ? { ...product, insertText: `${item.name}: ` } : product);
       });
@@ -726,7 +735,7 @@ export function genomeSymbolDocumentation(item: GenomeSymbol): GenomeSymbolDocum
   const mechanism = MECHANISM_CATALOG.find(entry=>entry.kind===item.name);
   if (mechanism) {
     const parts=mechanism.roles.map(role=>({name:role[0].toUpperCase()+role.slice(1)+'Part',role}));
-    return {example:`${parts.map(part=>`product ${part.name} = ${part.role}();`).join('\n')}\nassembly Machine: ${mechanism.kind} {\n${parts.map(part=>`  ${part.name}: 0.04;`).join('\n')}\n  activity: 1;\n}`,
+    return {example:`${parts.map(part=>part.role === 'adhesin' ? `product Precursor = scaffold();\nproduct ${part.name} = adhesin(Precursor);` : `product ${part.name} = ${part.role}();`).join('\n')}\nassembly Machine: ${mechanism.kind} {\n${parts.map(part=>`  ${part.name}: 0.04;`).join('\n')}\n  activity: 1;\n}`,
       notes:[mechanism.description,'Build separate mechanisms for the other operations the organism needs. Each recipe retains its physical ingredients and identity.']};
   }
   if (item.name === 'signal' && item.category === 'keyword') {
@@ -745,6 +754,7 @@ export function genomeSymbolDocumentation(item: GenomeSymbol): GenomeSymbolDocum
     const snippets:Record<string,string> = {
       cellular:'cellular;\nproduct Memory = regulator(8);\ngene remember: Memory = if energy > 50 then 0.1 else 0;',
       product:'product Rotor = motor();\nproduct Memory = regulator(8);',
+      adhesin:'product Precursor = scaffold();\nproduct Glue = adhesin(Precursor);\ngene make_precursor: Precursor = if pool.Precursor < 0.01 then 1 else 0;\ngene finish: Glue = if pool.Glue < 0.01 then 1 else 0;',
       gene:'product Rotor = motor();\ngene drive: Rotor = if pool.Rotor < 0.01 then 0.5 else 0;',
       assembly:'product Anchor = anchor();\nproduct Rotor = motor();\nproduct Tail = filament();\nassembly Swim: propel() {\n  Anchor: 0.005;\n  Rotor: 0.01;\n  Tail: 0.025;\n  activity: 0.6;\n  at: 1.570796;\n  direction: 0;\n}',
       fn:'fn response(value, threshold) = activate(value, threshold);\nlet response_now = response(energy.fraction, 0.4);',
