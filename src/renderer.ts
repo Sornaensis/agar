@@ -327,11 +327,14 @@ export class Renderer {
     for (const food of world.food) {
       const count = this.visibility.collect(food.x, food.y, 5);
       if (!count) continue;
-      const radius = (food.kind === 1 ? 1.8 : 1.2) + clamp(Math.max(food.energy / 40, food.nutrients), 0, 1) * 0.7;
+      // Area tracks remaining chemical energy up to one freshly supplied packet.
+      const fullness = Math.sqrt(clamp(food.energy / 24, 0, 1));
+      const radius = 0.25 + (food.kind === 1 ? 2.25 : 1.65) * fullness;
+      const haloRadius = 0.5 + 4.5 * fullness;
       const path = organicPaths[food.kind], halo = organicHalos[food.kind];
       for (let image = 0; image < count; image += 2) {
         const x = this.visibility.points[image], y = this.visibility.points[image + 1];
-        halo.moveTo(x + 5,y); halo.arc(x,y,5,0,Math.PI * 2);
+        halo.moveTo(x + haloRadius,y); halo.arc(x,y,haloRadius,0,Math.PI * 2);
         if (food.kind === 1) {
           path.moveTo(x,y-radius); path.lineTo(x+radius,y);
           path.lineTo(x,y+radius); path.lineTo(x-radius,y); path.closePath();

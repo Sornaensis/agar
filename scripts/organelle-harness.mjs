@@ -6,8 +6,8 @@ export const module=await WebAssembly.compile(bytes);
 export const kinds=['core','photosynthetic','metabolic','digestive','reserve','transporter','phagocyte','flagellum','piercer','cortex','repair','photoreceptor','thermoreceptor','chemoreceptor','mechanoreceptor','optical'];
 export const STRIDE=163;
 export const error=api=>new TextDecoder().decode(new Uint8Array(api.memory.buffer,api.error_ptr(),api.error_len()));
-export async function fresh(config={}){
-  const api=(await WebAssembly.instantiate(module,{})).exports;assert.equal(api.abi_version(),15);
+export async function fresh(config={},compiledModule=module){
+  const api=(await WebAssembly.instantiate(compiledModule,{})).exports;assert.equal(api.abi_version(),15);
   assert.equal(api.set_world_size(config.width??1200,config.height??760),1,error(api));
   api.set_environment(config.ambientTemperature??.5,config.ambientLight??0,config.currentStrength??0);
   api.set_initial_nutrients(config.initialNutrients??.3);api.set_food_rate(config.foodRate??0);api.set_mutation_rate(config.mutationRate??0);

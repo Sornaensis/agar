@@ -5,9 +5,9 @@ cellular;
 product Catalyst = enzyme();
 product Wall = membrane();
 product Mount = anchor();
+product Carrier = transporter();
 product Rotor = motor();
 product Frame = scaffold();
-product Carrier = transporter();
 product Tail = filament();
 product Detector = receptor();
 product Pigment = pigment();
@@ -24,8 +24,22 @@ let funded = (energy > 10 || gut.energy > 0) && nutrient.stored > 0.001;
 let expanding = body.area > body.birth_area * 1.6;
 let powered = enough(built.Gut, 0.06) && enough(built.ExudateEnzyme, 0.04) && enough(built.Capture, 0.03) && enough(built.Respiration, 0.04);
 let equipped = powered && enough(built.LeftMotor, 0.025) && enough(built.RightMotor, 0.025) && enough(built.Vision, 0.02) && enough(built.Touch, 0.01);
-let surplus = equipped && energy > 55 && gut.energy > 2 && carbon.organic > 0.3 * body.area;
-# Read the receptors the genome actually builds.
+let scavenging = gut.tissue.energy > 6 && !rb093;
+let provisioning = expanding && (energy > 60 || gut.exudate.energy + gut.tissue.energy > 10);
+# Commit after a substantial meal or a productive carbon connection.
+# A daughter can start with a smaller inherited ATP compartment.
+rb061 = true when equipped && energy > min(65, 0.85 * energy.capacity)
+  && (gut.exudate.energy + gut.tissue.energy > 12
+    || (gut.exudate.energy + gut.tissue.energy > 3 && carbon.organic > 0.8 * body.area)
+    || (built.CarbonPort > 0.045 && carbon.organic > 1.2 * body.area && energy.fraction > 0.85));
+let surplus = equipped && rb061 && energy > min(32, 0.65 * energy.capacity);
+# After recognizing a producer, build reciprocal junctions for future encounters.
+publish rf090 = 72;
+rf091 = 41;
+adhere_message rf091;
+let docked = sensed.Touch.message_valid && sensed.Touch.message == rf091;
+rb093 = true when docked;
+# Swing around hard obstacles and stay near edible particles.
 let injured = integrity < 0.995;
 let seen = sensed.Vision.valid;
 let blocked = sensed.Touch.valid && sensed.Touch.resistance >= 0.12;
@@ -46,32 +60,35 @@ let move = if blocked || injured then 0.65 else if meal_fraction > 0.45 then 0
   else if sensed.Chemistry.valid && sensed.Chemistry.organic > 0.001 then 0.18 else 0.28;
 
 let need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);
-let need_Gut = funded && (true) && missing(built.Gut, (if expanding then 0.12 else 0.06), 0.06);
-let need_ExudateEnzyme = funded && (true) && missing(built.ExudateEnzyme, (if expanding then 0.08 else 0.04), 0.04);
-let need_Capture = funded && (enough(built.Gut, 0.06)) && missing(built.Capture, (if expanding then 0.06 else 0.03), 0.03);
-let need_TissueEnzyme = funded && (powered && gut.tissue.energy > 0) && missing(built.TissueEnzyme, (if expanding then 0.08 else 0.04), 0.04);
-let need_WasteEnzyme = funded && (powered && gut.waste.energy > 0) && missing(built.WasteEnzyme, (if expanding then 0.03 else 0.015), 0.015);
-let need_Translation = funded && (surplus) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);
-let need_Minerals = funded && (powered && (nutrient.stored < 0.15 || surplus)) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);
-let need_EnergyStore = funded && (surplus) && missing(built.EnergyStore, (if expanding then 0.08 else 0.04), 0.04);
-let need_MineralStore = funded && (surplus && body.area > 1.2) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);
-let need_LeftMotor = funded && (powered) && missing(built.LeftMotor, (if expanding then 0.05 else 0.025), 0.025);
-let need_RightMotor = funded && (powered) && missing(built.RightMotor, (if expanding then 0.05 else 0.025), 0.025);
-let need_Vision = funded && (powered) && missing(built.Vision, (if expanding then 0.04 else 0.02), 0.02);
-let need_Touch = funded && (powered) && missing(built.Touch, (if expanding then 0.02 else 0.01), 0.01);
-let need_Chemistry = funded && (surplus) && missing(built.Chemistry, (if expanding then 0.03 else 0.015), 0.015);
-let need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);
-let need_Support = funded && (equipped && energy > 65 && gut.energy > 2 && carbon.organic > 0.3 * body.area) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);
-let need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);
-let need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);
-let need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);
+let need_Dock = funded && (equipped && rb093) && missing(built.Dock, (if provisioning then 0.04 else 0.02), 0.02);
+let need_CarbonPort = funded && (equipped && rb093) && missing(built.CarbonPort, (if provisioning then 0.1 else 0.05), 0.05);
+let need_MineralPort = funded && (equipped && rb093) && missing(built.MineralPort, (if provisioning then 0.04 else 0.02), 0.02);
+let need_Gut = funded && (true) && missing(built.Gut, (if provisioning then 0.12 else 0.06), 0.06);
+let need_ExudateEnzyme = funded && (true) && missing(built.ExudateEnzyme, (if provisioning then 0.08 else 0.04), 0.04);
+let need_Capture = funded && (enough(built.Gut, 0.06)) && missing(built.Capture, (if provisioning then 0.06 else 0.03), 0.03);
+let need_TissueEnzyme = funded && (powered && gut.tissue.energy > 0) && missing(built.TissueEnzyme, (if scavenging then 0.08 else if provisioning then 0.08 else 0.04), 0.04);
+let need_WasteEnzyme = funded && (powered && gut.waste.energy > 0) && missing(built.WasteEnzyme, (if provisioning then 0.03 else 0.015), 0.015);
+let need_Translation = funded && (surplus) && missing(built.Translation, (if provisioning then 0.08 else 0.04), 0.04);
+let need_Minerals = funded && (powered && (nutrient.stored < 0.15 || surplus)) && missing(built.Minerals, (if provisioning then 0.05 else 0.025), 0.025);
+let need_EnergyStore = funded && (surplus) && missing(built.EnergyStore, (if expanding then 0.04 else 0.02), 0.02);
+let need_MineralStore = funded && (surplus && body.area > 1.25) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);
+let need_LeftMotor = funded && (powered) && missing(built.LeftMotor, (if provisioning then 0.05 else 0.025), 0.025);
+let need_RightMotor = funded && (powered) && missing(built.RightMotor, (if provisioning then 0.05 else 0.025), 0.025);
+let need_Vision = funded && (powered) && missing(built.Vision, (if provisioning then 0.04 else 0.02), 0.02);
+let need_Touch = funded && (powered) && missing(built.Touch, (if provisioning then 0.02 else 0.01), 0.01);
+let need_Chemistry = funded && (surplus) && missing(built.Chemistry, (if provisioning then 0.03 else 0.015), 0.015);
+let need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if provisioning then 0.05 else 0.025), 0.025);
+let need_Support = funded && (surplus) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);
+let need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if provisioning then 0.04 else 0.02), 0.02);
+let need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if provisioning then 0.04 else 0.02), 0.02);
+let need_Division = funded && (surplus && body.area > 1.5 * body.birth_area) && missing(built.Division, (if provisioning then 0.04 else 0.02), 0.02);
 
 gene supply_Catalyst: Catalyst = buffered(pool.Catalyst, (if need_Respiration then 1 else 0) + (if need_ExudateEnzyme then 1 else 0) + (if need_TissueEnzyme then 1 else 0) + (if need_WasteEnzyme then 1 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0));
-gene supply_Wall: Wall = buffered(pool.Wall, (if need_Respiration then 0.6 else 0) + (if need_Gut then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0));
-gene supply_Mount: Mount = buffered(pool.Mount, (if need_Capture then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_LeftMotor then 0.5 else 0) + (if need_RightMotor then 0.5 else 0) + (if need_Vision then 0.333333 else 0) + (if need_Touch then 0.333333 else 0) + (if need_Chemistry then 0.25 else 0) + (if need_Division then 0.5 else 0));
+gene supply_Wall: Wall = buffered(pool.Wall, (if need_Respiration then 0.6 else 0) + (if need_Dock then 1 else 0) + (if need_CarbonPort then 1 else 0) + (if need_MineralPort then 1 else 0) + (if need_Gut then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0));
+gene supply_Mount: Mount = buffered(pool.Mount, (if need_Dock then 1 else 0) + (if need_Capture then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_LeftMotor then 0.5 else 0) + (if need_RightMotor then 0.5 else 0) + (if need_Vision then 0.333333 else 0) + (if need_Touch then 0.333333 else 0) + (if need_Chemistry then 0.25 else 0) + (if need_Division then 0.5 else 0));
+gene supply_Carrier: Carrier = buffered(pool.Carrier, (if need_CarbonPort then 1 else 0) + (if need_MineralPort then 1 else 0) + (if need_Minerals then 1 else 0));
 gene supply_Rotor: Rotor = buffered(pool.Rotor, (if need_Capture then 1 else 0) + (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Division then 1 else 0));
 gene supply_Frame: Frame = buffered(pool.Frame, (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0));
-gene supply_Carrier: Carrier = buffered(pool.Carrier, (if need_Minerals then 1 else 0));
 gene supply_Tail: Tail = buffered(pool.Tail, (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Touch then 0.333333 else 0));
 gene supply_Detector: Detector = buffered(pool.Detector, (if need_Vision then 1 else 0) + (if need_Touch then 1 else 0) + (if need_Chemistry then 1 else 0));
 gene supply_Pigment: Pigment = buffered(pool.Pigment, (if need_Vision then 0.333333 else 0));
@@ -82,7 +99,28 @@ assembly Respiration: respire(oxygen) {
   Catalyst: 0.025;
   Wall: 0.015;
   start_when: need_Respiration;
-  activity: if oxygen > 0 && energy.fraction < 0.98 && (carbon.organic > 0.2 * body.area || energy < 20) then 1 else 0;
+  activity: if oxygen > 0 && energy.fraction < 0.98 && (carbon.organic > (if energy > 62 then 0.65 else 0.18) * body.area || energy < 20) then 1 else 0;
+}
+
+assembly Dock: adhere() {
+  Mount: 0.01;
+  Wall: 0.01;
+  start_when: need_Dock;
+  activity: 1;
+}
+
+assembly CarbonPort: junction(carbon) {
+  Wall: 0.025;
+  Carrier: 0.025;
+  start_when: need_CarbonPort;
+  activity: if carbon.organic < 1.8 * body.area then 1 else 0;
+}
+
+assembly MineralPort: junction(mineral) {
+  Wall: 0.01;
+  Carrier: 0.01;
+  start_when: need_MineralPort;
+  activity: if nutrient.fraction > 0.45 then 1 else 0;
 }
 
 assembly Gut: store(food) {
@@ -131,7 +169,7 @@ assembly Minerals: import(mineral) {
 }
 
 assembly EnergyStore: store(energy) {
-  Wall: 0.04;
+  Wall: 0.02;
   start_when: need_EnergyStore;
   activity: 1;
 }
@@ -147,7 +185,7 @@ assembly LeftMotor: propel() {
   Rotor: 0.01;
   Tail: 0.01;
   start_when: need_LeftMotor;
-  activity: if meal > 2 && !injured then 0 else clamp(move - steer * 0.5, 0, 1);
+  activity: if docked || (meal > 2 && !injured) then 0 else clamp(move - steer * 0.5, 0, 1);
   at: 1.570796;
   direction: 0;
 }
@@ -157,7 +195,7 @@ assembly RightMotor: propel() {
   Rotor: 0.01;
   Tail: 0.01;
   start_when: need_RightMotor;
-  activity: if meal > 2 && !injured then 0 else clamp(move + steer * 0.5, 0, 1);
+  activity: if docked || (meal > 2 && !injured) then 0 else clamp(move + steer * 0.5, 0, 1);
   at: -1.570796;
   direction: 0;
 }
@@ -201,14 +239,14 @@ assembly Envelope: grow() {
   Wall: 0.015;
   Catalyst: 0.005;
   start_when: need_Envelope;
-  activity: if energy > 90 && body.area < body.birth_area * 2 then 0.8 else 0;
+  activity: if energy > 34 && body.area < body.birth_area * 2 then 0.8 else 0;
 }
 
 assembly Replication: replicate() {
   Frame: 0.005;
   Replicase: 0.015;
   start_when: need_Replication;
-  activity: if energy > 80 then 1 else 0;
+  activity: if energy > 34 then 1 else 0;
 }
 
 assembly Division: constrict() {
@@ -216,5 +254,5 @@ assembly Division: constrict() {
   Rotor: 0.008;
   Ring: 0.008;
   start_when: need_Division;
-  activity: if body.area + 0.000001 >= body.birth_area * 2 && energy > 100 then 1 else 0;
+  activity: if body.area + 0.000001 >= body.birth_area * 2 && enough(built.EnergyStore,0.04) && enough(built.MineralStore,0.04) && enough(built.Respiration,0.08) && energy > 45 then 1 else 0;
 }

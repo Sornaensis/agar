@@ -24,9 +24,13 @@ const catalog = await import(await moduleUrl('../src/catalog.ts', { './presets':
 const { BUILTIN_GENOMES: genomes, BUILTIN_ENVIRONMENTS: environments, BUILTIN_SIMULATIONS: simulations } = catalog;
 const copy = value => structuredClone(value);
 
-assert.equal(genomes.length, 11);
-assert.equal(environments.length, 5);
-assert.equal(simulations.length, 7);
+const slugs = rows => rows.map(row => row.id.split(':').at(-1)).sort();
+assert.deepEqual(slugs(genomes), ['forager','mixotroph','nurse-rosette','phototroph','predator','pulse-swimmer','rememberer']);
+assert.deepEqual(slugs(simulations), ['hunting-ground','light-and-shade','mixed-ecosystem','nurse-rosette','pulse-swimmers']);
+assert.equal(new Set(environments.map(row => row.id)).size, environments.length);
+for (const id of ['still-water','sunlit-pond','thermal-currents','colony-pool','current-bands']) {
+  assert.ok(environments.some(row => row.id === 'builtin:environment:' + id), 'Historical environment remains addressable: ' + id);
+}
 for (const genome of genomes) {
   assert.ok(Object.isFrozen(genome));
   assert.throws(() => storage.validateGenomeDocument(genome), /copied/);
@@ -53,7 +57,10 @@ for (const simulation of simulations) {
   assert.ok(environments.some(environment => environment.id === simulation.environmentId));
   assert.ok(simulation.populations.every(population => genomes.some(genome => genome.id === population.genomeId)));
   const total = simulation.populations.reduce((sum, population) => sum + population.count, 0);
-  assert.ok(Number.isSafeInteger(total) && total >= 0);
+  assert.ok(simulation.populations.length > 0 && simulation.populations.every(row => Number.isSafeInteger(row.count) && row.count > 0));
+  assert.ok(Number.isSafeInteger(total) && total > 0);
+  const env = environments.find(row => row.id === simulation.environmentId);
+  assert.deepEqual(catalog.simulationStartSettings(env.config), {initialFood: env.config.foodRate > 0 ? 360 : 0, mutationRate: 0.1});
 }
 
 const portable = JSON.parse(storage.exportGenome(genomes[0]));

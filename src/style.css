@@ -159,6 +159,7 @@ input:disabled, select:disabled, textarea:disabled { opacity: .55; cursor: defau
 .preset-card .card-copy { flex: 1; }
 .preset-card .card-title { padding-right: 0; font-size: 14px; }
 .preset-card .card-description { font-size: 11px; margin-top: 4px; }
+.preset-founders { display: block; margin-top: 9px; color: #b5c3bb; font-size: 11px; }
 .preset-card .card-identity { width: 35px; height: 35px; border-radius: 9px; }
 .preset-card .card-identity .icon { width: 19px; height: 19px; }
 .preset-card .card-chevron { margin: 0; padding: 0; }

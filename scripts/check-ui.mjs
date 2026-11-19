@@ -27,7 +27,26 @@ const readSaved = () => page.evaluate(() => new Promise((resolve, reject) => {
 try {
   await page.goto(base);
   await textIs('#save-state', 'Saved');
-  await page.locator('[data-action="start-template"][data-id="builtin:simulation:foragers"]').click();
+  const presetCards = page.locator('[data-action="start-template"]');
+  assert.equal(await presetCards.count(), 5);
+  assert.ok((await presetCards.first().locator('.preset-founders').innerText()).includes('Predator'));
+  const launchControls = () => page.locator('.new-simulation-dialog[open]').evaluate(dialog => ({
+    environment: dialog.querySelector('#simulation-environment').value,
+    seed: dialog.querySelector('#simulation-seed').value,
+    founders: [...dialog.querySelectorAll('[data-population]')].map((input,index) =>
+      [input.value, dialog.querySelector(`[data-count="${index}"]`).value]),
+  }));
+  await page.locator('[data-action="new-simulation"]').click();
+  const defaultStart = await launchControls();
+  await page.locator('.new-simulation-dialog[open] [data-close]').click();
+  await presetCards.first().click();
+  assert.deepEqual(await launchControls(), defaultStart);
+  await page.locator('.new-simulation-dialog[open] [data-close]').click();
+  await page.locator('[data-action="start-template"][data-id="builtin:simulation:nurse-rosette"]').click();
+  assert.equal(await page.locator('[data-population="0"]').inputValue(), 'builtin:genome:nurse-rosette');
+  assert.equal(await page.locator('[data-count="0"]').inputValue(), '1');
+  await page.locator('#simulation-environment').selectOption('builtin:environment:still-water');
+  await page.locator('[data-population="0"]').selectOption('builtin:genome:forager');
   await page.locator('#simulation-name').fill('Worker smoke');
   await page.locator('[data-count="0"]').fill('12');
   await page.getByRole('button', { name: /Start simulation/ }).click();
@@ -42,6 +61,8 @@ try {
   await page.locator('#world').focus(); await page.keyboard.press('ArrowRight');
   await page.locator('#inspector-content .inspector-metrics').waitFor();
   await page.locator('[data-inspector-view="body"]').click();
+  await page.locator('.cellular-body').waitFor();
+  await page.locator('[data-kind="cellular-budgets"] > summary').click();
   await page.locator('.body-capacity').waitFor();
   await page.locator('[data-inspector-view="memory"]').click();
   await page.waitForFunction(() => document.querySelector('#memory-summary')?.textContent?.includes('registers'));
@@ -69,6 +90,7 @@ try {
   await page.locator('#setting-overlay').selectOption('nutrients');
   await page.locator('[data-view="metrics"]').click();
   await textIs('#metric-population', '12');
+  assert.match(await page.locator('#mean-particle-carbon').textContent(), /organic C \/ particle/);
   await page.locator('[data-view="genomes"]').click();
   await page.locator('[data-genome-stats]').waitFor();
   assert.match(await page.locator('[data-genome-stats]').first().textContent(), /12 organisms/);
@@ -106,14 +128,14 @@ try {
 
   await page.getByRole('tab', { name: 'Environments', exact: true }).click();
   await page.locator('[data-action="open-environment"][data-id="builtin:environment:sunlit-pond"]').click();
-  await page.locator('.environment-editor-dialog .preview-status').waitFor({ state: 'hidden' });
+  await page.locator('.environment-editor-dialog[open] .preview-status').waitFor({ state: 'hidden' });
   assert.equal(page.workers().length, 2, 'Environment preview uses its own worker');
-  await page.locator('.environment-editor-dialog [data-copy]').click();
-  await page.locator('.environment-editor-dialog .preview-status').waitFor({ state: 'hidden' });
+  await page.locator('.environment-editor-dialog[open] [data-copy]').click();
+  await page.locator('.environment-editor-dialog[open] .preview-status').waitFor({ state: 'hidden' });
   await page.locator('#environment-width').fill('2400');
   await page.locator('#environment-height').fill('1520');
-  await page.locator('.environment-editor-dialog [data-object-field="strength"]').fill('.65');
-  await page.locator('.environment-editor-dialog [data-close]').click();
+  await page.locator('.environment-editor-dialog[open] [data-object-field="strength"]').fill('.65');
+  await page.locator('.environment-editor-dialog[open] [data-close]').click();
   await page.waitForFunction(() => !document.querySelector('.environment-editor-dialog'));
   await page.getByRole('tab', { name: 'Simulation', exact: true }).click();
   await page.locator('#world').waitFor();

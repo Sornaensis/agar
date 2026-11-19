@@ -11,7 +11,7 @@ npm ci
 npm run dev
 ```
 
-Open the local URL printed by Vite. In **Simulation**, start a preset or choose an environment, genomes and population counts. Every introduced cell begins with the same minimal structure and finite reserves; its genome grows its capabilities. **Sunlit pond** uses producer programs; **Still water** supplies organic particles for consumer experiments. **Mixed ecosystem** combines producer, scavenger, mixed and hunter programs. Their survival depends on resources and behavior.
+To use the included build, run `python3 -m http.server 8000 --directory docs` from the project folder and open `http://localhost:8000`. For development, open the local URL printed by Vite. In **Simulation**, start **Hunting ground** to follow a predator from its first meal, or **Sunlit food web** to watch predators and scavengers compete for food made in the pond. **Light and shade** shows Mixotrophs switching feeding modes as they move between a lamp and shaded water. **Nurse rosette** and **Pulse swimmers** show resource sharing and coordinated movement. Each card lists its founders. You can edit their numbers, environment and seed before starting.
 
 ## Cellular programming
 
@@ -19,9 +19,9 @@ New built-in genomes use `cellular;` programs: declare typed **products**, expre
 
 Named receptors expose `sensed.Eye.level` or `sensed.Chemistry.organic` at their actual attachment points. Regulatory products provide physical memory, read as mass with `pool.Name` or mass per area with `concentration.Name`. Pure `fn` definitions and `activate`/`repress` helpers express reusable feedback. A recipe's `start_when` permits new instances without stopping ones already underway. Its `recycle` expression selects physical machinery for paid recovery by a built `recycle()` mechanism. Current defaults share products between independently regulated recipes.
 
-Cellular programs can store private values between ticks and publish a recognition marker and a separate scalar signal on contact. **Conserver** remembers a low-reserve episode until its energy recovers. **Rememberer** follows its last observed chemical gradient for up to 1.5 seconds. **Predator** advertises a marker from birth and checks each potential victim before piercing or engulfing it. Any cell can advertise the same marker.
+Cellular programs can store private values between ticks and publish a recognition marker and a separate scalar signal on contact. **Rememberer** follows its last observed chemical gradient for up to 1.5 seconds. **Mixotroph** remembers its feeding mode between bright and dark water. **Predator** advertises a marker from birth and checks each potential victim before piercing or engulfing it. Any cell can advertise the same marker.
 
-Start **Colonies** to watch phototrophs grow adhesive surfaces and divide. Descendants with working, mutually matching surfaces can stay together. Each cell still builds its own machinery and pays its own energy costs. Select a cell and open **Memory** to see its registers or **Program** to inspect a contact reading. The editable colony genome includes the complete recognition and construction rules. [Colony example](examples/colony.cell)
+Select a cell and open **Memory** to see its registers or **Program** to inspect a contact reading. Each cell in a colony still builds its own machinery and pays its own energy costs. The basic adhesion program is also available as an [editable example](examples/colony.cell).
 
 **Nurse rosette** and **Pulse swimmers** are selectable simulation presets. The rosette’s young cells request support. Attached adults increase their light-harvesting effort, and compatible junctions share usable energy, free minerals and organic carbon according to reserve levels. Pulse swimmers pass short signals between their flank receptors. A received pulse activates the young cell’s motor and starts a recovery period before it can fire again.
 
@@ -109,7 +109,7 @@ The genome is the body plan. An introduced cell has area 1, one core of mass 0.0
 
 Programs must establish an energy source before spending their reserves on further development. The built-ins use actual organelle state to sequence construction, then build duplicates for division. This ordering is part of their visible source and can be edited or mutated. Changing a target changes future construction; it never replaces the living cell's existing organs.
 
-Current consumers build capture, digestion and navigation before optional storage and support. Predators assemble a piercer before attempting growth and devote more enzyme material to tissue digestion. Captured food can trigger construction of its missing enzyme even at low energy, provided the cell can pay the actual costs. Cellular construction, envelope repair and fission use actual available energy; empty storage capacity does not impose an additional reserve. Programs set their own energy thresholds.
+Current consumers build capture, digestion and navigation before optional storage and support. Predators assemble a piercer before attempting growth, double their initial exudate-digestion capacity relative to the former genome, and stage the machinery that a daughter will need. Captured food can trigger construction of its missing enzyme even at low energy, provided the cell can pay the actual costs. Cellular construction, envelope repair and fission use actual available energy; empty storage capacity does not impose an additional reserve. Programs set their own energy thresholds.
 
 Current programs tolerate modest loss of working capacity before requesting replacement machinery. A paid `repair()` mechanism responds to actual damage, including during development. This prevents small injuries from filling a cell with duplicate equipment. The construction tolerance is capped below one recipe unit so larger body goals still require every whole copy.
 
@@ -175,11 +175,11 @@ Optics exposes `object.offset`, `.area`, `.contrast`, `.pigment` and `.motion`, 
 
 `scan.bearing`, `scan.width` and `scan.target` control the next tick's scan. A remembered token can request reacquisition only within physically detectable objects. The per-cell tracking cache holds at most eight observations and forgets a track after a gap of more than 30 ticks (one simulated second). Eviction can forget it earlier. Tokens never grant remote access or alias a replacement object.
 
-Current foragers approach optical returns, follow the edge of large nearby objects to encounter released particles, and steer away from resistant contact. The Forager's motors rest while a substantial exudate or tissue meal is being processed; low-yield waste alone does not suppress further search. Capture still respects total gut occupancy. These heuristics use measured geometry and resistance; sensors do not classify objects as food or reveal their species.
+Foragers approach optical returns, follow the edge of large nearby objects to encounter released particles, and steer around resistant contact. When a Forager recognizes a compatible Phototroph it can build adhesive and exchange surfaces. Attached partners move fixed carbon and minerals toward the cell with the lower storage fraction for each resource. The Forager's motors rest while a substantial exudate or tissue meal is being processed; low-yield waste alone does not suppress further search. Capture still respects total gut occupancy. These heuristics use measured geometry and resistance; sensors do not classify objects as food or reveal their species.
 
 The Forager gives injury escape priority over feeding rest and optical attraction. Its own integrity can trigger that response even when an attacker is outside its contact receptor's coverage. Escape uses the existing paid motors and lasts until repair restores integrity.
 
-Predators approach soft particles, turn away from recognized peers and stop at other resistant contacts. Two paid flank thermoreceptors compare local temperatures; escape toward cooler water takes priority over contact, hunting and full-gut rest. This response requires the actual built receptors and does not grant heat protection.
+Predators remember a recent prey sighting or firm contact for 18 seconds. They pursue visual returns and use two chemical receptors to search when no target is visible. Matching contact markers make them turn away. Tissue and exudate in the gut contribute to feeding rest, and paired thermoreceptors can interrupt a meal to steer toward cooler water.
 
 Chemoreception reads local dissolved minerals and an organic-cue field emitted by release, leakage and decay. Cues diffuse, move with currents and decay; they do not point to a chosen meal. Light sensing is separate from photosynthesis, and temperature and currents affect cells even without their sensors.
 
@@ -289,12 +289,14 @@ npm run test:cellular
 npm run test:multicellular
 npm run test:cellular-ui
 npm run test:food-chain
-npm run test:ecosystem    # ten simulated minutes of the actual mixed preset
+npm run test:scenarios    # launch the five curated presets and check their behavior
+npm run test:predator     # one founder in stock Still water, three seeds
+npm run test:ecosystem    # ten simulated minutes of the Sunlit food web preset
 ```
 
 Tests cover physical accounting and packing, sensor gates, conservative inheritance, safe mutations, checkpoint replay, real WASM interfaces, editor/Rust metadata agreement, graph bounds and persistence failures. Worker tests use real worker threads and WASM to check ordered commands, transferred buffers, atomic checkpoint capture, partial failures, disposal and main-thread responsiveness. Session tests cover related inspector reads on one tick and final-save ordering. Player tests cover cross-document adoption, catalog navigation, close/return, failure cleanup, explicit pause, hidden-window timer scheduling and stale-callback cancellation. Gas tests cover substrate limits, carbon/oxygen budgets, barriers, signed exchange, conservative resize and checkpoint migration/replay. Food-chain tests check authored consumer development, resistant-contact navigation, prey capture and digestion, and recovery from a low-energy tissue meal. The mixed-ecosystem regression requires surviving and reproducing Forager and Predator lineages, with no supplied organic food. Recorded runs and limits are in [experiments](experiments/README.md). A passing finite run does not guarantee permanent coexistence. Legacy program fixtures remain available through `test:food-chain:legacy` and `test:navigation:legacy`.
 
-Start a fresh **Mixed ecosystem** to use updated built-in programs. Saved simulations retain their own original genome sources.
+Start a new preset to run its revised genomes. Saved simulations resume with the genome sources in their checkpoints.
 
 An optional browser smoke test is available as `node scripts/check-ui.mjs`. Run
 `npm run build:pages` and serve `docs` on `http://127.0.0.1:4173/` first; it requires

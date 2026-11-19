@@ -644,6 +644,15 @@ fn shipped_predator_pays_for_local_heat_sensing_and_escapes_while_fed() {
             cell.x = x; cell.y = 380.0; cell.angle = angle;
             cell.vx = 0.0; cell.vy = 0.0;
         }
+        // A real visible meal lies across the thermal boundary. This gives the
+        // heat-blind control a reason to swim inward once its gut empties.
+        // All four equipped orientations encounter the same attraction.
+        let hot_edge = (x as usize..700)
+            .find(|&x| world.environment.temperature_at(x as f64, 380.0) >= 0.98).unwrap();
+        let lure_x = hot_edge as f64 + CELL_RADIUS + 2.5;
+        assert_eq!(world.add_food(lure_x, 380.0, 1), 1);
+        let lure = world.food.last_mut().unwrap();
+        (lure.x, lure.y) = (lure_x, 380.0);
         let start_temperature = world.environment.temperature_at(x, 380.0);
         let inputs = world.sense_program(1, &genomes[0].program).unwrap();
         assert_eq!(heat_indices.iter().all(|&index|
@@ -672,8 +681,61 @@ fn shipped_predator_pays_for_local_heat_sensing_and_escapes_while_fed() {
             assert!(maximum_temperature < 0.85);
         } else {
             assert!(maximum_temperature > 0.9 && cell.integrity < 0.8,
-                "Without receptors, the ordinary search policy still enters dangerous heat");
+                "Without thermal receptors the hunter follows food into dangerous heat: peak {maximum_temperature}, integrity {}", cell.integrity);
         }
         assert_eq!(world.photosynthesis_total, 0.0);
+    }
+}
+
+#[test]
+fn shipped_predator_keeps_searching_when_waste_occupies_its_gut_in_darkness() {
+    let source = include_str!("../../../examples/predator.cell");
+    let program = Program::compile(source).unwrap();
+    let index = |name: &str| program.cellular().unwrap().assemblies.iter()
+        .position(|a| a.name == name).unwrap();
+    let (vision, left_nose, right_nose, left_motor, right_motor) =
+        (index("Vision"), index("LeftNose"), index("RightNose"), index("LeftMotor"), index("RightMotor"));
+    let mut genomes = vec![Genome::new(source.into(), program, 0, 0)];
+    let mut world = World::empty(42);
+    world.environment.configure(0.5, 0.0, 0.0);
+    world.set_food_rate(0.0);
+    world.set_mutation_rate(0.0);
+    world.try_seed_cells_in_registry(1, 1, 600.0, 380.0, &genomes).unwrap();
+    for _ in 0..1200 {
+        world.step(&mut genomes);
+        let observed = world.sense_program(1, &genomes[0].program).unwrap();
+        if observed.receptors[left_nose].available && observed.receptors[right_nose].available { break; }
+    }
+    // Construct the specific digestive state using paid particles and the same
+    // ingestion operation as capture. The separate hunting trials test pursuit
+    // and physical capture. Replacing a particle's substrate preserves its stock.
+    let (x, y) = (world.cells[0].x, world.cells[0].y);
+    assert_eq!(world.add_food(x, y, 2), 2);
+    for _ in 0..2 {
+        let particle = world.food.pop().unwrap();
+        world.cells[0].ingest(OrganicKind::Waste, particle.energy, particle.nutrients);
+    }
+    let cell = &world.cells[0];
+    assert!(cell.gut[OrganicKind::Waste as usize].energy > 0.45 * cell.gut_capacity());
+    assert_eq!(cell.gut[OrganicKind::Exudate as usize].energy + cell.gut[OrganicKind::Tissue as usize].energy, 0.0);
+    // A single real plume from paid, decaying food lies on either flank when
+    // the observer turns around. Both comparisons read the identical field.
+    (world.cells[0].x, world.cells[0].y) = (600.0, 380.0);
+    assert_eq!(world.add_food(600.0, 390.0, 8), 8);
+    for particle in &mut world.food { (particle.x, particle.y) = (600.0, 390.0); }
+    let mut workspace = PhaseWorkspace::default();
+    for _ in 0..8 { world.decay_food_in(&mut workspace); }
+    for (angle, turn) in [(0.0, 1.0), (PI, -1.0)] {
+        world.cells[0].angle = angle;
+        let input = world.sense_program(1, &genomes[0].program).unwrap();
+        assert!(!input.receptors[vision].valid);
+        assert!(input.receptors[left_nose].valid && input.receptors[right_nose].valid);
+        assert!((input.receptors[left_nose].organic - input.receptors[right_nose].organic) * turn > 0.001);
+        let mut memory = world.cells[0].memory.clone();
+        let controls = genomes[0].program.evaluate_cell(&input, &mut memory, &mut EvalScratch::default()).cellular.unwrap();
+        let left = controls.activity[left_motor];
+        let right = controls.activity[right_motor];
+        assert!(left + right > 1.0, "A dark, waste-fed hunter keeps seeking useful food");
+        assert!((right - left) * turn > 0.1, "Its differential motors turn toward the plume");
     }
 }

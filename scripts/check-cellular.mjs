@@ -9,16 +9,66 @@ const conserved = state => {
 };
 
 // Every authored example must compile, including files users can import directly.
-const importable = ['solar', 'regulated-motor', 'phototroph', 'forager', 'rememberer', 'predator', 'separate-digestion', 'local-control', 'colony', 'conserver', 'nurse-rosette', 'pulse-swimmer'];
+const playable = new Map(PRESETS.map(preset => [preset.name.toLowerCase().replaceAll(' ', '-'), preset]));
+const importable = [...playable.keys(), 'solar','regulated-motor','separate-digestion','local-control','colony','conserver','archive/drifter','archive/giant'];
 for (const name of importable) {
   const api = await fresh({ ambientLight: 0.85, initialNutrients: 3 });
-  const genome = compile(api, await readFile(new URL(`../examples/${name}.cell`, import.meta.url), 'utf8'));
+  const example = await readFile(new URL(`../examples/${name}.cell`, import.meta.url), 'utf8');
+  if (playable.has(name)) assert.equal(example.trimEnd(), playable.get(name).source, name+' example matches its live catalog program');
+  const genome = compile(api, example);
   if (name === 'solar' || name === 'regulated-motor') {
     seed(api, genome, 1);
     conserved(advance(api, 1200));
     assert.equal(body(api, 1).cellular.assemblies.filter(machine => machine.complete).length, 1,
       `${name} keeps its stock buffer small enough to avoid an unintended second complete machine`);
   }
+}
+
+// Follow the same paid machinery across a bright-to-shade-to-bright change.
+// The middle light level must retain either state, depending on the preceding reading.
+{
+  const api = await fresh({width:400,height:400,ambientLight:0.85,initialNutrients:3,gases:{mode:'open',exchangeRate:.5}});
+  seed(api, compile(api, playable.get('mixotroph').source), 1, 200, 200);
+  const required = ['Solar','Canopy','Gut','Capture','ExudateEnzyme','LeftMotor','RightMotor'];
+  let state = snapshot(api);
+  const inventory = () => body(api, 1).cellular.assemblies;
+  while (state.seconds < 35 && !required.every(name => inventory().some(machine => machine.complete && machine.name === name))) {
+    state = advance(api, 30);
+  }
+  const machines = inventory();
+  assert.ok(required.every(name => machines.some(machine => machine.name === name && machine.functionalMass > 0)));
+  function observe(light, expectedShade) {
+    api.set_environment(.5,light,0);
+    state = advance(api, 2);
+    const reading = evaluation(api,1);
+    assert.equal(reading.bindings.find(item => item.name === 'shade_feed').value, expectedShade);
+    assert.ok(Math.abs(reading.signals.find(item => item.name === 'sensed.Canopy.level').value-light)<.001);
+    assert.equal(state.cells[0].carbonFixationRate > 0, !expectedShade);
+    return inventory();
+  }
+  observe(.45,false);
+  const swimming = observe(.15,true);
+  assert.ok(swimming.some(machine => machine.kind === 'propel()' && machine.activity > 0 && machine.functionalMass > 0));
+  observe(.45,true);
+  const beforeFeeding = state.eaten;
+  let digested = 0;
+  for (let second=0; second<4; second++) {
+    const cell = state.cells[0];
+    api.add_food(cell.x, cell.y, 8);
+    state = advance(api, 30);
+    digested += state.cells[0].digestionRate;
+    assert.equal(state.cells[0].carbonFixationRate,0);
+  }
+  assert.ok(state.eaten > beforeFeeding && digested > 0, 'In shade the same organism captures and digests actual particles');
+  const resting = observe(.85,false);
+  assert.ok(resting.filter(machine => machine.kind === 'propel()' || machine.kind==='import(particle)').every(machine => machine.activity === 0));
+  const beforeResting = state.eaten;
+  api.add_food(state.cells[0].x,state.cells[0].y,12);
+  state = advance(api, 60);
+  assert.equal(state.eaten,beforeResting,'Bright cells leave available particles in the water');
+  assert.ok(state.cells[0].carbonFixationRate > 0);
+  observe(.45,false);
+  conserved(state);
 }
 
 // Exercise the shipped local-control program through real sensing and paid
@@ -72,7 +122,7 @@ for (const name of importable) {
 
 // Follow a real division with identical resources, seed and physical recipes.
 // Removing only the reciprocal selector isolates adhesion from ordinary drag.
-const colonySource = PRESETS.find(preset => preset.name === 'Colony phototroph').source;
+const colonySource = await readFile(new URL('../examples/colony.cell', import.meta.url), 'utf8');
 const pairedGaps = [];
 for (const adhesive of [true, false]) {
   const api = await fresh({ width:400, height:400, ambientLight:0.85, initialNutrients:3,
@@ -105,7 +155,7 @@ console.log(`Five seconds after division, colony surface gaps with and without a
 
 const cycles = [];
 for (const preset of PRESETS) {
-  const producer = ['Phototroph', 'Colony phototroph', 'Nurse rosette', 'Pulse swimmer'].includes(preset.name);
+  const producer = ['Phototroph', 'Nurse rosette', 'Pulse swimmer', 'Mixotroph'].includes(preset.name);
   // This reproductive-capacity fixture continuously supplies food in a small
   // region. Aerate the culture explicitly so accumulated decay does not turn
   // a feeding test into an unintended anoxia test; sealed limits have their own
@@ -133,9 +183,8 @@ for (const preset of PRESETS) {
   assert.ok(made > 0 && made * 0.6 <= 0.022 / 30 + 1e-10, 'All genes share the same paid core budget');
   assert.ok(state.cells[0].energy < 68 && state.cells[0].nutrients < 0.6);
 
-  // This generic WASM fixture supplies exudate. The tissue specialist retains
-  // an exudate pathway, but its smaller allocation deliberately grows more
-  // slowly on this substrate. Its primary tissue-fed cycle is tested natively.
+  // This lifecycle fixture supplies exudate near the founder. The separate
+  // predator foraging test covers scattered food and a prey-only habitat.
   const cycleSeconds = preset.name === 'Predator' ? 900 : 150;
   let nextFood = 1, previous;
   while (!state.births && state.ticks < cycleSeconds * 30) {

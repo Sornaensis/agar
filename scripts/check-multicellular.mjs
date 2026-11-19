@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { advance, body, catalog, compile, evaluation, fresh, memory, seed, snapshot } from './organelle-harness.mjs';
+import { advance, body, catalog, compile, evaluation, fresh, memory, restore, save, seed, snapshot } from './organelle-harness.mjs';
 
 const { PRESETS, BUILTIN_ENVIRONMENTS } = await catalog();
 const pool = BUILTIN_ENVIRONMENTS.find(item => item.id === 'builtin:environment:colony-pool').config;
@@ -132,6 +132,50 @@ async function swimmer(sender) {
   return { report, trajectory };
 }
 
+// In this controlled exchange assay the producer starts in mineral-depleted
+// water. A later particle meal supplies the grazer with minerals it can return.
+async function tradeWithProducer(openPorts) {
+  const api = await fresh({width:400,height:400,ambientLight:.9,ambientTemperature:.18,initialNutrients:0,gases:{mode:'open',exchangeRate:.2}});
+  const producer = PRESETS.find(preset => preset.name === 'Phototroph');
+  const grazer = PRESETS.find(preset => preset.name === 'Forager');
+  seed(api, compile(api,producer.source), 1, 200, 200);
+  let closed = 0;
+  const program = openPorts ? grazer.source : grazer.source.replace(/(assembly (?:Carbon|Mineral)Port: [^}]*?activity: )[^;]+;/g,
+    (_, prefix) => { closed++; return prefix + '0;'; });
+  if (!openPorts) assert.equal(closed,2);
+  const id = compile(api,program);
+  const host = advance(api,32*30).cells[0];
+  // Replay the normal introduction jitter so the grazer's front receptor
+  // faces the producer. Both still start from ordinary paid founder bodies.
+  const before = save(api);
+  seed(api,id,1,200,200);
+  const trial = snapshot(api).cells[1];
+  assert.equal(restore(api,before),1);
+  const separation = host.radius + trial.radius + 0.12;
+  seed(api,id,1,host.x - Math.cos(trial.angle)*separation - (trial.x-200),host.y - Math.sin(trial.angle)*separation - (trial.y-200));
+  const report = {attachedTicks:0,grazerCarbonNet:0,grazerMineralNet:0};
+  for (let tick=1; tick<=70*30; tick++) {
+    const state = advance(api,1);
+    const grazer = state.cells.find(cell => cell.id === trial.id);
+    assert.ok(grazer, 'The grazer survives the full feeding interval');
+    const transfers = state.cells.map(cell => body(api,cell.id).colony);
+    const receiver = transfers[state.cells.indexOf(grazer)];
+    if (receiver.neighbors) report.attachedTicks++;
+    // Count the producer’s descendants if a natural division occurs.
+    for (const resource of ['carbonNet','mineralNet']) {
+      assert.ok(Math.abs(transfers.reduce((sum,flux) => sum + flux[resource],0)) < 1e-9);
+    }
+    report.grazerCarbonNet += receiver.carbonNet;
+    report.grazerMineralNet += receiver.mineralNet;
+    if (tick >= 24*30 && tick <= 45*30 && tick%30 === 0) api.add_food(grazer.x,grazer.y,4);
+  }
+  assert.ok(report.attachedTicks > 40*30, 'Both treatments sustain real adhesion');
+  const inventory = body(api,trial.id).cellular.assemblies;
+  assert.ok(['Dock','CarbonPort','MineralPort'].every(name => inventory.some(machine => machine.name===name && machine.functionalMass > 0)),
+    'Contact and both exchange ports require completed machinery even in the closed control');
+  return report;
+}
+
 const open = await nursery(true), closed = await nursery(false);
 assert.ok(open.daughterAt48s.energy > closed.daughterAt48s.energy + 10, 'Open junctions protect the developing daughter’s reserve');
 assert.ok(open.daughterReproducedBySeconds + 5 < closed.daughterReproducedBySeconds, 'Provisioning advances the daughter’s reproductive cycle');
@@ -140,3 +184,8 @@ const relay = await swimmer(true), silent = await swimmer(false);
 const velocityDifference = Math.max(...relay.trajectory.map(([vx, vy], i) => Math.hypot(vx - silent.trajectory[i][0], vy - silent.trajectory[i][1])));
 assert.ok(velocityDifference > 0.01, 'Relayed propulsion changes the daughter’s measured motion');
 console.log('Pulse swimmer', JSON.stringify({ relay:relay.report, silent:silent.report, velocityDifference }));
+
+const trading = await tradeWithProducer(true), isolated = await tradeWithProducer(false);
+assert.ok(trading.grazerCarbonNet > 1 && trading.grazerMineralNet < -0.05, 'The producer supplies fixed carbon and receives mineral from a fed grazer');
+assert.equal(isolated.grazerCarbonNet,0); assert.equal(isolated.grazerMineralNet,0);
+console.log('Producer–grazer exchange', JSON.stringify({trading,isolated}));

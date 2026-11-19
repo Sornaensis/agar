@@ -17,8 +17,8 @@ export const BUILTIN_GENOMES: readonly GenomeDocument[] = freeze(PRESETS.map(pre
 
 export const BUILTIN_ENVIRONMENTS: readonly EnvironmentDocument[] = freeze([
   {
-    id: 'builtin:environment:still-water', name: 'Still water', description: 'A calm, externally fed sandbox for heterotrophs.', createdAt: 0, updatedAt: 0,
-    config: { foodRate: 6, ambientTemperature: 0.5, ambientLight: 0, currentStrength: 0, initialNutrients: 0.3, sources: [] },
+    id: 'builtin:environment:still-water', name: 'Still water', description: 'A compact, dark pool with a steady supply of scattered organic particles.', createdAt: 0, updatedAt: 0,
+    config: { width: 640, height: 480, foodRate: 6, ambientTemperature: 0.5, ambientLight: 0, currentStrength: 0, initialNutrients: 0.3, sources: [] },
   },
   {
     id: 'builtin:environment:sunlit-pond', name: 'Sunlit pond', description: 'Light and minerals support producers; organic food comes from living cells and their remains.', createdAt: 0, updatedAt: 0,
@@ -46,6 +46,21 @@ export const BUILTIN_ENVIRONMENTS: readonly EnvironmentDocument[] = freeze([
     },
   },
   {
+    id: 'builtin:environment:grazing-shallows', name: 'Grazing shallows',
+    description: 'A cool, sunlit pond with a mild current. Cells release organic food into the water and exchange resources on contact.',
+    createdAt: 0, updatedAt: 0,
+    config: { width: 400, height: 400, foodRate: 0, ambientTemperature: 0.15, ambientLight: 0.95,
+      currentStrength: 1, initialNutrients: 0.9, exchangeRate: 0.2, sources: [] },
+  },
+  {
+    id: 'builtin:environment:light-and-shade', name: 'Light and shade',
+    description: 'A lamp lights one side of a fed pool. The dim margins offer organic food to cells that switch feeding modes.',
+    createdAt: 0, updatedAt: 0,
+    config: { width: 600, height: 400, foodRate: 3, ambientTemperature: 0.5, ambientLight: 0.12,
+      currentStrength: 0, initialNutrients: 1, exchangeRate: 0.15,
+      sources: [{ kind: 0, x: 180, y: 200, strength: 0.95, radius: 150 }] },
+  },
+  {
     id: 'builtin:environment:colony-pool', name: 'Colony pool', description: 'Still, evenly lit water with dissolved minerals for observing division and contact between relatives.', createdAt: 0, updatedAt: 0,
     config: { width:400, height:400, foodRate:0, ambientTemperature:0.5, ambientLight:0.85, currentStrength:0, initialNutrients:3, sources:[] },
   },
@@ -71,8 +86,12 @@ export const BUILTIN_ENVIRONMENTS: readonly EnvironmentDocument[] = freeze([
     },
   },
 ].map(item => ({ ...item, config: {
-  width: 1200, height: 760, barriers: [], ...item.config,
-  gases: { initialOxygen: 1, initialCarbon: 1, mode: 'open', exchangeRate: 0.02, oxygenEquilibrium: 1, carbonEquilibrium: 1 },
+  width: item.config.width ?? 1200, height: item.config.height ?? 760,
+  ambientTemperature: item.config.ambientTemperature, ambientLight: item.config.ambientLight,
+  currentStrength: item.config.currentStrength, foodRate: item.config.foodRate, initialNutrients: item.config.initialNutrients,
+  barriers: item.config.barriers ?? [],
+  gases: { initialOxygen: 1, initialCarbon: 1, mode: 'open', exchangeRate: item.config.exchangeRate ?? 0.02,
+    oxygenEquilibrium: 1, carbonEquilibrium: 1 },
   sources: item.config.sources.map(source => ({ angle: 0, length: 600, ...source })),
 } as EnvironmentConfig })));
 
@@ -80,50 +99,48 @@ export interface BuiltinSimulation {
   id: string; name: string; description: string; environmentId: string; seed: number;
   populations: Array<{ genomeId: string; count: number }>;
 }
+/** The new-simulation dialog and scenario checks start with identical food and mutation settings. */
+export function simulationStartSettings(config: Pick<EnvironmentConfig, 'foodRate'>): { initialFood: number; mutationRate: number } {
+  return { initialFood: config.foodRate > 0 ? 360 : 0, mutationRate: 0.1 };
+}
+
 export const BUILTIN_SIMULATIONS: readonly BuiltinSimulation[] = freeze([
   {
-    id: 'builtin:simulation:foragers', name: 'Foragers', description: 'Heterotrophs in a deliberately food-supplied habitat.',
-    environmentId: 'builtin:environment:still-water', seed: 42,
-    populations: [{ genomeId: 'builtin:genome:forager', count: 22 }],
-  },
-  {
-    id: 'builtin:simulation:sunlit-pond', name: 'Sunlit pond', description: 'Pure autotrophs build a population from light and minerals.',
-    environmentId: 'builtin:environment:sunlit-pond', seed: 42,
-    populations: [{ genomeId: 'builtin:genome:phototroph', count: 22 }],
-  },
-  {
-    id: 'builtin:simulation:colonies', name: 'Colonies', description: 'Watch dividing phototrophs form small groups with matching contact signals and adhesive surfaces.',
-    environmentId: 'builtin:environment:sunlit-pond', seed: 42,
-    populations: [{ genomeId: 'builtin:genome:colony-phototroph', count: 22 }],
-  },
-  {
-    id: 'builtin:simulation:nurse-rosette', name: 'Nurse rosette', description: 'Follow one founder through division. Inspect the attached mother and juvenile to see their different harvesting and growth rates and the resources exchanged.',
-    environmentId:'builtin:environment:colony-pool', seed:42,
-    populations:[{genomeId:'builtin:genome:nurse-rosette',count:1}],
-  },
-  {
-    id: 'builtin:simulation:pulse-swimmers', name: 'Pulse swimmers', description: 'After division, mature cells start a pulse. Attached young cells relay it, swim briefly and rest before they can respond again.',
-    environmentId:'builtin:environment:colony-pool', seed:42,
-    populations:[{genomeId:'builtin:genome:pulse-swimmer',count:3}],
-  },
-  {
-    id: 'builtin:simulation:mixed-ecosystem', name: 'Mixed ecosystem', description: 'Many producers support a few foragers, mixotrophs, and predators. Survival depends on the food chain.',
-    environmentId: 'builtin:environment:sunlit-pond', seed: 42,
+    id: 'builtin:simulation:hunting-ground', name: 'Hunting ground',
+    description: 'Watch predators grow their own sensors and piercers, approach living producers and feed on tissue.',
+    environmentId: 'builtin:environment:grazing-shallows', seed: 42,
     populations: [
-      { genomeId: 'builtin:genome:phototroph', count: 72 },
-      { genomeId: 'builtin:genome:forager', count: 6 },
-      { genomeId: 'builtin:genome:mixotroph', count: 4 },
-      { genomeId: 'builtin:genome:predator', count: 2 },
+      { genomeId: 'builtin:genome:phototroph', count: 16 },
+      { genomeId: 'builtin:genome:predator', count: 3 },
     ],
   },
   {
-    id: 'builtin:simulation:current-bands', name: 'Current bands', description: 'Explore a larger habitat with editable currents, walls, and a nutrient sink.',
-    environmentId: 'builtin:environment:current-bands', seed: 42,
+    id: 'builtin:simulation:mixed-ecosystem', name: 'Sunlit food web',
+    description: 'Phototrophs feed grazers through released particles and contact. Predators hunt among them. No organic food is supplied.',
+    environmentId: 'builtin:environment:grazing-shallows', seed: 42,
     populations: [
-      { genomeId: 'builtin:genome:phototroph', count: 80 },
-      { genomeId: 'builtin:genome:forager', count: 6 },
-      { genomeId: 'builtin:genome:mixotroph', count: 8 },
+      { genomeId: 'builtin:genome:phototroph', count: 48 },
+      { genomeId: 'builtin:genome:forager', count: 12 },
+      { genomeId: 'builtin:genome:predator', count: 1 },
     ],
+  },
+  {
+    id: 'builtin:simulation:light-and-shade', name: 'Light and shade',
+    description: 'Mixotrophs bask near the lamp and feed in the shade. Rememberers follow chemical food cues.',
+    environmentId: 'builtin:environment:light-and-shade', seed: 42,
+    populations: [{ genomeId: 'builtin:genome:mixotroph', count: 12 }, { genomeId: 'builtin:genome:rememberer', count: 2 }],
+  },
+  {
+    id: 'builtin:simulation:nurse-rosette', name: 'Nurse rosette',
+    description: 'Follow one founder through division. Inspect the attached adult and juvenile to see harvesting, growth and resource exchange.',
+    environmentId: 'builtin:environment:colony-pool', seed: 42,
+    populations: [{ genomeId: 'builtin:genome:nurse-rosette', count: 1 }],
+  },
+  {
+    id: 'builtin:simulation:pulse-swimmers', name: 'Pulse swimmers',
+    description: 'After division, mature cells start a pulse. Attached young cells relay it, swim briefly and rest before responding again.',
+    environmentId: 'builtin:environment:colony-pool', seed: 42,
+    populations: [{ genomeId: 'builtin:genome:pulse-swimmer', count: 3 }],
   },
 ]);
 

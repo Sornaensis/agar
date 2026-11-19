@@ -227,7 +227,7 @@ export class CatalogUI {
           <section class="source-section"><h3>Objects</h3><div class="source-list" aria-label="Environment objects"></div><div class="source-detail"></div></section>
           <details class="environment-baseline gas-settings"><summary>Gases & atmosphere</summary>${gasFields(config.gases, editable, true)}</details>
           <details class="environment-baseline"><summary>Background & starting conditions</summary><div class="environment-form">
-            ${numberField('food', 'Organic input / s', config.foodRate, 0, 60, '0.5')}
+            ${numberField('food', 'Organic particles / s (whole world)', config.foodRate, 0, 60, '0.5')}
             ${numberField('light', 'Ambient light', config.ambientLight, 0, 1, '0.05')}
             ${numberField('temperature', 'Temperature', config.ambientTemperature, 0, 1, '0.05')}
             ${numberField('current', 'Background flow', config.currentStrength, 0, 30, '1')}

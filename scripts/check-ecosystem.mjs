@@ -4,11 +4,11 @@ import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
-import { bytes, fresh, compile, seed, snapshot, advance, body, save, error, catalog } from './organelle-harness.mjs';
+import { bytes, fresh, compile, seed, snapshot, advance, body, save, catalog } from './organelle-harness.mjs';
 
 // Measure the actual shipped mixed scenario, without the supplied-food or
 // stationary-organism shortcuts used by isolated pathway tests.
-const options = { seeds: [42], duration: 600, mutation: 0, output: null, wasm: null, assert: false };
+const options = { seeds: [42], duration: 600, mutation: undefined, output: null, wasm: null, assert: false };
 for (let i = 2; i < process.argv.length; i++) {
   const key = process.argv[i];
   if (key === '--assert') { options.assert = true; continue; }
@@ -22,13 +22,15 @@ for (let i = 2; i < process.argv.length; i++) {
 }
 assert.ok(options.seeds.every(n => Number.isInteger(n) && n >= 0 && n <= 0xffffffff));
 assert.ok(Number.isSafeInteger(options.duration) && options.duration > 0);
-assert.ok(options.mutation >= 0 && options.mutation <= 1);
 assert.ok(!options.assert || options.duration >= 300, 'Ecological regression checks require at least 300 simulated seconds');
 const binary = options.wasm ? await readFile(options.wasm) : bytes;
-const customModule = options.wasm ? await WebAssembly.compile(binary) : null;
-const { BUILTIN_ENVIRONMENTS, BUILTIN_GENOMES, BUILTIN_SIMULATIONS } = await catalog();
+const customModule = options.wasm ? await WebAssembly.compile(binary) : undefined;
+const { BUILTIN_ENVIRONMENTS, BUILTIN_GENOMES, BUILTIN_SIMULATIONS, simulationStartSettings } = await catalog();
 const template = BUILTIN_SIMULATIONS.find(item => item.id === 'builtin:simulation:mixed-ecosystem');
 const environment = BUILTIN_ENVIRONMENTS.find(item => item.id === template.environmentId);
+const startSettings = simulationStartSettings(environment.config);
+options.mutation ??= startSettings.mutationRate;
+assert.ok(options.mutation >= 0 && options.mutation <= 1);
 const populations = template.populations.map(row => ({ ...BUILTIN_GENOMES.find(item => item.id === row.genomeId), ...row }));
 assert.equal(environment.config.foodRate, 0, 'Mixed ecosystem has no supplied organic food');
 const samplesAt = [...new Set([0, 15, 30, 60, 120, 180, 300, 600, 900, options.duration].filter(n => n <= options.duration))].sort((a, b) => a - b);
@@ -46,22 +48,18 @@ const study = {
 const round = n => Math.round(n * 1e6) / 1e6;
 const sum = (rows, name) => rows.reduce((total, row) => total + row[name], 0);
 const kindNames = ['exudate', 'tissue', 'waste'];
-const distance = (a, b) => Math.hypot(Math.min(Math.abs(a.x - b.x), 1200 - Math.abs(a.x - b.x)), Math.min(Math.abs(a.y - b.y), 760 - Math.abs(a.y - b.y)));
-async function createWorld(config) {
-  if (!customModule) return fresh(config);
-  const api = (await WebAssembly.instantiate(customModule, {})).exports;
-  assert.equal(api.abi_version(), 15);
-  api.set_environment(config.ambientTemperature, config.ambientLight, config.currentStrength);
-  api.set_initial_nutrients(config.initialNutrients); api.set_food_rate(0); api.set_mutation_rate(config.mutationRate);
-  const gases=config.gases??{};
-  assert.equal(api.set_initial_gases(gases.initialOxygen??1,gases.initialCarbon??1),1);
-  assert.equal(api.set_gas_exchange(gases.mode==='open'?1:0,gases.exchangeRate??.02,gases.oxygenEquilibrium??1,gases.carbonEquilibrium??1),1);
-  for (const source of config.sources) assert.ok(api.add_source(source.kind, source.x, source.y, source.strength, source.radius));
-  assert.equal(api.reset_empty(config.seed, 0), 1, error(api));
-  return api;
+function closestDistance(cell, candidates) {
+  const { width, height } = environment.config;
+  let nearest = Infinity;
+  for (const candidate of candidates) {
+    const dx = Math.abs(cell.x - candidate.x), dy = Math.abs(cell.y - candidate.y);
+    nearest = Math.min(nearest, Math.hypot(Math.min(dx, width - dx), Math.min(dy, height - dy)));
+  }
+  return Number.isFinite(nearest) ? round(nearest) : null;
 }
 for (const randomSeed of options.seeds) {
-  const started = performance.now(), api = await createWorld({ ...environment.config, seed: randomSeed, mutationRate: options.mutation, initialFood: 0 });
+  const started = performance.now();
+  const api = await fresh({ ...environment.config, ...startSettings, seed: randomSeed, mutationRate: options.mutation }, customModule);
   const names = new Map();
   for (const population of populations) {
     const genome = compile(api, population.source); names.set(genome, population.name); seed(api, genome, population.count);
@@ -99,9 +97,10 @@ for (const randomSeed of options.seeds) {
     const metrics = new Float64Array(api.memory.buffer, metricsPointer, 51).slice();
     const carbonDelta = metrics[36] + metrics[49] - metrics[37];
     const oxygenDelta = metrics[44] + metrics[45] + metrics[48] + metrics[41] + metrics[42] - metrics[40] - metrics[47];
+    const materialRemoved = api.nutrient_removed_total();
     const accounting = {
-      material: state.material, materialIntroduced: state.materialIntroduced,
-      materialDelta: state.material - state.materialIntroduced,
+      material: state.material, materialIntroduced: state.materialIntroduced, materialRemoved,
+      materialDelta: state.material + materialRemoved - state.materialIntroduced,
       materialTolerance: Math.max(1e-7, state.materialIntroduced * 1e-10),
       energy: state.energy, energyIntroduced: state.energyIntroduced,
       photosynthesis: state.photosynthesis, energyTolerance: 1e-7,
@@ -116,6 +115,7 @@ for (const randomSeed of options.seeds) {
     const energyAccounted = accounting.energy <= accounting.energyIntroduced + accounting.photosynthesis + accounting.energyTolerance;
     const carbonAccounted = Math.abs(accounting.carbonDelta) < accounting.carbonTolerance;
     const oxygenAccounted = Math.abs(accounting.oxygenDelta) < accounting.oxygenTolerance;
+    const producers = state.cells.filter(cell => lineage(cell.genome) === 'Phototroph');
     const lineages = founding.map(name => {
       const cells = state.cells.filter(cell => lineage(cell.genome) === name), machinery = new Map();
       for (const cell of cells) {
@@ -139,9 +139,8 @@ for (const randomSeed of options.seeds) {
           integrity: round(cell.integrity), gutEnergy: round(cell.gutEnergy), digestionRate: round(cell.digestionRate),
           organicCarbon: round(cell.organicCarbon), internalOxygen: round(cell.internalOxygen), respirationRate: round(cell.respirationRate),
           speed: round(Math.hypot(cell.vx, cell.vy)), upkeep: round(cell.upkeep), metabolism: round(cell.metabolism),
-          closestParticle: state.food.length ? round(Math.min(...state.food.map(food => distance(cell, food)))) : null,
-          closestProducer: state.cells.some(other => lineage(other.genome) === 'Phototroph')
-            ? round(Math.min(...state.cells.filter(other => lineage(other.genome) === 'Phototroph').map(other => distance(cell, other)))) : null,
+          closestParticle: closestDistance(cell, state.food),
+          closestProducer: closestDistance(cell, producers),
         })),
       };
     });
@@ -149,7 +148,7 @@ for (const randomSeed of options.seeds) {
       seconds, population: state.population, births: state.births, deaths: state.deaths, particlesEaten: state.eaten,
       attacks: state.attacks, predations: state.predations, mutations: state.mutations,
       energy: round(state.energy), energyIntroduced: round(state.energyIntroduced), photosynthesis: round(state.photosynthesis),
-      mineralError: state.material - state.materialIntroduced, accounting,
+      mineralError: accounting.materialDelta, accounting,
       organic: Object.fromEntries(kindNames.map((kind, i) => {
         const particles = state.food.filter(food => food.kind === i);
         return [kind, { count: particles.length, energy: round(sum(particles, 'energy')), minerals: round(sum(particles, 'minerals')) }];
@@ -179,7 +178,7 @@ for (const randomSeed of options.seeds) {
   if (options.assert) {
     const last = result.samples.at(-1);
     result.assertions = {
-      noExternalOrganicFood: environment.config.foodRate === 0,
+      noExternalOrganicFood: environment.config.foodRate === 0 && startSettings.initialFood === 0,
       foragerSurvives: last.lineages.find(item => item.name === 'Forager').count > 0,
       predatorSurvives: last.lineages.find(item => item.name === 'Predator').count > 0,
       foragerReproduces: result.observedDescendants.Forager > 0,

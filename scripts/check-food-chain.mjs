@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import { bytes,fresh,compile,seed,snapshot,advance,graph,body,catalog,moduleUrl } from './organelle-harness.mjs';
+import { bytes,fresh,compile,seed,snapshot,advance,graph,body,catalog,moduleUrl,save } from './organelle-harness.mjs';
 const args=process.argv.slice(2),measure=args.includes('--measure');let output=null,seeds=[42,7,2026],mutationRate=0,duration=120;
 for(let i=0;i<args.length;i++){
   if(args[i]==='--measure')continue;const name=args[i],value=args[++i];assert.ok(['--output','--seed','--mutation','--duration'].includes(name)&&value);
@@ -56,8 +56,11 @@ function stationary(text){
   for(const[name,value]of [['thrust','0'],['turn','0'],['grow','0'],['divide','false']])text=text.replace(new RegExp(`^${name}\\s*=\\s*[^;]+;`,'m'),`${name} = ${value};`);
   return text; // Construction remains the authored genome's responsibility.
 }
+// The pre-gas genomes are exercised as supplied cultures. Aeration keeps the
+// concentrated test bolus from stripping all oxygen from the founder's patch.
+const cultureGases = { mode: 'open', initialOxygen: 4, oxygenEquilibrium: 4, exchangeRate: 1 };
 async function acquisition(name,light,food=false){
-  const api=await fresh({ambientLight:light,initialNutrients:2}),id=compile(api,stationary(preset(name).source));seed(api,id,1,600,380);
+  const api=await fresh({ambientLight:light,initialNutrients:2,gases:cultureGases}),id=compile(api,stationary(preset(name).source));seed(api,id,1,600,380);
   const before=snapshot(api);if(food)assert.equal(api.add_food(before.cells[0].x,before.cells[0].y,256),256);
   const after=advance(api,600);assert.equal(after.population,1);conserved(after);return{api,before,after};
 }
@@ -66,10 +69,19 @@ const consumerEmpty=await acquisition('Forager',.8),consumerFed=await acquisitio
 const mixerLight=await acquisition('Mixotroph',.8),mixerDark=await acquisition('Mixotroph',0),mixerFedDark=await acquisition('Mixotroph',0,true);
 assert.ok(producerLight.after.photosynthesis>10&&producerLight.after.cells[0].organs.photosynthetic.capacity>=1,'The genome builds functioning photosynthetic units');
 assert.equal(producerDark.after.photosynthesis,0);assert.equal(producerLight.after.cells[0].gutEnergy,0);
-assert.ok(producerLight.after.cells[0].energy>producerDark.after.cells[0].energy,'Built photosynthetic machinery supplies usable energy in light');
+assert.ok(producerLight.after.cells[0].organicCarbon>producerDark.after.cells[0].organicCarbon,'Built photosynthetic machinery fixes carbon in light');
 assert.equal(consumerEmpty.after.photosynthesis,0);assert.equal(consumerEmpty.after.eaten,0);
 assert.ok(consumerFed.after.eaten>0&&consumerFed.after.cells[0].digestionRate>0,'The genome builds capture and digestion machinery that actually processes organic particles');
-assert.ok(consumerFed.after.cells[0].organs.core.capacity>consumerEmpty.after.cells[0].organs.core.capacity,'Organic energy funds further construction beyond the unfed initial reserves');
+function respiredCarbon(api) {
+  const pointer = api.metrics_snapshot_ptr();
+  return new Float64Array(api.memory.buffer, pointer, 51)[41];
+}
+assert.ok(consumerFed.after.cells[0].organicCarbon > consumerEmpty.after.cells[0].organicCarbon,
+  'Digestion replenishes organic carbon before it becomes usable energy');
+const fedAfterMeal = advance(consumerFed.api, 900), emptyAfterMeal = advance(consumerEmpty.api, 900);
+assert.ok(fedAfterMeal.cells[0].energy > emptyAfterMeal.cells[0].energy
+  && respiredCarbon(consumerFed.api) > respiredCarbon(consumerEmpty.api),
+  'The supplied meal subsequently fuels respiration and builds an ATP reserve');
 assert.ok(mixerLight.after.photosynthesis>0&&mixerLight.after.cells[0].organs.digestive.capacity>=1&&mixerLight.after.cells[0].organs.phagocyte.capacity>=1,'The same initial cell can construct both energy routes');
 assert.equal(mixerDark.after.photosynthesis,0);assert.equal(mixerDark.after.eaten,0);
 assert.equal(mixerFedDark.after.photosynthesis,0);assert.ok(mixerFedDark.after.eaten>0&&mixerFedDark.after.cells[0].digestionRate>0,'A mixotroph can use its constructed organic pathway without light');
@@ -78,7 +90,7 @@ const surplus=advance(producerLight.api,1500);assert.ok(surplus.food.some(f=>f.e
 // Use each complete authored program unchanged. Food is supplied through the
 // normal accounted public input; neither bodies nor checkpoints are patched.
 async function lifecycle(name,fed){
-  const api=await fresh({ambientLight:.8,initialNutrients:2}),id=compile(api,preset(name).source);seed(api,id,1,600,380);
+  const api=await fresh({ambientLight:.8,initialNutrients:2,gases:cultureGases}),id=compile(api,preset(name).source);seed(api,id,1,600,380);
   let state=snapshot(api),tick=0,nextFood=0,precedingBody;
   if(fed)assert.equal(api.add_food(state.cells[0].x,state.cells[0].y,256),256);
   while(tick<5400&&!state.births){
@@ -104,7 +116,9 @@ console.log(`Organelle food-chain checks passed: ${PRESETS.length} genomes share
 if(measure){
   const template=BUILTIN_SIMULATIONS.find(s=>s.id==='builtin:simulation:mixed-ecosystem'),env=BUILTIN_ENVIRONMENTS.find(e=>e.id===template.environmentId);
   const populations=template.populations.map(row=>({...BUILTIN_GENOMES.find(g=>g.id===row.genomeId),...row}));
-  const study={startedAt:new Date().toISOString(),abi:10,checkpointVersion:5,wasmSha256:createHash('sha256').update(bytes).digest('hex'),wasmBytes:bytes.length,
+  const checkpoint = save(producerLight.api);
+  const checkpointVersion = new DataView(checkpoint.buffer, checkpoint.byteOffset, checkpoint.byteLength).getUint32(8,true);
+  const study={startedAt:new Date().toISOString(),abi:producerLight.api.abi_version(),checkpointVersion,wasmSha256:createHash('sha256').update(bytes).digest('hex'),wasmBytes:bytes.length,
     template:template.name,environment:env,populations,mutationRate,seeds,durationSeconds:duration,
     sampleSeconds:[...new Set([...([0,15,30,60,120,180].filter(seconds=>seconds<=duration)),duration])].sort((a,b)=>a-b),results:[]};
   const round=n=>Math.round(n*1000)/1000;

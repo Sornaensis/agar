@@ -6,7 +6,7 @@ import { Engine, type Cell, type BodyInspection, type RegisterEntry, type Genome
 import { WorkerEngine, type PresentationOptions } from './worker-engine';
 import { Renderer, genomeColor } from './renderer';
 import { GenomeVisualizer } from './genome-visualizer';
-import { BUILTIN_GENOMES, BUILTIN_ENVIRONMENTS, BUILTIN_SIMULATIONS, isBuiltin, type BuiltinSimulation } from './catalog';
+import { BUILTIN_GENOMES, BUILTIN_ENVIRONMENTS, BUILTIN_SIMULATIONS, simulationStartSettings, isBuiltin, type BuiltinSimulation } from './catalog';
 import { Storage, loadPreferences, savePreferences, newGenome, validateName, parseGenomeImport, parseEnvironmentImport,
   exportGenome, exportEnvironment, GENOME_LANGUAGE_VERSION, MAX_GENOME_IMPORT_BYTES, MAX_ENVIRONMENT_IMPORT_BYTES,
   type GenomeDocument, type EnvironmentDocument, type EnvironmentConfig, type SimulationMetadata, type UiPreferences } from './storage';
@@ -146,7 +146,7 @@ function renderSimulationList(): string {
   return `<div class="page library-page"><header class="page-header"><h1>Simulations</h1><button class="button primary" data-action="new-simulation">${icon('plus')}New simulation</button></header>
     ${simulationOpenError ? `<p class="compatibility-notice" role="alert">${esc(simulationOpenError)}${simulationOpenError.includes('preserved') ? '' : ' Your saved simulation remains unchanged.'}</p>` : ''}
     ${simulations.length ? `<section class="catalog-section"><h2 class="catalog-section-heading">Saved</h2><div class="catalog-grid simulation-grid">${simulations.map(item => `<article class="catalog-card simulation-card"><button class="card-open" data-action="open-simulation" data-id="${esc(item.id)}" aria-label="Open simulation ${esc(item.name)}"><span class="card-identity">${icon('cell')}</span><span class="card-copy"><span class="card-title">${esc(item.name)}</span><span class="card-description">${esc(item.environmentName)}</span><span class="simulation-card-stats"><span>${item.summary.population} ${item.summary.population===1?'organism':'organisms'}</span><span>${clock(item.summary.time)}</span></span></span><span class="card-chevron">${icon('chevron')}</span></button>${menu('simulation',item.id,item.name)}</article>`).join('')}</div></section>` : ''}
-    <section class="catalog-section"><h2 class="catalog-section-heading">Start from a preset</h2><div class="catalog-grid preset-grid">${BUILTIN_SIMULATIONS.map(item => `<article class="catalog-card preset-card"><button class="card-open" data-action="start-template" data-id="${item.id}" aria-label="Start ${esc(item.name)}"><span class="card-identity">${icon('play')}</span><span class="card-copy"><span class="card-title">${esc(item.name)}</span><span class="card-description">${esc(item.description)}</span></span><span class="card-chevron">${icon('chevron')}</span></button></article>`).join('')}</div></section></div>`;
+    <section class="catalog-section"><h2 class="catalog-section-heading">Start from a preset</h2><div class="catalog-grid preset-grid">${BUILTIN_SIMULATIONS.map(item => `<article class="catalog-card preset-card"><button class="card-open" data-action="start-template" data-id="${item.id}" aria-label="Start ${esc(item.name)}"><span class="card-identity">${icon('play')}</span><span class="card-copy"><span class="card-title">${esc(item.name)}</span><span class="card-description">${esc(item.description)}</span><span class="preset-founders">${item.populations.map(row => `${row.count} × ${esc(BUILTIN_GENOMES.find(genome => genome.id === row.genomeId)!.name)}`).join(' · ')}</span></span><span class="card-chevron">${icon('chevron')}</span></button></article>`).join('')}</div></section></div>`;
 }
 function renderCatalogCards(): void {
   const target = $('catalog-items'); if (!target) return;
@@ -291,11 +291,17 @@ function genomeOptions(selected?: string): string {
 }
 function newSimulationDialog(template?: BuiltinSimulation, environmentId?: string): void {
   if (!ready || transitioning || document.querySelector('.new-simulation-dialog[open]')) return;
-  const populations = template?.populations.map(item => ({ ...item })) ?? [{ genomeId: BUILTIN_GENOMES[0].id, count: 22 }];
-  const chosenEnvironment = environmentId || template?.environmentId || BUILTIN_ENVIRONMENTS[0].id;
+  const startingTemplate = template ?? (environmentId
+    ? BUILTIN_SIMULATIONS.find(item => item.environmentId === environmentId)
+    : BUILTIN_SIMULATIONS[0]);
+  const chosenEnvironment = environmentId ?? startingTemplate?.environmentId ?? BUILTIN_ENVIRONMENTS[0].id;
+  const populations = startingTemplate?.populations.map(item => ({ ...item })) ?? [{
+    genomeId: (findEnvironment(chosenEnvironment)?.config.foodRate ?? 0) > 0 ? 'builtin:genome:forager' : 'builtin:genome:phototroph',
+    count: 1,
+  }];
   const dialog = createDialog('New simulation', `<form>
     <div class="form-field"><label for="simulation-name">Name</label><input id="simulation-name" maxlength="80" required value="${esc(template?.name || 'New simulation')}"></div>
-    <div class="form-row"><div class="form-field"><label for="simulation-environment">Environment</label><select id="simulation-environment">${allEnvironments().map(item => `<option value="${esc(item.id)}"${item.id === chosenEnvironment ? ' selected' : ''}>${esc(item.name)}</option>`).join('')}</select></div><div class="form-field"><label for="simulation-seed">Seed</label><input id="simulation-seed" type="number" min="0" max="4294967295" step="1" value="${template?.seed ?? 42}"></div></div>
+    <div class="form-row"><div class="form-field"><label for="simulation-environment">Environment</label><select id="simulation-environment">${allEnvironments().map(item => `<option value="${esc(item.id)}"${item.id === chosenEnvironment ? ' selected' : ''}>${esc(item.name)}</option>`).join('')}</select></div><div class="form-field"><label for="simulation-seed">Seed</label><input id="simulation-seed" type="number" min="0" max="4294967295" step="1" value="${startingTemplate?.seed ?? 42}"></div></div>
     <h3>Starting organisms</h3><div class="population-labels" aria-hidden="true"><span>Genome</span><span>Count</span></div><div id="starting-populations"></div><button type="button" class="button subtle" id="add-population">${icon('plus')}Add genome</button>
     <p class="form-error" role="alert" hidden></p><footer class="dialog-actions"><button class="button primary" type="submit">Start simulation ${icon('arrow')}</button></footer></form>`, 'new-simulation-dialog');
   const rows = dialog.querySelector<HTMLElement>('#starting-populations')!;
@@ -341,7 +347,11 @@ function newSimulationDialog(template?: BuiltinSimulation, environmentId?: strin
           if (genome.languageVersion !== GENOME_LANGUAGE_VERSION) throw new Error('This genome uses the older investment language. Edit a new copy before introducing it.');
           return { count: item.count, source: genome.source, name: genome.name };
         });
-        const engine = candidate = await WorkerEngine.load(); await applyEnvironment(engine, environmentConfig); await engine.setMutationRate(0.1); await engine.resetEmpty(seed, environmentConfig.foodRate > 0 ? 360 : 0);
+        const { mutationRate, initialFood } = simulationStartSettings(environmentConfig);
+        const engine = candidate = await WorkerEngine.load();
+        await applyEnvironment(engine, environmentConfig);
+        await engine.setMutationRate(mutationRate);
+        await engine.resetEmpty(seed, initialFood);
         const names: Record<string, string> = {};
         for (const item of startingGenomes) {
           const id = await engine.compile(item.source); names[String(id)] = item.name;
@@ -828,7 +838,7 @@ const metricDefinitions = [
   ['generation','Generation'],['mutations','Mutated births'],['predation','Predation deaths'],['attacks','Bites'],
 ] as const;
 function metricsMarkup(): string {
-  const cards = (definitions: ReadonlyArray<readonly [string,string]>): string => definitions.map(([key,label]) => `<article class="metric-card"><span>${label}</span><strong id="metric-${key}">—</strong></article>`).join('');
+  const cards = (definitions: ReadonlyArray<readonly [string,string]>): string => definitions.map(([key,label]) => `<article class="metric-card"><span>${label}</span><strong id="metric-${key}">—</strong>${key === 'food' ? '<small id="mean-particle-carbon" title="Organic carbon remaining across all particles divided by their count. Particles lose carbon as they decay."></small>' : ''}</article>`).join('');
   return `<div class="page metrics-page"><div class="metrics-grid">${cards(metricDefinitions.slice(0,4))}</div>
     <section class="chart-panel"><div class="section-heading"><h2>Population</h2><span id="history-duration"></span></div><svg class="metrics-chart" id="history-chart" viewBox="0 0 1000 240" preserveAspectRatio="none" role="img" aria-label="Population history"></svg></section>
     <section class="trophic-panel"><div class="section-heading"><h2>Food chain</h2><span title="Based on functional organs that have actually been built.">Current capabilities</span></div><div class="metrics-grid">${cards([['autotrophs','Autotrophs'],['heterotrophs','Heterotrophs'],['mixotrophs','Mixotrophs'],['hunters','Attack-capable']])}</div><div class="energy-flow">${[['production','Fixed chemical energy'],['digestion','Assimilated substrate'],['exudation','Organic release']].map(([key,label])=>`<div><span>${label}</span><strong id="flow-${key}">—</strong></div>`).join('')}</div><div class="energy-flow">${[['exudate','Exudate'],['tissue','Cell tissue'],['waste','Waste']].map(([key,label])=>`<div><span>${label}</span><strong id="organic-${key}">—</strong></div>`).join('')}</div><p class="muted">Digestion releases organic carbon and minerals. Respiration uses oxygen to release usable energy from that carbon. Tissue also produces refractory waste, which takes more processing.</p></section>
@@ -845,6 +855,7 @@ function renderMetrics(world: MetricsSnapshot): void {
   for (const [key] of metricDefinitions) $('metric-'+key).textContent = String(values[key]);
   for (const [key,value] of Object.entries(world.trophic)) $('metric-'+key).textContent = String(value);
   for (const [key,value] of Object.entries(world.flow)) $('flow-'+key).textContent = value.toFixed(1)+' energy / s';
+  $('mean-particle-carbon').textContent = world.food ? (world.organicFoodTotal / world.food).toFixed(3) + ' organic C / particle' : '';
   const organicCounts = world.organicCounts;
   ['exudate','tissue','waste'].forEach((kind,index) => { $('organic-'+kind).textContent = organicCounts[index]+' particles'; });
   for (const [key,value] of Object.entries({water:world.nutrientDissolvedTotal,food:world.nutrientFoodTotal,cells:world.nutrientCellTotal,total:world.nutrientTotal})) $('nutrient-'+key).textContent=value.toFixed(1);

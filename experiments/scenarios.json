@@ -1,0 +1,657 @@
+{
+  "wasmSha256": "905fa094a14cfc9cb9bf63b475d747dc2c1f74894b3fe526f706386ef19c159c",
+  "ticksPerSecond": 30,
+  "founderPlacement": "Seeded uniform scatter from the normal launch path",
+  "environments": {
+    "builtin:environment:grazing-shallows": {
+      "width": 400,
+      "height": 400,
+      "ambientTemperature": 0.15,
+      "ambientLight": 0.95,
+      "currentStrength": 1,
+      "foodRate": 0,
+      "initialNutrients": 0.9,
+      "barriers": [],
+      "gases": {
+        "initialOxygen": 1,
+        "initialCarbon": 1,
+        "mode": "open",
+        "exchangeRate": 0.2,
+        "oxygenEquilibrium": 1,
+        "carbonEquilibrium": 1
+      },
+      "sources": []
+    },
+    "builtin:environment:light-and-shade": {
+      "width": 600,
+      "height": 400,
+      "ambientTemperature": 0.5,
+      "ambientLight": 0.12,
+      "currentStrength": 0,
+      "foodRate": 3,
+      "initialNutrients": 1,
+      "barriers": [],
+      "gases": {
+        "initialOxygen": 1,
+        "initialCarbon": 1,
+        "mode": "open",
+        "exchangeRate": 0.15,
+        "oxygenEquilibrium": 1,
+        "carbonEquilibrium": 1
+      },
+      "sources": [
+        {
+          "angle": 0,
+          "length": 600,
+          "kind": 0,
+          "x": 180,
+          "y": 200,
+          "strength": 0.95,
+          "radius": 150
+        }
+      ]
+    },
+    "builtin:environment:colony-pool": {
+      "width": 400,
+      "height": 400,
+      "ambientTemperature": 0.5,
+      "ambientLight": 0.85,
+      "currentStrength": 0,
+      "foodRate": 0,
+      "initialNutrients": 3,
+      "barriers": [],
+      "gases": {
+        "initialOxygen": 1,
+        "initialCarbon": 1,
+        "mode": "open",
+        "exchangeRate": 0.02,
+        "oxygenEquilibrium": 1,
+        "carbonEquilibrium": 1
+      },
+      "sources": []
+    }
+  },
+  "scenarios": [
+    {
+      "id": "hunting-ground",
+      "habitat": "builtin:environment:grazing-shallows",
+      "seconds": 120,
+      "sampleSeconds": 2,
+      "settings": {
+        "initialFood": 0,
+        "mutationRate": 0.1
+      },
+      "cohorts": [
+        {
+          "name": "Phototroph",
+          "count": 16,
+          "sourceSha256": "aaa3d55fd9d2eaa6c331421e318a43f427bc432ff196e6c016d9b6ba4dde397b"
+        },
+        {
+          "name": "Predator",
+          "count": 3,
+          "sourceSha256": "4b1e4d029061936de8d5eee21fd4f88a65cae4d0fb4003270b3d451faedf5603"
+        }
+      ],
+      "runs": [
+        {
+          "seed": 42,
+          "observations": {
+            "alive": {
+              "Phototroph": 16,
+              "Predator": 5
+            },
+            "observedDescendants": {
+              "Phototroph": 10,
+              "Predator": 2
+            },
+            "firstObservedBirth": 86,
+            "firstObservedKill": 36,
+            "kills": 10,
+            "attacks": 3530,
+            "foodCaptures": 689,
+            "huntersObservedWithTissue": 4
+          },
+          "checks": {
+            "naturalHunt": true,
+            "photosynthesis": true
+          },
+          "passed": true
+        },
+        {
+          "seed": 7,
+          "observations": {
+            "alive": {
+              "Phototroph": 17,
+              "Predator": 4
+            },
+            "observedDescendants": {
+              "Phototroph": 10,
+              "Predator": 1
+            },
+            "firstObservedBirth": 86,
+            "firstObservedKill": 32,
+            "kills": 9,
+            "attacks": 3231,
+            "foodCaptures": 505,
+            "huntersObservedWithTissue": 4
+          },
+          "checks": {
+            "naturalHunt": true,
+            "photosynthesis": true
+          },
+          "passed": true
+        },
+        {
+          "seed": 2026,
+          "observations": {
+            "alive": {
+              "Phototroph": 24,
+              "Predator": 3
+            },
+            "observedDescendants": {
+              "Phototroph": 12,
+              "Predator": 0
+            },
+            "firstObservedBirth": 86,
+            "firstObservedKill": 34,
+            "kills": 4,
+            "attacks": 1458,
+            "foodCaptures": 950,
+            "huntersObservedWithTissue": 3
+          },
+          "checks": {
+            "naturalHunt": true,
+            "photosynthesis": true
+          },
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "mixed-ecosystem",
+      "habitat": "builtin:environment:grazing-shallows",
+      "seconds": 600,
+      "sampleSeconds": 2,
+      "settings": {
+        "initialFood": 0,
+        "mutationRate": 0.1
+      },
+      "cohorts": [
+        {
+          "name": "Phototroph",
+          "count": 48,
+          "sourceSha256": "aaa3d55fd9d2eaa6c331421e318a43f427bc432ff196e6c016d9b6ba4dde397b"
+        },
+        {
+          "name": "Forager",
+          "count": 12,
+          "sourceSha256": "cbbd9c2f4161024115448d71e0e4d1ad71035ce3acf7378cd1120c39c5c2a345"
+        },
+        {
+          "name": "Predator",
+          "count": 1,
+          "sourceSha256": "4b1e4d029061936de8d5eee21fd4f88a65cae4d0fb4003270b3d451faedf5603"
+        }
+      ],
+      "runs": [
+        {
+          "seed": 42,
+          "observations": {
+            "alive": {
+              "Phototroph": 268,
+              "Forager": 12,
+              "Predator": 5
+            },
+            "observedDescendants": {
+              "Phototroph": 270,
+              "Forager": 25,
+              "Predator": 4
+            },
+            "firstObservedBirth": 74,
+            "firstObservedKill": 32,
+            "kills": 50,
+            "attacks": 14572,
+            "foodCaptures": 22869,
+            "huntersObservedWithTissue": 5,
+            "firstDescendantSeconds": {
+              "Forager": 74,
+              "Phototroph": 86,
+              "Predator": 136
+            },
+            "oldestObservedDescendantSeconds": {
+              "Phototroph": 515.1,
+              "Forager": 495.73333,
+              "Predator": 464.03333
+            },
+            "descendantsAliveAtEnd": {
+              "Phototroph": 229,
+              "Forager": 12,
+              "Predator": 4
+            },
+            "atFiveMinutes": {
+              "second": 300,
+              "population": {
+                "Phototroph": 199,
+                "Forager": 6,
+                "Predator": 2
+              },
+              "kills": 9
+            },
+            "grazersObservedDigestingProducerFood": 27,
+            "grazersReceivingCarbonAtJunctions": 24,
+            "peakCarbonTransferredIntoGrazerPerTick": 0.012866286376435328,
+            "peakMineralTransferredOutOfGrazerPerTick": 0.0004223126088428908
+          },
+          "checks": {
+            "naturalHunt": true,
+            "photosynthesis": true,
+            "noSuppliedOrganicFood": true,
+            "grazing": true,
+            "carbonReceivedThroughJunctions": true,
+            "tenMinuteCoexistence": true,
+            "allLineagesReproduced": true
+          },
+          "passed": true
+        },
+        {
+          "seed": 7,
+          "observations": {
+            "alive": {
+              "Phototroph": 269,
+              "Forager": 1,
+              "Predator": 4
+            },
+            "observedDescendants": {
+              "Phototroph": 262,
+              "Forager": 11,
+              "Predator": 4
+            },
+            "firstObservedBirth": 72,
+            "firstObservedKill": 34,
+            "kills": 46,
+            "attacks": 15657,
+            "foodCaptures": 26120,
+            "huntersObservedWithTissue": 5,
+            "firstDescendantSeconds": {
+              "Forager": 72,
+              "Phototroph": 86,
+              "Predator": 128
+            },
+            "oldestObservedDescendantSeconds": {
+              "Phototroph": 515.1,
+              "Forager": 486.26667,
+              "Predator": 472.96667
+            },
+            "descendantsAliveAtEnd": {
+              "Phototroph": 227,
+              "Forager": 1,
+              "Predator": 4
+            },
+            "atFiveMinutes": {
+              "second": 300,
+              "population": {
+                "Phototroph": 172,
+                "Forager": 3,
+                "Predator": 4
+              },
+              "kills": 25
+            },
+            "grazersObservedDigestingProducerFood": 17,
+            "grazersReceivingCarbonAtJunctions": 12,
+            "peakCarbonTransferredIntoGrazerPerTick": 0.020000000000000007,
+            "peakMineralTransferredOutOfGrazerPerTick": 0.0008988497551731045
+          },
+          "checks": {
+            "naturalHunt": true,
+            "photosynthesis": true,
+            "noSuppliedOrganicFood": true,
+            "grazing": true,
+            "carbonReceivedThroughJunctions": true,
+            "tenMinuteCoexistence": true,
+            "allLineagesReproduced": true
+          },
+          "passed": true
+        },
+        {
+          "seed": 2026,
+          "observations": {
+            "alive": {
+              "Phototroph": 221,
+              "Forager": 26,
+              "Predator": 7
+            },
+            "observedDescendants": {
+              "Phototroph": 235,
+              "Forager": 34,
+              "Predator": 6
+            },
+            "firstObservedBirth": 78,
+            "firstObservedKill": 38,
+            "kills": 63,
+            "attacks": 20647,
+            "foodCaptures": 46661,
+            "huntersObservedWithTissue": 7,
+            "firstDescendantSeconds": {
+              "Forager": 78,
+              "Phototroph": 86,
+              "Predator": 100
+            },
+            "oldestObservedDescendantSeconds": {
+              "Phototroph": 515.1,
+              "Forager": 519.36667,
+              "Predator": 501.33333
+            },
+            "descendantsAliveAtEnd": {
+              "Phototroph": 187,
+              "Forager": 26,
+              "Predator": 6
+            },
+            "atFiveMinutes": {
+              "second": 300,
+              "population": {
+                "Phototroph": 162,
+                "Forager": 9,
+                "Predator": 4
+              },
+              "kills": 24
+            },
+            "grazersObservedDigestingProducerFood": 35,
+            "grazersReceivingCarbonAtJunctions": 36,
+            "peakCarbonTransferredIntoGrazerPerTick": 0.02,
+            "peakMineralTransferredOutOfGrazerPerTick": 0.00048248755750856284
+          },
+          "checks": {
+            "naturalHunt": true,
+            "photosynthesis": true,
+            "noSuppliedOrganicFood": true,
+            "grazing": true,
+            "carbonReceivedThroughJunctions": true,
+            "tenMinuteCoexistence": true,
+            "allLineagesReproduced": true
+          },
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "light-and-shade",
+      "habitat": "builtin:environment:light-and-shade",
+      "seconds": 150,
+      "sampleSeconds": 0.5,
+      "settings": {
+        "initialFood": 360,
+        "mutationRate": 0.1
+      },
+      "cohorts": [
+        {
+          "name": "Mixotroph",
+          "count": 12,
+          "sourceSha256": "11e7047cb8926a5474afe824b1cd39322c523d3f5dbd06501bcb668423d97719"
+        },
+        {
+          "name": "Rememberer",
+          "count": 2,
+          "sourceSha256": "5daa48417b7e70bda9a83e33a4a475e928cf19609d9eba527afb275c2c1a59d0"
+        }
+      ],
+      "runs": [
+        {
+          "seed": 42,
+          "observations": {
+            "alive": {
+              "Mixotroph": 13,
+              "Rememberer": 2
+            },
+            "observedDescendants": {
+              "Mixotroph": 1,
+              "Rememberer": 0
+            },
+            "firstObservedBirth": 116,
+            "firstObservedKill": null,
+            "kills": 0,
+            "attacks": 0,
+            "foodCaptures": 298,
+            "cellsObservedFixingCarbonWithCanopy": 8,
+            "cellsObservedDigestingInShade": 11,
+            "cellsObservedInBothModes": 6,
+            "rememberersObservedSteeringAfterCueLoss": 2
+          },
+          "checks": {
+            "switchingFeedingModes": true,
+            "rememberedSteering": true
+          },
+          "passed": true
+        },
+        {
+          "seed": 7,
+          "observations": {
+            "alive": {
+              "Mixotroph": 13,
+              "Rememberer": 2
+            },
+            "observedDescendants": {
+              "Mixotroph": 1,
+              "Rememberer": 0
+            },
+            "firstObservedBirth": 131.5,
+            "firstObservedKill": null,
+            "kills": 0,
+            "attacks": 0,
+            "foodCaptures": 560,
+            "cellsObservedFixingCarbonWithCanopy": 6,
+            "cellsObservedDigestingInShade": 10,
+            "cellsObservedInBothModes": 4,
+            "rememberersObservedSteeringAfterCueLoss": 2
+          },
+          "checks": {
+            "switchingFeedingModes": true,
+            "rememberedSteering": true
+          },
+          "passed": true
+        },
+        {
+          "seed": 2026,
+          "observations": {
+            "alive": {
+              "Mixotroph": 13,
+              "Rememberer": 2
+            },
+            "observedDescendants": {
+              "Mixotroph": 1,
+              "Rememberer": 0
+            },
+            "firstObservedBirth": 116,
+            "firstObservedKill": null,
+            "kills": 0,
+            "attacks": 0,
+            "foodCaptures": 361,
+            "cellsObservedFixingCarbonWithCanopy": 6,
+            "cellsObservedDigestingInShade": 11,
+            "cellsObservedInBothModes": 4,
+            "rememberersObservedSteeringAfterCueLoss": 2
+          },
+          "checks": {
+            "switchingFeedingModes": true,
+            "rememberedSteering": true
+          },
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "nurse-rosette",
+      "habitat": "builtin:environment:colony-pool",
+      "seconds": 160,
+      "sampleSeconds": 0.5,
+      "settings": {
+        "initialFood": 0,
+        "mutationRate": 0.1
+      },
+      "cohorts": [
+        {
+          "name": "Nurse rosette",
+          "count": 1,
+          "sourceSha256": "2a5f9587ecf5f48f8d079fca2d6f130672e3d9ddc08d6ce85037ccaa61dbd727"
+        }
+      ],
+      "runs": [
+        {
+          "seed": 42,
+          "observations": {
+            "alive": {
+              "Nurse rosette": 2
+            },
+            "observedDescendants": {
+              "Nurse rosette": 1
+            },
+            "firstObservedBirth": 90,
+            "firstObservedKill": null,
+            "kills": 0,
+            "attacks": 0,
+            "foodCaptures": 0,
+            "peakObservedCarbonToJuvenile": 0.00058,
+            "attachmentSamplesUntilNursing": 15
+          },
+          "checks": {
+            "parentFeedsAttachedGrowingDaughter": true
+          },
+          "passed": true
+        },
+        {
+          "seed": 7,
+          "observations": {
+            "alive": {
+              "Nurse rosette": 2
+            },
+            "observedDescendants": {
+              "Nurse rosette": 1
+            },
+            "firstObservedBirth": 90,
+            "firstObservedKill": null,
+            "kills": 0,
+            "attacks": 0,
+            "foodCaptures": 0,
+            "peakObservedCarbonToJuvenile": 0.00058,
+            "attachmentSamplesUntilNursing": 15
+          },
+          "checks": {
+            "parentFeedsAttachedGrowingDaughter": true
+          },
+          "passed": true
+        },
+        {
+          "seed": 2026,
+          "observations": {
+            "alive": {
+              "Nurse rosette": 2
+            },
+            "observedDescendants": {
+              "Nurse rosette": 1
+            },
+            "firstObservedBirth": 90,
+            "firstObservedKill": null,
+            "kills": 0,
+            "attacks": 0,
+            "foodCaptures": 0,
+            "peakObservedCarbonToJuvenile": 0.00097,
+            "attachmentSamplesUntilNursing": 15
+          },
+          "checks": {
+            "parentFeedsAttachedGrowingDaughter": true
+          },
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "pulse-swimmers",
+      "habitat": "builtin:environment:colony-pool",
+      "seconds": 155,
+      "sampleSeconds": 0.2,
+      "settings": {
+        "initialFood": 0,
+        "mutationRate": 0.1
+      },
+      "cohorts": [
+        {
+          "name": "Pulse swimmer",
+          "count": 3,
+          "sourceSha256": "4e1f463cb8b546afefe5bcafb2ffd079af05a64e39f7cde18deedeba556fbddb"
+        }
+      ],
+      "runs": [
+        {
+          "seed": 42,
+          "observations": {
+            "alive": {
+              "Pulse swimmer": 6
+            },
+            "observedDescendants": {
+              "Pulse swimmer": 3
+            },
+            "firstObservedBirth": 91.6,
+            "firstObservedKill": null,
+            "kills": 0,
+            "attacks": 0,
+            "foodCaptures": 0,
+            "juvenilesWithMotorPulses": 2,
+            "juvenilesWithSubsequentMotorRest": 2,
+            "peakPulsesInOneJuvenile": 6
+          },
+          "checks": {
+            "juvenileRelaysAndRests": true
+          },
+          "passed": true
+        },
+        {
+          "seed": 7,
+          "observations": {
+            "alive": {
+              "Pulse swimmer": 6
+            },
+            "observedDescendants": {
+              "Pulse swimmer": 3
+            },
+            "firstObservedBirth": 91.6,
+            "firstObservedKill": null,
+            "kills": 0,
+            "attacks": 0,
+            "foodCaptures": 0,
+            "juvenilesWithMotorPulses": 1,
+            "juvenilesWithSubsequentMotorRest": 1,
+            "peakPulsesInOneJuvenile": 6
+          },
+          "checks": {
+            "juvenileRelaysAndRests": true
+          },
+          "passed": true
+        },
+        {
+          "seed": 2026,
+          "observations": {
+            "alive": {
+              "Pulse swimmer": 6
+            },
+            "observedDescendants": {
+              "Pulse swimmer": 3
+            },
+            "firstObservedBirth": 91.6,
+            "firstObservedKill": null,
+            "kills": 0,
+            "attacks": 0,
+            "foodCaptures": 0,
+            "juvenilesWithMotorPulses": 2,
+            "juvenilesWithSubsequentMotorRest": 2,
+            "peakPulsesInOneJuvenile": 6
+          },
+          "checks": {
+            "juvenileRelaysAndRests": true
+          },
+          "passed": true
+        }
+      ]
+    }
+  ],
+  "passed": true
+}

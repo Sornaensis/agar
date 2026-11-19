@@ -1,6 +1,6 @@
 # Ecosystem measurements
 
-These are deterministic tests of the simulator, not a biological validation or a guarantee of stable coexistence. Each measurement JSON preserves its engine hash, environment, complete authored genomes, initialization, mutation rate and sampled results.
+[Curated ecology](curated-ecology.md) records the current predator investigation and preset outcomes. Older runs below used the catalogs and engines identified in each section.
 
 ## Performance update — ABI 13, checkpoint 9
 
@@ -19,8 +19,8 @@ unchanged by this optimization pass.
 
 ## Gas exchange — ABI 12, checkpoint 9
 
-`gas-exchange-seed42.json` records 600 simulated seconds with the current gas
-model and authored genomes, using the unchanged mixed population counts and
+`gas-exchange-seed42.json` records 600 simulated seconds with the ABI 12 gas
+model and its authored genomes, using the original mixed population counts and
 the built-in open Sunlit pond. No organic food is supplied. The report includes
 carbon and oxygen inventories, external exchange, fixation, respiration and
 decay alongside the existing mineral and energy checks. All four accounting
@@ -31,17 +31,16 @@ A Predator descendant is observed during the run; no Forager descendant is
 observed. The consumer-persistence gate therefore remains unsatisfied, as it
 was in the earlier records below. This is a measured ecosystem limitation,
 not evidence of stable coexistence. Separate supplied-habitat lifecycle checks
-verify that all eight current genomes can build, feed and reproduce under the
+verify that all eight then-current genomes can build, feed and reproduce under the
 new chemistry.
 
 ## Earlier cellular food chain — ABI 10, checkpoint 7
 
-The mixed-ecosystem regression uses the actual current built-in sources and the
-catalog's unmodified Sunlit pond environment: 72 Phototrophs, 6 Foragers,
+The ABI 10 mixed-ecosystem regression used the sources and Sunlit pond environment shipped at the time, with 72 Phototrophs, 6 Foragers,
 4 Mixotrophs and 2 Predators, with no initial or continuing external organic
 food. Organisms grow their machinery from identical minimal founders.
 
-The current fixtures test staged consumer construction, hunting and tissue
+Those fixtures tested staged consumer construction, hunting and tissue
 digestion, recovery from a captured meal at low energy, and navigation around
 producer surfaces. Real thermal-stress fixtures check paid repair, recovery of
 the original machinery without redundant copies, and repair initiation before
