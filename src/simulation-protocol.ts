@@ -26,8 +26,8 @@ export interface WirePresentation {
 export interface CapturedCheckpoint { state: Uint8Array; summary: SimulationSummary }
 
 export const ENGINE_METHODS = [
-  'analyze', 'compile', 'reset', 'resetEmpty', 'saveState', 'restoreState', 'seed', 'placeCell', 'moveCell', 'setCellStores', 'addFood',
-  'setFoodRate', 'setMutationRate', 'setEnvironment', 'setInitialNutrients', 'addNutrients',
+  'analyze', 'compile', 'reset', 'resetEmpty', 'saveState', 'restoreState', 'seed', 'placeCell', 'moveCell', 'setCellStores',
+  'setMutationRate', 'setEnvironment', 'setInitialNutrients', 'addNutrients',
   'addSource', 'replaceSources', 'removeSource', 'clearSources', 'getMemory', 'getCellEvaluation', 'languageSchema',
   'setWorldSize', 'updateSource', 'addBarrier', 'updateBarrier', 'removeBarrier', 'clearBarriers',
   'setInitialGases', 'setGasExchange',

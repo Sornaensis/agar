@@ -108,16 +108,14 @@ try {
   // Issued without awaiting each other: the worker must retain invocation order.
   const pending = [
     remote.setEnvironment(0.5, 0.85, 5),
-    remote.setFoodRate(0),
     remote.setMutationRate(0),
-    remote.resetEmpty(171, 48),
+    remote.resetEmpty(171),
     remote.seed(genome, 12),
     remote.advance(12, { metrics: true, environment: true }),
   ];
   reference.setEnvironment(0.5, 0.85, 5);
-  reference.setFoodRate(0);
   reference.setMutationRate(0);
-  reference.resetEmpty(171, 48);
+  reference.resetEmpty(171);
   reference.seed(genome, 12);
   reference.tick(12);
   const initial = (await Promise.all(pending)).at(-1);
@@ -221,8 +219,7 @@ try {
   // injected so partial-batch reporting is deterministic and affordable to test.
   const { engine: failing } = await fresh(true);
   const failingId = await failing.compile(source);
-  await failing.setFoodRate(0);
-  await failing.resetEmpty(8, 0);
+  await failing.resetEmpty(8);
   await failing.seed(failingId, 2);
   const partial = await failing.advance(5, { frame: false, metrics: true });
   assert.match(partial.error, /after two real ticks/);
@@ -238,7 +235,7 @@ try {
     // immutable organism ID, even if another organism was added more recently.
     const { engine: edit } = await fresh();
     const founderGenome = await edit.compile(source);
-    await edit.resetEmpty(81, 0);
+    await edit.resetEmpty(81);
     const founder = await edit.placeCell(founderGenome, -0.625, 98.125);
     const other = await edit.placeCell(founderGenome, 200, 220);
     assert.notEqual(founder, other);
@@ -302,11 +299,10 @@ try {
   }
 
   const { engine: habitat } = await fresh();
-  await habitat.setFoodRate(0);
   await habitat.setEnvironment(0.5, 0, 0);
   assert.equal(await habitat.setWorldSize(2400, 1520), true);
   await habitat.setInitialNutrients(0.3);
-  await habitat.resetEmpty(42, 0);
+  await habitat.resetEmpty(42);
   const band = await habitat.addSource(6, 1200, 400, 0.6, 120, Math.PI / 2, 1200);
   const sink = await habitat.addSource(4, 300, 300, 1, 160);
   const wall = await habitat.addBarrier(800, 760, 500, 40, Math.PI / 4, false);
@@ -357,11 +353,11 @@ try {
   assert.equal((await habitat.environmentMetadata()).sources.length, 0);
 
   const { engine: chemistry } = await fresh();
-  await chemistry.setFoodRate(0); await chemistry.setEnvironment(.5,0,0);
+  await chemistry.setEnvironment(.5,0,0);
   assert.equal(await chemistry.setInitialGases(0,2),true);
   const sealed={mode:'sealed',exchangeRate:.02,oxygenEquilibrium:1,carbonEquilibrium:1};
   assert.equal(await chemistry.setGasExchange(sealed),true);
-  await chemistry.resetEmpty(901,0);
+  await chemistry.resetEmpty(901);
   let chemicals=await chemistry.metricsSnapshot();
   assert.equal(chemicals.oxygenDissolvedTotal,0);
   assert.equal(chemicals.inorganicCarbonTotal,4560);
@@ -407,6 +403,31 @@ try {
   assert.equal(await chemistry.setInitialGases(12,12),true);
   assert.equal((await chemistry.metricsSnapshot()).oxygenDissolvedTotal,presentBeforeConfig,'Starting gas settings do not reset a live field');
 
+  // All three supplied chemicals are dissolved. A lit, uninhabited pond
+  // accumulates exactly the requested imports and produces no meals.
+  const { engine: pond } = await fresh();
+  assert.equal(await pond.setWorldSize(400,400),true);
+  await pond.clearSources(); await pond.setEnvironment(.5,1,0);
+  await pond.setInitialNutrients(0);
+  assert.equal(await pond.setInitialGases(0,0),true);
+  assert.equal(await pond.setGasExchange(sealed),true);
+  await pond.resetEmpty(454);
+  for (const kind of [3,8,10]) assert.ok(await pond.addSource(kind,200,200,1,100));
+  const afterLight = (await pond.advance(120,{metrics:true})).metrics;
+  assert.equal(afterLight.food,0);
+  assert.equal(afterLight.carbonFixedTotal,0);
+  for (const key of ['nutrientDissolvedTotal','oxygenDissolvedTotal','inorganicCarbonTotal']) {
+    assert.ok(Math.abs(afterLight[key]-6)<1e-8, key);
+  }
+  await pond.clearSources();
+  for (const kind of [4,9,11]) assert.ok(await pond.addSource(kind,200,200,.25,100));
+  const drained = (await pond.advance(30,{metrics:true})).metrics;
+  for (const key of ['nutrientDissolvedTotal','oxygenDissolvedTotal','inorganicCarbonTotal']) {
+    assert.ok(Math.abs(afterLight[key]-drained[key]-.375)<1e-8, key);
+  }
+  assert.equal(drained.food,0);
+  checkChemicalBudget(drained);
+
   const priorEnvironment=new Uint8Array(await readFile(new URL('../engine/fixtures/environment-v8.bin',import.meta.url)));
   const priorMetadata=JSON.parse(await readFile(new URL('../engine/fixtures/environment-v8.json',import.meta.url),'utf8'));
   await chemistry.restoreState(priorEnvironment);
@@ -420,13 +441,13 @@ try {
   assert.ok(migratedGas.metrics.legacyCarbonImported>0,'Legacy organic inventory is explicitly counted at migration');
   checkChemicalBudget(migratedGas.metrics);
   const upgradedGas=await chemistry.saveState();
-  assert.equal(new DataView(upgradedGas.buffer,upgradedGas.byteOffset,upgradedGas.byteLength).getUint32(8,true),13);
+  assert.equal(new DataView(upgradedGas.buffer,upgradedGas.byteOffset,upgradedGas.byteLength).getUint32(8,true),14);
   const migratedFuture=await chemistry.advance(12,{metrics:true,environment:true});
   await chemistry.restoreState(upgradedGas);
   assert.deepEqual(await chemistry.advance(12,{metrics:true,environment:true}),migratedFuture);
 
   // A substantial real tick batch runs while the main JS event loop continues.
-  await remote.resetEmpty(62, 1500);
+  await remote.resetEmpty(62);
   await remote.seed(genome, 256);
   let heartbeats = 0;
   const timer = setInterval(() => { heartbeats++; }, 1);

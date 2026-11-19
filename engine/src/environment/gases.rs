@@ -234,15 +234,7 @@ impl Environment {
             .iter()
             .filter(|source| (8..=12).contains(&source.kind) && source.strength > 0.0)
         {
-            let weights: Vec<_> = (0..count)
-                .map(|i| {
-                    let (x, y) = self.patch_position(i);
-                    let distance = delta(x - source.x, self.width).powi(2)
-                        + delta(y - source.y, self.height).powi(2);
-                    (-2.0 * distance / source.radius.powi(2)).exp()
-                })
-                .collect();
-            let sum: f64 = weights.iter().sum();
+            let weights = self.chemical_footprint(source);
             let (rates, rate) = match source.kind {
                 8 => (&mut self.gases.oxygen_injection, GAS_SOURCE_RATE),
                 9 => (&mut self.gases.oxygen_absorption, GAS_SOURCE_RATE),
@@ -254,7 +246,7 @@ impl Environment {
                 ),
             };
             for (value, weight) in rates.iter_mut().zip(weights) {
-                *value += rate * source.strength * weight / sum;
+                *value += rate * source.strength * weight;
             }
         }
         self.rebuild_exchange_fractions();
@@ -297,6 +289,8 @@ impl Environment {
         );
         let gas = &mut self.gases;
         for i in 0..gas.oxygen.len() {
+            // Sources, sinks and surface exchange operate only in exposed water.
+            if self.solid_patches[i] { continue; }
             let oxygen_input = gas.oxygen_injection[i] * DT;
             let carbon_input = gas.carbon_injection[i] * DT;
             gas.oxygen[i] += oxygen_input;
@@ -309,11 +303,7 @@ impl Environment {
             gas.carbon[i] -= carbon_output;
             gas.oxygen_outputs += oxygen_output;
             gas.carbon_outputs += carbon_output;
-            // Solid full-depth obstacles have no exposed water surface. An
-            // explicit aerator opens only its own footprint in a sealed scene.
-            if self.solid_patches[i] {
-                continue;
-            }
+            // A local aerator can open its own footprint in a sealed scene.
             let rate = if gas.atmosphere_open {
                 gas.exchange_rate
             } else {

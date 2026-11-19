@@ -42,8 +42,8 @@ pub(super) fn equipped(extra: &str) -> (World, Vec<Genome>) {
     let mut world = World::empty(293);
     world.environment.configure(0.5, 0.85, 0.0);
     world.environment.set_initial_nutrients(2.0);
-    world.reset_empty(293, 0);
-    world.food_rate = 0.0;
+    world.reset_empty(293);
+
     world.mutation_rate = 0.0;
     world.seed_cells(1, 1, 600.0, 380.0);
     let cell = &mut world.cells[0];
@@ -364,7 +364,7 @@ fn particle_import_requires_a_compartment_and_grants_no_digestion_or_engulfing()
         assert_eq!(cap.digestion, 0.0);
         assert_eq!(cap.substrate_digestion, [0.0; 3]);
         let (x, y) = (world.cells[0].x, world.cells[0].y);
-        world.add_food(x, y, 4);
+        world.fixture_exudate(x, y, 4);
         for particle in &mut world.food {
             particle.x = x;
             particle.y = y;

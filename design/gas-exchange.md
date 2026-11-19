@@ -1,6 +1,6 @@
 # Gas exchange and material cycles
 
-Implemented in engine ABI 12 / checkpoint 9. This document describes the current model, its conservation rules, and its deliberate approximations.
+Current model for engine ABI 18 and checkpoint 14.
 
 ## Chemical stores and units
 
@@ -52,19 +52,20 @@ The builder's **Gases & atmosphere** section sets initial O₂/DIC amounts and t
 
 - **Sealed:** no background atmospheric flux.
 - **Open:** every uncovered water patch has finite signed exchange with the specified reservoir. Excess gas leaves and undersaturated water receives gas.
+- **Mineral emitter / absorber:** local input or removal of dissolved noncarbon construction material.
 - **Oxygen emitter / absorber:** local, explicitly accounted O₂ input or removal.
-- **Carbon emitter / absorber:** local, explicitly accounted inorganic-carbon input or removal.
+- **Inorganic carbon emitter / absorber:** local, explicitly accounted inorganic-carbon input or removal.
 - **Aerator:** a local reservoir connection, including in an otherwise sealed world. It can add or remove either gas.
 
-Emitter/absorber strength ranges from 0 to 1, with total requested rate `1.5 × strength` amount units per second distributed over the object's footprint. Absorbers remove only available stock. A unit-strength aerator exchanges five abstract water volumes per second over its footprint. Background exchange rate ranges from 0 to 1 per second; initial and equilibrium concentrations range from 0 to 100.
+Emitter/absorber strength ranges from 0 to 1, with total requested rate `1.5 × strength` amount units per second distributed over water patch centers inside the object's radius. Transfer tapers toward the edge, wraps at world seams and skips blocked patches. Absorbers remove only available stock. A unit-strength aerator exchanges five abstract water volumes per second over its footprint. Background exchange rate ranges from 0 to 1 per second; initial and equilibrium concentrations range from 0 to 100.
 
 Signed atmospheric exchange uses `1 − exp(−rate × dt)` of the concentration difference, avoiding overshoot or a hidden reset. Oxygen equilibrium has an explicitly abstract temperature factor `1.25 − 0.5 × temperature`; DIC equilibrium is fixed. This is not a Celsius-, pressure- or salinity-calibrated solubility model.
 
-All built-in environments use open water with rate 0.02/s and equilibrium concentrations of 1. Blank recipes, imports without gas settings and pre-version-9 checkpoints default to sealed water with initial O₂/DIC of 1 each per patch. Copying a recipe preserves its gas settings. Local objects remain explicit external actions in either mode.
+Built-in environments use open water and reservoir concentrations of 1. Each recipe sets its exchange rate, with a default of 0.02/s. Blank recipes, imports without gas settings and pre-version-9 checkpoints default to sealed water with initial O₂/DIC of 1 each per patch. Copying a recipe preserves its gas settings. Local objects remain explicit external actions in either mode.
 
 ## Inspection and accounting
 
-The player and builder provide **Oxygen** and **Inorganic carbon** overlays on fixed color scales. Organism inspection shows organic reserve, internal gases, fixation and respiration rates. Programs can read `carbon.organic`, `carbon.inorganic`, `oxygen`, `respiration.rate` and `carbon.fixation.rate`; the two reaction rates use carbon units per second.
+The player and builder provide **Minerals**, **Oxygen** and **Inorganic carbon** overlays and remember each view’s selection. Organism inspection shows organic reserve, internal gases, fixation and respiration rates. Programs can read `carbon.organic`, `carbon.inorganic`, `oxygen`, `respiration.rate` and `carbon.fixation.rate`; the two reaction rates use carbon units per second.
 
 Metrics expose all carbon stores, internal and dissolved oxygen, external inputs/removals, cumulative fixation, organism respiration, background decay and legacy imports. The budgets are:
 
@@ -74,9 +75,9 @@ oxygen present + oxygen removed + organism respiration + decay
     = oxygen introduced + carbon fixed
 ```
 
-Carbon present includes both internal and external inorganic carbon, structural/reserve/gut carbon and particles. Introductions include initial water, added organisms and supplied organic food. Source/sink and atmospheric transfers enter external ledgers. The same equations hold in open and sealed environments.
+Carbon present includes both internal and external inorganic carbon, structural/reserve/gut carbon and particles. Introductions include initial water, added organisms and chemical emitters. The ledger retains historical inputs when a checkpoint is imported. Source/sink and atmospheric transfers enter external ledgers. The same equations hold in open and sealed environments.
 
-Checkpoints 3–8 remain readable. Migration preserves existing physical structures, minerals, usable energy and sources, initializes gas fields explicitly, and classifies pre-existing organic inventory once in a legacy carbon-import ledger. It does not recreate cells from their genome. Continuation follows the new chemistry and is deterministic within the current engine; it is not intended to reproduce an older engine's biological trajectory. New checkpoints retain all chemical fields, internal pools, boundary settings and reaction ledgers.
+Checkpoints 3–13 remain readable. New worlds start with zero organic particles. When an older checkpoint is loaded, all existing organic matter is preserved and its historical supply rate and fractional spawn credit are discarded. For checkpoints 3–8, gas fields and gas budgets are initialized on import. Migration from those pre-gas checkpoints preserves physical structures, minerals, usable energy and sources, and classifies pre-existing organic inventory once in a legacy carbon-import ledger. It does not recreate cells from their genome. Continuation follows the new chemistry and is deterministic within the current engine; it is not intended to reproduce an older engine's biological trajectory. New checkpoints retain all chemical fields, internal pools, boundary settings and reaction ledgers.
 
 ## Limits and future chemistry
 

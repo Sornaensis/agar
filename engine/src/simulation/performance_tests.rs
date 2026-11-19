@@ -106,7 +106,7 @@ fn sparse_patch_groups_preserve_dense_order_and_reset_after_resize() {
 fn eligible_capture_index_preserves_empty_exhausted_wrapped_and_mineral_cases() {
     for scenario in 0..8 {
         let mut optimized = World::empty(317);
-        optimized.set_food_rate(0.0);
+
         if scenario != 0 {
             optimized.try_seed_fixture(1, 8, WIDTH - 3.0, HEIGHT - 4.0, BodyFixture::Scavenger).unwrap();
             for (i, cell) in optimized.cells.iter_mut().enumerate() {
@@ -114,7 +114,7 @@ fn eligible_capture_index_preserves_empty_exhausted_wrapped_and_mineral_cases() 
                 cell.y = HEIGHT - 4.0;
             }
         }
-        optimized.add_food(-1.0, -1.0, 150);
+        optimized.fixture_exudate(-1.0, -1.0, 150);
         for (i, food) in optimized.food.iter_mut().enumerate() {
             food.x = wrap(WIDTH - 2.0 + (i % 10) as f64, WIDTH);
             food.y = wrap(HEIGHT - 4.0 + (i % 3) as f64, HEIGHT);

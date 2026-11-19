@@ -20,12 +20,14 @@ interface TrailPoint { x: number; y: number; time: number }
 export type FieldOverlay = 'none' | 'light' | 'heat' | 'flow' | 'nutrients' | 'oxygen' | 'carbon';
 interface RenderOptions { colonyActivity?:boolean; sensors?: boolean; trails?: boolean; overlay?: FieldOverlay }
 export type EnvironmentSelection = { kind: 'source' | 'barrier'; id: number } | null;
-interface CellDragHandlers {
-  canDrag(id: number): boolean;
-  drop(id:number, x:number, y:number, colony:boolean): void;
+export type CanvasTarget = {kind:'cell'; object:RenderCell} | {kind:'source'; object:EnvironmentSource} | {kind:'barrier'; object:EnvironmentBarrier};
+interface DragHandlers {
+  preferEnvironment():boolean;
+  canDrag(target:CanvasTarget):boolean;
+  drop(target:CanvasTarget,x:number,y:number,colony:boolean):void;
 }
-interface CellDrag {
-  pointerId:number; cell:RenderCell; offsetX:number; offsetY:number; colony:boolean;
+interface Drag {
+  pointerId:number; item:CanvasTarget; offsetX:number; offsetY:number; colony:boolean;
   active:boolean; target:{x:number; y:number} | null;
 }
 interface CameraPointer { x: number; y: number; startX: number; startY: number; touch: boolean }
@@ -40,7 +42,7 @@ export class Renderer {
   private readonly originalTouchAction: string;
   private readonly originalCursor: string;
   private suppressClickUntil = 0;
-  private cellDrag: CellDrag | null = null;
+  private drag: Drag | null = null;
   private selection: EnvironmentSelection = null;
   private cameraFrame = 0;
   private renderOptions: RenderOptions = {};
@@ -71,7 +73,7 @@ export class Renderer {
   private resizeVersion = 0;
   private renderedResize = -1;
 
-  constructor(private readonly canvas: HTMLCanvasElement, private readonly cellDrags?: CellDragHandlers) {
+  constructor(private readonly canvas: HTMLCanvasElement, private readonly drags?: DragHandlers) {
     const context = canvas.getContext('2d', { alpha: false });
     if (!context) throw new Error('This browser does not support the 2D simulation view.');
     this.context = context;
@@ -176,19 +178,19 @@ export class Renderer {
       if (!this.pointers.size) this.suppressClickUntil = 0;
       const touch = event.pointerType === 'touch';
       let grab = false;
-      if (this.pointers.size === 0 && event.button === 0 && !event.shiftKey && this.cellDrags && this.lastWorld) {
-        const hit = this.pickCell(this.lastWorld,event.clientX,event.clientY);
+      if (this.pointers.size === 0 && event.button === 0 && !event.shiftKey && this.drags && this.lastWorld) {
+        const hit = this.pickTarget(this.lastWorld,event.clientX,event.clientY,this.drags.preferEnvironment());
         const point = this.toWorld(event.clientX,event.clientY);
-        if (hit && point && this.cellDrags.canDrag(hit.id)) {
-          // Preserve the grab offset even when the cell straddles a world edge.
-          const dx = hit.x - point.x, dy = hit.y - point.y;
-          this.cellDrag = {pointerId:event.pointerId,cell:hit,
+        if (hit && point && this.drags.canDrag(hit)) {
+          // Preserve the grab offset even when the object straddles a world edge.
+          const dx = hit.object.x - point.x, dy = hit.object.y - point.y;
+          this.drag = {pointerId:event.pointerId,item:hit,
             offsetX:dx - Math.round(dx / this.worldWidth) * this.worldWidth,
             offsetY:dy - Math.round(dy / this.worldHeight) * this.worldHeight,
             active:false,target:null,colony:event.altKey};
           grab = true;
         }
-      } else if (touch && this.cellDrag) this.clearCellDrag();
+      } else if (touch && this.drag) this.clearDrag();
       if (!grab && !touch && event.button !== 1 && event.button !== 2 && !(event.button === 0 && event.shiftKey)) return;
       if (!grab && !touch) { event.preventDefault(); this.suppressClickUntil = performance.now() + 700; }
       this.canvas.focus({ preventScroll: true });
@@ -203,11 +205,11 @@ export class Renderer {
       const oldX = pointer.x, oldY = pointer.y;
       const other = pointer.touch ? [...this.pointers.entries()].find(([id, value]) => id !== event.pointerId && value.touch)?.[1] : undefined;
       pointer.x = event.clientX; pointer.y = event.clientY;
-      if (this.cellDrag?.pointerId === event.pointerId) {
-        if (!this.cellDrag.active && Math.hypot(pointer.x-pointer.startX,pointer.y-pointer.startY) < 6) return;
-        this.cellDrag.active = true;
-        this.canvas.setAttribute('data-dragging-cell','');
-        this.cellDrag.target = this.cellDragPoint(pointer.x,pointer.y);
+      if (this.drag?.pointerId === event.pointerId) {
+        if (!this.drag.active && Math.hypot(pointer.x-pointer.startX,pointer.y-pointer.startY) < 6) return;
+        this.drag.active = true;
+        this.canvas.setAttribute('data-dragging-target',this.drag.item.kind);
+        this.drag.target = this.dragPoint(pointer.x,pointer.y);
         this.suppressClickUntil = performance.now()+700;
         this.resizeVersion++; this.requestRedraw(); event.preventDefault(); return;
       }
@@ -228,12 +230,12 @@ export class Renderer {
     }, { signal });
     const release = (event: PointerEvent): void => {
       if (!this.pointers.delete(event.pointerId)) return;
-      const grab = this.cellDrag;
+      const grab = this.drag;
       if (grab?.pointerId === event.pointerId) {
-        const target = this.cellDragPoint(event.clientX,event.clientY);
-        this.clearCellDrag();
-        if (event.type === 'pointerup' && grab.active && target && this.cellDrags?.canDrag(grab.cell.id)) {
-          this.cellDrags.drop(grab.cell.id,target.x,target.y,grab.colony);
+        const target = this.dragPoint(event.clientX,event.clientY);
+        this.clearDrag();
+        if (event.type === 'pointerup' && grab.active && target && this.drags?.canDrag(grab.item)) {
+          this.drags.drop(grab.item,target.x,target.y,grab.colony);
         }
       }
       if (this.suppressClickUntil) this.suppressClickUntil = performance.now() + 700;
@@ -251,18 +253,18 @@ export class Renderer {
     }, { signal });
   }
 
-  private cellDragPoint(clientX:number,clientY:number): {x:number; y:number} | null {
+  private dragPoint(clientX:number,clientY:number): {x:number; y:number} | null {
     const rect = this.canvas.getBoundingClientRect();
     if (clientX < rect.left || clientX >= rect.right || clientY < rect.top || clientY >= rect.bottom) return null;
     const point = this.toWorld(clientX,clientY);
-    if (!point || !this.cellDrag) return null;
-    return {x:(point.x + this.cellDrag.offsetX + this.worldWidth) % this.worldWidth,
-      y:(point.y + this.cellDrag.offsetY + this.worldHeight) % this.worldHeight};
+    if (!point || !this.drag) return null;
+    return {x:(point.x + this.drag.offsetX + this.worldWidth) % this.worldWidth,
+      y:(point.y + this.drag.offsetY + this.worldHeight) % this.worldHeight};
   }
 
-  private clearCellDrag(): void {
-    this.cellDrag = null;
-    this.canvas.removeAttribute('data-dragging-cell');
+  private clearDrag(): void {
+    this.drag = null;
+    this.canvas.removeAttribute('data-dragging-target');
     this.resizeVersion++; this.requestRedraw();
   }
 
@@ -306,6 +308,17 @@ export class Renderer {
       if (distance < best) { nearest = food; best = distance; }
     }
     return nearest;
+  }
+
+  pickTarget(world: RenderWorldSnapshot, x:number, y:number, preferEnvironment:boolean): CanvasTarget | null {
+    const cell = preferEnvironment ? null : this.pickCell(world,x,y);
+    if (cell) return {kind:'cell',object:cell};
+    const source = this.pickSource(world,x,y);
+    if (source) return {kind:'source',object:source};
+    const barrier = this.pickBarrier(world,x,y);
+    if (barrier) return {kind:'barrier',object:barrier};
+    const remainingCell = preferEnvironment ? this.pickCell(world,x,y) : null;
+    return remainingCell ? {kind:'cell',object:remainingCell} : null;
   }
 
   pickSource(world: RenderWorldSnapshot, clientX: number, clientY: number): EnvironmentSource | null {
@@ -433,13 +446,14 @@ export class Renderer {
     }
     this.drawBarriers(world.environment.barriers ?? []);
     this.drawSources(world.environment.sources, overlay);
-    const drag = this.cellDrag;
-    if (drag?.active && drag.target) {
-      const count = this.visibility.collect(drag.target.x,drag.target.y,drag.cell.radius+5/this.scale);
+    const drag = this.drag;
+    if (drag?.active && drag.target && drag.item.kind === 'cell') {
+      const cell = drag.item.object;
+      const count = this.visibility.collect(drag.target.x,drag.target.y,cell.radius+5/this.scale);
       context.save(); context.strokeStyle = '#e3fff5'; context.fillStyle = '#6ed5ad55';
       context.lineWidth = 2 / this.scale; context.setLineDash([4/this.scale,3/this.scale]);
       for (let image=0;image<count;image+=2) {
-        context.beginPath(); context.arc(this.visibility.points[image],this.visibility.points[image+1],drag.cell.radius,0,2*Math.PI); context.fill(); context.stroke();
+        context.beginPath(); context.arc(this.visibility.points[image],this.visibility.points[image+1],cell.radius,0,2*Math.PI); context.fill(); context.stroke();
       }
       context.restore();
     }
@@ -525,12 +539,14 @@ export class Renderer {
   private drawSources(sources: EnvironmentSource[], overlay: FieldOverlay): void {
     const context = this.context;
     context.save();
-    for (const source of sources) {
+    for (const actual of sources) {
+      const moving = this.drag?.active && this.drag.item.kind === 'source' && this.drag.item.object.id === actual.id && this.drag.target;
+      const source = moving ? {...actual,...moving} : actual;
       const color = source.kind === 0 ? '#efd089' : source.kind === 1 ? (source.strength >= 0 ? '#ed9c82' : '#83c5eb')
         : source.kind === 3 ? '#81d99d' : source.kind === 4 ? '#e69bcb'
         : source.kind === 8 || source.kind === 9 ? '#65bef7' : source.kind === 10 || source.kind === 11 ? '#d6a5f2' : '#a5c4f7';
-      const label = ['L', source.strength >= 0 ? 'H' : 'C', 'V', 'N', 'A', 'J', 'B', 'R', 'O+', 'O−', 'C+', 'C−', 'Air'][source.kind];
-      const selected = this.selection?.kind === 'source' && this.selection.id === source.id;
+      const label = ['L', source.strength >= 0 ? 'H' : 'C', 'V', 'M+', 'M−', 'J', 'B', 'R', 'O+', 'O−', 'C+', 'C−', 'Air'][source.kind];
+      const selected = moving || (this.selection?.kind === 'source' && this.selection.id === source.id);
       const showRadius = selected || (source.kind === 0 && overlay === 'light') || (source.kind === 1 && overlay === 'heat')
         || ([2,5,6,7].includes(source.kind) && overlay === 'flow') || ([3,4].includes(source.kind) && overlay === 'nutrients')
         || ([8,9,12].includes(source.kind) && overlay === 'oxygen') || ([10,11,12].includes(source.kind) && overlay === 'carbon');
@@ -605,8 +621,10 @@ export class Renderer {
   private drawBarriers(barriers: EnvironmentBarrier[]): void {
     const context = this.context;
     context.save();
-    for (const barrier of barriers) {
-      const selected = this.selection?.kind === 'barrier' && this.selection.id === barrier.id;
+    for (const actual of barriers) {
+      const moving = this.drag?.active && this.drag.item.kind === 'barrier' && this.drag.item.object.id === actual.id && this.drag.target;
+      const barrier = moving ? {...actual,...moving} : actual;
+      const selected = moving || (this.selection?.kind === 'barrier' && this.selection.id === barrier.id);
       const color = barrier.floating ? '#79c6df' : '#a8b6bd';
       const margin = Math.hypot(barrier.length, barrier.width) / 2 + 6 / this.scale;
       const count = this.visibility.collect(barrier.x, barrier.y, margin);
@@ -930,7 +948,7 @@ export class Renderer {
     this.renderWindow.cancelAnimationFrame(this.cameraFrame);
     this.cameraFrame = 0;
     for (const id of this.pointers.keys()) if (this.canvas.hasPointerCapture(id)) this.canvas.releasePointerCapture(id);
-    this.pointers.clear(); this.cellDrag = null; this.canvas.removeAttribute('data-dragging-cell');
+    this.pointers.clear(); this.drag = null; this.canvas.removeAttribute('data-dragging-target');
     this.canvas.style.touchAction = this.originalTouchAction;
     this.canvas.style.cursor = this.originalCursor;
     this.trails.clear();

@@ -9,8 +9,8 @@ fn forager(light: f64) -> (World, Vec<Genome>) {
     world.environment.configure(0.5, light, 0.0);
     world.environment.set_initial_nutrients(3.0);
     world.environment.configure_gas_exchange(true, 0.5, 1.0, 1.0);
-    world.reset_empty(42, 0);
-    world.set_food_rate(0.0);
+    world.reset_empty(42);
+
     world.set_mutation_rate(0.0);
     world.seed_cells(1, 1, 600.0, 380.0);
     let initial_energy = world.cells[0].energy;
@@ -50,10 +50,9 @@ fn activity(cell: &Cell, name: &str) -> f64 {
 }
 
 fn supply(world: &mut World, kind: OrganicKind, x: f64, y: f64) {
-    // The ordinary import accounts for every unit of energy and mineral. Only
-    // the controlled substrate and encounter position differ from add_food's
-    // usual exudate scatter; organism reserves and machinery are never patched.
-    assert_eq!(world.add_food(x, y, 1), 1);
+    // This isolated encounter controls the kind and location of accounted
+    // substrate. The organism must capture and process the whole specimen.
+    assert_eq!(world.fixture_exudate(x, y, 1), 1);
     let food = world.food.last_mut().unwrap();
     food.kind = kind;
     food.x = wrap(x, WIDTH);
@@ -146,8 +145,8 @@ fn fed_target(source: &str) -> (World, Vec<Genome>) {
     world.environment.configure(0.5, 0.8, 0.0);
     world.environment.set_initial_nutrients(0.3);
     world.environment.configure_gas_exchange(true, 0.5, 1.0, 1.0);
-    world.reset_empty(42, 0);
-    world.set_food_rate(0.0);
+    world.reset_empty(42);
+
     world.set_mutation_rate(0.0);
     world.seed_cells(1, 1, 600.0, 380.0);
     for _ in 0..600 {

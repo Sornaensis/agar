@@ -1,3 +1,4 @@
+import {placeByTissue} from './feeding-culture.mjs';
 import assert from 'node:assert/strict';
 import { fresh, compile, seed, snapshot, advance, evaluation, save, restore, catalog } from './organelle-harness.mjs';
 
@@ -60,7 +61,7 @@ assert.equal(separated.predations,0); assert.equal(separated.attacks,0);
 
 // A visible patch ahead can subsequently be approached and processed. Its
 // particles expose only geometry/appearance and soft mechanical resistance.
-assert.equal(api.add_food(wrap(moving.x+Math.cos(moving.angle)*20,1200),wrap(moving.y+Math.sin(moving.angle)*20,760),64),64);
+placeByTissue(api,moving,5);
 let bestGut=0, usableDigestion=0, sawSmallObject=false, sawSoftContact=false;
 for(let tick=0; tick<600; tick+=10){
   const current = advance(api,10), cell=current.cells.find(item=>item.id===initial.id);

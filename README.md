@@ -63,22 +63,25 @@ If Document Picture-in-Picture is unavailable, **Window** opens an ordinary popu
 
 ## Editing the environment
 
-Open **Environment** in the player to select, tune, add or remove individual objects while a simulation runs or is paused. Choose an object from the list or click its marker in the world. Its controls edit that object immediately; strength **0** disables an emitter. Choose a tool and click the world to place another object, or focus the canvas and press **Enter** to place it at the view center. The trash button removes the selected object.
+Click or tap an emitter, absorber, flow generator or barrier to open its controls. Drag it to a new position while the world runs or is paused. With the canvas focused, the arrow keys nudge the selected object by one world unit, or ten with **Shift**. Its strength, radius and other settings stay with it. Open **Environment** to select an object from the list, remove it, or choose a placement tool. Click to place an object, or press **Enter** on the canvas to place it at the center of the view.
 
-The same controls are available when creating or copying an **Environment** recipe. Its field preview holds barriers at their authored positions; floating motion begins when the actual simulation runs. The builder also has background temperature/light/flow, starting mineral concentration and external organic input under **Background & starting conditions**. Live environmental tuning uses object controls; simulation-wide mutation and display preferences remain in Settings.
+The environment builder has the same positioning controls, plus starting mineral and gas concentrations. Floating barriers hold their positions in the preview and start drifting when the simulation runs. The player and builder each remember their chosen field overlay across edits and reloads. The floating player shares the main player's selection.
 
 | Object | Controls and effect |
 | --- | --- |
 | Light | Strength and radius set local illumination. |
 | Heat / cooling | Positive strength heats and negative strength cools. |
 | Vortex | Radius sets its extent; strength controls intensity and rotation direction. |
-| Nutrient spring / absorber | Add or remove dissolved minerals locally; the absorber cannot remove more material than is available. Cumulative absorbed material appears in the Environment drawer and Metrics resource accounting. |
+| Mineral emitter / absorber | Adds or removes dissolved minerals used to build cells. |
+| Oxygen emitter / absorber | Adds or removes dissolved O₂ used for respiration and aerobic decay. |
+| Inorganic carbon emitter / absorber | Adds or removes dissolved inorganic carbon used in photosynthesis. |
+| Aerator | Exchanges both gases with the configured reservoir, including in sealed water. |
 | Directional jet | Direction, length and half-width describe a local stream. Negative strength reverses it. |
 | Current band | Direction, length and half-width describe a long current; combine bands with opposite strengths for neighboring currents. |
 | Radial flow | Positive strength drives outward flow; negative strength draws inward. |
 | Fixed / floating barrier | Length, thickness and angle define the obstacle. Fixed barriers stay in place; floating barriers drift with the local current. Their motion mode can be changed after placement. |
 
-**World size** is configurable in the builder and live drawer: width **400–4,800**, height **400–3,040**, in increments of **20** world units. This changes the simulated domain and field grid. A resize preserves existing material; newly added space does not create nutrients. Every rotated barrier must fit within the world dimensions. The **Current bands** preset demonstrates a larger world with opposing currents, a vortex, fixed and floating barriers, and a nutrient absorber.
+**World size** is configurable in the builder and live drawer: width **400–4,800**, height **400–3,040**, in increments of **20** world units. This changes the simulated domain and field grid. A resize preserves existing material; newly added space does not create nutrients. Every rotated barrier must fit within the world dimensions. The **Current bands** preset demonstrates a larger world with opposing currents, a vortex, fixed and floating barriers, and a mineral absorber.
 
 **Navigation:** scroll to zoom around the pointer; Shift-drag, middle-drag or right-drag to pan. Touch supports dragging and pinch zoom. The **−**, **+** and **Fit** buttons work in both views. With the canvas focused, **+ / −** zoom and **Home** fits the world.
 
@@ -86,9 +89,9 @@ Currents are prescribed flow fields, not a pressure-solving fluid simulation. Ba
 
 ## Gas exchange
 
-The environment now tracks dissolved oxygen and effective inorganic carbon alongside minerals. Photosynthesis consumes inorganic carbon and creates organic carbon plus oxygen. Aerobic respiration consumes organic carbon and oxygen, producing inorganic carbon and usable energy. Digestion supplies carbon substrates; it does not bypass oxygen demand. Phototrophs also respire in darkness. The core provides basal respiration; built `respire(oxygen)` machinery adds regulated capacity. The `energy` reserve is ATP-like usable energy, while organic carbon carries 20 chemical-potential units per carbon unit and respiration yields 16 usable units.
+New worlds begin with dissolved minerals, oxygen and inorganic carbon. The builder sets their initial concentrations. Each chemical has its own local emitter and absorber. Strength 1 requests 1.5 units per simulated second across the entire footprint. Radius spreads that throughput over nearby water patches. Absorbers draw only from available stock. **Gases & atmosphere** controls surface exchange. An aerator exchanges both gases with the configured reservoir, including in sealed water.
 
-Choose **Oxygen** or **Inorganic carbon** in the field selector. **Gases & atmosphere** sets sealed/open water, equilibrium concentrations and finite surface exchange. The builder also sets starting gas amounts; live controls preserve existing inventories. Oxygen and carbon emitters/absorbers and local aerators can be added, tuned and removed in both editors; an aerator connects its local water to the reservoir even when the rest of the surface is sealed. Built-in habitats use open water. Blank recipes, imports without gas settings and pre-gas checkpoints default to sealed water with one unit of each gas per patch; copies retain their recipe's settings.
+Light powers built photosynthetic machinery. Fixing one unit of dissolved inorganic carbon produces one organic carbon and one O₂. Producers release 12% of the newly fixed carbon as edible exudate. Consumers digest organic matter from the ecosystem. Both producers and consumers can respire one organic carbon with one O₂, returning one inorganic carbon to the water via membrane exchange. Respiration converts 80% of the associated chemical energy to ATP, or 16 units for plain carbon. Minerals are the pooled noncarbon resource used to build and repair cells. Carcasses, spills and digestive waste keep their accounted material and energy.
 
 Organism Overview shows internal gases, organic carbon, fixation and respiration. Metrics includes carbon and oxygen inventories and balances, including atmospheric input/output and background aerobic decay. All units are abstract; carbonate chemistry, pH and anaerobic pathways are outside the current model. See [Gas exchange and material cycles](design/gas-exchange.md) for reactions, phase order, conservation and migration rules.
 
@@ -139,7 +142,7 @@ Organic matter retains its composition through ingestion, gut storage, spills, d
 
 | Material | Origin | Processing |
 | --- | --- | --- |
-| Exudate | Released photosynthetic surplus and supplied organic meals | Fast, readily assimilated carbon source |
+| Exudate | Newly fixed carbon released by producers | Fast, readily assimilated carbon source |
 | Tissue | Dead cells, extracted cell contents and engulfed structural material | Slower, nutrient-rich processing that leaves digestive residue |
 | Waste | Unassimilated tissue residue | Slow recovery of accessible carbon; refractory carbon remains in residue |
 
@@ -233,7 +236,7 @@ In an organism's read-only Program view, hover, place the caret or select an exp
 
 IndexedDB stores documents and complete worlds; localStorage stores preferences and editor drafts. Changing runs checkpoint every two seconds and after key actions, and reopen paused. The save indicator reports failures. The active simulation advances when its main view is visible or its floating player is open, including while the main app shows a catalog. An open player uses a timer when both windows are hidden; browser throttling can slow it. There is no offline catch-up. Web Locks protect a run from competing writers in multiple tabs. Clearing browser site data removes its local saves; export genomes and environments for portable copies.
 
-**Current formats: engine ABI 17, checkpoint 13, genome language 3 with additive cellular metadata.** Genome JSON exports use `agar.genome` version 2 with `languageVersion: 3`; environment JSON remains version 1. Plain `.cell` source is checked with the current compiler. Checkpoint-3 simulations retain their actual organs, resources, memory and source. Their previously unclassified organic particles and gut contents import as tissue; their new protein pools start empty. Checkpoints 4 through 12 also remain readable. Previously built parts keep their recorded investment and existing food keeps its original carbon and energy. Older runs start with zero player withdrawals. Older states receive explicit initial gases and a one-time ledger for existing carbon; their future follows the new chemistry. New saves retain cellular products, ingredient ledgers, replication, mechanism identities and construction controls. Existing recipes default to allowing new starts and requesting no recycling. Corrected optical coverage and directional primitive interactions intentionally change affected trajectories. The old `build.*` source spelling remains an alias for expression.
+**Current formats: engine ABI 18, checkpoint 14, genome language 3 with additive cellular metadata.** Genome JSON exports use `agar.genome` version 2 with `languageVersion: 3`; environment JSON remains version 1. Plain `.cell` source is checked with the current compiler. Checkpoint-3 simulations retain their actual organs, resources, memory and source. Their previously unclassified organic particles and gut contents import as tissue; their new protein pools start empty. Checkpoints 4 through 13 also remain readable. Previously supplied particles and their accounted resources carry over. Automatic food supply ends at import. Previously built parts keep their recorded investment and existing food keeps its original carbon and energy. Older runs start with zero player withdrawals. Older states receive explicit initial gases and a one-time ledger for existing carbon; their future follows the new chemistry. New saves retain cellular products, ingredient ledgers, replication, mechanism identities and construction controls. Existing recipes default to allowing new starts and requesting no recycling. Corrected optical coverage and directional primitive interactions intentionally change affected trajectories. The old `build.*` source spelling remains an alias for expression.
 
 The organelle model is an intentional compatibility break. Checkpoints 1/2 are rejected before replacing the engine state. Older saved genomes remain viewable, renameable and exportable, but must be manually updated in a new copy before introduction. Their investment fractions and omniscient sensors are not silently converted into free organs. Saved records and old files remain preserved. New and old browser documents keep the same storage namespace.
 
@@ -341,7 +344,7 @@ checkpoint and render-buffer equality at sampled boundaries.
 
 ```sh
 npm run bench:simulation
-npm run bench:simulation -- --baseline /path/to/original/engine/pkg/agar_engine.wasm --output experiments/comparison.json
+npm run bench:simulation -- --baseline /path/to/compatible-ABI18/engine/pkg/agar_engine.wasm --output experiments/comparison.json
 ```
 
 The benchmark uses V8's optimizing WASM tier from the start to avoid timing tier

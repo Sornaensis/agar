@@ -17,13 +17,13 @@ export const BUILTIN_GENOMES: readonly GenomeDocument[] = freeze(PRESETS.map(pre
 
 export const BUILTIN_ENVIRONMENTS: readonly EnvironmentDocument[] = freeze([
   {
-    id: 'builtin:environment:still-water', name: 'Still water', description: 'A compact, dark pool with a steady supply of scattered organic particles.', createdAt: 0, updatedAt: 0,
-    config: { width: 640, height: 480, foodRate: 6, ambientTemperature: 0.5, ambientLight: 0, currentStrength: 0, initialNutrients: 0.3, sources: [] },
+    id: 'builtin:environment:still-water', name: 'Still water', description: 'A quiet, evenly lit pool where phototrophs turn dissolved carbon into biomass and exudate.', createdAt: 0, updatedAt: 0,
+    config: { width: 640, height: 480, ambientTemperature: 0.5, ambientLight: 0.85, currentStrength: 0, initialNutrients: 0.3, sources: [] },
   },
   {
     id: 'builtin:environment:sunlit-pond', name: 'Sunlit pond', description: 'Light and minerals support producers; organic food comes from living cells and their remains.', createdAt: 0, updatedAt: 0,
     config: {
-      foodRate: 0, ambientTemperature: 0.5, ambientLight: 0.4, currentStrength: 3, initialNutrients: 0.3,
+      ambientTemperature: 0.5, ambientLight: 0.4, currentStrength: 3, initialNutrients: 0.3,
       sources: [
         { kind: 0, x: 624, y: 364.8, strength: 0.95, radius: 280 },
         { kind: 1, x: 936, y: 243.2, strength: 0.35, radius: 180 },
@@ -35,7 +35,7 @@ export const BUILTIN_ENVIRONMENTS: readonly EnvironmentDocument[] = freeze([
   {
     id: 'builtin:environment:thermal-currents', name: 'Thermal currents', description: 'A producer-powered habitat with warm and cool currents and a mineral spring.', createdAt: 0, updatedAt: 0,
     config: {
-      foodRate: 0, ambientTemperature: 0.5, ambientLight: 0.45, currentStrength: 8, initialNutrients: 0.5,
+      ambientTemperature: 0.5, ambientLight: 0.45, currentStrength: 8, initialNutrients: 0.5,
       sources: [
         { kind: 0, x: 600, y: 380, strength: 0.35, radius: 320 },
         { kind: 1, x: 300, y: 240, strength: 0.65, radius: 220 },
@@ -49,26 +49,26 @@ export const BUILTIN_ENVIRONMENTS: readonly EnvironmentDocument[] = freeze([
     id: 'builtin:environment:grazing-shallows', name: 'Grazing shallows',
     description: 'A cool, sunlit pond with a mild current. Cells release organic food into the water and exchange resources on contact.',
     createdAt: 0, updatedAt: 0,
-    config: { width: 400, height: 400, foodRate: 0, ambientTemperature: 0.15, ambientLight: 0.95,
+    config: { width: 400, height: 400, ambientTemperature: 0.15, ambientLight: 0.95,
       currentStrength: 1, initialNutrients: 0.9, exchangeRate: 0.2, sources: [] },
   },
   {
     id: 'builtin:environment:light-and-shade', name: 'Light and shade',
-    description: 'A lamp lights one side of a fed pool. The dim margins offer organic food to cells that switch feeding modes.',
+    description: 'A lamp lights the producer bed. A current carries cells and released organic matter between the bright center and the shaded margins.',
     createdAt: 0, updatedAt: 0,
-    config: { width: 600, height: 400, foodRate: 3, ambientTemperature: 0.5, ambientLight: 0.12,
-      currentStrength: 0, initialNutrients: 1, exchangeRate: 0.15,
-      sources: [{ kind: 0, x: 180, y: 200, strength: 0.95, radius: 150 }] },
+    config: { width: 400, height: 400, ambientTemperature: 0.4, ambientLight: 0.24,
+      currentStrength: 4, initialNutrients: 1, exchangeRate: 0.15,
+      sources: [{ kind: 0, x: 125, y: 200, strength: 0.95, radius: 95 }] },
   },
   {
     id: 'builtin:environment:colony-pool', name: 'Colony pool', description: 'Still, evenly lit water with dissolved minerals for observing division and contact between relatives.', createdAt: 0, updatedAt: 0,
-    config: { width:400, height:400, foodRate:0, ambientTemperature:0.5, ambientLight:0.85, currentStrength:0, initialNutrients:3, sources:[] },
+    config: { width:400, height:400, ambientTemperature:0.5, ambientLight:0.85, currentStrength:0, initialNutrients:3, sources:[] },
   },
   {
     id: 'builtin:environment:current-bands', name: 'Current bands',
     description: 'A larger habitat with opposing currents, a sheltered channel, a drifting barrier, and local nutrient input and removal.', createdAt: 0, updatedAt: 0,
     config: {
-      width: 2400, height: 1520, foodRate: 0, ambientTemperature: 0.5, ambientLight: 0, currentStrength: 0, initialNutrients: 0.3,
+      width: 2400, height: 1520, ambientTemperature: 0.5, ambientLight: 0, currentStrength: 0, initialNutrients: 0.3,
       sources: [
         { kind: 0, x: 750, y: 440, strength: 0.95, radius: 620 },
         { kind: 0, x: 1750, y: 1050, strength: 0.85, radius: 560 },
@@ -88,7 +88,7 @@ export const BUILTIN_ENVIRONMENTS: readonly EnvironmentDocument[] = freeze([
 ].map(item => ({ ...item, config: {
   width: item.config.width ?? 1200, height: item.config.height ?? 760,
   ambientTemperature: item.config.ambientTemperature, ambientLight: item.config.ambientLight,
-  currentStrength: item.config.currentStrength, foodRate: item.config.foodRate, initialNutrients: item.config.initialNutrients,
+  currentStrength: item.config.currentStrength, initialNutrients: item.config.initialNutrients,
   barriers: item.config.barriers ?? [],
   gases: { initialOxygen: 1, initialCarbon: 1, mode: 'open', exchangeRate: item.config.exchangeRate ?? 0.02,
     oxygenEquilibrium: 1, carbonEquilibrium: 1 },
@@ -99,9 +99,9 @@ export interface BuiltinSimulation {
   id: string; name: string; description: string; environmentId: string; seed: number;
   populations: Array<{ genomeId: string; count: number }>;
 }
-/** The new-simulation dialog and scenario checks start with identical food and mutation settings. */
-export function simulationStartSettings(config: Pick<EnvironmentConfig, 'foodRate'>): { initialFood: number; mutationRate: number } {
-  return { initialFood: config.foodRate > 0 ? 360 : 0, mutationRate: 0.1 };
+/** The standard mutation rate applies to every built-in launch. */
+export function simulationStartSettings(): { mutationRate: number } {
+  return { mutationRate: 0.1 };
 }
 
 export const BUILTIN_SIMULATIONS: readonly BuiltinSimulation[] = freeze([
@@ -128,7 +128,7 @@ export const BUILTIN_SIMULATIONS: readonly BuiltinSimulation[] = freeze([
     id: 'builtin:simulation:light-and-shade', name: 'Light and shade',
     description: 'Mixotrophs bask near the lamp and feed in the shade. Rememberers follow chemical food cues.',
     environmentId: 'builtin:environment:light-and-shade', seed: 42,
-    populations: [{ genomeId: 'builtin:genome:mixotroph', count: 12 }, { genomeId: 'builtin:genome:rememberer', count: 2 }],
+    populations: [{ genomeId: 'builtin:genome:phototroph', count: 32 }, { genomeId: 'builtin:genome:mixotroph', count: 12 }, { genomeId: 'builtin:genome:rememberer', count: 2 }],
   },
   {
     id: 'builtin:simulation:nurse-rosette', name: 'Nurse rosette',

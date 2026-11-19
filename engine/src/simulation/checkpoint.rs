@@ -15,12 +15,10 @@ impl World {
             w.u64(v);
         }
         for v in [
-            self.food_rate,
             self.mutation_rate,
             self.photosynthesis_total,
             self.nutrient_imports,
             self.energy_imports,
-            self.food_credit,
         ] {
             w.f64(v);
         }
@@ -122,12 +120,12 @@ impl World {
             *v = r.u64()?;
             ensure(*v < u64::MAX / 2, "counter outside safe range")?;
         }
-        let food_rate = r.range(0.0, 60.0)?;
+        if version < 14 { r.range(0.0, 60.0)?; } // Obsolete provisioning rate.
         let mutation_rate = r.range(0.0, 1.0)?;
         let photosynthesis_total = r.range(0.0, 1e100)?;
         let nutrient_imports = r.range(0.0, 1e100)?;
         let energy_imports = r.range(0.0, 1e100)?;
-        let food_credit = r.range(0.0, 1.0)?;
+        if version < 14 { r.range(0.0, 1.0)?; } // Obsolete fractional provisioning credit.
         let mut chemistry = [0.0; 5];
         if version >= 9 { for value in &mut chemistry { *value = r.range(0.0, 1e100)?; } }
         let (energy_withdrawn, mineral_withdrawn) = if version >= 12 {
@@ -404,14 +402,12 @@ impl World {
             mutations_skipped: counts[5],
             predations: counts[6],
             attacks: counts[7],
-            food_rate,
             mutation_rate,
             photosynthesis_total,
             nutrient_imports,
             energy_imports, energy_withdrawn, mineral_withdrawn,
             carbon_fixed_total: chemistry[0], carbon_respired_total: chemistry[1],
             decay_carbon_respired_total: chemistry[2], carbon_imports: chemistry[3], legacy_carbon_imports: chemistry[4],
-            food_credit,
             next_id,
             next_food_id,
             rng: Rng(rng),
@@ -479,7 +475,7 @@ mod tests {
     fn enrichment_roundtrips_and_requires_carrier_carbon() {
         let mut live = Engine::new();
         let genome = live.compile("thrust=0;turn=0;divide=false;feed=0;");
-        live.world.reset_empty(8, 0);
+        live.world.reset_empty(8);
         live.world.try_seed_cells(genome, 1, 100.0, 100.0).unwrap();
         // Move some reserve carbon into a particle so the supply ledgers stay exact.
         live.world.cells[0].organic_carbon -= 0.1;
@@ -512,7 +508,7 @@ mod tests {
     fn mildly_heat_damaged_universal_core_survives_and_roundtrips_without_free_headroom() {
         let mut live = Engine::new();
         let id = live.compile("thrust=0;turn=0;divide=true;grow=1;absorb=0;feed=0;");
-        live.world.food_rate = 0.0;
+
         live.world.environment.configure(0.9, 0.0, 0.0);
         live.world.try_seed_cells(id, 1, 200.0, 200.0).unwrap();
         live.world.step(&mut live.genomes);
@@ -536,11 +532,11 @@ mod tests {
     fn aggregate_restore_ledgers_reject_checksum_correct_resource_injection_atomically() {
         let mut live = Engine::new();
         let id = live.compile("thrust=0;turn=0;divide=false;feed=0;absorb=0;");
-        live.world.reset_empty(97, 0);
+        live.world.reset_empty(97);
         live.world
             .try_seed_fixture(id, 1, 200.0, 200.0, BodyFixture::Bare)
             .unwrap();
-        live.world.add_food(300.0, 200.0, 1);
+        live.world.fixture_exudate(300.0, 200.0, 1);
         let before = checkpoint::save(&live).unwrap();
         assert_eq!(
             checkpoint::save(&checkpoint::restore(&before).unwrap()).unwrap(),
@@ -590,7 +586,8 @@ mod tests {
     fn old_cells_and_uncapped_particles_roundtrip_with_exact_gut_substrates() {
         let mut live = Engine::new();
         let id = live.compile("thrust=0;turn=0;divide=false;feed=0;absorb=0;");
-        live.world.reset_empty(31, 2501);
+        live.world.reset_empty(31);
+        live.world.fixture_exudate(-1.0,-1.0,2501);
         live.world
             .try_seed_fixture(id, 1, 200.0, 200.0, BodyFixture::Scavenger)
             .unwrap();
@@ -618,13 +615,16 @@ mod tests {
     }
 
     #[test]
-    fn failed_organic_introduction_and_reset_preserve_the_world_atomically() {
-        let mut live = Engine::new();
-        live.world.reset_empty(12, 5);
-        let before = checkpoint::save(&live).unwrap();
-        assert!(live.world.try_add_food(100.0, 100.0, usize::MAX).is_err());
-        assert_eq!(checkpoint::save(&live).unwrap(), before);
-        assert!(live.world.try_reset_empty(37, usize::MAX).is_err());
-        assert_eq!(checkpoint::save(&live).unwrap(), before);
+    fn empty_reset_stays_organic_free_and_has_no_external_carbon_or_energy_provision() {
+        let mut engine = Engine::new();
+        engine.world.reset_empty(12);
+        let initial_carbon = engine.world.carbon_input_total();
+        for _ in 0..240 { engine.world.step(&mut engine.genomes); }
+        assert!(engine.world.food.is_empty());
+        assert_eq!(engine.world.energy_input_total(), 0.0);
+        assert_eq!(engine.world.carbon_input_total(), initial_carbon);
+        assert_eq!(engine.world.organic_food_total(), 0.0);
+        let saved = checkpoint::save(&engine).unwrap();
+        assert_eq!(checkpoint::save(&checkpoint::restore(&saved).unwrap()).unwrap(), saved);
     }
 }

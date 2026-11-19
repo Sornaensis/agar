@@ -32,7 +32,7 @@ fn enlarged_world_sensing_collisions_spawning_and_snapshots_use_live_dimensions(
     let mut world = World::empty(42);
     assert!(world.set_world_size(2400.0, 1520.0));
     world.environment.configure(0.5, 1.0, 0.0);
-    world.set_food_rate(0.0);
+
     let observer = place(&mut world, BodyFixture::Hunter, 1205.0, 1000.0);
     let target = place(&mut world, BodyFixture::Bare, 1235.0, 1000.0);
     assert!(
@@ -73,7 +73,7 @@ fn enlarged_world_sensing_collisions_spawning_and_snapshots_use_live_dimensions(
     world.render_snapshot(&mut snapshot);
     assert_eq!(&snapshot[7..9], &[2400.0, 1520.0]);
     world.seed_cells(1, 100, -1.0, -1.0);
-    world.add_food(-1.0, -1.0, 100);
+    world.fixture_exudate(-1.0, -1.0, 100);
     assert!(
         world
             .cells
@@ -97,7 +97,7 @@ fn enlarged_world_sensing_collisions_spawning_and_snapshots_use_live_dimensions(
 #[test]
 fn barriers_stop_live_cells_and_particles_and_occlude_physical_vision() {
     let mut world = World::empty(42);
-    world.set_food_rate(0.0);
+
     world.environment.configure(0.5, 1.0, 0.0);
     let observer = place(&mut world, BodyFixture::Hunter, 550.0, 380.0);
     place(&mut world, BodyFixture::Bare, 650.0, 380.0);
@@ -119,7 +119,7 @@ fn barriers_stop_live_cells_and_particles_and_occlude_physical_vision() {
         "opaque walls block sight"
     );
     world.cells[observer].vx = 6000.0;
-    world.add_food(550.0, 380.0, 1);
+    world.fixture_exudate(550.0, 380.0, 1);
     world.food[0].x = 586.0;
     world.food[0].y = 380.0;
     let flow = world.environment.add_source(6, 600.0, 380.0, 1.0, 100.0);
@@ -142,10 +142,10 @@ fn barriers_stop_live_cells_and_particles_and_occlude_physical_vision() {
 #[test]
 fn live_world_resize_and_absorber_roundtrip_keep_full_material_ledger_and_exact_replay() {
     let mut world = World::empty(91);
-    world.set_food_rate(0.0);
+
     world.set_mutation_rate(0.0);
     place(&mut world, BodyFixture::Bare, 600.0, 380.0);
-    world.add_food(-1.0, -1.0, 10);
+    world.fixture_exudate(-1.0, -1.0, 10);
     let mass = world.nutrient_total();
     assert!(world.set_world_size(2400.0, 1520.0));
     assert_eq!((world.cells[0].x, world.cells[0].y), (1200.0, 760.0));

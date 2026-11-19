@@ -225,8 +225,8 @@ impl Environment {
             width: width.clamp(10.0, 400.0),
             angle: angle.rem_euclid(TAU),
             floating,
-            vx: 0.0,
-            vy: 0.0,
+            vx: if floating && b.floating { b.vx } else { 0.0 },
+            vy: if floating && b.floating { b.vy } else { 0.0 },
         };
         self.rebuild_barriers();
         true

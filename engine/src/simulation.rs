@@ -43,6 +43,8 @@ mod foraging_tests;
 mod environment_tests;
 #[cfg(test)]
 mod performance_tests;
+#[cfg(test)]
+mod test_substrate;
 
 pub const WIDTH: f64 = 1200.0;
 pub const HEIGHT: f64 = 760.0;
@@ -57,7 +59,8 @@ pub const LIFESPAN: f64 = 0.0;
 pub const MEMORY_REGISTER_COST: f64 = 0.0025;
 pub const MAX_GENOME_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_GENOMES: usize = 2048;
-const FOOD_NUTRIENTS: f64 = 0.25;
+#[cfg(test)]
+const FIXTURE_MINERALS: f64 = 0.25;
 /// Consistent abstract stoichiometry. Particle/gut energy is chemical potential,
 /// never usable cellular energy. Structural products carry one carbon per mass.
 pub const CHEMICAL_ENERGY_PER_CARBON: f64 = 20.0;
@@ -670,7 +673,6 @@ pub struct World {
     pub births: u64,
     pub deaths: u64,
     pub eaten: u64,
-    pub food_rate: f64,
     pub mutation_rate: f64,
     pub mutations: u64,
     pub mutations_skipped: u64,
@@ -687,7 +689,6 @@ pub struct World {
     pub decay_carbon_respired_total: f64,
     carbon_imports: f64,
     pub legacy_carbon_imports: f64,
-    food_credit: f64,
     next_id: u32,
     next_food_id: u64,
     rng: Rng,
@@ -707,7 +708,6 @@ impl World {
             births: 0,
             deaths: 0,
             eaten: 0,
-            food_rate: 6.0,
             mutation_rate: 0.1,
             mutations: 0,
             mutations_skipped: 0,
@@ -724,7 +724,6 @@ impl World {
             decay_carbon_respired_total: 0.0,
             carbon_imports: 0.0,
             legacy_carbon_imports: 0.0,
-            food_credit: 0.0,
             next_id: 1,
             next_food_id: 1,
             rng: Rng::new(seed),
@@ -775,25 +774,18 @@ impl World {
         next.environment = self.environment.clone();
         next.environment.reset_dynamic();
         next.mutation_rate = self.mutation_rate;
-        next.food_rate = self.food_rate;
-        next.try_add_food(-1.0, -1.0, 360)?;
         next.seed_bodies(genome_id, 22, FounderPlacement::Scatter, Body::founder, program)?;
         *self = next;
         Ok(())
     }
-    pub fn reset_empty(&mut self, seed: u32, initial_food: usize) {
-        self.try_reset_empty(seed, initial_food)
-            .expect("Unable to allocate organic material");
-    }
-    pub fn try_reset_empty(&mut self, seed: u32, initial_food: usize) -> Result<(), String> {
+    /// Clear organisms and all organic matter. Dissolved pools are initialized
+    /// from the environment recipe. Founders can be introduced explicitly.
+    pub fn reset_empty(&mut self, seed: u32) {
         let mut next = Self::empty(seed);
         next.environment = self.environment.clone();
         next.environment.reset_dynamic();
         next.mutation_rate = self.mutation_rate;
-        next.food_rate = self.food_rate;
-        next.try_add_food(-1.0, -1.0, initial_food)?;
         *self = next;
-        Ok(())
     }
     pub fn time(&self) -> f64 {
         self.ticks as f64 * DT
@@ -960,45 +952,6 @@ impl World {
         });
         self.next_food_id += 1;
         true
-    }
-    pub fn add_food(&mut self, x: f64, y: f64, count: usize) -> usize {
-        self.try_add_food(x, y, count).unwrap_or(0)
-    }
-    pub fn try_add_food(&mut self, x: f64, y: f64, count: usize) -> Result<usize, String> {
-        if count as u128 > (u64::MAX / 2 - self.next_food_id) as u128 {
-            return Err(
-                "Cannot add organic particles: the identifier sequence is exhausted.".into(),
-            );
-        }
-        self.food
-            .try_reserve(count)
-            .map_err(|_| "Cannot add organic particles: not enough memory.".to_string())?;
-        let mut added = 0;
-        for _ in 0..count {
-            let (fx, fy) = if x < 0.0 || y < 0.0 || !x.is_finite() || !y.is_finite() {
-                (self.rng.unit() * self.environment.width, self.rng.unit() * self.environment.height)
-            } else {
-                let a = self.rng.unit() * TAU;
-                let r = self.rng.unit().sqrt() * 45.0;
-                (wrap(x + a.cos() * r, self.environment.width), wrap(y + a.sin() * r, self.environment.height))
-            };
-            let energy = 18.0 + self.rng.unit() * 6.0;
-            if !self.particle(OrganicKind::Exudate, fx, fy, energy, FOOD_NUTRIENTS) {
-                break;
-            }
-            self.nutrient_imports += FOOD_NUTRIENTS;
-            self.energy_imports += energy;
-            self.carbon_imports += energy / CHEMICAL_ENERGY_PER_CARBON;
-            added += 1;
-        }
-        Ok(added)
-    }
-    pub fn set_food_rate(&mut self, rate: f64) {
-        self.food_rate = if rate.is_finite() {
-            rate.clamp(0.0, 60.0)
-        } else {
-            0.0
-        };
     }
     pub fn set_mutation_rate(&mut self, rate: f64) {
         self.mutation_rate = if rate.is_finite() {
@@ -1487,7 +1440,6 @@ impl World {
             .cells
             .len()
             .checked_mul(20)
-            .and_then(|n| n.checked_add((self.food_rate * DT).ceil() as usize + 1))
             .ok_or("Simulation paused: organic material exceeds addressable memory.")?;
         self.reserve_organic_packets(packet_energy, packet_overhead)?;
         self.environment.step(self.time());
@@ -1780,10 +1732,6 @@ impl World {
         // overflow to the local environment rather than cloning a compartment.
         self.spill_excess_stores_in(phases, false);
         self.remove_dead_in(phases);
-        self.food_credit += self.food_rate * DT;
-        let food = self.food_credit.floor() as usize;
-        self.food_credit -= food as f64;
-        self.add_food(-1.0, -1.0, food);
         self.settle_barriers();
         self.ticks += 1;
         Ok(())
@@ -2665,7 +2613,7 @@ impl World {
             self.environment.height as f64,
             0.0,
             0.0,
-            self.food_rate as f64,
+            0.0, // Reserved former provision-rate slot.
         ]);
         for c in &self.cells {
             self.snapshot_cell_into(c, target);
@@ -2906,7 +2854,7 @@ mod workspace_tests {
         reused.environment.configure(0.5, 0.8, 12.0);
         reused.environment.add_source(1, 10.0, 755.0, 0.3, 80.0);
         reused.environment.add_source(2, 1195.0, 5.0, -0.7, 90.0);
-        reused.set_food_rate(0.0);
+
         reused.set_mutation_rate(0.0);
         for fixture in [
             BodyFixture::Producer,
@@ -2917,7 +2865,7 @@ mod workspace_tests {
                 .try_seed_fixture(1, 2, 1190.0, 750.0, fixture)
                 .unwrap();
         }
-        reused.add_food(1190.0, 750.0, 20);
+        reused.fixture_exudate(1190.0, 750.0, 20);
 
         for tick in 0..32 {
             if tick == 5 {
@@ -2928,7 +2876,8 @@ mod workspace_tests {
                 // Still valid at checkpoint time; ordinary maintenance kills it.
                 reused.cells[0].energy = 1e-12;
             } else if tick == 18 {
-                reused.reset_empty(92, 20);
+                reused.reset_empty(92);
+                reused.fixture_exudate(-1.0, -1.0, 20);
                 reused.try_seed_cells(1, 2, 20.0, 20.0).unwrap();
             } else if tick == 22 {
                 reused
@@ -2951,7 +2900,7 @@ mod workspace_tests {
     fn successful_ticks_retain_buffers_and_failed_preflight_preserves_them_and_state() {
         let mut world = World::empty(43);
         let mut programs = genomes();
-        world.set_food_rate(0.0);
+
         world.set_mutation_rate(0.0);
         world.try_seed_cells(1, 2, 200.0, 200.0).unwrap();
         world.try_step(&mut programs).unwrap();
@@ -2975,11 +2924,7 @@ mod workspace_tests {
         world.next_food_id = next_food_id;
         world.try_step(&mut programs).unwrap();
 
-        let before = state(&world);
-        assert!(world.try_reset_empty(123, usize::MAX).is_err());
-        assert_eq!(state(&world), before);
-        assert_eq!(world.workspace.outputs.as_ptr(), outputs);
-        world.try_reset_empty(123, 0).unwrap();
+        world.reset_empty(123);
         assert!(world.workspace.capacities.is_empty());
         assert!(world.workspace.observations.inputs.is_empty());
         world.try_step(&mut programs).unwrap();

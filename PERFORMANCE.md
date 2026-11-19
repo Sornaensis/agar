@@ -1,5 +1,7 @@
 # Simulation performance
 
+The measurements below describe the archived engines named in each section. The current benchmark measures compatible ABI 18 builds and uses biologically produced organic particles. Reproduce historical comparisons with the corresponding archived harness and engine binaries.
+
 ## ABI 13: larger simulations
 
 These changes preserve the physical rules and checkpoint format 9. The current

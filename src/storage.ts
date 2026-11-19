@@ -6,7 +6,7 @@ export const GENOME_LANGUAGE_VERSION = 3;
 export interface GenomeDocument extends DocumentBase { source: string; description?: string; languageVersion: number }
 export interface EnvironmentConfig {
   width: number; height: number;
-  foodRate: number; ambientTemperature: number; ambientLight: number; currentStrength: number; initialNutrients: number;
+  ambientTemperature: number; ambientLight: number; currentStrength: number; initialNutrients: number;
   gases: GasConfig;
   sources: Array<Omit<EnvironmentSource, 'id'>>;
   barriers: Array<Omit<EnvironmentBarrier, 'id' | 'vx' | 'vy'>>;
@@ -19,11 +19,16 @@ export interface SimulationRecord extends DocumentBase {
   genomeNames: Record<string, string>; history: HistoryPoint[]; summary: SimulationSummary;
 }
 export type SimulationMetadata = Omit<SimulationRecord, 'state'>;
+const FIELD_OVERLAYS = ['none', 'light', 'heat', 'flow', 'nutrients', 'oxygen', 'carbon'] as const;
+type FieldOverlay = typeof FIELD_OVERLAYS[number];
+function readOverlay(value: unknown, fallback: FieldOverlay): FieldOverlay {
+  return FIELD_OVERLAYS.find(field => field === value) ?? fallback;
+}
 export interface UiPreferences {
   tab: 'simulation' | 'environments' | 'genomes';
   simulationView: 'player' | 'metrics' | 'settings' | 'genomes';
   activeSimulationId: string | null;
-  overlay: 'none' | 'light' | 'heat' | 'flow' | 'nutrients' | 'oxygen' | 'carbon';
+  overlay: FieldOverlay; builderOverlay: FieldOverlay;
   sensors: boolean; trails: boolean; colonyActivity: boolean;
 }
 export interface GenomeDraft { name: string; source: string }
@@ -43,7 +48,7 @@ const GENOME_DRAFT_KEY = 'cellarium.genome-draft.v1';
 const ENVIRONMENT_DRAFT_KEY = 'cellarium.environment-draft.v1';
 const encoder = new TextEncoder();
 const DEFAULT_PREFERENCES: UiPreferences = {
-  tab: 'simulation', simulationView: 'player', activeSimulationId: null, overlay: 'none', sensors: true, trails: false, colonyActivity: true,
+  tab: 'simulation', simulationView: 'player', activeSimulationId: null, overlay: 'none', builderOverlay: 'light', sensors: true, trails: false, colonyActivity: true,
 };
 
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -99,7 +104,6 @@ export function validateEnvironmentConfig(value: unknown): EnvironmentConfig {
   if (mode !== 'sealed' && mode !== 'open') throw new Error('Gas boundary must be sealed or open.');
   return {
     width, height,
-    foodRate: number(config.foodRate, 'External organic input', 0, 60),
     ambientTemperature: number(config.ambientTemperature, 'Temperature', 0, 1),
     ambientLight: number(config.ambientLight, 'Light', 0, 1),
     currentStrength: number(config.currentStrength, 'Current', 0, 30),
@@ -376,7 +380,8 @@ export function loadPreferences(): UiPreferences {
     tab: ['simulation', 'environments', 'genomes'].includes(saved.tab ?? '') ? saved.tab! : DEFAULT_PREFERENCES.tab,
     simulationView: ['player', 'metrics', 'settings', 'genomes'].includes(saved.simulationView ?? '') ? saved.simulationView! : DEFAULT_PREFERENCES.simulationView,
     activeSimulationId: typeof saved.activeSimulationId === 'string' && /^[A-Za-z0-9:_-]{1,160}$/.test(saved.activeSimulationId) && !saved.activeSimulationId.startsWith('builtin:') ? saved.activeSimulationId : null,
-    overlay: ['none', 'light', 'heat', 'flow', 'nutrients', 'oxygen', 'carbon'].includes(saved.overlay ?? '') ? saved.overlay! : 'none',
+    overlay: readOverlay(saved.overlay, DEFAULT_PREFERENCES.overlay),
+    builderOverlay: readOverlay(saved.builderOverlay, DEFAULT_PREFERENCES.builderOverlay),
     sensors: typeof saved.sensors === 'boolean' ? saved.sensors : true,
     colonyActivity: typeof saved.colonyActivity === 'boolean' ? saved.colonyActivity : true,
     trails: typeof saved.trails === 'boolean' ? saved.trails : false,

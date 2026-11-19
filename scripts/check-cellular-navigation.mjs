@@ -1,3 +1,4 @@
+import {placeByTissue} from './feeding-culture.mjs';
 import assert from 'node:assert/strict';
 import { fresh, compile, seed, snapshot, advance, body, evaluation, save, restore, catalog } from './organelle-harness.mjs';
 
@@ -48,17 +49,6 @@ function placeAhead(api, targetGenome, cell, separation) {
     wrap(cell.y + Math.sin(cell.angle) * separation - jitter.y, 760));
   return snapshot(api).cells.find(other => !known.has(other.id));
 }
-function placeParticleAhead(api, cell, noseDistance) {
-  const checkpoint = save(api);
-  assert.equal(api.add_food(cell.x, cell.y, 1), 1);
-  const trial = snapshot(api).food[0];
-  const jitter = { x: delta(trial.x - cell.x, 1200), y: delta(trial.y - cell.y, 760) };
-  assert.equal(restore(api, checkpoint), 1);
-  assert.equal(api.add_food(
-    wrap(cell.x + Math.cos(cell.angle) * (cell.radius + noseDistance) - jitter.x, 1200),
-    wrap(cell.y + Math.sin(cell.angle) * (cell.radius + noseDistance) - jitter.y, 760), 1), 1);
-  return snapshot(api).food[0];
-}
 
 const forager = await developed('Forager', ['Gut', 'ExudateEnzyme', 'Capture', 'LeftMotor', 'RightMotor', 'Vision', 'Touch']);
 const obstacleGenome = compile(forager.api, 'thrust=0;turn=0;divide=false;feed=0;absorb=0;');
@@ -84,7 +74,7 @@ assert.ok(frontCleared && Math.abs(surfaceTravel) > 1, 'The forager clears its f
 const moving = followed.cells.find(cell => cell.id === 1);
 assert.equal(followed.attacks, 0);
 assert.equal(followed.predations, 0);
-assert.equal(forager.api.add_food(wrap(moving.x + Math.cos(moving.angle) * 20, 1200), wrap(moving.y + Math.sin(moving.angle) * 20, 760), 64), 64);
+placeByTissue(forager.api,moving,5);
 let bestGut = 0, digestion = 0, sawParticle = false;
 for (let tick = 0; tick < 600; tick += 10) {
   const state = advance(forager.api, 10), cell = state.cells.find(cell => cell.id === 1);
@@ -136,7 +126,8 @@ assert.equal(hunted.photosynthesis, 0);
 {
   const fixture = await developed('Predator', ['Gut', 'ExudateEnzyme', 'Capture', 'TissueEnzyme', 'LeftMotor', 'RightMotor', 'Vision', 'Touch', 'Piercer']);
   const api = fixture.api, ready = advance(api, 1), cell = ready.cells[0];
-  const particle = placeParticleAhead(api, cell, 3.35);
+  const particle = placeByTissue(api, cell, 3.35);
+  Object.assign(cell,snapshot(api).cells.find(c=>c.id===cell.id));
   const separation = Math.hypot(delta(particle.x - cell.x, 1200), delta(particle.y - cell.y, 760));
   assert.ok(separation > cell.radius + 2.5, 'The introduced particle initially lies outside capture range');
   const sensed = values(api, 1);

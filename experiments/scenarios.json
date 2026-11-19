@@ -1,5 +1,5 @@
 {
-  "wasmSha256": "85199f0cbc08c85a34284a4dc13672d4164f19afa74daea23fe1672c1b4d6021",
+  "wasmSha256": "0a392499c920389028a20a31bb694f3b67ded906231cc6040f68cfc4d6a07c74",
   "ticksPerSecond": 30,
   "founderPlacement": "Seeded uniform scatter from the normal launch path",
   "environments": {
@@ -9,7 +9,6 @@
       "ambientTemperature": 0.15,
       "ambientLight": 0.95,
       "currentStrength": 1,
-      "foodRate": 0,
       "initialNutrients": 0.9,
       "barriers": [],
       "gases": {
@@ -23,12 +22,11 @@
       "sources": []
     },
     "builtin:environment:light-and-shade": {
-      "width": 600,
+      "width": 400,
       "height": 400,
-      "ambientTemperature": 0.5,
-      "ambientLight": 0.12,
-      "currentStrength": 0,
-      "foodRate": 3,
+      "ambientTemperature": 0.4,
+      "ambientLight": 0.24,
+      "currentStrength": 4,
       "initialNutrients": 1,
       "barriers": [],
       "gases": {
@@ -44,10 +42,10 @@
           "angle": 0,
           "length": 600,
           "kind": 0,
-          "x": 180,
+          "x": 125,
           "y": 200,
           "strength": 0.95,
-          "radius": 150
+          "radius": 95
         }
       ]
     },
@@ -57,7 +55,6 @@
       "ambientTemperature": 0.5,
       "ambientLight": 0.85,
       "currentStrength": 0,
-      "foodRate": 0,
       "initialNutrients": 3,
       "barriers": [],
       "gases": {
@@ -78,7 +75,6 @@
       "seconds": 120,
       "sampleSeconds": 2,
       "settings": {
-        "initialFood": 0,
         "mutationRate": 0.1
       },
       "cohorts": [
@@ -174,7 +170,6 @@
       "seconds": 600,
       "sampleSeconds": 2,
       "settings": {
-        "initialFood": 0,
         "mutationRate": 0.1
       },
       "cohorts": [
@@ -380,10 +375,14 @@
       "seconds": 150,
       "sampleSeconds": 0.5,
       "settings": {
-        "initialFood": 360,
         "mutationRate": 0.1
       },
       "cohorts": [
+        {
+          "name": "Phototroph",
+          "count": 32,
+          "sourceSha256": "aaa3d55fd9d2eaa6c331421e318a43f427bc432ff196e6c016d9b6ba4dde397b"
+        },
         {
           "name": "Mixotroph",
           "count": 12,
@@ -400,21 +399,23 @@
           "seed": 42,
           "observations": {
             "alive": {
-              "Mixotroph": 13,
+              "Phototroph": 43,
+              "Mixotroph": 10,
               "Rememberer": 2
             },
             "observedDescendants": {
-              "Mixotroph": 1,
+              "Phototroph": 11,
+              "Mixotroph": 0,
               "Rememberer": 0
             },
-            "firstObservedBirth": 116,
+            "firstObservedBirth": 94.5,
             "firstObservedKill": null,
             "kills": 0,
             "attacks": 0,
-            "foodCaptures": 298,
-            "cellsObservedFixingCarbonWithCanopy": 8,
-            "cellsObservedDigestingInShade": 11,
-            "cellsObservedInBothModes": 6,
+            "foodCaptures": 3584,
+            "cellsObservedFixingCarbonWithCanopy": 7,
+            "cellsObservedDigestingInShade": 12,
+            "cellsObservedInBothModes": 7,
             "rememberersObservedSteeringAfterCueLoss": 2
           },
           "checks": {
@@ -427,21 +428,23 @@
           "seed": 7,
           "observations": {
             "alive": {
-              "Mixotroph": 13,
+              "Phototroph": 42,
+              "Mixotroph": 11,
               "Rememberer": 2
             },
             "observedDescendants": {
+              "Phototroph": 10,
               "Mixotroph": 1,
               "Rememberer": 0
             },
-            "firstObservedBirth": 131.5,
+            "firstObservedBirth": 91,
             "firstObservedKill": null,
             "kills": 0,
             "attacks": 0,
-            "foodCaptures": 560,
-            "cellsObservedFixingCarbonWithCanopy": 6,
+            "foodCaptures": 4264,
+            "cellsObservedFixingCarbonWithCanopy": 9,
             "cellsObservedDigestingInShade": 10,
-            "cellsObservedInBothModes": 4,
+            "cellsObservedInBothModes": 7,
             "rememberersObservedSteeringAfterCueLoss": 2
           },
           "checks": {
@@ -454,21 +457,23 @@
           "seed": 2026,
           "observations": {
             "alive": {
-              "Mixotroph": 13,
+              "Phototroph": 42,
+              "Mixotroph": 8,
               "Rememberer": 2
             },
             "observedDescendants": {
-              "Mixotroph": 1,
+              "Phototroph": 10,
+              "Mixotroph": 0,
               "Rememberer": 0
             },
-            "firstObservedBirth": 116,
+            "firstObservedBirth": 91,
             "firstObservedKill": null,
             "kills": 0,
             "attacks": 0,
-            "foodCaptures": 361,
-            "cellsObservedFixingCarbonWithCanopy": 6,
-            "cellsObservedDigestingInShade": 11,
-            "cellsObservedInBothModes": 4,
+            "foodCaptures": 4833,
+            "cellsObservedFixingCarbonWithCanopy": 8,
+            "cellsObservedDigestingInShade": 12,
+            "cellsObservedInBothModes": 8,
             "rememberersObservedSteeringAfterCueLoss": 2
           },
           "checks": {
@@ -485,7 +490,6 @@
       "seconds": 160,
       "sampleSeconds": 0.5,
       "settings": {
-        "initialFood": 0,
         "mutationRate": 0.1
       },
       "cohorts": [
@@ -570,7 +574,6 @@
       "seconds": 360,
       "sampleSeconds": 2,
       "settings": {
-        "initialFood": 0,
         "mutationRate": 0.1
       },
       "cohorts": [
@@ -685,7 +688,6 @@
       "seconds": 155,
       "sampleSeconds": 0.2,
       "settings": {
-        "initialFood": 0,
         "mutationRate": 0.1
       },
       "cohorts": [

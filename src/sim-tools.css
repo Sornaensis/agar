@@ -1,7 +1,7 @@
 .cell-edit-actions { display:flex; flex-wrap:wrap; gap:5px; margin:10px 0; }
 .cell-edit-actions .button { min-height:34px; padding:5px 10px; }
 .cell-tool-bar { position:absolute; z-index:12; display:flex; align-items:center; gap:12px; max-width:calc(100% - 24px); bottom:62px; left:50%; transform:translateX(-50%); padding:7px 9px 7px 14px; border:1px solid #66867e; border-radius:12px; background:#182f2bf5; color:#e1f0e9; font-size:13px; box-shadow:0 3px 14px #0006; width:max-content; }
-.cell-tool-bar[hidden], .cell-tool-bar label[hidden], .player-stage[data-cell-tool] .cell-inspector, .player-stage:has(canvas[data-dragging-cell]) .cell-inspector { display:none; }
+.cell-tool-bar[hidden], .cell-tool-bar label[hidden], .player-stage[data-cell-tool] .cell-inspector, .player-stage:has(canvas[data-dragging-target]) .cell-inspector { display:none; }
 .cell-tool-bar label { display:flex; align-items:center; gap:5px; white-space:nowrap; }
 .player-stage[data-cell-tool] canvas { cursor:crosshair; }
 .reserve-editor { width:min(420px,calc(100% - 24px)); }
@@ -17,3 +17,8 @@
   .cell-tool-bar #cell-tool-status { flex:1 0 100%; }
   .cell-edit-actions .button { min-height:40px; }
 }
+
+.player-stage:has(canvas[data-dragging-target]) .live-environment { visibility:hidden; }
+.player-field { display:inline-flex; align-items:center; gap:7px; background:#192325f2; border:1px solid #485655; border-radius:7px; padding:3px 6px 3px 10px; color:#c3d2ca; font-size:12px; }
+.player-field select { min-height:30px; max-width:144px; padding:3px 22px 3px 5px; border:0; font-size:12px; }
+@media (max-width:680px) { .player-field { gap:4px; padding-left:6px; } .player-field select { max-width:122px; } }

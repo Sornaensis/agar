@@ -1,3 +1,4 @@
+import {prepareBloom, placeByTissue} from './feeding-culture.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fresh, compile, seed, snapshot, advance, graph, body, evaluation, save, restore, source, error, catalog } from './organelle-harness.mjs';
@@ -51,11 +52,10 @@ for (const name of importable) {
   assert.ok(swimming.some(machine => machine.kind === 'propel()' && machine.activity > 0 && machine.functionalMass > 0));
   observe(.45,true);
   const beforeFeeding = state.eaten;
+  placeByTissue(api,state.cells[0],0);
   let digested = 0;
-  for (let second=0; second<4; second++) {
-    const cell = state.cells[0];
-    api.add_food(cell.x, cell.y, 8);
-    state = advance(api, 30);
+  for (let second=0; second<25 && digested===0; second++) {
+    state = advance(api,30);
     digested += state.cells[0].digestionRate;
     assert.equal(state.cells[0].carbonFixationRate,0);
   }
@@ -63,7 +63,7 @@ for (const name of importable) {
   const resting = observe(.85,false);
   assert.ok(resting.filter(machine => machine.kind === 'propel()' || machine.kind==='import(particle)').every(machine => machine.activity === 0));
   const beforeResting = state.eaten;
-  api.add_food(state.cells[0].x,state.cells[0].y,12);
+  assert.ok(state.food.some(p=>p.energy>0),'Available tissue remains beside the bright cell');
   state = advance(api, 60);
   assert.equal(state.eaten,beforeResting,'Bright cells leave available particles in the water');
   assert.ok(state.cells[0].carbonFixationRate > 0);
@@ -156,46 +156,40 @@ console.log(`Five seconds after division, colony surface gaps with and without a
 const cycles = [];
 for (const preset of PRESETS) {
   const producer = ['Phototroph', 'Nurse rosette', 'Pulse swimmer', 'Crown rosette', 'Mixotroph'].includes(preset.name);
-  // This reproductive-capacity fixture continuously supplies food in a small
-  // region. Aerate the culture explicitly so accumulated decay does not turn
-  // a feeding test into an unintended anoxia test; sealed limits have their own
-  // reaction/conservation coverage.
-  const api = await fresh({ ambientLight: 0.85, initialNutrients: 3,
-    gases: { mode:'open', exchangeRate:.5, oxygenEquilibrium:1, carbonEquilibrium:1 } });
-  const genome = compile(api, preset.source);
-  assert.equal(graph(api, genome).mode, 'cellular');
-  seed(api, genome, 1, 600, 380);
-  const initial = body(api, 1);
+  const api = await fresh({width:400,height:400,ambientLight:.85,ambientTemperature:producer ? 0.5 : 0.2,initialNutrients:3,
+    gases:{mode:'open',initialOxygen:producer ? 1 : 3,oxygenEquilibrium:producer ? 1 : 3,exchangeRate:.5}});
+  const genome = compile(api,preset.source);
+  assert.equal(graph(api,genome).mode,'cellular');
+  const site = producer ? {x:200,y:200} : prepareBloom(api,playable.get('phototroph').source);
+  const founder = api.place_cell(genome,site.x,site.y);
+  assert.ok(founder,error(api));
+  const startTick=snapshot(api).ticks;
+  const initial = body(api, founder);
   assert.equal(initial.organs.length, 1);
   assert.equal(initial.organs[0].kind, 'core');
   assert.equal(initial.cellular.assemblies.length, 0);
   assert.ok(initial.cellular.products.every(product => product.mass === 0));
   const beforeInspection = save(api);
-  const inspected = evaluation(api, 1);
+  const inspected = evaluation(api, founder);
   assert.equal(inspected.mode, 'cellular');
   assert.ok(!inspected.signals.some(signal => ['id', 'time', 'body.division_ready'].includes(signal.name)));
   assert.deepEqual(save(api), beforeInspection, 'Cellular inspection must not initialize or mutate state');
 
   let state = advance(api, 1);
-  const first = body(api, 1).cellular;
+  const first = body(api, founder).cellular;
   assert.equal(first.assemblies.length, 0, 'Newly expressed material cannot install in the same tick');
   const made = first.products.reduce((sum, product) => sum + product.mass, 0);
   assert.ok(made > 0 && made * 0.6 <= 0.022 / 30 + 1e-10, 'All genes share the same paid core budget');
   assert.ok(state.cells[0].energy < 68 && state.cells[0].nutrients < 0.6);
 
-  // This lifecycle fixture supplies exudate near the founder. The separate
-  // predator foraging test covers scattered food and a prey-only habitat.
+  // The consumer has one finite producer-derived patch and receives no later inputs.
   const cycleSeconds = preset.name === 'Predator' ? 900 : 150;
-  let nextFood = 1, previous;
-  while (!state.births && state.ticks < cycleSeconds * 30) {
-    const parent = state.cells.find(cell => cell.id === 1);
+  let previous;
+  while (!state.births && state.ticks-startTick < cycleSeconds * 30) {
+    const parent = state.cells.find(cell => cell.id === founder);
     assert.ok(parent, `${preset.name} must survive development in its supplied habitat`);
-    if (!producer && state.ticks >= nextFood) {
-      assert.equal(api.add_food(parent.x, parent.y, 4), 4);
-      nextFood = state.ticks + 30;
-    }
     const steps = parent.area >= 1.9 ? 1 : 30;
-    previous = steps === 1 ? body(api, 1).cellular : undefined;
+    previous = steps === 1 ? body(api, founder).cellular : undefined;
     state = advance(api, steps);
     conserved(state);
   }
@@ -203,8 +197,8 @@ for (const preset of PRESETS) {
   assert.equal(state.population, 2);
   assert.ok(previous, 'Observe the actual fission tick');
   const daughter = state.cells.find(cell => cell.generation === 1);
-  assert.ok(daughter && daughter.parentId === 1);
-  const inherited = [body(api, 1).cellular, body(api, daughter.id).cellular];
+  assert.ok(daughter && daughter.parentId === founder);
+  const inherited = [body(api, founder).cellular, body(api, daughter.id).cellular];
   const machines = inherited.flatMap(cell => cell.assemblies);
   assert.equal(new Set(machines.map(machine => machine.id)).size, machines.length, 'Fission assigns actual instances without cloning IDs');
   for (const machine of previous.assemblies) {
@@ -235,11 +229,11 @@ for (const preset of PRESETS) {
     assert.ok(state.photosynthesis > 0);
     assert.equal(state.eaten, 0);
   }
-  if (preset.name === 'Forager') assert.equal(state.photosynthesis, 0);
+  if (!producer) assert.ok(state.eaten>0 && state.cells.every(cell=>cell.carbonFixationRate===0));
 
-  const firstDivisionSeconds = state.seconds;
+  const firstDivisionSeconds = (state.ticks-startTick)/30;
   const bytes = save(api), resumed = await fresh();
-  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 13);
+  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 14);
   assert.equal(restore(resumed, bytes), 1, error(resumed));
   assert.deepEqual(save(resumed), bytes);
   advance(api, 90); advance(resumed, 90);
@@ -251,9 +245,9 @@ for (const preset of PRESETS) {
     compile(api, source(api, mutant));
     assert.equal(api.mutate_genome(genome, 17, kind), mutant);
   }
-  cycles.push({ name: preset.name, suppliedSubstrate: producer ? 'none' : 'exudate',
+  cycles.push({ name: preset.name, suppliedSubstrate: producer ? 'light' : 'heat-killed producer bloom',
     firstDivisionSeconds: Math.round(firstDivisionSeconds * 100) / 100, timeLimitSeconds: cycleSeconds });
 }
 
-console.log(`Cellular checks passed: ${PRESETS.length} authored genomes, ${importable.length} importable examples, local receptor separation, bright/shade motor recycling and regrowth, paid development, frozen inspection, resource conservation, whole-machine fission with functioning consumer daughters, gene/placement mutations, and exact v13 continuation.`);
-console.log(JSON.stringify({ conditions: 'One founder; 0.85 light; 3 initial minerals per patch; 4 supplied exudate particles/s for non-phototrophs. The Predator tissue-funded lifecycle is tested separately in the native engine.', cycles }));
+console.log(`Cellular checks passed: ${PRESETS.length} authored genomes, ${importable.length} importable examples, local receptor separation, bright/shade motor recycling and regrowth, paid development, frozen inspection, resource conservation, whole-machine fission with functioning consumer daughters, gene/placement mutations, and exact v14 continuation.`);
+console.log(JSON.stringify({ conditions: 'One founder in lit water. Consumer trials start beside a finite patch of tissue and exudate from a bloom of 25 Phototrophs grown for 60 seconds and killed by thermal stress. No subsequent inputs.', cycles }));

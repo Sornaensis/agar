@@ -20,11 +20,11 @@ async function until(predicate, label) {
 
 function setup() {
   const engine = {
-    time: 0, foodRate: 0, broken: false, disposed: false, gate: null, partialFailure: false, events: [],
+    time: 0, mutationRate: 0, broken: false, disposed: false, gate: null, partialFailure: false, events: [],
     summary() { return { time: this.time, population: 1, food: 0, births: 0, deaths: 0, generation: 0 }; },
     async presentation(options = {}) {
       const result = { tick: this.time * 30, summary: this.summary() };
-      if (options.frame !== false) result.frame = { ...this.summary(), tick: this.time * 30, cells: [{ id: 1, generation: 0 }], food: [], foodRate: this.foodRate };
+      if (options.frame !== false) result.frame = { ...this.summary(), tick: this.time * 30, cells: [{ id: 1, generation: 0 }], food: [], mutationRate: this.mutationRate };
       if (options.metrics) result.metrics = { tick: this.time * 30, population: 1 };
       if (options.environment) result.environment = { columns: 1, rows: 1, ambientTemperature: .5, ambientLight: .2, currentStrength: 0, sources: [], barriers: [] };
       if (options.environment === true) result.environment.samples = new Float32Array(7);
@@ -42,10 +42,10 @@ function setup() {
     async captureCheckpoint() {
       this.events.push(['capture', this.time]);
       if (this.broken) throw new Error('Snapshot failed');
-      return { state: encode({ time: this.time, foodRate: this.foodRate }), summary: this.summary() };
+      return { state: encode({ time: this.time, mutationRate: this.mutationRate }), summary: this.summary() };
     },
-    async setFoodRate(value) { this.foodRate = value; },
-    async getCellEvaluation(id) { this.events.push(['evaluation', id, this.time]); return { cellId: id, tick: this.time * 30, value: this.foodRate }; },
+    async setMutationRate(value) { this.mutationRate = value; },
+    async getCellEvaluation(id) { this.events.push(['evaluation', id, this.time]); return { cellId: id, tick: this.time * 30, value: this.mutationRate }; },
     dispose() { this.disposed = true; },
   };
   const writes = [], committed = [], statuses = [];
@@ -144,21 +144,21 @@ function setup() {
   const { engine, session, writes } = setup();
   const gate = deferred();
   const mutation = session.mutate(async current => {
-    await gate.promise; await current.setFoodRate(12);
+    await gate.promise; await current.setMutationRate(.12);
     session.metadata.genomeNames[2] = 'New arrival';
     return 2;
   });
   const save = session.checkpoint();
   gate.resolve(); assert.equal(await mutation, 2);
   await until(() => writes.length === 1, 'Mutation checkpoint starts');
-  assert.equal(session.world.foodRate, 12);
-  assert.equal(decode(writes[0].record.state).foodRate, 12);
+  assert.equal(session.world.mutationRate, .12);
+  assert.equal(decode(writes[0].record.state).mutationRate, .12);
   assert.equal(writes[0].record.genomeNames[2], 'New arrival');
   writes[0].resolve(); await save;
   await assert.rejects(session.mutate(async current => {
-    await current.setFoodRate(9); throw new Error('Mutation partially failed');
+    await current.setMutationRate(.09); throw new Error('Mutation partially failed');
   }), /partially failed/);
-  assert.equal(session.world.foodRate, engine.foodRate);
+  assert.equal(session.world.mutationRate, engine.mutationRate);
   assert.equal(session.revision, 2, 'Partial mutations remain dirty and visible');
   await session.advance(1);
   assert.equal(session.world.time, 1, 'A failed command does not poison later work');
@@ -293,9 +293,9 @@ for (const failure of ['snapshot', 'validation', 'commit']) {
   session.metadata.name = 'Renamed'; session.touch();
   await session.refresh({ frame: false }); await session.evaluation(1);
   assert.equal(engine.events.filter(event => event[0] === 'evaluation').length, 1);
-  await session.mutate(current => current.setFoodRate(12));
+  await session.mutate(current => current.setMutationRate(.12));
   const beforeStep = await session.evaluation(1);
-  assert.equal(beforeStep.evaluation.value, 12);
+  assert.equal(beforeStep.evaluation.value, .12);
   assert.equal(beforeStep.stateVersion, session.stateVersion);
   assert.equal(engine.events.filter(event => event[0] === 'evaluation').length, 2);
   const gate = engine.gate = deferred(), advance = session.advance(1, { frame: false });

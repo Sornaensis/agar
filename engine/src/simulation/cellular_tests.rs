@@ -8,8 +8,8 @@ fn solar_world() -> (World, Vec<Genome>) {
     let mut world = World::empty(42);
     world.environment.configure(0.5, 0.85, 0.0);
     world.environment.set_initial_nutrients(2.0);
-    world.reset_empty(42, 0);
-    world.set_food_rate(0.0);
+    world.reset_empty(42);
+
     world.set_mutation_rate(0.0);
     world.seed_cells(1, 1, 600.0, 380.0);
     (world, genomes)

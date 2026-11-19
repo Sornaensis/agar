@@ -53,8 +53,8 @@ fn grown_hunter(pierce: bool, capture: bool, digest: bool) -> (World, Vec<Genome
     let mut genomes = vec![Genome::new(source, program, 0, 0)];
     let mut world = World::empty(42);
     world.environment.configure(0.5, 0.0, 0.0);
-    world.reset_empty(42, 0);
-    world.set_food_rate(0.0);
+    world.reset_empty(42);
+
     world.set_mutation_rate(0.0);
     world.seed_cells(1, 1, 600.0, 380.0);
     let initial_energy = world.cells[0].energy;
@@ -219,7 +219,7 @@ fn both_partitioned_daughters_capture_and_digest_accounted_tissue() {
     for index in 0..2 {
         let (x, y) = (world.cells[index].x, world.cells[index].y);
         let start = world.food.len();
-        assert_eq!(world.add_food(x, y, 2), 2);
+        assert_eq!(world.fixture_exudate(x, y, 2), 2);
         // Accounted external tissue, placed at each daughter's capture surface.
         // Only substrate and position change; imported mass and energy are kept.
         for food in &mut world.food[start..] { food.kind = OrganicKind::Tissue; food.x = x; food.y = y; }
@@ -403,7 +403,7 @@ assembly Reverse: propel() {
         let (mut world, mut genomes) = super::mechanism_tests::equipped(source);
         let cell = &mut world.cells[0];
         cell.x = x; cell.y = y; cell.angle = angle;
-        assert_eq!(world.add_food(x, y, 1), 1);
+        assert_eq!(world.fixture_exudate(x, y, 1), 1);
         let food = world.food.last_mut().unwrap();
         food.kind = OrganicKind::Tissue; food.x = x; food.y = y;
         let mut waste_id = None;
@@ -463,8 +463,8 @@ fn shipped_predator_repairs_grows_and_divides_on_accounted_tissue() {
     let mut genomes = vec![Genome::new(source.into(), program, 0, 0)];
     let mut world = World::empty(42);
     world.environment.configure(0.5, 0.0, 0.0);
-    world.reset_empty(42, 0);
-    world.set_food_rate(0.0);
+    world.reset_empty(42);
+
     world.set_mutation_rate(0.0);
     world.seed_cells(1, 1, 600.0, 380.0);
     let mut heat_until = None;
@@ -495,7 +495,7 @@ fn shipped_predator_repairs_grows_and_divides_on_accounted_tissue() {
                         <= cell.radius() + 2.5).map(|food| food.energy).sum();
             if nearby < 12.0 {
                 let (x, y) = (cell.x, cell.y);
-                assert_eq!(world.add_food(x, y, 1), 1);
+                assert_eq!(world.fixture_exudate(x, y, 1), 1);
                 let food = world.food.last_mut().unwrap();
                 food.kind = OrganicKind::Tissue;
                 food.x = x;
@@ -554,8 +554,8 @@ fn shipped_predator_pays_for_local_heat_sensing_and_escapes_while_fed() {
     habitat.environment.configure(0.5, 0.85, 0.0);
     habitat.environment.set_initial_nutrients(3.0);
     habitat.environment.add_source(1, 700.0, 380.0, 1.0, 180.0);
-    habitat.reset_empty(42, 0);
-    habitat.set_food_rate(0.0);
+    habitat.reset_empty(42);
+
     for _ in 0..3600 { habitat.step(&mut Vec::new()); }
 
     for (label, source, angle, senses_heat) in [
@@ -574,9 +574,9 @@ fn shipped_predator_pays_for_local_heat_sensing_and_escapes_while_fed() {
         let mut world = World::empty(42);
         world.environment.configure(0.5, 0.85, 0.0);
         world.environment.set_initial_nutrients(3.0);
-        world.reset_empty(42, 0);
+        world.reset_empty(42);
         world.environment = habitat.environment.clone();
-        world.set_food_rate(0.0);
+
         world.set_mutation_rate(0.0);
         assert!((world.nutrient_total() - world.nutrient_input_total()).abs() < 1e-7);
         world.seed_cells(1, 1, 100.0, 380.0);
@@ -625,7 +625,7 @@ fn shipped_predator_pays_for_local_heat_sensing_and_escapes_while_fed() {
         // its rest condition. Heat escape must override that condition.
         let (x, y) = (cell.x, cell.y);
         let first = world.food.len();
-        assert_eq!(world.add_food(x, y, 2), 2);
+        assert_eq!(world.fixture_exudate(x, y, 2), 2);
         for food in &mut world.food[first..] {
             food.kind = OrganicKind::Tissue; food.x = x; food.y = y;
         }
@@ -650,7 +650,7 @@ fn shipped_predator_pays_for_local_heat_sensing_and_escapes_while_fed() {
         let hot_edge = (x as usize..700)
             .find(|&x| world.environment.temperature_at(x as f64, 380.0) >= 0.98).unwrap();
         let lure_x = hot_edge as f64 + CELL_RADIUS + 2.5;
-        assert_eq!(world.add_food(lure_x, 380.0, 1), 1);
+        assert_eq!(world.fixture_exudate(lure_x, 380.0, 1), 1);
         let lure = world.food.last_mut().unwrap();
         (lure.x, lure.y) = (lure_x, 380.0);
         let start_temperature = world.environment.temperature_at(x, 380.0);
@@ -698,7 +698,7 @@ fn shipped_predator_keeps_searching_when_waste_occupies_its_gut_in_darkness() {
     let mut genomes = vec![Genome::new(source.into(), program, 0, 0)];
     let mut world = World::empty(42);
     world.environment.configure(0.5, 0.0, 0.0);
-    world.set_food_rate(0.0);
+
     world.set_mutation_rate(0.0);
     world.try_seed_cells_in_registry(1, 1, 600.0, 380.0, &genomes).unwrap();
     for _ in 0..1200 {
@@ -710,7 +710,7 @@ fn shipped_predator_keeps_searching_when_waste_occupies_its_gut_in_darkness() {
     // ingestion operation as capture. The separate hunting trials test pursuit
     // and physical capture. Replacing a particle's substrate preserves its stock.
     let (x, y) = (world.cells[0].x, world.cells[0].y);
-    assert_eq!(world.add_food(x, y, 2), 2);
+    assert_eq!(world.fixture_exudate(x, y, 2), 2);
     for _ in 0..2 {
         let particle = world.food.pop().unwrap();
         world.cells[0].ingest(OrganicKind::Waste, particle.energy, particle.nutrients);
@@ -721,7 +721,7 @@ fn shipped_predator_keeps_searching_when_waste_occupies_its_gut_in_darkness() {
     // A single real plume from paid, decaying food lies on either flank when
     // the observer turns around. Both comparisons read the identical field.
     (world.cells[0].x, world.cells[0].y) = (600.0, 380.0);
-    assert_eq!(world.add_food(600.0, 390.0, 8), 8);
+    assert_eq!(world.fixture_exudate(600.0, 390.0, 8), 8);
     for particle in &mut world.food { (particle.x, particle.y) = (600.0, 390.0); }
     let mut workspace = PhaseWorkspace::default();
     for _ in 0..8 { world.decay_food_in(&mut workspace); }

@@ -1,5 +1,5 @@
 {
-  "abi": 17,
+  "abi": 18,
   "memory": "memory",
   "functions": [
     "abi_version",
@@ -22,8 +22,6 @@
     "set_cell_stores",
     "energy_withdrawn_total",
     "mineral_withdrawn_total",
-    "add_food",
-    "set_food_rate",
     "mutate_genome",
     "genome_source_ptr",
     "genome_source_len",

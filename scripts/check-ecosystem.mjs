@@ -28,11 +28,11 @@ const customModule = options.wasm ? await WebAssembly.compile(binary) : undefine
 const { BUILTIN_ENVIRONMENTS, BUILTIN_GENOMES, BUILTIN_SIMULATIONS, simulationStartSettings } = await catalog();
 const template = BUILTIN_SIMULATIONS.find(item => item.id === 'builtin:simulation:mixed-ecosystem');
 const environment = BUILTIN_ENVIRONMENTS.find(item => item.id === template.environmentId);
-const startSettings = simulationStartSettings(environment.config);
+const startSettings = simulationStartSettings();
 options.mutation ??= startSettings.mutationRate;
 assert.ok(options.mutation >= 0 && options.mutation <= 1);
 const populations = template.populations.map(row => ({ ...BUILTIN_GENOMES.find(item => item.id === row.genomeId), ...row }));
-assert.equal(environment.config.foodRate, 0, 'Mixed ecosystem has no supplied organic food');
+assert.equal('foodRate' in environment.config,false, 'Habitats cannot provision organic particles');
 const samplesAt = [...new Set([0, 15, 30, 60, 120, 180, 300, 600, 900, options.duration].filter(n => n <= options.duration))].sort((a, b) => a - b);
 const study = {
   startedAt: new Date().toISOString(), wasmSha256: createHash('sha256').update(binary).digest('hex'), wasmBytes: binary.length,
@@ -181,7 +181,7 @@ for (const randomSeed of options.seeds) {
   if (options.assert) {
     const last = result.samples.at(-1);
     result.assertions = {
-      noExternalOrganicFood: environment.config.foodRate === 0 && startSettings.initialFood === 0,
+      noExternalOrganicFood: !('add_food' in api) && !('set_food_rate' in api),
       foragerSurvives: last.lineages.find(item => item.name === 'Forager').count > 0,
       predatorSurvives: last.lineages.find(item => item.name === 'Predator').count > 0,
       foragerReproduces: result.observedDescendants.Forager > 0,

@@ -59,8 +59,7 @@ for (const simulation of simulations) {
   const total = simulation.populations.reduce((sum, population) => sum + population.count, 0);
   assert.ok(simulation.populations.length > 0 && simulation.populations.every(row => Number.isSafeInteger(row.count) && row.count > 0));
   assert.ok(Number.isSafeInteger(total) && total > 0);
-  const env = environments.find(row => row.id === simulation.environmentId);
-  assert.deepEqual(catalog.simulationStartSettings(env.config), {initialFood: env.config.foodRate > 0 ? 360 : 0, mutationRate: 0.1});
+  assert.deepEqual(catalog.simulationStartSettings(), {mutationRate: 0.1});
 }
 
 const portable = JSON.parse(storage.exportGenome(genomes[0]));
@@ -94,7 +93,13 @@ assert.throws(() => storage.parseGenomeImport('{"format":"cellarium.genome","ver
 assert.equal({}.polluted, undefined);
 
 const baseConfig = environments[0].config;
-for (const [field, invalid] of [['foodRate', 61], ['foodRate', NaN], ['foodRate', '6'], ['ambientTemperature', -0.1], ['ambientLight', 1.01], ['currentStrength', 31], ['initialNutrients', 5.01]]) {
+for (const retiredRate of [6, 60, 'unused']) {
+  const oldRecipe = { ...environmentExport, config: { ...baseConfig, foodRate: retiredRate } };
+  const imported = storage.parseEnvironmentImport(JSON.stringify(oldRecipe));
+  assert.deepEqual(imported.config, baseConfig);
+  assert.deepEqual(JSON.parse(storage.exportEnvironment(imported)).config, baseConfig);
+}
+for (const [field, invalid] of [['ambientTemperature', -0.1], ['ambientLight', 1.01], ['currentStrength', 31], ['initialNutrients', 5.01]]) {
   assert.throws(() => storage.validateEnvironmentConfig({ ...baseConfig, [field]: invalid }), field);
 }
 const source = { kind: 0, x: 600, y: 380, strength: 0.8, radius: 200 };
@@ -199,6 +204,10 @@ assert.equal(storage.loadPreferences().tab, 'simulation');
 storage.savePreferences({ tab: 'genomes', simulationView: 'metrics', activeSimulationId: 'simulation:test', overlay: 'nutrients', sensors: false, trails: true });
 assert.equal(storage.loadPreferences().simulationView, 'metrics');
 assert.equal(storage.loadPreferences().overlay, 'nutrients');
+assert.equal(storage.loadPreferences().builderOverlay, 'light', 'Old player preferences receive an independent builder field');
+storage.savePreferences({...storage.loadPreferences(), builderOverlay:'carbon'});
+assert.equal(storage.loadPreferences().overlay,'nutrients');
+assert.equal(storage.loadPreferences().builderOverlay,'carbon');
 for (const overlay of ['oxygen','carbon']) {
   storage.savePreferences({...storage.loadPreferences(),overlay});
   assert.equal(storage.loadPreferences().overlay,overlay);

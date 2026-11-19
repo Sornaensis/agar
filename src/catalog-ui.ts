@@ -1,8 +1,8 @@
 import { Engine, type MutationKind, type SourceKind } from './engine';
-import { SOURCE_NAMES, SOURCE_FIELDS, defaultSource, defaultBarrier, toolOptions, toolName, sourceFields, barrierFields, readObjectFields, objectList, cameraControls, type EnvironmentTool, type ObjectSelection, type SourceConfig, type BarrierConfig } from './environment-controls';
+import { SOURCE_NAMES, fieldOptions, arrowNudge, defaultSource, defaultBarrier, toolOptions, toolName, sourceFields, barrierFields, readObjectFields, objectList, cameraControls, type EnvironmentTool, type ObjectSelection, type SourceConfig, type BarrierConfig } from './environment-controls';
 import { WorkerEngine } from './worker-engine';
 import type { RenderWorldSnapshot } from './session';
-import { Renderer, type FieldOverlay } from './renderer';
+import { Renderer, type CanvasTarget, type FieldOverlay } from './renderer';
 import {
   GENOME_LANGUAGE_VERSION, clearEnvironmentDraft, clearGenomeDraft, loadEnvironmentDraft, loadGenomeDraft,
   newEnvironment, newGenome, saveEnvironmentDraft, saveGenomeDraft, validateEnvironmentConfig,
@@ -15,6 +15,8 @@ import { isCellularSource } from './genome-language';
 import { gasFields, readGasConfig } from './gas-controls';
 
 export interface CatalogCallbacks {
+  builderOverlay: () => FieldOverlay;
+  setBuilderOverlay: (value: FieldOverlay) => void;
   compiler: () => Promise<Engine>;
   saveGenome: (document: GenomeDocument) => Promise<void>;
   saveEnvironment: (document: EnvironmentDocument) => Promise<void>;
@@ -24,7 +26,7 @@ export interface CatalogCallbacks {
 }
 
 const DEFAULT_ENVIRONMENT: EnvironmentConfig = {
-  width: 1200, height: 760, foodRate: 6, ambientTemperature: 0.5, ambientLight: 0, currentStrength: 0, initialNutrients: 0.3, sources: [], barriers: [],
+  width: 1200, height: 760, ambientTemperature: 0.5, ambientLight: 0, currentStrength: 0, initialNutrients: 0.3, sources: [], barriers: [],
   gases: { initialOxygen: 1, initialCarbon: 1, mode: 'sealed', exchangeRate: 0.02, oxygenEquilibrium: 1, carbonEquilibrium: 1 },
 };
 // Use the same authored construction program as the built-in producer.
@@ -213,12 +215,12 @@ export class CatalogUI {
         <div class="environment-preview">
           <div class="preview-toolbar">
             ${editable ? `<label class="environment-tool-select"><span class="visually-hidden">Environment tool</span><select data-environment-tool aria-label="Environment tool">${toolOptions()}</select></label>` : ''}
-            <select id="preview-overlay" aria-label="Preview field"><option value="light">Light</option><option value="heat">Temperature</option><option value="flow">Water flow</option><option value="nutrients">Minerals</option><option value="oxygen">Oxygen</option><option value="carbon">Inorganic carbon</option><option value="none">No overlay</option></select>
+            <select id="preview-overlay" aria-label="Preview field">${fieldOptions(this.callbacks.builderOverlay())}</select>
             ${cameraControls('preview')}
           </div>
-          <canvas class="environment-canvas" aria-label="Environment preview. Select an object to edit it." tabindex="0"></canvas>
+          <canvas class="environment-canvas" aria-label="Environment preview. Tap an object to inspect it. Drag to move an editable object, or use arrow keys." tabindex="0"></canvas>
           <p class="preview-status" role="status">Loading preview…</p><p class="preview-caption"></p>
-          <p class="environment-navigation-hint">Scroll to zoom · Shift-drag or right-drag to pan · Fit to see the whole world</p>
+          <p class="environment-navigation-hint">Drag an object to move it · Scroll to zoom · Shift-drag to pan</p>
         </div>
         <aside class="environment-rail">
           <section class="environment-form environment-size"><h3>World size</h3>
@@ -227,11 +229,10 @@ export class CatalogUI {
           <section class="source-section"><h3>Objects</h3><div class="source-list" aria-label="Environment objects"></div><div class="source-detail"></div></section>
           <details class="environment-baseline gas-settings"><summary>Gases & atmosphere</summary>${gasFields(config.gases, editable, true)}</details>
           <details class="environment-baseline"><summary>Background & starting conditions</summary><div class="environment-form">
-            ${numberField('food', 'Organic particles / s (whole world)', config.foodRate, 0, 60, '0.5')}
             ${numberField('light', 'Ambient light', config.ambientLight, 0, 1, '0.05')}
             ${numberField('temperature', 'Temperature', config.ambientTemperature, 0, 1, '0.05')}
             ${numberField('current', 'Background flow', config.currentStrength, 0, 30, '1')}
-            ${numberField('nutrients', 'Starting nutrients', config.initialNutrients, 0, 5, '0.1')}
+            ${numberField('nutrients', 'Starting minerals', config.initialNutrients, 0, 5, '0.1')}
           </div></details>
         </aside>
       </div>
@@ -257,11 +258,10 @@ export class CatalogUI {
       if (selected?.kind === 'source') next.sources[selected.id] = readObjectFields(detail, next.sources[selected.id], Math.max(config.width, next.width), Math.max(config.height, next.height));
       if (selected?.kind === 'barrier') next.barriers[selected.id] = readObjectFields(detail, next.barriers[selected.id], Math.max(config.width, next.width), Math.max(config.height, next.height));
       for (const object of [...next.sources, ...next.barriers]) { object.x %= next.width; object.y %= next.height; }
-      next.foodRate = inputNumber(query(dialog, '#environment-food'), 'Organic input', 0, 60);
       next.ambientLight = inputNumber(query(dialog, '#environment-light'), 'Ambient light', 0, 1);
       next.ambientTemperature = inputNumber(query(dialog, '#environment-temperature'), 'Temperature', 0, 1);
       next.currentStrength = inputNumber(query(dialog, '#environment-current'), 'Background flow', 0, 30);
-      next.initialNutrients = inputNumber(query(dialog, '#environment-nutrients'), 'Starting nutrients', 0, 5);
+      next.initialNutrients = inputNumber(query(dialog, '#environment-nutrients'), 'Starting minerals', 0, 5);
       next.gases = readGasConfig(dialog);
       return validateEnvironmentConfig(next);
     };
@@ -287,7 +287,7 @@ export class CatalogUI {
           await worker.clearBarriers();
           if (!await worker.setWorldSize(next.width, next.height)) throw new Error('The world size could not be changed.');
           await worker.setEnvironment(next.ambientTemperature, next.ambientLight, next.currentStrength);
-          await worker.setInitialNutrients(next.initialNutrients); await worker.setFoodRate(next.foodRate);
+          await worker.setInitialNutrients(next.initialNutrients);
           if (!await worker.setInitialGases(next.gases.initialOxygen, next.gases.initialCarbon) || !await worker.setGasExchange(next.gases)) throw new Error('The gas settings could not be applied.');
           if (!await worker.replaceSources(next.sources)) throw new Error('The emitters could not be added.');
           // Settle the fields without moving authored geometry. The preview
@@ -298,7 +298,7 @@ export class CatalogUI {
             if (!id) throw new Error('A barrier could not be added.');
             barrierIds.push(id);
           }
-          await worker.resetEmpty(42, 0);
+          await worker.resetEmpty(42);
           const settled = await worker.advance(60, { frame: false });
           if (settled.error) throw new Error(settled.error);
           if (!alive(dialog) || engine !== worker) return;
@@ -337,7 +337,14 @@ export class CatalogUI {
     const flush = (): boolean => {
       window.clearTimeout(refreshTimer); const next = collect();
       const modified = JSON.stringify(next) !== JSON.stringify(config);
-      config = next; persist(); return modified;
+      config = next;
+      // Preserve precision for untouched fields while allowing a later edit back to an earlier value.
+      if (selected) detail.querySelectorAll<HTMLInputElement>('[data-object-field]').forEach(input=>{input.dataset.presentedValue=input.value;});
+      dialog.querySelectorAll<HTMLInputElement>('input[data-gas-field]').forEach(input=>{
+        const key=input.dataset.gasField as keyof typeof config.gases;
+        input.dataset.presentedValue=input.value; input.dataset.sourceValue=String(config.gases[key]);
+      });
+      persist(); return modified;
     };
     const changed = (): void => {
       if (!editable || dialog.getAttribute('aria-busy') === 'true') return;
@@ -352,7 +359,6 @@ export class CatalogUI {
       if (dialog.getAttribute('aria-busy') === 'true') return;
       try {
         const modified = flush(); selected = next; tool = 'select';
-        if (selected?.kind === 'source') overlay.value = SOURCE_FIELDS[config.sources[selected.id].kind];
         renderList(); renderDetail(); if (modified) refresh(); else draw(); clearError(dialog);
       } catch (error) { setDialogError(dialog, error); }
     };
@@ -379,6 +385,24 @@ export class CatalogUI {
         selected = nextSelection; tool = 'select'; persist(); renderList(); renderDetail(); refresh(); clearError(dialog);
       } catch (error) { setDialogError(dialog, error); }
     };
+    const selectionFor = (hit:CanvasTarget|null):ObjectSelection|null => {
+      if (!snapshot || visibleRevision!==revision || !hit || hit.kind==='cell') return null;
+      const objects = hit.kind==='source' ? snapshot.environment.sources : snapshot.environment.barriers;
+      const id=objects.findIndex(item=>item.id===hit.object.id);
+      return id<0 ? null : {kind:hit.kind,id};
+    };
+    const move = (selection:ObjectSelection,x:number,y:number):void => {
+      if (!editable || tool!=='select' || dialog.getAttribute('aria-busy')==='true') return;
+      try {
+        flush();
+        const candidate=structuredClone(config);
+        const object=(selection.kind==='source' ? candidate.sources : candidate.barriers)[selection.id];
+        if (!object) return;
+        object.x=(x%config.width+config.width)%config.width; object.y=(y%config.height+config.height)%config.height;
+        config=validateEnvironmentConfig(candidate); selected=selection;
+        persist(); renderList(); renderDetail(); refresh(); clearError(dialog);
+      } catch (error) { setDialogError(dialog,error); }
+    };
     list.addEventListener('click', event => {
       const button = (event.target as Element).closest<HTMLButtonElement>('[data-object-kind]');
       if (button) choose({ kind: button.dataset.objectKind as 'source' | 'barrier', id: Number(button.dataset.objectId) });
@@ -397,27 +421,29 @@ export class CatalogUI {
     toolInput?.addEventListener('change', () => {
       try {
         const next = toolInput.value as EnvironmentTool, modified = flush(); selected = null; tool = next;
-        if (tool.startsWith('source:')) overlay.value = SOURCE_FIELDS[Number(tool.split(':')[1])];
-        else if (tool !== 'select') { barrierDefault = defaultBarrier(tool === 'barrier:floating', 0, 0); overlay.value = 'flow'; }
+        if (tool.startsWith('barrier:')) barrierDefault = defaultBarrier(tool === 'barrier:floating', 0, 0);
         renderList(); renderDetail(); if (modified) refresh(); else draw(); clearError(dialog);
       } catch (error) { toolInput.value = tool; setDialogError(dialog, error); }
     });
     canvas.addEventListener('click', event => {
       if (!renderer || !snapshot || renderer.wasDragging() || busy) return;
       if (tool !== 'select') { const position = renderer.toWorld(event.clientX, event.clientY); if (position) place(position.x, position.y); return; }
-      if (busy) return;
-      const source = renderer.pickSource(snapshot, event.clientX, event.clientY);
-      const barrier = source ? null : renderer.pickBarrier(snapshot, event.clientX, event.clientY);
-      choose(source ? { kind: 'source', id: snapshot.environment.sources.findIndex(item => item.id === source.id) } : barrier ? { kind: 'barrier', id: snapshot.environment.barriers.findIndex(item => item.id === barrier.id) } : null);
+      choose(selectionFor(renderer.pickTarget(snapshot,event.clientX,event.clientY,true)));
     });
     canvas.addEventListener('keydown', event => {
       if (event.key === 'Enter' && tool !== 'select') { event.preventDefault(); const center = renderer?.getCamera(); place(center?.x ?? config.width / 2, center?.y ?? config.height / 2); }
+      const nudge=arrowNudge(event);
+      if (nudge && editable && selected && tool==='select') {
+        event.preventDefault(); if (event.repeat) return;
+        const object=(selected.kind==='source'?config.sources:config.barriers)[selected.id];
+        move(selected,object.x+nudge.x,object.y+nudge.y);
+      }
       if (event.key === 'Escape' && tool !== 'select') { event.preventDefault(); tool = 'select'; renderDetail(); }
     });
     dialog.querySelectorAll<HTMLButtonElement>('[data-camera]').forEach(button => button.addEventListener('click', () => {
       if (button.dataset.camera === 'preview:fit') renderer?.fitWorld(); else renderer?.zoomBy(button.dataset.camera === 'preview:in' ? 1.25 : .8);
     }));
-    overlay.addEventListener('change', draw);
+    overlay.addEventListener('change', () => { this.callbacks.setBuilderOverlay(overlay.value as FieldOverlay); draw(); });
     dialog.addEventListener('close', () => {
       window.clearTimeout(refreshTimer); renderer?.dispose(); engine?.dispose(); renderer = null; engine = null; snapshot = null;
       if (editable && !saved) { try { config = collect(); persist(); } catch (error) { this.callbacks.notify(`Draft could not be saved: ${message(error)}`); } }
@@ -425,7 +451,11 @@ export class CatalogUI {
     renderList(); renderDetail();
     void WorkerEngine.load().then(worker => {
       if (!alive(dialog)) { worker.dispose(); return; }
-      engine = worker; renderer = new Renderer(canvas); refresh();
+      engine = worker; renderer = new Renderer(canvas,{
+        preferEnvironment:()=>true,
+        canDrag:target=>editable && !busy && tool==='select' && !!selectionFor(target),
+        drop:(target,x,y)=>{const choice=selectionFor(target);if(choice)move(choice,x,y);},
+      }); refresh();
     }).catch(error => { if (alive(dialog)) { status.textContent = 'Preview unavailable'; setDialogError(dialog, error); } });
     if (!editable) {
       query<HTMLButtonElement>(dialog, '[data-copy]').addEventListener('click', () => { dialog.close(); this.openEnvironment(document, true); });

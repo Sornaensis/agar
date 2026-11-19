@@ -36,7 +36,7 @@ const memberCount = (cells, lineages, lineage) => cells.filter(cell => lineages.
 async function run(template, worldSeed) {
   const id = template.id.split(':').at(-1);
   const habitat = BUILTIN_ENVIRONMENTS.find(item => item.id === template.environmentId);
-  const settings = simulationStartSettings(habitat.config);
+  const settings = simulationStartSettings();
   const api = await fresh({ ...habitat.config, ...settings, seed: worldSeed });
   const lineages = new Map(), cohorts = [], observedOffspring = {};
   for (const row of template.populations) {
@@ -49,7 +49,7 @@ async function run(template, worldSeed) {
   }
   let state = snapshot(api);
   assert.equal(state.population, cohorts.reduce((sum, row) => sum + row.count, 0));
-  assert.equal(state.food.length, settings.initialFood);
+  assert.equal(state.food.length, 0, 'Every scenario starts with living founders and no organic particles');
   const result = { id, seed:worldSeed, seconds:horizons[id], habitat:habitat.id, settings, cohorts, observations:{}, checks:{} };
   const obs = result.observations;
   const crown = id === 'crown-rosette' ? crownObservation() : null;
@@ -164,7 +164,7 @@ async function run(template, worldSeed) {
     obs.grazersReceivingCarbonAtJunctions = grazersReceivingCarbon.size;
     obs.peakCarbonTransferredIntoGrazerPerTick = peakGrazerCarbonTransfer;
     obs.peakMineralTransferredOutOfGrazerPerTick = peakGrazerMineralReturn;
-    result.checks.noSuppliedOrganicFood = !settings.initialFood && !habitat.config.foodRate;
+    result.checks.noSuppliedOrganicFood = state.photosynthesis > 0 && !('add_food' in api) && !('set_food_rate' in api);
     result.checks.grazing = grazing.size > 0;
     result.checks.carbonReceivedThroughJunctions = grazersReceivingCarbon.size > 0;
     result.checks.tenMinuteCoexistence = Object.values(obs.alive).every(n => n > 0);

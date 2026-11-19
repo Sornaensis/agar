@@ -29,7 +29,7 @@ impl World {
             self.eaten as f64,
             self.environment.width,
             self.environment.height,
-            self.food_rate,
+            0.0, // Reserved former provision-rate slot.
             self.mutation_rate,
             0.0,
         ]);
@@ -309,7 +309,7 @@ mod tests {
             world.cells[index].digestion_rate = index as f64 * 0.5;
             world.cells[index].exudation_rate = index as f64 * 0.125;
         }
-        world.add_food(-1.0, -1.0, 9);
+        world.fixture_exudate(-1.0, -1.0, 9);
         for (index, food) in world.food.iter_mut().enumerate() {
             food.kind = OrganicKind::ALL[index % 3];
         }

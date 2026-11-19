@@ -15,7 +15,7 @@ async function run(file) {
   const { instance } = await WebAssembly.instantiate(bytes, {});
   const api = instance.exports;
   const abi = api.abi_version();
-  assert.ok(abi === 16 || abi === 17);
+  assert.ok([16,17,18].includes(abi));
   const sha = data => createHash('sha256').update(data).digest('hex');
   const { PRESETS } = await catalog();
   const source = name => PRESETS.find(preset => preset.name === name).source;
@@ -33,10 +33,11 @@ async function run(file) {
 
   ok(api.set_world_size(800,480), 'habitat');
   api.set_environment(.5,.85,0);
-  api.set_initial_nutrients(3); api.set_food_rate(0); api.set_mutation_rate(0);
+  api.set_initial_nutrients(3); api.set_mutation_rate(0);
+  if (abi < 18) api.set_food_rate(0);
   ok(api.set_initial_gases(1,1), 'initial gases');
   ok(api.set_gas_exchange(1,.5,1,1), 'open reservoir');
-  ok(api.reset_empty(42,0), 'reset');
+  ok(abi < 18 ? api.reset_empty(42,0) : api.reset_empty(42), 'reset');
   const photo = compile(api,source('Phototroph')), predator = compile(api,source('Predator'));
   const grownId = api.place_cell(photo,100,100);
   ok(grownId,'seed Phototroph');
@@ -180,7 +181,7 @@ let output = current;
 if (args.has('--baseline')) {
   const before = await run(args.get('--baseline'));
   assert.equal(before.abi,16);
-  assert.equal(current.abi,17);
+  assert.ok(current.abi >= 17);
   assert.deepEqual(current.sources,before.sources);
   for (const name of ['newborn','grown']) {
     const old = before.encounters[name], now = current.encounters[name];

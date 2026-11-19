@@ -100,7 +100,8 @@ try {
     .map(key => [key,Number(document.getElementById(key).textContent)])));
   assert.ok(balance['packet-energy']>=0 && balance['held-energy']>=balance['packet-energy']);
   assert.ok(Math.abs(balance['introduced-energy']+balance['light-energy']-balance['held-energy']-balance['withdrawn-energy']-balance['dissipated-energy'])<0.03);
-  assert.match(await page.locator('#mean-particle-carbon').textContent(), /organic C \/ particle/);
+  assert.equal(balance['packet-energy'], 0, 'Freshly introduced cells begin in water with no organic particles');
+  assert.equal(await page.locator('#mean-particle-carbon').textContent(), '', 'An empty particle pool has no mean carbon value');
   await page.locator('[data-view="genomes"]').click();
   await page.locator('[data-genome-stats]').waitFor();
   assert.match(await page.locator('[data-genome-stats]').first().textContent(), /12 organisms/);

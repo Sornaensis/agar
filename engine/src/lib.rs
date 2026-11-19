@@ -127,7 +127,7 @@ thread_local! { static ENGINE: RefCell<Engine> = RefCell::new(Engine::new()); }
 
 #[no_mangle]
 pub extern "C" fn abi_version() -> u32 {
-    17
+    18
 }
 
 /// Allocate a writable, zero-initialized byte buffer. The caller must deallocate
@@ -793,29 +793,15 @@ pub extern "C" fn reset(seed: u32, genome_id: u32) -> u32 {
     })
 }
 
-/// Reset dynamic state, retain the environment recipe and rates, and seed no cells.
+/// Start a new organism-free habitat with the current chemical recipe.
 #[no_mangle]
-pub extern "C" fn reset_empty(seed: u32, initial_food: f64) -> u32 {
-    ENGINE.with(|e| {
-        let mut e = e.borrow_mut();
-        e.error.clear();
-        let Some(count) = organic_count(initial_food) else {
-            e.error = "Organic particle count must be a nonnegative whole number representable by the engine.".into();
-            return 0;
-        };
-        match e.world.try_reset_empty(seed, count) {
-            Ok(()) => 1,
-            Err(error) => { e.error = error; 0 }
-        }
+pub extern "C" fn reset_empty(seed: u32) -> u32 {
+    ENGINE.with(|engine| {
+        let mut engine = engine.borrow_mut();
+        engine.world.reset_empty(seed);
+        engine.error.clear();
+        1
     })
-}
-
-// A double crosses WASM without wrapping negative/fractional/large JavaScript
-// numbers through an i32 parameter. This is an address/result representation
-// check, not a habitat particle quota; actual allocation failure is reported.
-fn organic_count(value: f64) -> Option<usize> {
-    (value.is_finite() && value >= 0.0 && value.fract() == 0.0 && value <= u32::MAX as f64)
-        .then_some(value as usize)
 }
 
 fn edit_world(edit: impl FnOnce(&mut World, &[Genome]) -> Result<u32, String>) -> u32 {
@@ -872,27 +858,6 @@ pub extern "C" fn seed_cells(genome_id: u32, count: f64, x: f32, y: f32) -> u32 
             Err(error) => { e.error = error; 0 }
         }
     })
-}
-
-#[no_mangle]
-pub extern "C" fn add_food(x: f32, y: f32, count: f64) -> u32 {
-    ENGINE.with(|e| {
-        let mut e = e.borrow_mut();
-        e.error.clear();
-        let Some(count) = organic_count(count) else {
-            e.error = "Organic particle count must be a nonnegative whole number representable by the engine.".into();
-            return 0;
-        };
-        match e.world.try_add_food(x as f64, y as f64, count) {
-            Ok(added) => added as u32,
-            Err(error) => { e.error = error; 0 }
-        }
-    })
-}
-
-#[no_mangle]
-pub extern "C" fn set_food_rate(rate: f32) {
-    ENGINE.with(|e| e.borrow_mut().world.set_food_rate(rate as f64));
 }
 
 #[no_mangle]
@@ -1116,9 +1081,9 @@ mod tests {
         engine.world.cells[0].vy = -1.25;
         engine.world.cells[0].integrity = 0.8;
         engine.world.snapshot(&mut engine.snapshot);
-        assert_eq!(abi_version(), 17);
+        assert_eq!(abi_version(), 18);
         assert_eq!(simulation::CELL_STRIDE, 163);
-        assert_eq!(engine.snapshot.len(), 12 + 22 * simulation::CELL_STRIDE + 360 * 5);
+        assert_eq!(engine.snapshot.len(), 12 + 22 * simulation::CELL_STRIDE);
         assert_eq!(engine.snapshot[7], simulation::WIDTH as f64);
         assert_eq!(engine.snapshot[8], simulation::HEIGHT as f64);
         assert_eq!(
@@ -1157,7 +1122,7 @@ mod tests {
             assert_eq!(first[offset + 4], cell.body.building(kind) as f64);
             assert_eq!(first[offset + 5], cell.body.functional_mass(kind) as f64);
         }
-        assert_eq!(engine.snapshot[12 + 22 * simulation::CELL_STRIDE + 3], 0.25);
+        assert_eq!(engine.snapshot[3], 0.0, "fresh founders have no outside organic food");
         assert!(engine.snapshot.iter().all(|v| v.is_finite()));
     }
 
@@ -1264,7 +1229,7 @@ mod tests {
         ENGINE.with(|engine| *engine.borrow_mut() = Engine::new());
         let source = "thrust=0;turn=0;divide=false;target.flagellum.count=999;target.flagellum.size=.2;build.flagellum=0;";
         let id = ENGINE.with(|engine| engine.borrow_mut().compile(source));
-        assert_eq!(reset_empty(91, 0.0), 1);
+        assert_eq!(reset_empty(91), 1);
         assert_eq!(seed_cells(id, 1.0, 200.0, 100.0), 1);
         assert_eq!(tick(1), 1);
         let before = ENGINE.with(|engine| checkpoint::save(&engine.borrow()).unwrap());
@@ -1421,9 +1386,8 @@ mod tests {
         });
         set_initial_nutrients(0.0);
         reset(7, id);
-        set_food_rate(0.0);
         assert_eq!(nutrient_dissolved_total(), 0.0);
-        assert_eq!(nutrient_food_total(), 90.0);
+        assert_eq!(nutrient_food_total(), 0.0);
         let introduced = nutrient_food_total() + nutrient_cell_total();
         assert!(
             nutrient_cell_total() > 0.0,
@@ -1513,7 +1477,7 @@ mod tests {
                 .borrow_mut()
                 .compile("# 🌿\nlet count=ri001+1;ri001=count;thrust=0;turn=0;divide=false;")
         });
-        assert_eq!(reset_empty(71, 0.0), 1);
+        assert_eq!(reset_empty(71), 1);
         assert_eq!(seed_cells(id, 2.0, 100.0, 100.0), 2);
         tick(3);
         let before = ENGINE.with(|engine| checkpoint::save(&engine.borrow()).unwrap());

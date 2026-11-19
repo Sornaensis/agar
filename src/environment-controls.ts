@@ -7,9 +7,8 @@ export type SourceConfig = EnvironmentConfig['sources'][number];
 export type BarrierConfig = EnvironmentConfig['barriers'][number];
 export type EnvironmentTool = 'select' | `source:${SourceKind}` | 'barrier:fixed' | 'barrier:floating';
 export type ObjectSelection = { kind: 'source' | 'barrier'; id: number };
-export const SOURCE_NAMES = ['Light', 'Heat / cooling', 'Vortex', 'Nutrient spring', 'Nutrient absorber', 'Directional jet', 'Current band', 'Radial flow', 'Oxygen emitter', 'Oxygen absorber', 'Carbon emitter', 'Carbon absorber', 'Aerator'] as const;
+export const SOURCE_NAMES = ['Light', 'Heat / cooling', 'Vortex', 'Mineral emitter', 'Mineral absorber', 'Directional jet', 'Current band', 'Radial flow', 'Oxygen emitter', 'Oxygen absorber', 'Inorganic carbon emitter', 'Inorganic carbon absorber', 'Aerator'] as const;
 export const SOURCE_ICONS = ['light', 'heat', 'flow', 'plus', 'download', 'arrow', 'flow', 'flow', 'plus', 'download', 'plus', 'download', 'flow'] as const;
-export const SOURCE_FIELDS: FieldOverlay[] = ['light', 'heat', 'flow', 'nutrients', 'nutrients', 'flow', 'flow', 'flow', 'oxygen', 'oxygen', 'carbon', 'carbon', 'oxygen'];
 export const SOURCE_HINTS = [
   'Illuminates the surrounding water. Strength 0 switches it off.',
   'Positive strength heats; negative strength cools.',
@@ -34,8 +33,10 @@ export const defaultBarrier = (floating: boolean, x: number, y: number): Barrier
 });
 export function toolOptions(selected: EnvironmentTool = 'select'): string {
   const option = (value: string, label: string): string => `<option value="${value}"${selected === value ? ' selected' : ''}>${label}</option>`;
-  return option('select', 'Select object') + '<optgroup label="Emitters & flows">' + SOURCE_NAMES.map((name, kind) => option(`source:${kind}`, name)).join('')
-    + '</optgroup><optgroup label="Barriers">' + option('barrier:fixed', 'Fixed barrier') + option('barrier:floating', 'Floating barrier') + '</optgroup>';
+  const group = (label:string, kinds:readonly number[]):string => `<optgroup label="${label}">${kinds.map(kind => option(`source:${kind}`,SOURCE_NAMES[kind])).join('')}</optgroup>`;
+  return option('select','Select object') + group('Light & heat',[0,1]) + group('Currents',[2,5,6,7])
+    + group('Minerals',[3,4]) + group('Oxygen',[8,9]) + group('Inorganic carbon',[10,11]) + group('Gas exchange',[12])
+    + '<optgroup label="Barriers">' + option('barrier:fixed','Fixed barrier') + option('barrier:floating','Floating barrier') + '</optgroup>';
 }
 export function toolName(tool: EnvironmentTool): string {
   if (tool.startsWith('source:')) return SOURCE_NAMES[Number(tool.split(':')[1])];
@@ -55,7 +56,9 @@ const field = (key: string, label: string, value: number, min: number, max: numb
 };
 export function sourceFields(source: SourceConfig, width: number, height: number, editable = true, position = true): string {
   const spatial = position ? field('x', 'X', source.x, 0, width - Number.EPSILON * width, 'any', editable) + field('y', 'Y', source.y, 0, height - Number.EPSILON * height, 'any', editable) : '';
-  return `<div class="source-fields">${spatial}${field('strength', 'Strength', source.strength, sourceMinimum(source.kind), 1, '0.05', editable)}${field('radius', source.kind === 5 || source.kind === 6 ? 'Half-width' : 'Radius', source.radius, 20, 1000, '10', editable)}${source.kind === 5 || source.kind === 6 ? field('angle', 'Direction (°)', degrees(source.angle), -360, 360, '5', editable) + field('length', 'Length', source.length, 40, 4800, '20', editable) : ''}</div><p class="environment-hint">${SOURCE_HINTS[source.kind]}</p>`;
+  const chemical = [3,4,8,9,10,11].includes(source.kind);
+  const rateHint = chemical ? ' Full strength transfers up to 1.5 units per simulated second within the radius.' : '';
+  return `<div class="source-fields">${spatial}${field('strength', 'Strength', source.strength, sourceMinimum(source.kind), 1, '0.05', editable)}${field('radius', source.kind === 5 || source.kind === 6 ? 'Half-width' : 'Radius', source.radius, 20, 1000, '10', editable)}${source.kind === 5 || source.kind === 6 ? field('angle', 'Direction (°)', degrees(source.angle), -360, 360, '5', editable) + field('length', 'Length', source.length, 40, 4800, '20', editable) : ''}</div><p class="environment-hint">${SOURCE_HINTS[source.kind]}${rateHint}</p>`;
 }
 export function barrierFields(barrier: BarrierConfig, width: number, height: number, editable = true, position = true): string {
   const spatial = position ? field('x', 'X', barrier.x, 0, width - Number.EPSILON * width, 'any', editable) + field('y', 'Y', barrier.y, 0, height - Number.EPSILON * height, 'any', editable) : '';
@@ -85,3 +88,20 @@ export function objectList(sources: ReadonlyArray<SourceConfig & { id?: number }
     || '<p class="source-empty">No environment objects. Choose a tool and click the world to place one.</p>';
 }
 export const cameraControls = (prefix: string): string => `<div class="camera-controls" role="group" aria-label="View controls"><button type="button" data-camera="${prefix}:out" aria-label="Zoom out">−</button><button type="button" data-camera="${prefix}:fit" aria-label="Fit world">Fit</button><button type="button" data-camera="${prefix}:in" aria-label="Zoom in">+</button></div>`;
+
+export function fieldOptions(selected: FieldOverlay): string {
+  return [['none','No overlay'],['light','Light'],['heat','Temperature'],['flow','Water flow'],['nutrients','Minerals'],['oxygen','Oxygen'],['carbon','Inorganic carbon']].map(([value,label]) =>
+    `<option value="${value}"${selected===value?' selected':''}>${label}</option>`).join('');
+}
+
+/** One world unit per press, or ten with Shift, independent of camera zoom. */
+export function arrowNudge(event: KeyboardEvent): {x:number;y:number} | null {
+  const step = event.shiftKey ? 10 : 1;
+  switch (event.key) {
+    case 'ArrowRight': return {x:step,y:0};
+    case 'ArrowLeft': return {x:-step,y:0};
+    case 'ArrowUp': return {x:0,y:-step};
+    case 'ArrowDown': return {x:0,y:step};
+    default: return null;
+  }
+}

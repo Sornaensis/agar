@@ -15,17 +15,29 @@ if (process.argv.includes('--compare')) {
 
 const results = [];
 for (const [version, source] of cases) {
-  for (const habitat of ['dark exudate', 'lit live prey']) {
+  for (const habitat of ['dark carrion', 'lit live prey']) {
     const withPrey = habitat === 'lit live prey';
     for (const randomSeed of [42, 7, 2026]) {
       const api = await fresh({
-        seed: randomSeed, width: 400, height: 400, ambientLight: withPrey ? 0.85 : 0,
+        seed: randomSeed, width: 400, height: 400, ambientLight: 0.85,
         ambientTemperature: 0.5, currentStrength: 0, initialNutrients: 3, mutationRate: 0,
-        initialFood: withPrey ? 0 : 64, foodRate: withPrey ? 0 : 4,
         gases: { mode: 'open', initialOxygen: 1, initialCarbon: 1,
           exchangeRate: 0.5, oxygenEquilibrium: 1, carbonEquilibrium: 1 },
       });
       const hunterGenome = compile(api, source);
+      let initialDeaths=0, initialFixation=0;
+      if (!withPrey) {
+        // Grow a scattered producer cohort and let heat stress generate real
+        // carcasses. The hunter starts after cooling, in darkness.
+        const producer=compile(api,PRESETS.find(p=>p.name==='Phototroph').source);
+        seed(api,producer,64);
+        let bloom=advance(api,60*30); assert.ok(bloom.photosynthesis>0);
+        api.set_environment(1,.85,0);
+        while(bloom.population && bloom.seconds<150) bloom=advance(api,30);
+        assert.equal(bloom.population,0);assert.ok(bloom.food.some(f=>f.kind===1));
+        initialFixation=bloom.photosynthesis; initialDeaths=bloom.deaths;
+        api.set_environment(.25,0,0);
+      }
       seed(api, hunterGenome, 1);
       if (withPrey) seed(api, compile(api, neutralPrey), 20);
       let firstDivision = null, peakExudate = 0, peakTissue = 0, state;
@@ -43,7 +55,7 @@ for (const [version, source] of cases) {
         peakTissue: +peakTissue.toFixed(2) });
       assert.ok(Math.abs(state.material - state.materialIntroduced) < 1e-7);
       assert.ok(state.energy <= state.energyIntroduced + state.photosynthesis + 1e-7);
-      assert.equal(state.photosynthesis, 0);
+      assert.equal(state.photosynthesis,initialFixation);
       if (version === 'prior') continue;
       assert.ok(living > 0 && state.births > 0, `${habitat}, seed ${randomSeed}: the lineage must survive and reproduce`);
       if (withPrey) {
@@ -51,7 +63,7 @@ for (const [version, source] of cases) {
           'The hunting lineage must kill and ingest real prey tissue');
       } else {
         assert.equal(state.attacks, 0, 'Hunters spare their relatives');
-        assert.ok(state.eaten > 0 && peakExudate > 1, 'The lineage must capture scattered exudate');
+        assert.ok(initialDeaths>=64 && state.eaten>0 && peakTissue>1,'The dark scavenging lineage must capture real carcass tissue');
       }
     }
   }

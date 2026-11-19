@@ -131,7 +131,7 @@ export async function checkEngineLoader() {
     assert.equal(requests.filter(url => url === oldUrl).length, 1, 'Current loader never revisits the cached legacy path');
     const untouched = editorB.saveState();
     const id = editorA.compile('ri001=ri001+1;thrust=0.5;turn=0;divide=false;');
-    editorA.resetEmpty(123, 0); assert.equal(editorA.seed(id, 1), 1); editorA.tick(3);
+    editorA.resetEmpty(123); assert.equal(editorA.seed(id, 1), 1); editorA.tick(3);
     assert.deepEqual(editorB.saveState(), untouched, 'Instances retain independent genomes, memory, and worlds');
     run.restoreState(editorA.saveState()); run.tick(10); editorA.tick(10);
     assert.deepEqual(run.saveState(), editorA.saveState(), 'Typed checkpoints continue across independent instances');
@@ -146,7 +146,7 @@ export async function checkEngineLoader() {
     assert.deepEqual(editorA.saveState(), beforeAnalysis);
     const populationProbe = await Engine.load();
     const probeGenome = populationProbe.compile('rf001=chemical.organic;rf002=chemical.mineral;thrust=0;turn=0;divide=false;');
-    populationProbe.resetEmpty(81, 0);
+    populationProbe.resetEmpty(81);
     const beforeInvalidSeed = populationProbe.saveState();
     for (const count of [-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, 0x100000000, 0xffffffff]) {
       assert.throws(() => populationProbe.seed(probeGenome, count), /count|identifier/i);
@@ -160,12 +160,30 @@ export async function checkEngineLoader() {
     populationCopy.restoreState(populationState);
     assert.equal(populationCopy.snapshot().cells.length, 2049);
     assert.deepEqual(populationCopy.saveState(), populationState);
-    const organicProbe=await Engine.load();organicProbe.resetEmpty(71,1401);
-    assert.equal(organicProbe.snapshot().food.length,1401,'Frontend accepts more than 1,200 organic particles');
-    const organicSaved=organicProbe.saveState();organicProbe.restoreState(organicSaved);
-    assert.equal(organicProbe.snapshot().food.length,1401);
+    const organicProbe = await Engine.load();
+    organicProbe.resetEmpty(71);
+    assert.equal(organicProbe.snapshot().food.length, 0);
+    for (const name of ['add_food','set_food_rate']) assert.equal(name in organicProbe.wasm, false);
+    const organicHistory = await readFile(new URL('../engine/fixtures/organic-history-v13.bin', import.meta.url));
+    assert.equal(organicHistory.readUInt32LE(8), 13);
+    organicProbe.restoreState(organicHistory);
+    const api = organicProbe.wasm;
+    const packetStart = api.snapshot_ptr() + 12 * 8;
+    const packets = new Uint8Array(api.memory.buffer, packetStart, (api.snapshot_len() - 12) * 8);
+    assert.equal(createHash('sha256').update(packets).digest('hex'), 'cdbd87b3d8d4751a4adce408cb22361dc47cffd06c98cb384d1849703b4f540e');
+    const organicSaved = organicProbe.saveState();
+    const organicTotals = organicProbe.metricsSnapshot();
+    assert.equal(organicTotals.food, 1401);
+    organicProbe.tick(300);
+    const continued = organicProbe.metricsSnapshot();
+    for (const field of ['food','energyTotal','energyInputTotal','carbonTotal','nutrientTotal','nutrientInputTotal']) {
+      assert.equal(continued[field], organicTotals[field], 'Existing particles persist without continuing the old external supply');
+    }
+    const future = organicProbe.saveState();
+    organicProbe.restoreState(organicSaved); organicProbe.tick(300);
+    assert.deepEqual(organicProbe.saveState(), future);
     const current=editorA.saveState();
-    assert.equal(new DataView(current.buffer,current.byteOffset,current.byteLength).getUint32(8,true),13);
+    assert.equal(new DataView(current.buffer,current.byteOffset,current.byteLength).getUint32(8,true),14);
     for (const filename of ['trophic-v1.bin','trophic-v2.bin']) {
       const legacy=new Uint8Array(await readFile(new URL('../engine/fixtures/'+filename,import.meta.url)));
       assert.throws(()=>editorA.restoreState(legacy),/Unsupported simulation version.*preserved/);
@@ -197,7 +215,7 @@ export async function checkEngineLoader() {
     const migrated = await Engine.load();
     migrated.restoreState(historical);
     const upgraded = migrated.saveState();
-    assert.equal(new DataView(upgraded.buffer, upgraded.byteOffset, upgraded.byteLength).getUint32(8,true), 13);
+    assert.equal(new DataView(upgraded.buffer, upgraded.byteOffset, upgraded.byteLength).getUint32(8,true), 14);
     // Canonical public projections recorded on ABI14 from the authentic v9 save.
     // v11 also stores the last exchange counters, so the save layout differs.
     function physicalStateHash(instance, omitHeldEnergy = false) {
@@ -238,16 +256,18 @@ export async function checkEngineLoader() {
       assert.equal(markerOnly.getCellEvaluation(id).contactMessages.signal, null);
       assert.deepEqual(markerOnly.cellBody(id).colony,{neighbors:0,energyNet:0,mineralNet:0,carbonNet:0});
     }
-    replay.restoreState(markerOnly.saveState());
-    markerOnly.tick(60); replay.tick(60);
-    assert.deepEqual(markerOnly.saveState(), replay.saveState());
+    // ABI17's import-time physical projections, with retired rate slot 11 zeroed.
     for (const [read, len, width, expected] of [
-      ['snapshot_ptr','snapshot_len',8,'b92a12ea3a4b328be261b451d5a685daf5c10679586f52f8f04f7d32f0afcd56'],
-      ['environment_snapshot_ptr','environment_snapshot_len',4,'63f03f4bba309942428d6d49e8bf92a96accdcdf6ce21b52570ae1688a84cbbb'],
+      ['snapshot_ptr','snapshot_len',8,'e683c315c787695af922b6eb393f71eda7424d7af6e19eb26137629871040c86'],
+      ['environment_snapshot_ptr','environment_snapshot_len',4,'f10db2a8b3fe4c5ba8f271ce188d31c17778b03427b676d2ae8596267c559d39'],
     ]) {
       const api = markerOnly.wasm, ptr = api[read]();
       assert.equal(createHash('sha256').update(new Uint8Array(api.memory.buffer,ptr,api[len]()*width)).digest('hex'),expected);
     }
+    replay.restoreState(markerOnly.saveState());
+    markerOnly.tick(60); replay.tick(60);
+    assert.deepEqual(markerOnly.saveState(), replay.saveState());
+    assert.equal(markerOnly.snapshot().food.length, 1, 'The old automatic six-particle/s supply stops at import.');
 
     const body=editorA.cellBody(editorA.snapshot().cells[0].id);
     assert.ok(body.organs.length>0);assert.ok(body.spaceUsed<=body.spaceCapacity);
@@ -259,7 +279,7 @@ export async function checkEngineLoader() {
   } finally {
     globalThis.fetch = originalFetch; WebAssembly.compile = originalCompile;
   }
-  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, version13 body/product/substrate/mechanism/control/environment/gas continuation and explicit atomic rejection of pre-organelle checkpoints.');
+  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, version14 body/product/substrate/mechanism/control/environment/gas continuation and explicit atomic rejection of pre-organelle checkpoints.');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await checkEngineLoader();

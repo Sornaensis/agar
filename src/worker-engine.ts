@@ -88,7 +88,7 @@ export class WorkerEngine {
   analyze(source: string): Promise<GenomeAnalysis> { return this.call('analyze', [source]); }
   compile(source: string): Promise<number> { return this.call('compile', [source]); }
   reset(seed: number, genomeId: number): Promise<void> { return this.call('reset', [seed, genomeId]); }
-  resetEmpty(seed: number, initialFood = 360): Promise<void> { return this.call('resetEmpty', [seed, initialFood]); }
+  resetEmpty(seed: number): Promise<void> { return this.call('resetEmpty', [seed]); }
   saveState(): Promise<Uint8Array> { return this.call('saveState'); }
   restoreState(bytes: Uint8Array): Promise<void> {
     // Preserve the caller's saved bytes even if a restore fails or worker closes.
@@ -99,8 +99,6 @@ export class WorkerEngine {
   moveCell(cellId:number, x:number, y:number, colony = false): Promise<number> { return this.call('moveCell', [cellId, x, y, colony]); }
   setCellStores(cellId:number, energy:number|null, minerals:number|null): Promise<void> { return this.call('setCellStores', [cellId, energy, minerals]); }
   seed(genomeId: number, count = 8, x = -1, y = -1): Promise<number> { return this.call('seed', [genomeId, count, x, y]); }
-  addFood(x = -1, y = -1, count = 40): Promise<number> { return this.call('addFood', [x, y, count]); }
-  setFoodRate(rate: number): Promise<void> { return this.call('setFoodRate', [rate]); }
   setMutationRate(rate: number): Promise<void> { return this.call('setMutationRate', [rate]); }
   setEnvironment(temperature: number, light: number, current: number): Promise<void> { return this.call('setEnvironment', [temperature, light, current]); }
   setWorldSize(width: number, height: number): Promise<boolean> { return this.call('setWorldSize', [width, height]); }

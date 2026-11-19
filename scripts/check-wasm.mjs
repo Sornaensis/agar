@@ -5,7 +5,7 @@ import { fresh,compile,seed,snapshot,advance,save,restore,error,source,graph,bod
 const {LEGACY_PRESETS:PRESETS}=await catalog();
 const idle='thrust=0;turn=0;divide=false;absorb=0;feed=0;';
 const producer=PRESETS.find(p=>p.name==='Phototroph').source;
-const api=await fresh({ambientLight:.8,initialNutrients:3,initialFood:360,foodRate:2});
+const api=await fresh({ambientLight:.8,initialNutrients:3});
 const id=compile(api,producer);seed(api,id,22);
 const original=save(api);const before=snapshot(api);assert.equal(before.population,22);
 advance(api,90);const after=save(api);assert.notDeepEqual(after,original);
@@ -53,7 +53,7 @@ const previous=await fresh();
 const previousSave=new Uint8Array(await readFile(new URL('../engine/fixtures/organelle-v3.bin',import.meta.url)));
 
 assert.equal(restore(previous,previousSave),1,error(previous));
-const migrated=save(previous);assert.equal(new DataView(migrated.buffer,migrated.byteOffset,migrated.byteLength).getUint32(8,true),13);
+const migrated=save(previous);assert.equal(new DataView(migrated.buffer,migrated.byteOffset,migrated.byteLength).getUint32(8,true),14);
 assert.equal(source(previous,1),JSON.parse(await readFile(new URL('../engine/fixtures/organelle-v3.json',import.meta.url),'utf8')).source);
 const priorCell=snapshot(previous).cells[0];
 assert.ok(priorCell.organs.photosynthetic.mass>0 && priorCell.organs.digestive.mass>0,'Restoring an existing cell never reconstructs it from the minimal founder');
@@ -72,14 +72,24 @@ const saved=save(cycle),resumed=await fresh();assert.equal(restore(resumed,saved
 for(const cell of state.cells)assert.ok(kinds.every(k=>cell.organs[k].mass>=0));
 
 // Particle counts and age are outcomes of the physical simulation, not quotas.
-const particles=await fresh({initialFood:1401});assert.equal(snapshot(particles).food.length,1401);
-assert.equal(particles.add_food(-1,-1,700),700);assert.equal(snapshot(particles).food.length,2101);
+const particles=await fresh({width:2400,height:1520,gases:{initialOxygen:0}});
+assert.equal(snapshot(particles).food.length,0);
+assert.equal('add_food' in particles,false);
+assert.equal('set_food_rate' in particles,false);
+// Ordinary founders run out of ATP at the next upkeep in dark, anoxic
+// water. Their existing tissue and reserve carbon supply every packet.
+const donor=compile(particles,idle), donorCount=512;
+seed(particles,donor,donorCount);
+const founders=snapshot(particles);
+for(const cell of founders.cells) assert.equal(particles.set_cell_stores(cell.id,1,1e-7,0),1,error(particles));
+const debris=advance(particles,1);
+assert.equal(debris.deaths,donorCount);
+assert.equal(debris.population,0);
+assert.ok(debris.food.length>=2101 && debris.food.every(f=>f.kind===1),'Ordinary lysis stores more than 2,100 tissue packets');
+assert.ok(Math.abs(debris.material - founders.material)<1e-7,'Lysis preserves the original minerals');
 const particleState=save(particles),particleCopy=await fresh();
-for(const bad of [-1,.5,NaN,Infinity,2**40]){
-  assert.equal(particles.add_food(-1,-1,bad),0);assert.ok(error(particles));assert.deepEqual(save(particles),particleState);
-  assert.equal(particles.reset_empty(71,bad),0);assert.ok(error(particles));assert.deepEqual(save(particles),particleState);
-}
 assert.equal(restore(particleCopy,particleState),1,error(particleCopy));assert.deepEqual(save(particleCopy),particleState);
+advance(particles,3);advance(particleCopy,3);assert.deepEqual(save(particleCopy),save(particles),'Large organic inventories replay identically');
 
 const longLived=await fresh({ambientLight:.85,initialNutrients:5});
 const stationaryProducer=producer.replace(/^divide\s*=\s*[^;]+;/m,'divide = false;').replace(/^thrust\s*=\s*[^;]+;/m,'thrust = 0;');
@@ -88,5 +98,5 @@ const older=advance(longLived,10800);assert.equal(older.population,1,'A funded, 
 assert.ok(older.cells[0].age>359);assert.equal(older.cells[0].lifespan,0);
 const olderState=save(longLived),olderCopy=await fresh();assert.equal(restore(olderCopy,olderState),1,error(olderCopy));
 assert.deepEqual(save(olderCopy),olderState,'Older organisms remain valid saved state');
-console.log(`WASM organelle integration passed: ABI17, typed174/81schema, five register banks, original-source mutations, genome-grown bodies, closed material, checkpoint13 replay and v3/v4 compatibility, uncapped2,049-organism restore, ${state.births} producer births.`);
+console.log(`WASM organelle integration passed: ABI18, typed174/81schema, five register banks, original-source mutations, genome-grown bodies, closed material, checkpoint14 replay and v3/v4 compatibility, uncapped2,049-organism restore, ${state.births} producer births.`);
 await checkEngineLoader();

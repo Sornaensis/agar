@@ -10,17 +10,17 @@ export async function fresh(config={},compiledModule=module){
   const api=(await WebAssembly.instantiate(compiledModule,{})).exports;
   // Explicit comparisons may use the previous engine, which shares the setup
   // commands and the full cell/particle snapshot format used by this harness.
-  if (compiledModule === module) assert.equal(api.abi_version(),17);
+  if (compiledModule === module) assert.equal(api.abi_version(),18);
   else assert.ok([16,17].includes(api.abi_version()),'Expected a compatible comparison engine');
   assert.equal(api.set_world_size(config.width??1200,config.height??760),1,error(api));
   api.set_environment(config.ambientTemperature??.5,config.ambientLight??0,config.currentStrength??0);
-  api.set_initial_nutrients(config.initialNutrients??.3);api.set_food_rate(config.foodRate??0);api.set_mutation_rate(config.mutationRate??0);
+  api.set_initial_nutrients(config.initialNutrients??.3);api.set_mutation_rate(config.mutationRate??0);
   const gases=config.gases??{};
   assert.equal(api.set_initial_gases(gases.initialOxygen??1,gases.initialCarbon??1),1,error(api));
   assert.equal(api.set_gas_exchange(gases.mode==='open'?1:0,gases.exchangeRate??.02,gases.oxygenEquilibrium??1,gases.carbonEquilibrium??1),1,error(api));
   for(const s of config.sources??[]){const id=api.add_source(s.kind,s.x,s.y,s.strength,s.radius);assert.ok(id,error(api));assert.equal(api.update_source(id,s.kind,s.x,s.y,s.strength,s.radius,s.angle??0,s.length??600),1,error(api));}
   for(const b of config.barriers??[])assert.ok(api.add_barrier(b.x,b.y,b.length,b.width,b.angle,Number(b.floating)),error(api));
-  assert.equal(api.reset_empty(config.seed??42,config.initialFood??0),1,error(api));return api;
+  assert.equal(api.reset_empty(config.seed??42),1,error(api));return api;
 }
 export function compile(api,source){
   const data=new TextEncoder().encode(source),ptr=api.alloc(data.length);assert.ok(ptr);

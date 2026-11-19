@@ -465,26 +465,34 @@ impl Environment {
             .iter()
             .filter(|source| matches!(source.kind, 3 | 4) && source.strength > 0.0)
         {
-            let weights: Vec<f64> = (0..self.patch_count())
-                .map(|i| {
-                    let (x, y) = self.patch_position(i);
-                    let d2 = delta(x - source.x, self.width).powi(2)
-                        + delta(y - source.y, self.height).powi(2);
-                    (-2.0 * d2 / source.radius.powi(2)).exp()
-                })
-                .collect();
-            let total: f64 = weights.iter().sum();
+            let weights = self.chemical_footprint(source);
             let rates = if source.kind == 4 {
                 &mut self.nutrient_absorption
             } else {
                 &mut self.nutrient_injection
             };
             for (rate, weight) in rates.iter_mut().zip(weights) {
-                *rate += NUTRIENT_SOURCE_RATE * source.strength * weight / total;
+                *rate += NUTRIENT_SOURCE_RATE * source.strength * weight;
             }
         }
         self.rebuild_flow_samples();
         self.rebuild_gas_sources();
+    }
+
+    /// Compact, smoothly tapered weights over patch centers in the displayed
+    /// disk, including periodic images. Radius is at least one patch width, so
+    /// every supported source location includes at least one water-grid center.
+    fn chemical_footprint(&self, source: &Source) -> Vec<f64> {
+        let radius_squared = source.radius * source.radius;
+        let mut weights: Vec<_> = (0..self.patch_count()).map(|i| {
+            let (x, y) = self.patch_position(i);
+            let distance_squared = delta(x - source.x, self.width).powi(2)
+                + delta(y - source.y, self.height).powi(2);
+            (1.0 - distance_squared / radius_squared).max(0.0).powi(2)
+        }).collect();
+        let total: f64 = weights.iter().sum();
+        for weight in &mut weights { *weight /= total; }
+        weights
     }
 
     pub fn patch_index(&self, x: f64, y: f64) -> usize {
@@ -612,17 +620,16 @@ impl Environment {
             &mut self.scratch,
         );
         let mut supplied = 0.0;
-        for (balance, rate) in self.nutrients.iter_mut().zip(&self.nutrient_injection) {
-            let amount = rate * DT;
-            *balance += amount;
-            supplied += amount;
+        for (i, balance) in self.nutrients.iter_mut().enumerate() {
+            if self.solid_patches[i] { continue; }
+            let input = self.nutrient_injection[i] * DT;
+            *balance += input;
+            supplied += input;
+            let removed = (self.nutrient_absorption[i] * DT).min(*balance);
+            *balance -= removed;
+            self.nutrient_removed += removed;
         }
         self.nutrient_inputs += supplied;
-        for (balance, rate) in self.nutrients.iter_mut().zip(&self.nutrient_absorption) {
-            let amount = (rate * DT).min(*balance);
-            *balance -= amount;
-            self.nutrient_removed += amount;
-        }
     }
 
     fn snapshot_header(&self, target: &mut Vec<f32>) {

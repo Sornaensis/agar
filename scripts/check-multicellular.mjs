@@ -133,12 +133,25 @@ async function swimmer(sender) {
 }
 
 // In this controlled exchange assay the producer starts in mineral-depleted
-// water. A later particle meal supplies the grazer with minerals it can return.
+// water. Two distant donors acquire inorganic minerals and carbon. Their
+// tissue later supplies the mineral-bearing meal in both treatments.
 async function tradeWithProducer(openPorts) {
   const api = await fresh({width:400,height:400,ambientLight:.9,ambientTemperature:.18,initialNutrients:0,gases:{mode:'open',exchangeRate:.2}});
   const producer = PRESETS.find(preset => preset.name === 'Phototroph');
   const grazer = PRESETS.find(preset => preset.name === 'Forager');
   seed(api, compile(api,producer.source), 1, 200, 200);
+  // A distant donor stores inorganic minerals from a local spring. Its paid
+  // storage and uptake make a mineral-rich, carbon-bearing meal at lysis.
+  const mineralDonor = `cellular;
+    product Wall = membrane(); product Carrier = transporter(); product Mount = anchor();
+    gene wall: Wall = if built.Store < .2 && pool.Wall < .003 then 1 else 0;
+    gene carrier: Carrier = if built.Pump < .099 && pool.Carrier < .003 then 1 else 0;
+    gene mount: Mount = if built.Pump < .099 && pool.Mount < .003 then 1 else 0;
+    assembly Pump: import(mineral) { Mount:.005; Carrier:.02; start_when:built.Pump < .099; }
+    assembly Store: store(mineral) { Wall:.02; start_when:built.Store < .199; }`;
+  const donor = api.place_cell(compile(api,mineralDonor),70,70); assert.ok(donor);
+  const bloomDonor=api.place_cell(compile(api,producer.source),88,70);assert.ok(bloomDonor);
+  const spring = api.add_source(3,70,70,1,20); assert.ok(spring);
   let closed = 0;
   const program = openPorts ? grazer.source : grazer.source.replace(/(assembly (?:Carbon|Mineral)Port: [^}]*?activity: )[^;]+;/g,
     (_, prefix) => { closed++; return prefix + '0;'; });
@@ -149,7 +162,7 @@ async function tradeWithProducer(openPorts) {
   // faces the producer. Both still start from ordinary paid founder bodies.
   const before = save(api);
   seed(api,id,1,200,200);
-  const trial = snapshot(api).cells[1];
+  const trial = snapshot(api).cells.find(cell=>cell.genome===id);
   assert.equal(restore(api,before),1);
   const separation = host.radius + trial.radius + 0.12;
   seed(api,id,1,host.x - Math.cos(trial.angle)*separation - (trial.x-200),host.y - Math.sin(trial.angle)*separation - (trial.y-200));
@@ -167,7 +180,19 @@ async function tradeWithProducer(openPorts) {
     }
     report.grazerCarbonNet += receiver.carbonNet;
     report.grazerMineralNet += receiver.mineralNet;
-    if (tick >= 24*30 && tick <= 45*30 && tick%30 === 0) api.add_food(grazer.x,grazer.y,4);
+    if (tick===24*30) {
+      // Move the attached pair once onto a real carcass so tissue supplies
+      // minerals in both treatments without changing their contact geometry.
+      const donorMinerals=state.cells.find(c=>c.id===donor)?.nutrients;
+      assert.ok(donorMinerals>1,'The donor must concentrate real minerals');
+      api.remove_source(spring);
+      assert.equal(api.set_cell_stores(donor,1,0,0),1);
+      assert.equal(api.set_cell_stores(bloomDonor,1,0,0),1);
+      const packet=snapshot(api).food.find(p=>p.kind===1);
+      assert.ok(packet);
+      assert.ok(api.move_cell(grazer.id,packet.x,packet.y,1));
+    }
+
   }
   assert.ok(report.attachedTicks > 40*30, 'Both treatments sustain real adhesion');
   const inventory = body(api,trial.id).cellular.assemblies;
@@ -186,6 +211,6 @@ assert.ok(velocityDifference > 0.01, 'Relayed propulsion changes the daughter’
 console.log('Pulse swimmer', JSON.stringify({ relay:relay.report, silent:silent.report, velocityDifference }));
 
 const trading = await tradeWithProducer(true), isolated = await tradeWithProducer(false);
+console.log('Producer–grazer exchange', JSON.stringify({trading,isolated}));
 assert.ok(trading.grazerCarbonNet > 1 && trading.grazerMineralNet < -0.05, 'The producer supplies fixed carbon and receives mineral from a fed grazer');
 assert.equal(isolated.grazerCarbonNet,0); assert.equal(isolated.grazerMineralNet,0);
-console.log('Producer–grazer exchange', JSON.stringify({trading,isolated}));

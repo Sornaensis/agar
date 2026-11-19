@@ -257,3 +257,47 @@ fn version_eight_environment_migration_establishes_explicit_initial_gas_ledgers(
         (0.0, 0.0)
     );
 }
+
+#[test]
+fn all_six_chemical_ports_act_on_the_wrapped_disk_and_account_actual_exchange() {
+    let mut env = empty();
+    env.set_initial_nutrients(0.0);
+    env.reset_dynamic();
+    let near = env.patch_index(10.0,210.0);
+    let across = env.patch_index(env.width - 10.0,210.0);
+    let outside = env.patch_index(90.0,210.0);
+    let stocks = |e:&Environment,i| [e.nutrient_patch(i),e.oxygen_patch(i),e.inorganic_carbon_patch(i)];
+    let inputs = |e:&Environment| [e.nutrient_input_total(),e.oxygen_input_total(),e.carbon_input_total()];
+    let outputs = |e:&Environment| [e.nutrient_removed_total(),e.oxygen_output_total(),e.carbon_output_total()];
+    for kind in [3,8,10] { assert_ne!(env.add_source(kind,0.0,210.0,0.8,40.0),0); }
+    let barrier = env.add_barrier(0.0,210.0,100.0,100.0,0.0,false);
+    assert!(barrier > 0);
+    env.step(0.0);
+    assert_eq!(inputs(&env),[0.0;3], "a completely covered port introduces no material");
+    assert!(env.remove_barrier(barrier));
+    env.step(DT);
+    for n in inputs(&env) { close(n,1.5*0.8*DT); }
+    assert_eq!(stocks(&env,outside),[0.0;3]);
+    for k in 0..3 {
+        assert!(stocks(&env,near)[k]>0.0);
+        close(stocks(&env,near)[k],stocks(&env,across)[k]);
+    }
+
+    env.clear_sources();
+    env.set_initial_nutrients(1.0);
+    assert!(env.set_initial_gases(1.0,1.0));
+    env.reset_dynamic();
+    for kind in [4,9,11] { assert_ne!(env.add_source(kind,0.0,210.0,0.8,40.0),0); }
+    env.step(0.0);
+    for n in outputs(&env) { close(n,1.5*0.8*DT); }
+    assert_eq!(stocks(&env,outside),[1.0;3]);
+    assert!(stocks(&env,near).iter().all(|n| *n<1.0));
+    for (amount,removed) in [env.nutrient_total(),env.oxygen_total(),env.inorganic_carbon_total()]
+        .into_iter().zip(outputs(&env)) {
+        close(amount + removed, env.patch_count() as f64);
+    }
+    env.set_initial_nutrients(0.0);
+    assert!(env.set_initial_gases(0.0,0.0));
+    env.reset_dynamic(); env.step(0.0);
+    assert_eq!(outputs(&env),[0.0;3], "an empty patch cannot fund a sink");
+}

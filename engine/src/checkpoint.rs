@@ -8,7 +8,7 @@ use crate::{
 
 pub(crate) const MAX_STATE_BYTES: usize = 128 * 1024 * 1024;
 const MAGIC: &[u8; 8] = b"CELLAR01";
-pub(crate) const VERSION: u32 = 13;
+pub(crate) const VERSION: u32 = 14;
 pub(crate) type Result<T> = std::result::Result<T, String>;
 
 pub(crate) fn ensure(ok: bool, message: &str) -> Result<()> {
@@ -292,8 +292,8 @@ mod tests {
         assert_ne!(id, 0, "{}", original.error);
         original.world.environment.configure(0.5, 0.85, 0.0);
         original.world.environment.set_initial_nutrients(2.0);
-        original.world.reset_empty(49, 0);
-        original.world.set_food_rate(0.0);
+        original.world.reset_empty(49);
+
         original.world.set_mutation_rate(0.0);
         original.world.seed_cells(id, 2, 600.0, 380.0);
         for _ in 0..75 { original.world.step(&mut original.genomes); }
@@ -332,8 +332,9 @@ mod tests {
         ] {
             assert!(e.world.environment.add_source(kind, x, y, strength, radius) > 0);
         }
-        e.world.reset_empty(56311, 600);
-        e.world.set_food_rate(27.5);
+        e.world.reset_empty(56311);
+        e.world.fixture_exudate(-1.0, -1.0, 600);
+
         e.world.set_mutation_rate(1.0);
         e.world
             .try_seed_fixture(id, 12, -1.0, -1.0, crate::body::BodyFixture::Producer)
@@ -568,7 +569,7 @@ mod tests {
         let mut live = live_engine();
         let before = save(&live).unwrap();
         assert!(!live.restore_state(bytes));
-        assert!(live.error.contains("simulation saves 3 through 13"));
+        assert!(live.error.contains("simulation saves 3 through 14"));
         assert_eq!(save(&live).unwrap(), before);
         let mut version2 = before.clone();
         version2[8..12].copy_from_slice(&2u32.to_le_bytes());
@@ -661,15 +662,15 @@ mod tests {
     }
 
     #[test]
-    fn empty_reset_keeps_recipe_and_rates_but_clears_dynamic_state() {
+    fn empty_reset_keeps_environment_and_mutation_probability_but_clears_every_inventory() {
         let mut e = live_engine();
         let genome_count = e.genomes.len();
-        e.world.reset_empty(72, 13);
+        e.world.reset_empty(72);
         assert_eq!(e.world.cells.len(), 0);
-        assert_eq!(e.world.food.len(), 13);
+        assert!(e.world.food.is_empty());
         assert_eq!(e.world.ticks, 0);
         assert_eq!(e.world.environment.sources.len(), 4);
-        assert_eq!(e.world.food_rate, 27.5);
+
         assert_eq!(e.world.mutation_rate, 1.0);
         assert_eq!(e.genomes.len(), genome_count);
         assert_eq!(e.world.seed_cells(1, 1, -1.0, -1.0), 1);

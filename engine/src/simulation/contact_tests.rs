@@ -52,7 +52,7 @@ fn message_requires_a_working_receptor_and_its_actual_publishing_contact() {
     assert!(read.valid && !read.message_valid && !read.signal_valid, "the nearer private sender wins contact");
     assert_eq!(read.message, 0.0);
     place(&mut world.cells[private], 200.0, 100.0, 0.0);
-    world.add_food(0.0, 100.0, 1);
+    world.fixture_exudate(0.0, 100.0, 1);
     world.food[0].x = 0.0;
     world.food[0].y = 100.0;
     let read = read_touch(&world, &genomes, 1);

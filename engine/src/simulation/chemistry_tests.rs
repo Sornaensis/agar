@@ -8,8 +8,8 @@ fn world(fixture: BodyFixture, oxygen: f64, carbon: f64) -> World {
     let mut world = World::empty(71);
     world.environment.set_initial_gases(oxygen, carbon);
     world.environment.configure(0.5, 1.0, 0.0);
-    world.reset_empty(71, 0);
-    world.food_rate = 0.0; world.mutation_rate = 0.0;
+    world.reset_empty(71);
+world.mutation_rate = 0.0;
     world.try_seed_fixture(1, 1, 300.0, 300.0, fixture).unwrap();
     world.cells[0].x = 300.0; world.cells[0].y = 300.0;
     world.cells[0].vx = 0.0; world.cells[0].vy = 0.0;
@@ -23,7 +23,7 @@ fn balances(world: &World) {
     assert!(world.energy_total() <= world.energy_input_total() + world.photosynthesis_total + 1e-7);
 }
 fn import_to_gut(world: &mut World, kind: OrganicKind) {
-    world.add_food(300.0, 300.0, 1);
+    world.fixture_exudate(300.0, 300.0, 1);
     let food = world.food.pop().unwrap();
     world.cells[0].ingest(kind, food.energy, food.nutrients);
 }
@@ -118,7 +118,7 @@ fn aerobic_machinery_uses_actual_recipe_activity_without_a_hidden_core() {
 
 #[test]
 fn the_minimal_core_maintains_an_atp_working_pool_without_filling_all_storage() {
-    let mut world=World::empty(41); world.food_rate=0.0;
+    let mut world=World::empty(41); 
     world.seed_cells(1,1,300.0,300.0);
     world.exchange_gases_in(&mut PhaseWorkspace::default());
     let caps=vec![world.cells[0].body.capacities()];
@@ -153,8 +153,8 @@ fn digestion_transfers_organic_carbon_to_reserves_and_residue_without_energy_cre
 fn background_decay_stops_without_oxygen_and_accounts_for_each_reaction() {
     for oxygen in [0.0, 0.001] {
         let mut w = World::empty(7);
-        w.environment.set_initial_gases(oxygen, 0.0); w.reset_empty(7, 0);
-        w.food_rate = 0.0; w.add_food(300.0, 300.0, 5);
+        w.environment.set_initial_gases(oxygen, 0.0); w.reset_empty(7);
+w.fixture_exudate(300.0, 300.0, 5);
         let food = w.organic_food_total();
         for _ in 0..200 { w.decay_food_in(&mut PhaseWorkspace::default()); }
         close(food-w.organic_food_total(), w.decay_carbon_respired_total);
@@ -166,7 +166,7 @@ fn background_decay_stops_without_oxygen_and_accounts_for_each_reaction() {
 
 #[test]
 fn crowded_membranes_share_a_finite_patch_without_cell_order_bias() {
-    let mut w = World::empty(17); w.food_rate = 0.0;
+    let mut w = World::empty(17); 
     w.try_seed_cells(1, 600, 300.0, 300.0).unwrap();
     for cell in &mut w.cells { cell.x=300.0; cell.y=300.0; }
     w.exchange_gases_in(&mut PhaseWorkspace::default());
@@ -182,7 +182,7 @@ fn crowded_membranes_share_a_finite_patch_without_cell_order_bias() {
 #[test]
 fn partial_particle_capture_keeps_even_a_sub_micro_energy_carbon_tail() {
     let mut w = world(BodyFixture::Scavenger, 0.0, 0.0);
-    w.add_food(300.0, 300.0, 1);
+    w.fixture_exudate(300.0, 300.0, 1);
     w.food[0].x=300.0; w.food[0].y=300.0;
     let before = w.cells[0].gut_energy+w.food[0].energy;
     let mut caps = vec![w.cells[0].body.capacities()];
@@ -200,7 +200,7 @@ fn carbon_and_oxygen_close_through_growth_death_resize_and_checkpoint_replay() {
     let source = include_str!("../../../examples/phototroph.cell");
     assert_eq!(engine.compile(source), 1);
     engine.world.environment.configure(0.5, 0.8, 0.0);
-    engine.world.food_rate=0.0; engine.world.mutation_rate=0.0;
+engine.world.mutation_rate=0.0;
     engine.world.seed_cells(1, 2, 300.0, 300.0);
     for _ in 0..300 { engine.world.step(&mut engine.genomes); balances(&engine.world); }
     assert!(engine.world.carbon_fixed_total > 0.0);

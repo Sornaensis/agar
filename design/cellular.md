@@ -352,7 +352,7 @@ ingredients, assembly identities, activities and genetic progress. Formats 3, 4,
 5 and 6 remain readable. Existing sources default to unrestricted initiation and
 zero recycling. Corrected optical coverage and directional primitive interactions
 can change affected trajectories. Save/restore replay is deterministic within the
-current engine. The current WASM ABI is 17. Checkpoint 13 also stores the energy carried by food, gut contents and organic reserves above their base carbon potential. It reads checkpoints 3 through 12 and preserves their actual recorded construction energy. Language schema 3 describes register access and contact messaging in its cellular metadata.
+current engine. The current WASM ABI is 18. Checkpoint 14 stores the energy carried by food, gut contents and organic reserves above their base carbon potential. It reads checkpoints 3 through 13, preserves recorded construction energy and existing organic particles, and discards the retired external food schedule. Language schema 3 describes register access and contact messaging in its cellular metadata.
 
 This is a coarse cellular language: named aggregate material pools and discrete
 machines implementing a fixed set of small physical operations. There is no

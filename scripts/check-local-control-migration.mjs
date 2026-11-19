@@ -9,14 +9,15 @@ import { catalog, moduleUrl, compile, seed, snapshot, body, source, save, restor
 // intentionally not compared with the old engine. Every imported physical state
 // must nevertheless be preserved, and its new-format future must replay exactly.
 const options = {
-  baseline: resolve('../cellarium-local-control-baseline/engine/pkg/agar_engine.wasm'),
+  baseline: null,
+  comparison: null,
   output: resolve('experiments/local-control-migration.json'),
   checkpointTicks: 1200,
   continuationTicks: 60,
   phototrophTicks: 2700,
 };
 const names = {
-  '--baseline': 'baseline', '--output': 'output',
+  '--baseline': 'baseline', '--comparison': 'comparison', '--output': 'output',
   '--checkpoint-ticks': 'checkpointTicks', '--continuation-ticks': 'continuationTicks',
   '--phototroph-ticks': 'phototrophTicks',
 };
@@ -29,9 +30,10 @@ for (let i = 0; i < args.length; i += 2) {
 for (const [key, value] of Object.entries(options)) {
   if (key.endsWith('Ticks')) assert.ok(Number.isSafeInteger(value) && value >= 30 && value <= 18000 && value % 30 === 0, key);
 }
+assert.ok(options.baseline && options.comparison, 'This historical migration comparison requires --baseline /path/to/checkpoint6.wasm and --comparison /path/to/archived-comparison.wasm.');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const [oldBytes, newBytes] = await Promise.all([
-  readFile(options.baseline), readFile(new URL('../engine/pkg/agar_engine.wasm', import.meta.url)),
+  readFile(options.baseline), readFile(options.comparison),
 ]);
 assert.notEqual(hash(oldBytes), hash(newBytes), 'The baseline must be the preceding v6 engine');
 const [oldModule, newModule] = await Promise.all([WebAssembly.compile(oldBytes), WebAssembly.compile(newBytes)]);

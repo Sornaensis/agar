@@ -8,7 +8,7 @@ fn scene(recipe: BodyFixture, source: &str, light: f64) -> (World, Vec<Genome>) 
     let genomes = vec![Genome::new(source.to_owned(), program, 0, 0)];
     let mut world = World::empty(107);
     world.environment.configure(0.5, light, 0.0);
-    world.set_food_rate(0.0);
+
     world.set_mutation_rate(0.0);
     add_cell(&mut world, recipe, 110.0, 110.0);
     (world, genomes)
@@ -28,7 +28,7 @@ fn add_cell(world: &mut World, recipe: BodyFixture, x: f64, y: f64) -> usize {
 
 fn add_particle(world: &mut World, x: f64, y: f64) -> usize {
     let index = world.food.len();
-    assert_eq!(world.add_food(x, y, 1), 1);
+    assert_eq!(world.fixture_exudate(x, y, 1), 1);
     world.food[index].x = x;
     world.food[index].y = y;
     index

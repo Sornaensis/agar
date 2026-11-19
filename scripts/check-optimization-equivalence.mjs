@@ -6,21 +6,22 @@ import { catalog, compile, seed, save, restore, snapshot, source, error } from '
 
 // Correctness only: no timing claims or altered physiology. This deliberately
 // instantiates both modules directly; fresh() requires the current ABI.
-let baselinePath, outputPath;
+let baselinePath, comparisonPath, outputPath;
 for (let i = 2; i < process.argv.length; i += 2) {
   const option = process.argv[i], value = process.argv[i + 1];
   assert.ok(value, `Missing value for ${option}`);
   if (option === '--baseline') baselinePath = resolve(value);
+  else if (option === '--comparison') comparisonPath = resolve(value);
   else if (option === '--output') outputPath = resolve(value);
   else throw new Error(`Unknown option ${option}`);
 }
-assert.ok(baselinePath, 'Usage: node --no-liftoff scripts/check-optimization-equivalence.mjs --baseline /path/to/ABI12.wasm [--output report.json]');
+assert.ok(baselinePath && comparisonPath, 'Archived equivalence check. Usage: node --no-liftoff scripts/check-optimization-equivalence.mjs --baseline /path/to/ABI12.wasm --comparison /path/to/ABI13.wasm [--output report.json]');
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const descriptions = [];
 for (const [name, path, abi] of [
   ['baseline', baselinePath, 12],
-  ['current', new URL('../engine/pkg/agar_engine.wasm', import.meta.url), 13],
+  ['current', comparisonPath, 13],
 ]) {
   const bytes = await readFile(path);
   descriptions.push({ name, abi, sha256: hash(bytes), module: await WebAssembly.compile(bytes) });

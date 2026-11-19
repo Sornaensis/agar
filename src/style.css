@@ -883,5 +883,5 @@ kbd { padding: 2px 5px; border: 1px solid #505455; border-radius: 4px; font-size
   .live-environment { max-height: min(63%, calc(100% - 112px)); }
   .player-stage:has(.cell-inspector:not([hidden])) .player-view-controls { left: 12px; right: auto; top: 64px; }
   .environment-navigation-hint { font-size: 0 !important; }
-  .environment-navigation-hint::after { content: 'Pinch to zoom · Drag to pan · Fit to see the whole world'; font-size: 10px; }
+  .environment-navigation-hint::after { content: 'Drag objects to move · Swipe empty space to pan · Pinch to zoom'; font-size: 10px; }
 }

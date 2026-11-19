@@ -8,25 +8,26 @@ import { catalog, compile, seed, snapshot, body, save, restore, error, legacyEnv
 // formats differ (v5/v6), so compare exact world/environment bytes and complete
 // body inspection, then migrate the old save and compare subsequent dynamics.
 const args = process.argv.slice(2);
-let baselinePath, outputPath, checkpointTicks = 900, continuationTicks = 1800;
+let baselinePath, comparisonPath, outputPath, checkpointTicks = 900, continuationTicks = 1800;
 for (let i = 0; i < args.length; i += 2) {
   const value = args[i + 1];
   assert.ok(value, `Missing value for ${args[i]}`);
   switch (args[i]) {
     case '--baseline': baselinePath = resolve(value); break;
+    case '--comparison': comparisonPath = resolve(value); break;
     case '--output': outputPath = resolve(value); break;
     case '--checkpoint-ticks': checkpointTicks = Number(value); break;
     case '--continuation-ticks': continuationTicks = Number(value); break;
     default: throw new Error(`Unknown option ${args[i]}`);
   }
 }
-assert.ok(baselinePath, 'Pass --baseline /path/to/pre-mechanism/engine/pkg/agar_engine.wasm');
+assert.ok(baselinePath && comparisonPath, 'This historical comparison requires --baseline /path/to/checkpoint5.wasm and --comparison /path/to/checkpoint6.wasm.');
 for (const ticks of [checkpointTicks, continuationTicks]) {
   assert.ok(Number.isSafeInteger(ticks) && ticks >= 30 && ticks <= 18000 && ticks % 30 === 0);
 }
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const [oldBytes, newBytes] = await Promise.all([
-  readFile(baselinePath), readFile(new URL('../engine/pkg/agar_engine.wasm', import.meta.url)),
+  readFile(baselinePath), readFile(comparisonPath),
 ]);
 assert.notEqual(hash(oldBytes), hash(newBytes), 'The baseline must be the previous engine, not a copy of the current WASM');
 const [oldModule, newModule] = await Promise.all([WebAssembly.compile(oldBytes), WebAssembly.compile(newBytes)]);

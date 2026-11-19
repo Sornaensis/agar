@@ -262,3 +262,17 @@ fn cached_grid_flow_matches_direct_flow_after_edits_motion_resize_and_restore() 
         }
     }
 }
+
+#[test]
+fn dragging_a_floater_preserves_velocity_and_fixing_it_stops_motion() {
+    let mut env = Environment::default();
+    let id = env.add_barrier(260.0,140.0,70.0,15.0,0.0,true);
+    let b = &mut env.barriers[0];
+    (b.vx,b.vy) = (4.25,-1.75);
+    assert!(env.update_barrier(id,400.0,360.0,80.0,20.0,0.2,true));
+    assert_eq!((env.barriers[0].vx,env.barriers[0].vy),(4.25,-1.75));
+    assert!(env.update_barrier(id,400.0,360.0,80.0,20.0,0.2,false));
+    assert_eq!((env.barriers[0].vx,env.barriers[0].vy),(0.0,0.0));
+    assert!(env.update_barrier(id,400.0,360.0,80.0,20.0,0.2,true));
+    assert_eq!((env.barriers[0].vx,env.barriers[0].vy),(0.0,0.0));
+}

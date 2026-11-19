@@ -87,7 +87,7 @@ fn reading(world: &World, genomes: &[Genome], name: &str) -> ReceptorInput {
 }
 
 fn particle(world: &mut World, x: f64, y: f64) {
-    assert_eq!(world.add_food(x, y, 1), 1);
+    assert_eq!(world.fixture_exudate(x, y, 1), 1);
     let last = world.food.last_mut().unwrap();
     last.x = x;
     last.y = y;
