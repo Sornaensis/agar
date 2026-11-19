@@ -1,0 +1,51 @@
+.organism-title { min-width: 0; }
+.organism-title h2 { display: flex; align-items: baseline; gap: 8px; overflow-wrap: anywhere; }
+.organism-title h2 i { flex: 0 0 8px; height: 8px; align-self: center; border-radius: 50%; }
+.organism-overview { color: #e0e6e4; font-size: 13px; font-variant-numeric: tabular-nums; }
+.organism-overview [hidden] { display: none; }
+.organism-reserves { display: grid; gap: 13px; }
+.organism-reserve > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.organism-reserve strong { font-weight: 550; }
+.organism-reserve { --reserve-color: #99ddb8; }
+.organism-reserve[data-reserve="minerals"] { --reserve-color: #b9adeb; }
+.organism-reserve[data-reserve="integrity"] { --reserve-color: #88cbda; }
+.organism-reserve[data-reserve="gut"] { --reserve-color: #dbb383; }
+.organism-reserve meter { display: block; appearance: none; width: 100%; height: 5px; border: 0; border-radius: 5px; overflow: hidden; margin-top: 6px; background: #38413e; }
+.organism-reserve meter::-webkit-meter-bar { height: 5px; border: 0; background: #38413e; }
+.organism-reserve meter::-webkit-meter-optimum-value { background: var(--reserve-color); }
+.organism-reserve meter::-moz-meter-bar { background: var(--reserve-color); }
+.organism-facts.inspector-metrics { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px 12px; margin: 18px 0 16px; }
+.organism-facts dt, .organism-detail-facts dt, .colony-exchange dt { color: #acb7b3; font-size: 12px; }
+.organism-facts dd, .organism-detail-facts dd, .colony-exchange dd { margin: 4px 0 0; }
+.organism-facts dd { font-size: 14px; }
+.organism-physiology { border-top: 1px solid #3a4140; }
+.organism-physiology > summary { padding: 13px 0 2px; font-weight: 550; cursor: pointer; }
+.organism-detail-facts { margin: 12px 0 0; }
+.organism-detail-facts div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 5px 0; }
+.organism-detail-facts dd { overflow-wrap: anywhere; }
+.body-inventory-title { display: flex; gap: 10px; flex-wrap: wrap; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.body-inventory-title h3, .colony-exchange h4 { color: #e0e7e3; font-size: 14px; font-weight: 550; }
+.body-inventory-title span, .body-empty, .colony-exchange p, .colony-exchange small { color: #b0beb7; font-size: 12px; line-height: 1.5; }
+.body-empty { padding: 6px 0; }
+.cellular-machine > summary > span, .cellular-section > summary { font-size: 13px; }
+.cellular-machine > summary small, .cellular-machine > summary strong, .cellular-section-note, .cellular-work span, .cellular-life-step span { font-size: 11px; color: #aec1b3; }
+.cellular-machine-content .cellular-component small, .cellular-machine-facts > span, .cellular-products small { font-size: 10px; }
+.cellular-machine > summary { padding: 10px 0; }
+.cellular-section > .cellular-machines, .cellular-section > .cellular-life { padding: 5px 12px; }
+.cellular-section > .cellular-work { margin: 8px 12px; }
+.colony-exchange { padding: 12px; margin: 12px 0; border: 1px solid #36564d; border-radius: 7px; background: #192a25; }
+.colony-exchange p { margin: 4px 0 0; }
+.colony-exchange dl { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; margin: 12px 0 6px; }
+.colony-exchange dd { font-variant-numeric: tabular-nums; font-size: 13px; }
+.metrics-page details.metrics-secondary { margin: 0; }
+.metrics-page .metrics-secondary > summary { color: #c6d1cc; font-size: 14px; }
+.metrics-page .metrics-secondary[open] { padding-bottom: 12px; }
+.junction-reading { padding: 10px 12px; font-size: 12px; line-height: 1.6; }
+.junction-reading strong, .junction-reading span { display: block; }
+.junction-reading span { color: #bccdc1; }
+.cell-inspector .cell-edit-actions { gap: 6px; margin-bottom: 12px; }
+.cell-inspector .cell-edit-actions .button { flex: 1 0 auto; border: 1px solid #414947; background: #242b29; color: #e1e7e3; font-size: 12px; }
+.cell-inspector .cell-edit-actions .button:hover { background: #303b36; border-color: #859d8b; }
+.cell-inspector .inspector-tabs button { font-size: 12px; }
+.cell-inspector .colony-exchange h4, .cell-inspector .colony-exchange p { margin-top: 0; }
+.cell-inspector .colony-exchange h4 { margin-bottom: 4px; }

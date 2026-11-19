@@ -416,6 +416,12 @@ impl Environment {
             })
     }
 
+    /// The collision solver reserves this clearance around each body.
+    pub(crate) fn circle_fits(&self, at: (f64, f64), radius: f64) -> bool {
+        self.barriers.iter().zip(&self.barrier_cache.shapes).all(|(wall, shape)|
+            self.barrier_hit(wall, shape, at, (0.0, 0.0), radius + 0.001).is_none())
+    }
+
     /// Swept collision prevents tunneling through thin walls. Remaining motion
     /// slides along a wall. Placing a wall over existing matter pushes it clear.
     pub fn move_circle(&self, from: (f64, f64), to: (f64, f64), radius: f64) -> (f64, f64) {

@@ -28,7 +28,7 @@ try {
   await page.goto(base);
   await textIs('#save-state', 'Saved');
   const presetCards = page.locator('[data-action="start-template"]');
-  assert.equal(await presetCards.count(), 5);
+  assert.equal(await presetCards.count(), 6);
   assert.ok((await presetCards.first().locator('.preset-founders').innerText()).includes('Predator'));
   const launchControls = () => page.locator('.new-simulation-dialog[open]').evaluate(dialog => ({
     environment: dialog.querySelector('#simulation-environment').value,
@@ -97,6 +97,9 @@ try {
   await page.locator('[data-view="player"]').click();
   await page.getByRole('button', { name: 'Add organism', exact: true }).click();
   await page.getByRole('button', { name: 'Add Forager', exact: true }).click();
+  await page.locator('#cell-tool-status').waitFor();
+  const worldBounds = await page.locator('#world').boundingBox();
+  await page.mouse.click(worldBounds.x + worldBounds.width * 0.32, worldBounds.y + worldBounds.height * 0.38);
   await page.waitForFunction(() => document.querySelector('#player-caption')?.textContent?.startsWith('13 organisms'));
   await page.locator('[data-action="close-simulation"]').click();
   await page.locator('[data-action="open-simulation"]').waitFor();

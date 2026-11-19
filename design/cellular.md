@@ -163,6 +163,10 @@ The fractional imbalance and the weaker side’s active mass limit the amount on
 
 **Nurse rosette** uses its recognition marker for attachment and its signal register for a juvenile request. **Pulse swimmer** uses the same language features for an excitable motor response with a refractory interval. Both programs grow their own machinery from the same founding body. [Nurse rosette](../examples/nurse-rosette.cell) · [Pulse swimmer](../examples/pulse-swimmer.cell)
 
+A named `junction(signal)` uses membrane and receptor material. Both cells must be attached and operate signal junctions. For a junction named `Bus`, `sensed.Bus.count` counts directly attached partners with a populated signal register, and `sensed.Bus.value` gives their arithmetic mean. An occupied zero contributes to the mean. With no contributing partners, `sensed.Bus.valid` is false, and count and value are zero. Each cell reads the same start-of-tick publications, so a relay needs a new tick for each hop.
+
+[Crown rosette](../examples/crown-rosette.cell) uses this count to recognize a cell with two or more signaling neighbors. It publishes 1. A cell with one signaling neighbor and an incoming mean above 0.5 activates a second light harvester. The player shows these readings under **Body → Incoming colony signals**.
+
 ## Physical memory and pure functions
 
 ```text
@@ -349,7 +353,7 @@ ingredients, assembly identities, activities and genetic progress. Formats 3, 4,
 5 and 6 remain readable. Existing sources default to unrestricted initiation and
 zero recycling. Corrected optical coverage and directional primitive interactions
 can change affected trajectories. Save/restore replay is deterministic within the
-current engine. The current WASM ABI is 15. Checkpoint 11 saves both contact channels, junction machinery, and the latest measured exchange. It reads versions 3 through 10. Language schema 3 describes register access and contact messaging in its cellular metadata.
+current engine. The current WASM ABI is 16. Checkpoint 12 saves both contact channels, junction machinery, the last measured exchange and cumulative player withdrawals. It reads checkpoints 3 through 11. Language schema 3 describes register access and contact messaging in its cellular metadata.
 
 This is a coarse cellular language: named aggregate material pools and discrete
 machines implementing a fixed set of small physical operations. There is no

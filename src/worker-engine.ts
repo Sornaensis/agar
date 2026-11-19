@@ -95,6 +95,9 @@ export class WorkerEngine {
     const copy = bytes.slice();
     return this.call('restoreState', [copy], [copy.buffer as ArrayBuffer]);
   }
+  placeCell(genomeId:number, x:number, y:number): Promise<number> { return this.call('placeCell', [genomeId, x, y]); }
+  moveCell(cellId:number, x:number, y:number, colony = false): Promise<number> { return this.call('moveCell', [cellId, x, y, colony]); }
+  setCellStores(cellId:number, energy:number|null, minerals:number|null): Promise<void> { return this.call('setCellStores', [cellId, energy, minerals]); }
   seed(genomeId: number, count = 8, x = -1, y = -1): Promise<number> { return this.call('seed', [genomeId, count, x, y]); }
   addFood(x = -1, y = -1, count = 40): Promise<number> { return this.call('addFood', [x, y, count]); }
   setFoodRate(rate: number): Promise<void> { return this.call('setFoodRate', [rate]); }

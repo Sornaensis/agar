@@ -1467,7 +1467,8 @@ assembly Digest: digest(tissue) { Catalyst: 0.04; activity: if gut.tissue.energy
         assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 8).is_err());
         assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 9).is_err());
         assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 10).is_err());
-        let restored = Program::read_checkpoint_version(&mut Reader::new(&writer.0), 11).unwrap();
+        assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), 11).is_err());
+        let restored = Program::read_checkpoint_version(&mut Reader::new(&writer.0), 12).unwrap();
         assert_eq!(program.cellular(), restored.cellular());
         assert_eq!(program.evaluate(&inputs()), restored.evaluate(&inputs()));
         assert!(restored.checkpoint_source_matches(&program, &source, true));

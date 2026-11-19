@@ -4,9 +4,10 @@ import { ORGANELLE_CATALOG, MECHANISM_CATALOG } from './organelles';
 export function showGuide(): void {
   createDialog('Guide', `
     <p>Start with <b>Hunting ground</b> to follow a hunter, or <b>Sunlit food web</b> to see where its food comes from. In the food web, Foragers can dock with Phototrophs to exchange carbon and minerals. Each preset lists its founders. You can edit the starting populations, environment and seed. Runs save automatically and reopen paused.</p>
-    <p>Click a cell to inspect its state, physical body, memory or program. <b>Add organism</b> introduces one cell with the chosen genome.</p>
+    <p><b>Add organism</b> lets you choose a genome and click its starting position. Turn on <b>Place several</b> to add more. Press Escape to finish.</p>
+    <p>Select a cell to see its reserves and colony contacts. Drag it to move it, or use <b>Move cell</b> or <b>Move colony</b> and choose a destination. <b>Edit reserves</b> lets you add or remove energy and minerals while running or paused. Zero energy kills the cell.</p>
     <p><b>Pop out</b> keeps the same player running while you edit elsewhere or background the main tab. It keeps advancing when hidden, subject to browser throttling or system sleep; keep the main tab open. <b>Window</b> is the fallback when always-on-top is unavailable. Explicit Pause still stops playback. Without an open player window, a hidden main tab pauses.</p>
-    <details class="guide-section" open><summary>Program a cell with products and recipes</summary>
+    <details class="guide-section"><summary>Program a cell with products and recipes</summary>
       <p>New genomes begin with <code>cellular;</code>. Declare physical products, express them with named genes, then combine their stock into machines. Every founder has one core and finite reserves. Its program must build an energy route before those reserves run out.</p>
       <pre class="guide-code">cellular;
 product Anchor = anchor();
@@ -140,7 +141,7 @@ gene skins: Skin = if pool.Skin &lt; 0.04 then 0.2 else 0;
 assembly Link: adhere() { Mount: 0.02; Skin: 0.02; }</pre>
       <p><code>publish</code> exposes one scalar register. The optional number sets it once at birth. Writing the register updates the message on the next tick. Clearing it withdraws the message. A working <code>sense(contact)</code> recipe named <code>Touch</code> reads the touched cell’s <code>sensed.Touch.message</code> when <code>sensed.Touch.message_valid</code> is true. A published zero is valid.</p>
       <p><code>signal rf002 = 0;</code> selects a second scalar address. Change it to request supplies or relay a pulse while keeping the recognition marker steady. A receptor reads its contact’s <code>signal_valid</code> and <code>signal</code> from the same tick as the marker.</p>
-      <p>Attached cells with matching <code>junction(energy)</code>, <code>junction(mineral)</code> or <code>junction(carbon)</code> machinery exchange that resource toward equal storage fractions. Both sides must build and activate the port. Open <b>Body → Colony exchange</b> to see signed transfers. Try <b>Nurse rosette</b> for resource sharing or <b>Pulse swimmers</b> for relayed movement.</p>
+      <p>Attached cells with matching <code>junction(energy)</code>, <code>junction(mineral)</code> or <code>junction(carbon)</code> machinery exchange that resource toward equal storage fractions. Both sides must build and activate the port. Open <b>Body → Colony exchange</b> to see signed transfers. Try <b>Nurse rosette</b> for resource sharing or <b>Pulse swimmers</b> for relayed movement. In <b>Crown rosette</b>, cells with at least two signaling partners send a beacon. Edge cells that receive it activate an extra light harvester. Open <b>Body → Incoming colony signals</b> to see what a signal junction reads.</p>
       <p><code>avoid_message</code> skips an attack on each candidate whose published value exactly matches the chosen occupied register. <code>adhere_message</code> selects a value for adhesion. Both contacting cells must accept each other’s message and operate built <code>adhere()</code> machinery. Matching values describe a shared signal. Unrelated cells can publish the same value.</p>
     </details>
     <details class="guide-section"><summary>Mutation and dependency graph</summary>
@@ -162,7 +163,7 @@ assembly Link: adhere() { Mount: 0.02; Skin: 0.02; }</pre>
       <p>Minerals circulate through water, bodies and particles. Construction transfers them into structures; recycling and death return them. Usable, raw gut and embodied structural energy remain separate, and maintenance, movement and conversion dissipate energy. Metrics includes introduced resources, total held energy and harvested light.</p>
     </details>
     <details class="guide-section"><summary>Saved files and older versions</summary>
-      <p>IndexedDB holds genomes, environments and full simulation checkpoints; local storage keeps preferences and unfinished drafts. Export genomes and environments from their menus. Existing v3 organelle programs remain executable. Checkpoint 11 saves preserve signal registers, junction machinery and last-tick exchange, along with gas fields, carbon inventories and reaction ledgers as well as world dimensions, per-source geometry and moving barriers; checkpoints 3 through 10 remain readable. Old organic inventories are classified once at import. Updated physical rules can change old trajectories, while saving and continuing under the current engine is deterministic. Earlier investment-language documents remain viewable and exportable.</p>
+      <p>IndexedDB holds genomes, environments and full simulation checkpoints; local storage keeps preferences and unfinished drafts. Export genomes and environments from their menus. Existing v3 organelle programs remain executable. Saves retain the world, organisms, signals and reserve edits. Checkpoint 12 reads saves from versions 3 through 11. Earlier investment-language documents remain viewable and exportable.</p>
     </details>
   `, 'guide-dialog');
 }

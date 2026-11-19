@@ -109,6 +109,7 @@ fn each_requested_receptor_field_matches_complete_inspection() {
     use crate::genome::ReceptorField as F;
     fn bits(input: &ReceptorInput, field: F) -> Vec<u64> {
         let values = match field {
+            F::Count => return vec![u64::from(input.count)],
             F::Available => return vec![input.available as u64],
             F::Valid => return vec![input.valid as u64],
             F::Level => vec![input.level], F::Value => vec![input.value],
@@ -357,7 +358,7 @@ fn cellular_tick_buffers_reuse_allocations_and_v7_continuation_is_exact() {
     assert_eq!(control_ptrs, (controls.expression.as_ptr(), controls.activity.as_ptr(), controls.start.as_ptr(), controls.recycle.as_ptr()));
     let mut original = crate::Engine { world, genomes, ..crate::Engine::new() };
     let saved = crate::checkpoint::save(&original).unwrap();
-    assert_eq!(u32::from_le_bytes(saved[8..12].try_into().unwrap()), 11);
+    assert_eq!(u32::from_le_bytes(saved[8..12].try_into().unwrap()), crate::checkpoint::VERSION);
     let mut restored = crate::checkpoint::restore(&saved).unwrap();
     assert_eq!(crate::checkpoint::save(&restored).unwrap(), saved);
     for _ in 0..60 {

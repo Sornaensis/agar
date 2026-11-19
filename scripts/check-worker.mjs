@@ -233,6 +233,74 @@ try {
 
   // Environment commands must use the same ordered real-worker path as ticks
   // and saved runs. This covers the ABI decoder as well as the Rust behavior.
+  {
+    // Direct manipulation has its own exact placement path. Commands target the
+    // immutable organism ID, even if another organism was added more recently.
+    const { engine: edit } = await fresh();
+    const founderGenome = await edit.compile(source);
+    await edit.resetEmpty(81, 0);
+    const founder = await edit.placeCell(founderGenome, -0.625, 98.125);
+    const other = await edit.placeCell(founderGenome, 200, 220);
+    assert.notEqual(founder, other);
+    const first = await edit.cellSnapshot(founder);
+    assert.deepEqual([first.x, first.y, first.age, first.parentId], [1199.375, 98.125, 0, 0]);
+    assert.equal(await edit.moveCell(founder, 100.0625, 200.25, true), 1);
+    const moved = await edit.cellSnapshot(founder);
+    assert.deepEqual([moved.x, moved.y, moved.vx, moved.vy], [100.0625,200.25,first.vx,first.vy]);
+    assert.equal((await edit.cellSnapshot(other)).x,200);
+    await edit.addBarrier(340, 440, 80, 20, 0, false);
+    const intact = await edit.saveState();
+    for (const operation of [
+      () => edit.placeCell(founderGenome, 200, 220), () => edit.moveCell(founder, 340, 440),
+      () => edit.moveCell(0x100000001, 100, 200), () => edit.placeCell(founderGenome, Infinity, 20),
+      () => edit.setCellStores(founder, 1, moved.nutrientCapacity+1),
+      () => edit.setCellStores(founder, NaN, null),
+    ]) {
+      await assert.rejects(operation());
+      assert.deepEqual(await edit.saveState(), intact, 'Rejected edits preserve genome state, RNG and accounting');
+    }
+    const original = await edit.metricsSnapshot();
+    await edit.setCellStores(founder, first.energy+1, null);
+    await edit.setCellStores(founder, first.energy-1, first.nutrientStored-0.25);
+    const edited = await edit.metricsSnapshot();
+    assert.equal(edited.energyInputTotal,original.energyInputTotal+1);
+    assert.equal(edited.energyWithdrawnTotal,2);
+    assert.equal(edited.mineralWithdrawnTotal,0.25);
+    assert.ok(Math.abs(edited.nutrientTotal+edited.mineralWithdrawnTotal-edited.nutrientInputTotal)<1e-7);
+    assert.equal((await edit.snapshot()).mineralWithdrawnTotal,0.25);
+    const editedState = await edit.saveState();
+    await edit.tick(1);
+    const next = await edit.saveState();
+    await edit.restoreState(editedState);
+    assert.deepEqual(await edit.metricsSnapshot(),edited);
+    await edit.tick(1);
+    assert.deepEqual(await edit.saveState(),next);
+    await edit.setCellStores(founder, 0, null);
+    assert.equal(await edit.cellSnapshot(founder),null);
+    assert.equal((await edit.metricsSnapshot()).deaths,1);
+    assert.ok((await edit.snapshot()).food.some(particle=>particle.kind===1));
+    assert.ok(await edit.cellSnapshot(other));
+    const afterDeath = await edit.saveState();
+    await edit.restoreState(afterDeath);
+    assert.deepEqual(await edit.saveState(),afterDeath);
+
+    // A saved attached pair has actual mature adhesive machinery and registers.
+    await edit.restoreState(new Uint8Array(await readFile(new URL('../engine/fixtures/attached-v11.bin', import.meta.url))));
+    const pair = (await edit.snapshot()).cells;
+    assert.equal(pair.length,2);
+    assert.equal((await edit.cellBody(pair[0].id)).colony.neighbors,1);
+    assert.equal(await edit.moveCell(pair[0].id,25,50,true),2);
+    const transported = (await edit.snapshot()).cells;
+    assert.equal(transported[0].x,25);
+    assert.equal(transported[0].y,50);
+    for (const axis of ['x','y']) assert.ok(Math.abs(transported[1][axis]-transported[0][axis]-
+      (pair[1][axis]-pair[0][axis]))<1e-9);
+    assert.equal(await edit.moveCell(pair[0].id,280,140,false),1);
+    assert.deepEqual((await edit.snapshot()).cells[1],transported[1]);
+    assert.equal((await edit.cellBody(pair[1].id)).colony.neighbors,0);
+    assert.equal(await edit.moveCell(pair[0].id,290,150,true),1);
+  }
+
   const { engine: habitat } = await fresh();
   await habitat.setFoodRate(0);
   await habitat.setEnvironment(0.5, 0, 0);
@@ -352,7 +420,7 @@ try {
   assert.ok(migratedGas.metrics.legacyCarbonImported>0,'Legacy organic inventory is explicitly counted at migration');
   checkChemicalBudget(migratedGas.metrics);
   const upgradedGas=await chemistry.saveState();
-  assert.equal(new DataView(upgradedGas.buffer,upgradedGas.byteOffset,upgradedGas.byteLength).getUint32(8,true),11);
+  assert.equal(new DataView(upgradedGas.buffer,upgradedGas.byteOffset,upgradedGas.byteLength).getUint32(8,true),12);
   const migratedFuture=await chemistry.advance(12,{metrics:true,environment:true});
   await chemistry.restoreState(upgradedGas);
   assert.deepEqual(await chemistry.advance(12,{metrics:true,environment:true}),migratedFuture);

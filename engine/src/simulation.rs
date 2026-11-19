@@ -14,6 +14,7 @@ use std::f64::consts::{PI, TAU};
 use std::fmt::Write;
 use std::rc::Rc;
 mod adhesion;
+mod manipulation;
 mod checkpoint;
 mod chemistry;
 mod contact;
@@ -630,6 +631,18 @@ struct TickWorkspace {
     phases: PhaseWorkspace,
 }
 
+enum FounderPlacement {
+    Scatter,
+    Cluster(f64, f64),
+    Exact(f64, f64),
+}
+impl FounderPlacement {
+    fn seeded(x: f64, y: f64) -> Self {
+        if x < 0.0 || y < 0.0 || !x.is_finite() || !y.is_finite() { Self::Scatter }
+        else { Self::Cluster(x, y) }
+    }
+}
+
 pub struct World {
     pub cells: Vec<Cell>,
     pub food: Vec<Food>,
@@ -647,6 +660,8 @@ pub struct World {
     pub photosynthesis_total: f64,
     nutrient_imports: f64,
     energy_imports: f64,
+    pub energy_withdrawn: f64,
+    pub mineral_withdrawn: f64,
     pub carbon_fixed_total: f64,
     pub carbon_respired_total: f64,
     pub decay_carbon_respired_total: f64,
@@ -682,6 +697,8 @@ impl World {
             photosynthesis_total: 0.0,
             nutrient_imports: 0.0,
             energy_imports: 0.0,
+            energy_withdrawn: 0.0,
+            mineral_withdrawn: 0.0,
             carbon_fixed_total: 0.0,
             carbon_respired_total: 0.0,
             decay_carbon_respired_total: 0.0,
@@ -740,7 +757,7 @@ impl World {
         next.mutation_rate = self.mutation_rate;
         next.food_rate = self.food_rate;
         next.try_add_food(-1.0, -1.0, 360)?;
-        next.seed_bodies(genome_id, 22, -1.0, -1.0, Body::founder, program)?;
+        next.seed_bodies(genome_id, 22, FounderPlacement::Scatter, Body::founder, program)?;
         *self = next;
         Ok(())
     }
@@ -798,7 +815,7 @@ impl World {
         x: f64,
         y: f64,
     ) -> Result<usize, String> {
-        self.seed_bodies(id, count, x, y, Body::founder, None)
+        self.seed_bodies(id, count, FounderPlacement::seeded(x, y), Body::founder, None)
     }
     fn founder_program(genome_id: u32, genomes: &[Genome]) -> Result<&Program, String> {
         genomes.get(genome_id.wrapping_sub(1) as usize).map(|genome| &genome.program)
@@ -808,7 +825,7 @@ impl World {
         &mut self, id: u32, count: usize, x: f64, y: f64, genomes: &[Genome],
     ) -> Result<usize, String> {
         let program = Self::founder_program(id, genomes)?;
-        self.seed_bodies(id, count, x, y, Body::founder, Some(program))
+        self.seed_bodies(id, count, FounderPlacement::seeded(x, y), Body::founder, Some(program))
     }
     /// Preassembled specimens are available only to native regression tests.
     #[cfg(test)]
@@ -820,14 +837,13 @@ impl World {
         y: f64,
         fixture: BodyFixture,
     ) -> Result<usize, String> {
-        self.seed_bodies(genome_id, count, x, y, || Body::fixture(fixture), None)
+        self.seed_bodies(genome_id, count, FounderPlacement::seeded(x, y), || Body::fixture(fixture), None)
     }
     fn seed_bodies(
         &mut self,
         genome_id: u32,
         count: usize,
-        x: f64,
-        y: f64,
+        placement: FounderPlacement,
         mut create_body: impl FnMut() -> (Body, FounderBudget),
         program: Option<&Program>,
     ) -> Result<usize, String> {
@@ -837,14 +853,16 @@ impl World {
         self.cells
             .try_reserve_exact(count)
             .map_err(|_| "Cannot add organisms: not enough memory.".to_string())?;
-        let scatter = x < 0.0 || y < 0.0 || !x.is_finite() || !y.is_finite();
         for _ in 0..count {
-            let (cx, cy) = if scatter {
-                (self.rng.unit() * self.environment.width, self.rng.unit() * self.environment.height)
-            } else {
-                let a = self.rng.unit() * TAU;
-                let r = self.rng.unit().sqrt() * 38.0;
-                (wrap(x + a.cos() * r, self.environment.width), wrap(y + a.sin() * r, self.environment.height))
+            let (cx, cy) = match placement {
+                FounderPlacement::Exact(x, y) => (x, y),
+                FounderPlacement::Scatter => (self.rng.unit() * self.environment.width,
+                    self.rng.unit() * self.environment.height),
+                FounderPlacement::Cluster(x, y) => {
+                    let a = self.rng.unit() * TAU;
+                    let r = self.rng.unit().sqrt() * 38.0;
+                    (wrap(x + a.cos() * r, self.environment.width), wrap(y + a.sin() * r, self.environment.height))
+                }
             };
             let angle = self.rng.unit() * TAU;
             let (body, budget) = create_body();
@@ -1002,7 +1020,7 @@ impl World {
         let mut max_radius: f64 = 0.0;
         let spatial_sensing = capacities.iter().enumerate().any(|(i, caps)| {
             selected.is_none_or(|which| which == i)
-                && (caps.optical_sensing > 0.0 || caps.mechanical_sensing > 0.0)
+                && (caps.optical_sensing > 0.0 || caps.mechanical_sensing > 0.0 || caps.signal_junction > 0.0)
         });
         if spatial_sensing {
             geometry.rebuild(&self.cells, true, false);
@@ -1446,21 +1464,7 @@ impl World {
             .checked_mul(20)
             .and_then(|n| n.checked_add((self.food_rate * DT).ceil() as usize + 1))
             .ok_or("Simulation paused: organic material exceeds addressable memory.")?;
-        let energetic_packets = (packet_energy / ORGANIC_PACKET_ENERGY).ceil();
-        if !energetic_packets.is_finite() || energetic_packets >= usize::MAX as f64 {
-            return Err("Simulation paused: organic material exceeds addressable memory.".into());
-        }
-        let possible_particles = packet_overhead
-            .checked_add(energetic_packets as usize)
-            .ok_or("Simulation paused: organic material exceeds addressable memory.")?;
-        if possible_particles as u128 > (u64::MAX / 2 - self.next_food_id) as u128 {
-            return Err(
-                "Simulation paused: the organic particle identifier sequence is exhausted.".into(),
-            );
-        }
-        self.food.try_reserve(possible_particles).map_err(|_| {
-            "Simulation paused: not enough memory for organic material.".to_string()
-        })?;
+        self.reserve_organic_packets(packet_energy, packet_overhead)?;
         self.environment.step(self.time());
         self.decay_food_in(phases);
         // Phase 1: one immutable observation/capability snapshot. Memory and
@@ -1743,38 +1747,7 @@ impl World {
         // Uneven, discrete compartment inheritance can reduce capacity; transfer
         // overflow to the local environment rather than cloning a compartment.
         self.spill_excess_stores_in(phases, false);
-        phases.emissions.clear();
-        // A newborn can immediately lose all usable energy when its inherited
-        // storage overflows. Return its tissue too; only pre-birth cells could
-        // have been consumed during this tick's predation phase.
-        for (i, c) in self.cells.iter().enumerate() {
-            if c.alive() || phases.consumed.get(i).copied().unwrap_or(false) {
-                continue;
-            }
-            self.environment.release_oxygen(c.x, c.y, c.internal_oxygen);
-            self.environment.release_inorganic_carbon(c.x, c.y, c.internal_inorganic_carbon);
-            phases.emissions.push(OrganicEmission::new(
-                OrganicKind::Tissue,
-                c.x,
-                c.y,
-                (c.body.structural_mass() * STRUCTURAL_CARBON_PER_MASS + c.organic_carbon) * CHEMICAL_ENERGY_PER_CARBON,
-                c.body.structural_mass() + c.nutrient_stored,
-            ));
-            for kind in OrganicKind::ALL {
-                let pool = c.gut[kind as usize];
-                phases.emissions.push(OrganicEmission::new(
-                    kind,
-                    c.x,
-                    c.y,
-                    pool.energy,
-                    pool.nutrients,
-                ));
-            }
-        }
-        self.emit_organic_pending(phases);
-        let before = self.cells.len();
-        self.cells.retain(Cell::alive);
-        self.deaths += (before - self.cells.len()) as u64;
+        self.remove_dead_in(phases);
         self.food_credit += self.food_rate * DT;
         let food = self.food_credit.floor() as usize;
         self.food_credit -= food as f64;
@@ -2246,6 +2219,58 @@ impl World {
                 }
             }
         }
+    }
+    fn reserve_organic_packets(&mut self, packet_energy: f64, packet_overhead: usize) -> Result<(), String> {
+        let energetic_packets = (packet_energy / ORGANIC_PACKET_ENERGY).ceil();
+        if !energetic_packets.is_finite() || energetic_packets >= usize::MAX as f64 {
+            return Err("Simulation paused: organic material exceeds addressable memory.".into());
+        }
+        let possible_particles = packet_overhead
+            .checked_add(energetic_packets as usize)
+            .ok_or("Simulation paused: organic material exceeds addressable memory.")?;
+        if possible_particles as u128 > (u64::MAX / 2 - self.next_food_id) as u128 {
+            return Err(
+                "Simulation paused: the organic particle identifier sequence is exhausted.".into(),
+            );
+        }
+        self.food.try_reserve(possible_particles).map_err(|_| {
+            "Simulation paused: not enough memory for organic material.".to_string()
+        })?;
+        Ok(())
+    }
+    fn remove_dead_in(&mut self, phases: &mut PhaseWorkspace) {
+        phases.emissions.clear();
+        // A newborn can immediately lose all usable energy when its inherited
+        // storage overflows. Return its tissue too; only pre-birth cells could
+        // have been consumed during this tick's predation phase.
+        for (i, c) in self.cells.iter().enumerate() {
+            if c.alive() || phases.consumed.get(i).copied().unwrap_or(false) {
+                continue;
+            }
+            self.environment.release_oxygen(c.x, c.y, c.internal_oxygen);
+            self.environment.release_inorganic_carbon(c.x, c.y, c.internal_inorganic_carbon);
+            phases.emissions.push(OrganicEmission::new(
+                OrganicKind::Tissue,
+                c.x,
+                c.y,
+                (c.body.structural_mass() * STRUCTURAL_CARBON_PER_MASS + c.organic_carbon) * CHEMICAL_ENERGY_PER_CARBON,
+                c.body.structural_mass() + c.nutrient_stored,
+            ));
+            for kind in OrganicKind::ALL {
+                let pool = c.gut[kind as usize];
+                phases.emissions.push(OrganicEmission::new(
+                    kind,
+                    c.x,
+                    c.y,
+                    pool.energy,
+                    pool.nutrients,
+                ));
+            }
+        }
+        self.emit_organic_pending(phases);
+        let before = self.cells.len();
+        self.cells.retain(Cell::alive);
+        self.deaths += (before - self.cells.len()) as u64;
     }
     /// Merge locally within a substrate. Building the index once per batch
     /// avoids one full particle scan for every photosynthesizing cell.

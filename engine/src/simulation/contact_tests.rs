@@ -286,3 +286,78 @@ assembly Piercer: pierce() { Mount:0.01; Tail:0.03; Catalyst:0.01; }
     assert!(world.cells[prey].integrity < 1.0, "a closer peer must not suppress a reachable prey target");
     assert_eq!(world.attacks, 1);
 }
+
+const PORT: &str = r#"
+assembly Glue: adhere() { Mount:0.01; Wall:0.01; }
+assembly Bus: junction(signal) { Detector:0.01; Wall:0.01; }
+publish rf001=83; adhere_message rf001;
+signal rf003=0;
+rf006=sensed.Bus.count; rb005=sensed.Bus.valid; rf004=sensed.Bus.value;
+"#;
+
+fn read_bus(world: &World, genomes: &[Genome], id: u32) -> ReceptorInput {
+    let cell = world.cells.iter().find(|cell| cell.id == id).unwrap();
+    let program = &genomes[(cell.genome_id - 1) as usize].program;
+    let index = program.cellular().unwrap().assemblies.iter().position(|recipe| recipe.name == "Bus").unwrap();
+    world.sense_program_in_registry(id, program, genomes).unwrap().receptors[index]
+}
+
+#[test]
+fn signal_junction_averages_only_attached_paid_publishers_and_accepts_zero() {
+    let (mut world, mut genomes) = equipped(PORT);
+    let original = genomes[0].source.clone();
+    place(&mut world.cells[0], 200.0, 200.0, 0.0);
+    genomes[0].program.initialize_message(&mut world.cells[0].memory);
+    for (offset, declaration) in [
+        ([14.2, 0.0], "signal rf003=0;"),
+        ([-14.2, 0.0], "signal rf003=-6;"),
+        ([0.0, 14.2], "signal rf003=12;"),
+        ([0.0, -14.2], "signal rf003;"),
+    ] {
+        let mut peer = world.cells[0].clone();
+        genomes.push(genome(&original.replace("signal rf003=0;", declaration)));
+        peer.id = world.next_id;
+        world.next_id += 1;
+        peer.genome_id = genomes.len() as u32;
+        peer.memory = Registers::default();
+        genomes.last().unwrap().program.initialize_message(&mut peer.memory);
+        place(&mut peer, 200.0 + offset[0], 200.0 + offset[1], PI);
+        world.cells.push(peer);
+    }
+    let sample = |w:&World| { let read=read_bus(w,&genomes,1); (read.available,read.valid,read.count,read.value) };
+    assert_eq!(sample(&world),(true,true,3,2.0)); // Occupied zero contributes; the fourth port is silent.
+    let block = world.environment.add_barrier(207.1,200.0,20.0,10.0,PI*0.5,false);
+    assert!(block>0);
+    assert_eq!(sample(&world),(true,true,2,3.0));
+    assert!(world.environment.remove_barrier(block));
+    let remote = &mut world.cells[3];
+    remote.body.cellular.as_mut().unwrap().assemblies.iter_mut().find(|a|a.recipe.name=="Bus").unwrap().activity=0.0;
+    assert_eq!(sample(&world),(true,true,2,-3.0));
+    world.cells[2].x=140.0;
+    assert_eq!(sample(&world),(true,true,1,0.0));
+    world.cells[1].body.cellular.as_mut().unwrap().assemblies.iter_mut().find(|a|a.recipe.name=="Glue").unwrap().integrity=0.0;
+    assert_eq!(sample(&world),(true,false,0,0.0));
+    world.cells[0].body.cellular.as_mut().unwrap().assemblies.iter_mut().find(|a|a.recipe.name=="Bus").unwrap().activity=0.0;
+    assert_eq!(sample(&world),(false,false,0,0.0));
+}
+
+#[test]
+fn signal_junction_relays_one_frozen_hop_per_tick() {
+    let (mut world,mut genomes)=equipped(&format!("{PORT} rf003=sensed.Bus.value;"));
+    let original=genomes[0].source.clone();
+    genomes.push(genome(&original.replace("rf003=sensed.Bus.value;","rf003=8;")));
+    for i in 0..3 {
+        if i>0 { let mut next=world.cells[0].clone();next.id=world.next_id;world.next_id+=1;world.cells.push(next); }
+        let cell=&mut world.cells[i];cell.genome_id=if i==0 {2}else{1};
+        place(cell,200.0 + i as f64 * 14.2,200.0,0.0);
+        genomes[(cell.genome_id-1) as usize].program.initialize_message(&mut cell.memory);
+    }
+    for expected in [[8.0,0.0,0.0],[8.0,4.0,0.0],[8.0,4.0,4.0]] {
+        world.step(&mut genomes);
+        for (i,value) in expected.iter().enumerate() {
+            let cell=world.cells.iter().find(|cell|cell.id==i as u32 + 1).unwrap();
+            assert_eq!(cell.memory.value("rf003"),Some(&Value::Scalar(*value)));
+        }
+        world.cells.reverse();
+    }
+}

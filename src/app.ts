@@ -1,8 +1,11 @@
 import './style.css';
 import './player-view.css';
+import './observation.css';
+import './sim-tools.css';
+import { cellEditActions, editReserves } from './sim-tools';
 import { PlayerView, PlayerFrameLoop, type PlayerCloseReason } from './player-view';
 import { SimulationLoop, type SimulationWork } from './simulation-loop';
-import { Engine, type Cell, type BodyInspection, type RegisterEntry, type GenomeRecord, type MetricsSnapshot, type SourceKind } from './engine';
+import { Engine, type Cell, type BodyInspection, type RegisterEntry, type GenomeRecord, type GenomeSignalEvaluation, type MetricsSnapshot, type SourceKind } from './engine';
 import { WorkerEngine, type PresentationOptions } from './worker-engine';
 import { Renderer, genomeColor } from './renderer';
 import { GenomeVisualizer } from './genome-visualizer';
@@ -18,6 +21,7 @@ import { icon, escapeHtml as esc, createDialog, setDialogError, downloadFile, in
 import { showGuide } from './guide';
 import { ORGANELLE_CATALOG } from './organelles';
 import { renderCellularBody } from './cellular-inspector';
+import { organismOverview, updateOrganismOverview } from './organism-overview';
 import { gasFields, readGasExchange } from './gas-controls';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => (document.getElementById(id) ?? playerView.document?.getElementById(id)) as T;
@@ -38,6 +42,8 @@ const inspectedRevisions = new WeakMap<ProgramEditor, { session: SimulationSessi
 let ready = false, transitioning = false, saveFailed = false;
 let lifecycleFlushes = 0;
 let selectedId: number | null = null;
+type CellTool = { kind:'place'; genome:GenomeDocument; repeat:boolean; placed:number } | { kind:'move'; id:number; colony:boolean };
+let cellTool: CellTool | null = null, cellEditPending = false;
 let environmentOpen = false, environmentSelection: ObjectSelection | null = null;
 let environmentTool: EnvironmentTool = 'select';
 let liveSourceDraft: SourceConfig | null = null, liveBarrierDraft: BarrierConfig | null = null;
@@ -54,7 +60,7 @@ const playerHost = (): Window => playerView.visible ? playerView.window! : !docu
 const frameLoop = new PlayerFrameLoop(playerHost, frame, undefined, () => playerView.isOpen);
 const simulationLoop = new SimulationLoop(playerHost, simulationWork, advanceSimulation, runError);
 let inspectorEpoch = 0, inspectorPending = false, inspectorStamp = '';
-let cellInspection: { session: SimulationSession; cell: Cell; body?: BodyInspection; memory?: RegisterEntry[] } | null = null;
+let cellInspection: { session: SimulationSession; cell: Cell; body?: BodyInspection; memory?: RegisterEntry[]; reception?: GenomeSignalEvaluation[] } | null = null;
 const genomeRecords = new WeakMap<SimulationSession, Map<number, Promise<GenomeRecord>>>();
 const evaluatingEditors = new WeakSet<ProgramEditor>();
 const genomeVisualizer = new GenomeVisualizer();
@@ -168,6 +174,7 @@ function renderCatalog(): string {
 function renderView(): void {
   const retainPlayer = (playerView.isOpen || restoringPlayer) && Boolean(playerElement && renderer);
   if (!retainPlayer) {
+    if (prefs.tab !== 'simulation' || prefs.simulationView !== 'player') cellTool = null;
     inspectorEpoch++;
     inspectorProgram?.destroy(); inspectorProgram = null;
     renderer?.dispose(); renderer = null; playerElement = null;
@@ -188,9 +195,21 @@ function renderView(): void {
     updatePlayback(); renderLiveEnvironment();
   } else if (prefs.simulationView === 'player' && !playerView.isOpen) {
     playerElement = document.querySelector<HTMLElement>('.player-stage');
-    const canvas = $<HTMLCanvasElement>('world'); renderer = new Renderer(canvas);
+    const canvas = $<HTMLCanvasElement>('world'); renderer = new Renderer(canvas, {
+      canDrag: id => !transitioning && !environmentOpen && !cellEditPending && id === selectedId && (!cellTool || cellTool.kind === 'move'),
+      drop: (id,x,y,colony) => {
+        const tool = cellTool?.kind === 'move' && cellTool.id === id ? cellTool : {kind:'move' as const,id,colony};
+        void useCellTool(tool,x,y);
+      },
+    });
     canvas.addEventListener('click', event => {
       if (!active || !renderer || transitioning || renderer.wasDragging()) return;
+      if (cellTool) {
+        const destination = renderer.toWorld(event.clientX,event.clientY);
+        if (destination) void useCellTool(cellTool,destination.x,destination.y);
+        else toast('Choose a point inside the world.');
+        return;
+      }
       if (environmentOpen) {
         if (environmentTool !== 'select') { const position = renderer.toWorld(event.clientX,event.clientY); if (position) void placeLiveEnvironmentObject(position.x,position.y).catch(error=>toast(readableError(error))); return; }
         const source = renderer.pickSource(active.world,event.clientX,event.clientY), barrier = source ? null : renderer.pickBarrier(active.world,event.clientX,event.clientY);
@@ -201,17 +220,21 @@ function renderView(): void {
     });
     canvas.addEventListener('keydown', event => {
       if (!active || transitioning) return;
-      if (event.key === 'Enter' && environmentOpen && environmentTool !== 'select') { event.preventDefault(); const center=renderer?.getCamera(); void placeLiveEnvironmentObject(center?.x ?? active.world.width/2,center?.y ?? active.world.height/2).catch(error=>toast(readableError(error))); }
+      if (cellTool && event.key === 'Enter' && !event.repeat) {
+        event.preventDefault(); const point = renderer!.getCamera(); void useCellTool(cellTool,point.x,point.y);
+      } else if (cellTool && event.key === 'Escape') { event.preventDefault(); clearCellTool(); }
+      else if (event.key === 'Enter' && environmentOpen && environmentTool !== 'select') { event.preventDefault(); const center=renderer?.getCamera(); void placeLiveEnvironmentObject(center?.x ?? active.world.width/2,center?.y ?? active.world.height/2).catch(error=>toast(readableError(error))); }
       else if (event.code === 'Space') { event.preventDefault(); void togglePlayback(); }
       else if (event.key === 'Escape') { if (environmentOpen) { environmentTool='select'; environmentSelection=null; renderLiveEnvironment(); } selectedId = null; renderInspector(); }
       else if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
         event.preventDefault();
         if(environmentOpen){environmentOpen=false;environmentTool='select';environmentSelection=null;renderLiveEnvironment();}
+        if (cellTool) clearCellTool();
         const cells = active.world.cells, index = cells.findIndex(cell => cell.id === selectedId), direction = event.key === 'ArrowRight' ? 1 : -1;
         selectedId = cells.length ? cells[index < 0 ? (direction > 0 ? 0 : cells.length - 1) : (index + direction + cells.length) % cells.length].id : null; renderInspector();
       }
     });
-    bindLiveEnvironment(); renderLiveEnvironment();
+    bindLiveEnvironment(); renderLiveEnvironment(); renderCellTool();
     canvas.closest('.player-stage')!.querySelectorAll<HTMLButtonElement>('[data-camera]').forEach(button=>button.addEventListener('click',()=>{if(button.dataset.camera==='player:fit')renderer?.fitWorld();else renderer?.zoomBy(button.dataset.camera==='player:in'?1.25:.8);}));
     renderInspector(); updatePlayback(); renderer.render(active.world, selectedId, prefs, cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.cell : null, cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.body ?? null : null);
   }
@@ -244,7 +267,7 @@ async function makeSession(engine: WorkerEngine, metadata: SimulationMetadata): 
   return new SimulationSession(engine, metadata, initial, storage, saveStatus, upsertMetadata);
 }
 function disposeSession(session: SimulationSession): void {
-  if (session === active) playerView.close(unloading ? 'unload' : 'session');
+  if (session === active) { cellTool = null; cellEditPending = false; playerView.close(unloading ? 'unload' : 'session'); }
   for (const inspection of expandedInspections) if (inspection.session === session) {
     inspection.editor.setEvaluationUnavailable('This simulation has been closed.');
     expandedInspections.delete(inspection);
@@ -398,8 +421,9 @@ function playerWindowChanged(reason?: PlayerCloseReason): void {
 }
 
 function playerMarkup(): string {
-  return `<section class="player-stage" aria-label="Simulation player"><canvas id="world" tabindex="0" role="img" aria-label="Simulation. Click an organism to inspect it. Scroll to zoom; Shift-drag to pan. Arrow keys select organisms; Space plays or pauses."></canvas>
+  return `<section class="player-stage" aria-label="Simulation player"><canvas id="world" tabindex="0" role="img" aria-label="Simulation. Select an organism to inspect or drag it. Scroll or pinch to zoom. Shift-drag or swipe the background to pan. Arrow keys select organisms; Space plays or pauses."></canvas>
     <div class="player-toolbar"><div class="playback"><button class="play-button" id="play-pause" data-action="play"></button><select class="playback-speed" id="playback-speed" aria-label="Playback speed" title="Playback speed">${[1,2,5,10].map(speed => `<option value="${speed}">${speed}×</option>`).join('')}</select></div><button class="button subtle" data-action="toggle-environment" aria-pressed="${environmentOpen}">${icon('flow')}Environment</button><button class="button primary" data-action="add-organism">${icon('plus')}Add organism</button><button type="button" class="player-popout" data-action="popout-player" title="${playerView.supportsAlwaysOnTop ? 'Open an always-on-top player' : 'Open a separate player window; always-on-top is unavailable in this browser'}">${icon('expand')}${playerView.supportsAlwaysOnTop ? 'Pop out' : 'Window'}</button></div>
+    <div class="cell-tool-bar" id="cell-tool-bar" hidden><span id="cell-tool-status" title="Tap or click a destination, or press Enter to use the center of the view." role="status" aria-live="polite"></span><label><input type="checkbox" data-repeat-placement> Place several</label><button type="button" class="button small subtle" data-action="cancel-cell-tool">Done</button></div>
     <div class="player-view-controls">${cameraControls('player')}<span>Scroll to zoom · Shift-drag to pan</span></div><aside class="live-environment" id="live-environment" aria-label="Environment controls" hidden></aside><div class="player-caption" id="player-caption"></div><aside class="cell-inspector" id="cell-inspector" aria-label="Organism inspector" hidden></aside></section>`;
 }
 function renderLiveEnvironment(): void {
@@ -611,17 +635,26 @@ async function togglePlayback(): Promise<void> {
   const session = active;
   session.metadata.paused = !session.metadata.paused; simulationLoop.reset(); session.touch(); updatePlayback();
   const pausing = session.metadata.paused;
-  if (pausing) transitioning = true;
+  if (pausing) {
+    transitioning = true;
+    saveStatus('saving', undefined, 'pause-checkpoint');
+  }
   try {
     if (pausing) {
       // Finish any accepted batch, then refresh the slower projections once so
       // a paused overlay and metrics describe the final rendered tick.
-      await session.refresh(viewPresentationOptions());
-      await session.flush();
+      try { await session.refresh(viewPresentationOptions()); }
+      finally { await session.flush(); }
     } else await session.checkpoint();
   }
   catch (error) { runError(session, error); }
-  finally { if (pausing) transitioning = false; simulationLoop.reset(); }
+  finally {
+    if (pausing) {
+      transitioning = false;
+      saveStatus('saved', undefined, 'pause-checkpoint');
+    }
+    simulationLoop.reset();
+  }
 }
 function getGenome(session: SimulationSession, id: number): Promise<GenomeRecord> {
   let records = genomeRecords.get(session);
@@ -655,11 +688,14 @@ function renderInspector(): void {
   const panel = $('cell-inspector'); if (!panel || !active) return;
   panel.hidden = selectedId === null; if (selectedId === null) return;
   const cell = active.world.cells.find(item => item.id === selectedId);
-  panel.innerHTML = `<header class="inspector-header"><div><h2>Organism ${selectedId}</h2><span class="muted">${cell ? esc(genomeName(cell.genomeId)) : 'No longer alive'}</span></div><button class="icon-button" data-action="close-inspector" aria-label="Close organism inspector">${icon('close')}</button></header>
+  panel.innerHTML = `<header class="inspector-header"><div class="organism-title"><h2>${cell ? `<i aria-hidden="true" style="background:${genomeColor(cell.genomeId)}"></i><span data-inspected-genome>${esc(genomeName(cell.genomeId))}</span>` : 'Organism ' + selectedId}</h2>${cell ? `<span class="muted">Organism #${selectedId} · Generation ${cell.generation}</span>` : ''}</div><button class="icon-button" data-action="close-inspector" aria-label="Close organism inspector">${icon('close')}</button></header>
+    ${cell ? cellEditActions() : ''}
     <p id="inspector-error" class="compatibility-notice" role="status" hidden></p>
     ${cell ? `<nav class="inspector-tabs" aria-label="Organism details" role="tablist">${(['overview','body','memory','program'] as const).map(view => `<button role="tab" data-inspector-view="${view}" tabindex="${inspectorView === view ? 0 : -1}" aria-selected="${inspectorView === view}" class="${inspectorView === view ? 'active' : ''}">${view[0].toUpperCase()+view.slice(1)}</button>`).join('')}</nav><div id="inspector-content"></div>` : '<p class="muted">This organism has died.</p>'}`;
   if (!cell) return;
-  if (inspectorView === 'memory') {
+  if (inspectorView === 'overview') {
+    $('inspector-content').innerHTML = organismOverview();
+  } else if (inspectorView === 'memory') {
     $('inspector-content').innerHTML = `<div class="memory-summary" id="memory-summary"></div><input id="memory-filter" class="search-input memory-filter" type="search" placeholder="Find a register" aria-label="Find a register" value="${esc(memoryFilter)}"><table class="memory-table"><thead><tr><th>Address</th><th>Value</th></tr></thead><tbody id="memory-values"></tbody></table><div class="memory-footer"><button class="button subtle" data-action="memory-previous">Previous</button><span id="memory-page"></span><button class="button subtle" data-action="memory-next">Next</button></div>`;
   } else if (inspectorView === 'program') {
     $('inspector-content').innerHTML = `<div class="program-toolbar"><button class="button small subtle" data-action="cell-graph">${icon('graph')}Graph</button><button class="icon-button" data-action="cell-program" aria-label="Expand program" title="Expand program">${icon('expand')}</button></div><div id="organism-program" class="organism-program-editor"><p class="muted">Loading program…</p></div>`;
@@ -667,11 +703,6 @@ function renderInspector(): void {
   updateInspector();
 }
 function metricRow(label: string, value: string): string { return `<div class="metric-row"><span>${label}</span><strong>${value}</strong></div>`; }
-function trophicRole(cell: Cell): 'Autotroph' | 'Heterotroph' | 'Mixotroph' | 'Non-feeding' {
-  const photosynthesis = cell.organelles.some(organ => organ.kind === 'photosynthetic' && organ.capacity > 0),
-    digestion = cell.organelles.some(organ => organ.kind === 'digestive' && organ.capacity > 0);
-  return photosynthesis && digestion ? 'Mixotroph' : photosynthesis ? 'Autotroph' : digestion ? 'Heterotroph' : 'Non-feeding';
-}
 function memoryValue(value: unknown): string {
   if (typeof value === 'number') return Number.isInteger(value) ? String(value) : Number(value.toPrecision(6)).toString();
   if (Array.isArray(value)) return '[' + value.map(memoryValue).join(', ') + ']';
@@ -699,10 +730,11 @@ function updateProgramEvaluation(editor: ProgramEditor, session: SimulationSessi
 }
 function updateInspector(): void {
   const content = $('inspector-content');
-  if (!active || selectedId === null || !content || content.ownerDocument.hidden) return;
+  if (!active || cellTool || selectedId === null || !content || content.ownerDocument.hidden) return;
   const session = active, id = selectedId, mode = inspectorView, epoch = inspectorEpoch;
   if (!session.world.cells.some(item => item.id === id)) { cellInspection = null; renderInspector(); return; }
-  const stamp = `${session.stateVersion}:${session.tick}:${id}:${mode}`;
+  const readReception = mode === 'body' && !!content.querySelector('[data-kind="colony-reception"][open]');
+  const stamp = `${session.stateVersion}:${session.tick}:${id}:${mode}:${readReception}`;
   if (inspectorPending || inspectorStamp === stamp) return;
   inspectorPending = true;
   void (async () => {
@@ -712,13 +744,14 @@ function updateInspector(): void {
       if (!cell) return null;
       const body = mode === 'body' || mode === 'memory' ? await engine.cellBody(id) : undefined;
       const memory = mode === 'memory' ? await engine.getMemory(id) : undefined;
-      return { cell, body, memory, stamp: `${stateVersion}:${tick}:${id}:${mode}` };
+      const reception = readReception ? (await engine.getCellEvaluation(id)).signals : undefined;
+      return { cell, body, memory, reception, stamp: `${stateVersion}:${tick}:${id}:${mode}:${readReception}` };
     });
     if (!detail) return;
-    const { cell, body, memory } = detail;
+    const { cell, body, memory, reception } = detail;
     const source = mode === 'program' ? (await getGenome(session, cell.genomeId)).source : undefined;
     if (active !== session || selectedId !== id || inspectorView !== mode || inspectorEpoch !== epoch || content.ownerDocument.hidden) return;
-    cellInspection = { session, cell, body, memory }; inspectorStamp = detail.stamp;
+    cellInspection = { session, cell, body, memory, reception }; inspectorStamp = detail.stamp;
     const errorNotice = $('inspector-error');
     if (errorNotice) { errorNotice.hidden = true; errorNotice.textContent = ''; }
     if (source !== undefined && !inspectorProgram && $('organism-program')) {
@@ -737,10 +770,10 @@ function paintInspector(): void {
   if (!active || selectedId === null || !$('inspector-content')) return;
   const cell = cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.cell : null;
   if (!cell) return;
-  const name = queryUi<HTMLElement>('.inspector-header .muted');
+  const name = queryUi<HTMLElement>('[data-inspected-genome]');
   if (name) name.textContent = genomeName(cell.genomeId);
   if (inspectorView === 'overview') {
-    $('inspector-content').innerHTML = `<div class="inspector-metrics">${metricRow('Capabilities',trophicRole(cell))}${metricRow('Energy',cell.energy.toFixed(1)+' / '+cell.energyCapacity.toFixed(1))}${metricRow('Envelope area',cell.bodyArea.toFixed(3))}${metricRow('Material mass',cell.bodyMass.toFixed(3))}${metricRow('Division',cell.divisionReady ? 'Ready' : Math.round(cell.maturity*100)+'% grown')}${metricRow('Growth',cell.growthRate.toFixed(3)+' area / s')}${metricRow('Gut',cell.gutEnergy.toFixed(1)+' / '+cell.gutCapacity.toFixed(1))}${metricRow('Gut exudate',cell.gutExudateEnergy.toFixed(1)+' energy')}${metricRow('Gut tissue',cell.gutTissueEnergy.toFixed(1)+' energy')}${metricRow('Gut waste',cell.gutWasteEnergy.toFixed(1)+' energy')}${metricRow('Digestion',cell.digestionRate.toFixed(2)+' substrate / s')}${metricRow('Carbon fixation',cell.carbonFixationRate.toFixed(3)+' C / s')}${metricRow('Respiration',cell.respirationRate.toFixed(3)+' C / s')}${metricRow('Organic carbon reserve',cell.organicCarbon.toFixed(3))}${metricRow('Internal oxygen',cell.internalOxygen.toFixed(3))}${metricRow('Internal inorganic carbon',cell.internalInorganicCarbon.toFixed(3))}${metricRow('Integrity',Math.round(cell.integrity*100)+'%')}${metricRow('Minerals',cell.nutrientStored.toFixed(2)+' / '+cell.nutrientCapacity.toFixed(2))}${metricRow('Age',clock(cell.age))}${metricRow('Generation',String(cell.generation))}${metricRow('Upkeep',(cell.basalMetabolism+cell.memoryCost).toFixed(2)+' energy / s')}</div>`;
+    updateOrganismOverview($('inspector-content'), cell, active.world.cells.find(item => item.id === cell.id));
   } else if (inspectorView === 'body') {
     const target = $('inspector-content'), expanded = new Set([...target.querySelectorAll<HTMLDetailsElement>('details[open]')].map(item => item.dataset.kind));
     const focusedFamily = target.contains(target.ownerDocument.activeElement) ? target.ownerDocument.activeElement?.closest<HTMLDetailsElement>('details[data-kind]')?.dataset.kind : undefined;
@@ -748,7 +781,7 @@ function paintInspector(): void {
       const body = cellInspection?.body; if (!body) return;
       const meter = (name: string, used: number, capacity: number): string => `<div class="body-meter"><div><span>${name}</span><strong>${used.toFixed(3)} / ${capacity.toFixed(3)}</strong></div><meter min="0" max="${Math.max(capacity,0.000001)}" value="${used}" aria-label="${name}"></meter></div>`;
       if (body.cellular) {
-        target.innerHTML = renderCellularBody(body, expanded, !target.querySelector('.cellular-body')) + `<details class="cellular-section" data-kind="cellular-budgets"${expanded.has('cellular-budgets') ? ' open' : ''}><summary><span>Core & physical budgets</span></summary><div class="body-capacity">${meter('Internal space',body.spaceUsed,body.spaceCapacity)}${meter('Membrane attachments',body.surfaceUsed,body.surfaceCapacity)}</div><p class="cellular-section-note">All products, incomplete assemblies and installed machinery occupy physical space.</p><table class="organelle-table"><thead><tr><th>Inherited organ</th><th>Mass</th><th>Integrity</th></tr></thead><tbody>${body.organs.map(organ=>`<tr><td>${esc(organ.kind)} #${organ.id}</td><td>${organ.mass.toFixed(4)}</td><td>${Math.round(organ.integrity*100)}%</td></tr>`).join('')}</tbody></table></details>`;
+        target.innerHTML = renderCellularBody(body, expanded, cellInspection?.reception) + `<details class="cellular-section" data-kind="cellular-budgets"${expanded.has('cellular-budgets') ? ' open' : ''}><summary><span>Structure & capacity</span></summary><div class="body-capacity">${meter('Internal space',body.spaceUsed,body.spaceCapacity)}${meter('Membrane attachments',body.surfaceUsed,body.surfaceCapacity)}</div><p class="cellular-section-note">All products, incomplete assemblies and installed machinery occupy physical space.</p><table class="organelle-table"><thead><tr><th>Inherited organ</th><th>Mass</th><th>Integrity</th></tr></thead><tbody>${body.organs.map(organ=>`<tr><td>${esc(organ.kind)} #${organ.id}</td><td>${organ.mass.toFixed(4)}</td><td>${Math.round(organ.integrity*100)}%</td></tr>`).join('')}</tbody></table></details>`;
       } else {
       target.innerHTML = `<div class="body-capacity">${meter('Internal space',body.spaceUsed,body.spaceCapacity)}${meter('Membrane attachments',body.surfaceUsed,body.surfaceCapacity)}</div><div class="body-work"><span>Expression <strong>${body.synthesisRate.toFixed(3)}</strong></span><span>Assembly <strong>${body.constructionRate.toFixed(3)}</strong></span><span title="Shared work budget: protein synthesis costs 0.6 work per material, and assembly costs 0.4.">Core capacity <strong>${body.assemblyCapacity.toFixed(3)}</strong></span><span>Recycling <strong>${body.recyclingRate.toFixed(3)}</strong></span><span>Repair <strong>${body.repairRate.toFixed(3)}</strong></span><small>material / s · synthesis and assembly share core work</small></div><div class="organelle-list">${ORGANELLE_CATALOG.map(definition => {
         const summary = cell.organelles.find(item => item.kind === definition.kind)!;
@@ -758,6 +791,7 @@ function paintInspector(): void {
         return `<details class="organelle-detail" data-kind="${definition.kind}"${expanded.has(definition.kind) ? ' open' : ''}><summary><i style="background:${definition.color}"></i><span>${esc(definition.name)}<small>${summary.mass.toFixed(3)} material${summary.building > 0 ? ' · assembling' : ''}${summary.damaged > 0 ? ' · damaged' : ''}</small></span><strong title="Actual instances / last requested count">${summary.count}<small> / ${request.count}</small></strong></summary><div class="organelle-content"><p>${esc(definition.description)}</p><div class="organelle-request">${metricRow('Assembly protein',request.proteinMass.toFixed(4)+' material')}${metricRow('Expression / recycle effort',Math.round(request.build*100)+'% / '+Math.round(request.recycle*100)+'%')}${metricRow('Unit size target',request.size.toFixed(3))}${metricRow('Functional capacity',summary.capacity.toFixed(3))}${metricRow('Damaged material',summary.damaged.toFixed(3))}</div>${organs.length ? `<table class="organelle-table"><thead><tr><th>Unit</th><th>Built</th><th>Integrity</th><th>State</th></tr></thead><tbody>${organs.map(organ => `<tr><td>#${organ.id}</td><td>${organ.mass.toFixed(3)}</td><td>${Math.round(organ.integrity*100)}%</td><td>${organ.functional ? organ.mass + 1e-9 < request.size ? 'Growing' : 'Functional' : organ.mass < organ.minimumMass ? 'Assembling' : 'Damaged'}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">No physical units yet.</p>'}</div></details>`;
       }).join('')}</div><p class="body-explanation">Expression produces family-specific proteins. Targets assemble organs from existing stock. Unused proteins occupy space, consume energy and decay.</p>`;
       }
+      target.querySelector('details[data-kind="colony-reception"]')?.addEventListener('toggle', updateInspector);
       if (focusedFamily) target.querySelector<HTMLElement>(`[data-kind="${focusedFamily}"] > summary`)?.focus({preventScroll:true});
     } catch (error) { target.textContent = readableError(error); }
   } else if (inspectorView === 'memory') {
@@ -802,10 +836,62 @@ async function openLiveProgram(id: number, cellId?: number): Promise<void> {
     void persistGenome(newGenome(name,source)).then(() => { button.textContent = 'Saved to Genomes'; toast('Genome saved.'); }).catch(error => { button.disabled=false; setDialogError(dialog,error); });
   });
 }
+function renderCellTool(): void {
+  const bar = $('cell-tool-bar');
+  if (!bar || !playerElement) return;
+  bar.hidden = !cellTool;
+  playerElement.toggleAttribute('data-cell-tool',Boolean(cellTool));
+  if (!cellTool) return;
+  $('cell-tool-status').textContent = cellTool.kind === 'place'
+    ? `Place ${cellTool.genome.name} · tap the world${cellTool.placed ? ' · ' + cellTool.placed + ' added' : ''}`
+    : `Move ${cellTool.colony ? 'colony' : 'cell ' + cellTool.id} · tap a destination`;
+  bar.querySelector('label')!.hidden = cellTool.kind !== 'place';
+  bar.querySelector<HTMLInputElement>('[data-repeat-placement]')!.checked = cellTool.kind === 'place' && cellTool.repeat;
+  bar.querySelector('button')!.textContent = cellTool.kind === 'place' && cellTool.placed ? 'Done' : 'Cancel';
+}
+function clearCellTool(): void { cellTool = null; renderCellTool(); }
+function startCellTool(tool: CellTool): void {
+  environmentOpen = false; environmentSelection = null; environmentTool = 'select'; renderLiveEnvironment();
+  cellTool = tool; renderCellTool();
+  $('world')?.focus({preventScroll:true});
+}
+async function useCellTool(tool: CellTool, x: number, y: number): Promise<void> {
+  const session = active;
+  if (!session || transitioning || cellEditPending) return;
+  cellEditPending = true;
+  const previous = cellTool;
+  try {
+    let id: number, message: string;
+    if (tool.kind === 'place') {
+      id = await session.mutate(async engine => {
+        const genomeId = await engine.compile(tool.genome.source);
+        const cellId = await engine.placeCell(genomeId,x,y);
+        session.metadata.genomeNames[String(genomeId)] = tool.genome.name;
+        return cellId;
+      });
+      tool.placed++;
+      message = `${tool.genome.name} placed · organism ${id}.`;
+    } else {
+      const count = await session.mutate(engine => engine.moveCell(tool.id,x,y,tool.colony));
+      id = tool.id;
+      message = count === 1 ? `Moved organism ${id}.` : `Moved all ${count} organisms in the colony.`;
+    }
+    void session.checkpoint().catch(() => {});
+    if (active !== session || previous !== cellTool) return;
+    selectedId = id; inspectorView = 'overview'; memoryPage = 0; memoryFilter = '';
+    if (tool.kind === 'place' && tool.repeat) renderCellTool(); else clearCellTool();
+    renderInspector(); updateSimulationUi(); toast(message);
+  } catch (error) {
+    if (active === session) {
+      if (tool.kind === 'move' && !session.world.cells.some(cell => cell.id === tool.id)) { clearCellTool(); renderInspector(); }
+      toast(readableError(error));
+    }
+  } finally { if (active === session) cellEditPending = false; }
+}
 function addOrganismDialog(): void {
   if (!active || transitioning) return;
   const session = active;
-  const dialog = createDialog('Add organism', '<input class="search-input" id="organism-search" type="search" placeholder="Find a genome" aria-label="Find a genome"><div class="picker-list" id="organism-options"></div><p class="form-error" role="alert" hidden></p>', 'organism-picker');
+  const dialog = createDialog('Add organism', '<input class="search-input" id="organism-search" type="search" placeholder="Find a genome" aria-label="Find a genome"><div class="picker-list" id="organism-options"></div><p class="form-error" role="alert" hidden></p>', 'organism-picker', playerElement?.ownerDocument);
   const options = dialog.querySelector<HTMLElement>('#organism-options')!;
   const draw = (): void => {
     const query = dialog.querySelector<HTMLInputElement>('#organism-search')!.value.toLowerCase();
@@ -816,20 +902,13 @@ function addOrganismDialog(): void {
     }).join('') || '<p class="muted picker-empty">No matching current-language genomes.</p>';
   };
   draw(); dialog.querySelector('#organism-search')!.addEventListener('input',draw);
-  options.addEventListener('click', async event => {
+  options.addEventListener('click', event => {
     const button = (event.target as Element).closest<HTMLButtonElement>('[data-add-id]');
     if (!button || active !== session || transitioning) return;
-    const genome = findGenome(button.dataset.addId!); if (!genome) return;
-    try {
-      button.disabled = true;
-      await session.mutate(async engine => {
-        const id = await engine.compile(genome.source);
-        if (await engine.seed(id,1) !== 1) throw new Error('The organism could not be introduced.');
-        session.metadata.genomeNames[String(id)] = genome.name;
-      });
-      dialog.close(); void session.checkpoint().catch(() => {}); updateSimulationUi();
-      toast('One '+genome.name+' organism added.');
-    } catch (error) { button.disabled = false; if (dialog.open) setDialogError(dialog,error); }
+    const genome = findGenome(button.dataset.addId!);
+    if (!genome) return;
+    dialog.close();
+    startCellTool({kind:'place',genome,repeat:false,placed:0});
   });
   dialog.querySelector<HTMLInputElement>('#organism-search')!.focus();
 }
@@ -841,13 +920,13 @@ function metricsMarkup(): string {
   const cards = (definitions: ReadonlyArray<readonly [string,string]>): string => definitions.map(([key,label]) => `<article class="metric-card"><span>${label}</span><strong id="metric-${key}">—</strong>${key === 'food' ? '<small id="mean-particle-carbon" title="Organic carbon remaining across all particles divided by their count. Particles lose carbon as they decay."></small>' : ''}</article>`).join('');
   return `<div class="page metrics-page"><div class="metrics-grid">${cards(metricDefinitions.slice(0,4))}</div>
     <section class="chart-panel"><div class="section-heading"><h2>Population</h2><span id="history-duration"></span></div><svg class="metrics-chart" id="history-chart" viewBox="0 0 1000 240" preserveAspectRatio="none" role="img" aria-label="Population history"></svg></section>
-    <section class="trophic-panel"><div class="section-heading"><h2>Food chain</h2><span title="Based on functional organs that have actually been built.">Current capabilities</span></div><div class="metrics-grid">${cards([['autotrophs','Autotrophs'],['heterotrophs','Heterotrophs'],['mixotrophs','Mixotrophs'],['hunters','Attack-capable']])}</div><div class="energy-flow">${[['production','Fixed chemical energy'],['digestion','Assimilated substrate'],['exudation','Organic release']].map(([key,label])=>`<div><span>${label}</span><strong id="flow-${key}">—</strong></div>`).join('')}</div><div class="energy-flow">${[['exudate','Exudate'],['tissue','Cell tissue'],['waste','Waste']].map(([key,label])=>`<div><span>${label}</span><strong id="organic-${key}">—</strong></div>`).join('')}</div><p class="muted">Digestion releases organic carbon and minerals. Respiration uses oxygen to release usable energy from that carbon. Tissue also produces refractory waste, which takes more processing.</p></section>
-    <section class="gas-panel"><div class="section-heading"><h2>Gases & carbon</h2><span>Abstract chemical units</span></div><div class="metrics-grid">${cards([['oxygen-water','Oxygen in water'],['carbon-water','Inorganic carbon in water'],['carbon-cells','Organic carbon in organisms'],['carbon-food','Organic carbon in particles']])}</div><p class="muted">Photosynthesis fixes inorganic carbon and produces oxygen. Respiration consumes organic carbon and oxygen. Producers also respire in darkness; minerals remain a separate growth resource.</p></section>
-    <section class="nutrient-panel"><h2>Minerals</h2><div class="metrics-grid nutrient-metrics">${[['water','Water'],['food','Organic particles'],['cells','Organisms & guts'],['total','Total']].map(([key,label])=>`<div class="metric-card"><span>${label}</span><strong id="nutrient-${key}">—</strong></div>`).join('')}</div></section>
+    <section class="trophic-panel"><div class="section-heading"><h2>Feeding capabilities</h2><span>Living organisms</span></div><div class="metrics-grid">${cards([['autotrophs','Light feeders'],['heterotrophs','Organic feeders'],['mixotrophs','Mixed feeders'],['hunters','Can attack']])}</div></section>
+    <details class="metrics-secondary"><summary>Food & energy flow</summary><div class="energy-flow">${[['production','Energy fixed from light'],['digestion','Assimilated substrate'],['exudation','Organic release']].map(([key,label])=>`<div><span>${label}</span><strong id="flow-${key}">—</strong></div>`).join('')}</div><div class="energy-flow">${[['exudate','Exudate'],['tissue','Cell tissue'],['waste','Waste']].map(([key,label])=>`<div><span>${label}</span><strong id="organic-${key}">—</strong></div>`).join('')}</div></details>
+    <details class="metrics-secondary"><summary>Gases & minerals</summary><div class="metrics-grid">${cards([['oxygen-water','Oxygen in water'],['carbon-water','Inorganic carbon in water'],['carbon-cells','Organic carbon in organisms'],['carbon-food','Organic carbon in particles']])}</div><div class="metrics-grid nutrient-metrics">${[['water','Dissolved minerals'],['food','Minerals in particles'],['cells','Minerals in organisms'],['total','Total minerals']].map(([key,label])=>`<div class="metric-card"><span>${label}</span><strong id="nutrient-${key}">—</strong></div>`).join('')}</div></details>
     <details class="metrics-secondary"><summary>Carbon & oxygen accounting</summary><div class="inspector-metrics">${[
       ['carbon-total','Carbon currently held'],['carbon-input','Carbon introduced'],['carbon-removed','Carbon removed'],['carbon-legacy','Carbon in imported legacy bodies'],['carbon-fixed','Carbon fixed by photosynthesis'],['carbon-respired','Carbon respired by organisms'],['carbon-decayed','Carbon respired by background decay'],['carbon-balance','Carbon balance error'],['oxygen-total','Oxygen in water & organisms'],['oxygen-input','Oxygen introduced'],['oxygen-removed','Oxygen removed'],['oxygen-balance','Oxygen balance error'],
     ].map(([key,label])=>metricRow(label,`<span id="gas-${key}">—</span>`)).join('')}</div><p class="muted">Carbon balance: present + removed − introduced. Oxygen balance also includes production by fixation and consumption by respiration and decay. Atmospheric inflow and outflow are recorded.</p></details>
-    <details class="metrics-secondary"><summary>Resource accounting</summary><div class="inspector-metrics">${metricRow('Material introduced','<span id="introduced-material">—</span>')}${metricRow('Minerals absorbed','<span id="removed-material">—</span>')}${metricRow('Organic energy introduced','<span id="introduced-energy">—</span>')}${metricRow('Energy currently held','<span id="held-energy">—</span>')}${metricRow('Light energy collected','<span id="light-energy">—</span>')}</div></details>
+    <details class="metrics-secondary"><summary>Resource accounting</summary><div class="inspector-metrics">${metricRow('Material introduced','<span id="introduced-material">—</span>')}${metricRow('Minerals absorbed','<span id="removed-material">—</span>')}${metricRow('Minerals withdrawn from cells','<span id="withdrawn-material">—</span>')}${metricRow('Energy withdrawn from cells','<span id="withdrawn-energy">—</span>')}${metricRow('Energy introduced','<span id="introduced-energy">—</span>')}${metricRow('Energy currently held','<span id="held-energy">—</span>')}${metricRow('Light energy collected','<span id="light-energy">—</span>')}</div></details>
     <details class="metrics-secondary"><summary>Evolution & interactions</summary><div class="metrics-grid">${cards(metricDefinitions.slice(4))}</div></details></div>`;
 }
 function renderMetrics(world: MetricsSnapshot): void {
@@ -870,16 +949,21 @@ function renderMetrics(world: MetricsSnapshot): void {
   })) $('gas-'+key).textContent = key.endsWith('balance') ? Math.abs(value) < 1e-7 ? '0.000000' : value.toExponential(3) : value.toFixed(3);
   $('introduced-material').textContent = world.nutrientInputTotal.toFixed(2);
   $('removed-material').textContent = active!.world.environment.nutrientRemovedTotal.toFixed(2);
+  $('withdrawn-material').textContent = world.mineralWithdrawnTotal.toFixed(2);
+  $('withdrawn-energy').textContent = world.energyWithdrawnTotal.toFixed(2);
   $('introduced-energy').textContent = world.energyInputTotal.toFixed(2);
   $('held-energy').textContent = world.energyTotal.toFixed(2);
   $('light-energy').textContent = world.photosynthesisTotal.toFixed(2);
   $('nutrient-total').title = world.nutrientInputTotal.toFixed(1)+' mineral units introduced since this simulation began.';
   const history = [...active!.metadata.history.filter(point=>point.time<world.time),{time:world.time,population:world.population}];
   const first = history[0]?.time ?? 0, span=Math.max(1,world.time-first);
-  const max=Math.ceil(Math.max(10,...history.map(point=>point.population))*1.1/10)*10;
+  const peak = history.reduce((largest,point)=>Math.max(largest,point.population),1);
+  const unit = 10 ** Math.floor(Math.log10(Math.max(1,peak/4)));
+  const step = [1,2,5,10].map(factor=>factor*unit).find(value=>value>=peak/4)!;
+  const intervals = Math.max(2,Math.ceil(peak/step)), max = intervals*step;
   const points=history.map(point=>`${((point.time-first)/span*930+50).toFixed(2)},${(214-point.population/max*190).toFixed(2)}`);
   if(points.length===1) points.push('980,'+(214-history[0].population/max*190).toFixed(2));
-  const ticks=[0,max/2,max].map(value=>{const y=214-value/max*190;return `<path d="M50 ${y}H980" stroke="#29373b" stroke-dasharray="3 7"/><text x="36" y="${y+4}" text-anchor="end" fill="#809697" font-size="11">${value}</text>`;}).join('');
+  const ticks=Array.from({length:intervals+1},(_,i)=>i*step).map(value=>{const y=214-value/max*190;return `<path d="M50 ${y}H980" stroke="#29373b" stroke-dasharray="3 7"/><text x="36" y="${y+4}" text-anchor="end" fill="#809697" font-size="11">${value}</text>`;}).join('');
   $('history-chart').innerHTML = `${ticks}${points.length?`<path d="M50 214L${points.join(' L')}L${points[points.length-1].split(',')[0]} 214Z" fill="rgba(130,226,192,.06)"/><path d="M${points.join(' L')}" fill="none" stroke="#8be2c5" stroke-width="2.5" vector-effect="non-scaling-stroke"/>`:''}`;
   $('history-duration').textContent = clock(first)+' – '+clock(world.time);
 }
@@ -914,7 +998,7 @@ function updateSimulationUi(): void {
   if(!active) return;
   for (const inspection of expandedInspections) updateProgramEvaluation(inspection.editor, inspection.session, inspection.cellId);
   if(playerView.visible || !playerView.isOpen && !document.hidden && prefs.tab==='simulation' && prefs.simulationView==='player') {
-    $('player-caption').textContent=active.metadata.summary.population+' organisms · '+clock(active.metadata.summary.time);
+    $('player-caption').textContent=active.metadata.summary.population+(active.metadata.summary.population === 1 ? ' organism · ' : ' organisms · ')+clock(active.metadata.summary.time);
     updateLiveEnvironmentReadout();
     updateInspector();
   }
@@ -1004,7 +1088,20 @@ async function action(name:string,id?:string,genomeId?:number):Promise<void>{
   if(name==='open-simulation'&&id){await openSimulation(id);return;}
   if(name==='close-simulation'){await closeSimulation();return;}
   if(name==='play'){await togglePlayback();return;}
+  if(name==='cancel-cell-tool'){clearCellTool();$('world')?.focus({preventScroll:true});return;}
+  if(name==='move-cell'||name==='move-colony'){
+    if(active&&selectedId!==null)startCellTool({kind:'move',id:selectedId,colony:name==='move-colony'});
+    return;
+  }
+  if(name==='edit-reserves'&&active&&selectedId!==null&&playerElement){
+    const session=active,id=selectedId;
+    if(await editReserves(session,id,playerElement.ownerDocument,()=>session===active && selectedId===id) && session===active){
+      inspectorStamp=''; updateSimulationUi(); toast('Reserves updated for organism '+id+'.');
+    }
+    return;
+  }
   if(name==='toggle-environment'||name==='close-environment'||name==='edit-live-environment'){
+    clearCellTool();
     environmentOpen=name==='edit-live-environment'||name==='toggle-environment'&&!environmentOpen;
     if(!environmentOpen){environmentTool='select';environmentSelection=null;$('world')?.classList.remove('placing-object');}
     if(name==='edit-live-environment'){prefs.simulationView='player';persistPreferences();renderView();}
@@ -1046,7 +1143,7 @@ function handleUiClick(event: MouseEvent): void {
     queryUi<HTMLButtonElement>('[data-inspector-view="'+inspectorView+'"]')?.focus({preventScroll:true});return;
   }
   if(target.dataset.action){
-    if ((event.target as Element).ownerDocument !== document && ['add-organism','cell-program','cell-graph','live-program','live-graph'].includes(target.dataset.action)) window.focus();
+    if ((event.target as Element).ownerDocument !== document && ['cell-program','cell-graph','live-program','live-graph'].includes(target.dataset.action)) window.focus();
     target.closest('details')?.removeAttribute('open');
     void action(target.dataset.action,target.dataset.id,Number(target.dataset.genome)).catch(error=>toast(readableError(error)));
   }
@@ -1062,6 +1159,7 @@ function handleUiInput(event: Event): void {
 }
 function handleUiChange(event: Event): void {
   const input=event.target as HTMLInputElement,key=input.dataset.setting;
+  if(input.hasAttribute('data-repeat-placement') && cellTool?.kind==='place'){cellTool.repeat=input.checked;return;}
   if(input.id==='playback-speed'){
     if(!active||transitioning){updatePlayback();return;}
     const speed=Number(input.value);
@@ -1089,6 +1187,9 @@ function handleUiChange(event: Event): void {
   }catch(error){toast(readableError(error));renderView();}
 }
 function handleUiKeydown(event: KeyboardEvent): void {
+  if(event.key==='Escape' && cellTool && playerElement?.contains(event.target as Node)){
+    event.preventDefault(); clearCellTool(); $('world')?.focus({preventScroll:true}); return;
+  }
   if(event.key==='Escape')for(const details of document.querySelectorAll<HTMLDetailsElement>('.item-menu[open]')){details.open=false;details.querySelector<HTMLElement>('summary')?.focus();}
   const current=(event.target as HTMLElement).closest<HTMLButtonElement>('button[role="tab"]');
   if(!current||transitioning||!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;

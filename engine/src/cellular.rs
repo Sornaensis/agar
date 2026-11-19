@@ -101,17 +101,17 @@ pub enum MechanismKind {
     LightHarvest, MineralImport, ParticleCapture, Engulf,
     DigestExudate, DigestTissue, DigestWaste, Propulsion, Pierce, Shield,
     Repair, SenseLight, SenseHeat, SenseChemical, SenseContact, SenseOptical,
-    Grow, Replicate, Constrict, Recycle, RespireOxygen, Adhere, JunctionEnergy, JunctionMineral, JunctionCarbon,
+    Grow, Replicate, Constrict, Recycle, RespireOxygen, Adhere, JunctionEnergy, JunctionMineral, JunctionCarbon, JunctionSignal,
 }
 impl MechanismKind {
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 31] = [
         Self::Support, Self::Translation, Self::EnergyStorage, Self::MineralStorage,
         Self::FoodStorage, Self::LightHarvest, Self::MineralImport, Self::ParticleCapture,
         Self::Engulf, Self::DigestExudate, Self::DigestTissue, Self::DigestWaste,
         Self::Propulsion, Self::Pierce, Self::Shield, Self::Repair, Self::SenseLight,
         Self::SenseHeat, Self::SenseChemical, Self::SenseContact, Self::SenseOptical,
         Self::Grow, Self::Replicate, Self::Constrict, Self::Recycle, Self::RespireOxygen, Self::Adhere,
-        Self::JunctionEnergy, Self::JunctionMineral, Self::JunctionCarbon,
+        Self::JunctionEnergy, Self::JunctionMineral, Self::JunctionCarbon, Self::JunctionSignal,
     ];
     pub fn name(self) -> &'static str {
         ["support()", "translate()", "store(energy)", "store(mineral)", "store(food)",
@@ -119,7 +119,7 @@ impl MechanismKind {
          "digest(exudate)", "digest(tissue)", "digest(waste)", "propel()", "pierce()",
          "shield()", "repair()", "sense(light)", "sense(heat)", "sense(chemical)",
          "sense(contact)", "sense(optical)", "grow()", "replicate()", "constrict()", "recycle()", "respire(oxygen)", "adhere()",
-         "junction(energy)", "junction(mineral)", "junction(carbon)"]
+         "junction(energy)", "junction(mineral)", "junction(carbon)", "junction(signal)"]
             [self as usize]
     }
     pub fn from_name(name: &str) -> Option<Self> {
@@ -162,7 +162,8 @@ impl MechanismKind {
          "Holds contacting cells together while their surface messages match in both directions.",
          "Exchanges stored ATP with an adhered neighbor carrying an active energy junction.",
          "Exchanges free mineral with an adhered neighbor carrying an active mineral junction.",
-         "Exchanges organic carbon reserves with an adhered neighbor carrying an active carbon junction."]
+         "Exchanges organic carbon reserves with an adhered neighbor carrying an active carbon junction.",
+         "Reads the number and mean published signal of directly adhered neighbors with active signal junctions."]
             [self as usize]
     }
     pub fn required_roles(self) -> &'static [ProductKind] {
@@ -174,6 +175,7 @@ impl MechanismKind {
             Self::LightHarvest => &[Anchor, Pigment, Enzyme],
             Self::RespireOxygen => &[Enzyme, Membrane],
             Self::Adhere => &[Anchor, Membrane],
+            Self::JunctionSignal => &[Membrane, Receptor],
             Self::JunctionEnergy | Self::JunctionMineral | Self::JunctionCarbon => &[Membrane, Transporter],
             Self::MineralImport => &[Anchor, Transporter],
             Self::ParticleCapture => &[Anchor, Motor],
@@ -192,17 +194,17 @@ impl MechanismKind {
     pub fn minimum_mass(self) -> f64 {
         [0.04, 0.02, 0.02, 0.02, 0.04, 0.04, 0.015, 0.015, 0.025,
          0.01, 0.01, 0.01, 0.025, 0.025, 0.02, 0.025, 0.01, 0.01,
-         0.015, 0.01, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02][self as usize]
+         0.015, 0.01, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02][self as usize]
     }
     fn internal_footprint(self) -> f64 {
         [1.0, 1.0, 2.4, 2.4, 2.5, 1.35, 0.7, 0.8, 0.8,
          1.0, 1.0, 1.0, 0.65, 0.8, 0.35, 1.0, 0.8, 0.8,
-         1.0, 0.7, 1.3, 1.0, 1.0, 1.0, 1.0, 1.2, 1.0, 0.7, 0.7, 0.7][self as usize]
+         1.0, 0.7, 1.3, 1.0, 1.0, 1.0, 1.0, 1.2, 1.0, 0.7, 0.7, 0.7, 0.7][self as usize]
     }
     fn surface_footprint(self) -> f64 {
         [0.0, 0.0, 0.0, 0.0, 0.0, 0.55, 1.8, 2.2, 2.2,
          0.0, 0.0, 0.0, 1.5, 2.0, 3.0, 0.0, 1.2, 1.1,
-         1.5, 1.1, 2.0, 1.5, 0.0, 1.5, 0.0, 0.0, 1.4, 1.4, 1.4, 1.4][self as usize]
+         1.5, 1.1, 2.0, 1.5, 0.0, 1.5, 0.0, 0.0, 1.4, 1.4, 1.4, 1.4, 1.4][self as usize]
     }
 }
 
@@ -883,6 +885,7 @@ impl CellularState {
                 SenseHeat => cap.heat_sensing += active,
                 SenseChemical => cap.chemical_sensing += active,
                 SenseContact => cap.mechanical_sensing += active,
+                JunctionSignal => cap.signal_junction += active,
                 SenseOptical => cap.optical_sensing += active,
                 Support | Grow | Replicate | Constrict | Recycle | Adhere | JunctionEnergy | JunctionMineral | JunctionCarbon => {},
             }
@@ -1203,6 +1206,7 @@ impl CellularState {
                 43 if version >= 7 => AssemblyKind::Mechanism(MechanismKind::Recycle),
                 44 if version >= 9 => AssemblyKind::Mechanism(MechanismKind::RespireOxygen),
                 45 if version >= 10 => AssemblyKind::Mechanism(MechanismKind::Adhere),
+                49 if version >= 12 => AssemblyKind::Mechanism(MechanismKind::JunctionSignal),
                 tag @ 46..=48 if version >= 11 => AssemblyKind::Mechanism(MechanismKind::ALL[(tag - 19) as usize]),
                 value => AssemblyKind::Organelle(
                     OrganelleKind::from_index(value as usize)

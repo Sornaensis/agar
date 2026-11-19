@@ -88,6 +88,7 @@ pub struct ReceptorInput {
     pub message_valid: bool,
     pub message: f64,
     pub signal_valid: bool,
+    pub count: u32,
     pub signal: f64,
     pub flow: [f64; 2],
     pub speed: f64,
@@ -121,9 +122,10 @@ pub enum ReceptorField {
     Message,
     SignalValid,
     Signal,
+    Count,
 }
 impl ReceptorField {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::Available,
         Self::Valid,
         Self::Level,
@@ -144,6 +146,7 @@ impl ReceptorField {
         Self::Message,
         Self::SignalValid,
         Self::Signal,
+        Self::Count,
     ];
     pub fn name(self) -> &'static str {
         [
@@ -167,6 +170,7 @@ impl ReceptorField {
             "message",
             "signal_valid",
             "signal",
+            "count",
         ][self as usize]
     }
     pub fn for_kind(kind: AssemblyKind) -> &'static [Self] {
@@ -177,6 +181,7 @@ impl ReceptorField {
             AssemblyKind::Mechanism(M::SenseLight) | AssemblyKind::Organelle(O::Photoreceptor) => {
                 &[Available, Valid, Level]
             }
+            AssemblyKind::Mechanism(M::JunctionSignal) => &[Available, Valid, Value, Count],
             AssemblyKind::Mechanism(M::SenseHeat) | AssemblyKind::Organelle(O::Thermoreceptor) => {
                 &[Available, Valid, Value]
             }
@@ -231,6 +236,7 @@ impl ReceptorField {
             _ => Value::Scalar(finite(match self {
                 Self::Level => input.level,
                 Self::Value => input.value,
+                Self::Count => f64::from(input.count),
                 Self::Mineral => input.mineral,
                 Self::Organic => input.organic,
                 Self::Pressure => input.pressure,

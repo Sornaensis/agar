@@ -2,7 +2,7 @@
 //! selects partners; the smaller active adhesive surface limits their coupling.
 use super::*;
 
-const CONTACT_GAP: f64 = 1.0;
+pub(super) const CONTACT_GAP: f64 = 1.0;
 const GAP_RELAXATION: f64 = 4.0;
 const SHEAR_DAMPING: f64 = 0.5;
 const ACCELERATION_PER_MASS: f64 = 18_000.0;
@@ -35,6 +35,25 @@ impl ContactPorts {
         }
         ports
     }
+}
+
+// The solver precomputes working adhesive masses. Read-only queries use the
+// same geometry and marker predicate against the current immutable state.
+fn contact_geometry(env: &Environment, a: &Cell, b: &Cell, sa: CellSignal, sb: CellSignal)
+    -> Option<(f64, f64, f64, f64)> {
+    if sa.adhesion.is_none() || sb.adhesion.is_none()
+        || sa.adhesion != sb.published || sb.adhesion != sa.published { return None; }
+    let dx = delta(b.x - a.x, env.width);
+    let dy = delta(b.y - a.y, env.height);
+    let distance = dx.hypot(dy);
+    let gap = distance - a.radius() - b.radius();
+    if distance <= 1e-9 || gap > CONTACT_GAP || env.segment_blocked((a.x, a.y), (b.x, b.y)) { return None; }
+    Some((dx, dy, distance, gap))
+}
+
+pub(super) fn bonded(env: &Environment, a: &Cell, b: &Cell, sa: CellSignal, sb: CellSignal) -> bool {
+    a.alive() && b.alive() && contact_geometry(env, a, b, sa, sb).is_some()
+        && ContactPorts::of(a).adhesive > 0.0 && ContactPorts::of(b).adhesive > 0.0
 }
 
 #[derive(Default, Clone, Copy)]
@@ -201,16 +220,11 @@ impl World {
             let a = &self.cells[i];
             let search = grid.nearby_radius(a.x, a.y, a.radius() + max_radius + CONTACT_GAP);
             for j in search {
-                if j <= i || signals[i].adhesion != signals[j].published
-                    || signals[j].adhesion != signals[i].published { continue; }
+                if j <= i { continue; }
                 let (before, after) = self.cells.split_at_mut(j);
                 let (a, b) = (&mut before[i], &mut after[0]);
-                let dx = delta(b.x - a.x, self.environment.width);
-                let dy = delta(b.y - a.y, self.environment.height);
-                let distance = dx.hypot(dy);
-                let gap = distance - a.radius() - b.radius();
-                if distance <= 1e-9 || gap > CONTACT_GAP
-                    || self.environment.segment_blocked((a.x, a.y), (b.x, b.y)) { continue; }
+                let Some((dx, dy, distance, gap)) = contact_geometry(
+                    &self.environment, a, b, signals[i], signals[j]) else { continue; };
 
                 self.had_adhesive_contacts = true;
                 a.adhered_neighbors += 1;

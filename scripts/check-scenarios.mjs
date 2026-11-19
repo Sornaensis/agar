@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
+import { crownObservation, sampleCrown } from './crown-observation.mjs';
 import { advance, body, bytes, catalog, compile, evaluation, fresh, memory, seed, snapshot } from './organelle-harness.mjs';
 
 // Each run advances the shipped scattered launch without interventions. Descendant
@@ -24,7 +25,7 @@ const report = { wasmSha256: hash(bytes), ticksPerSecond:30,
   environments:Object.fromEntries(BUILTIN_ENVIRONMENTS
     .filter(habitat => templates.some(template => template.environmentId === habitat.id))
     .map(habitat => [habitat.id,habitat.config])), scenarios:[] };
-const horizons = { 'mixed-ecosystem':600, 'hunting-ground':120, 'light-and-shade':150, 'nurse-rosette':160, 'pulse-swimmers':155 };
+const horizons = { 'mixed-ecosystem':600, 'hunting-ground':120, 'light-and-shade':150, 'nurse-rosette':160, 'pulse-swimmers':155, 'crown-rosette':360 };
 
 const activeMass = (inventory, name) => inventory.cellular.assemblies
   .filter(machine => machine.name === name && machine.complete)
@@ -51,6 +52,7 @@ async function run(template, worldSeed) {
   assert.equal(state.food.length, settings.initialFood);
   const result = { id, seed:worldSeed, seconds:horizons[id], habitat:habitat.id, settings, cohorts, observations:{}, checks:{} };
   const obs = result.observations;
+  const crown = id === 'crown-rosette' ? crownObservation() : null;
   const shade = new Set(), bright = new Set(), hungryTissue = new Set(), grazing = new Set();
   const rememberedSteering = new Set(), grazersReceivingCarbon = new Set();
   let peakGrazerCarbonTransfer = 0, peakGrazerMineralReturn = 0;
@@ -71,6 +73,7 @@ async function run(template, worldSeed) {
   };
   while (state.ticks < result.seconds * 30) {
     state = advance(api, Math.min(secondsPerSample * 30, result.seconds * 30 - state.ticks));
+    if (crown) sampleCrown(api,state,habitat.config,crown);
     if (firstBirth === null && state.births) firstBirth = state.seconds;
     if (firstKill === null && state.predations) firstKill = state.seconds;
     for (const cell of state.cells) {
@@ -179,6 +182,10 @@ async function run(template, worldSeed) {
     obs.peakObservedCarbonToJuvenile = round(carbonToYoung);
     obs.attachmentSamplesUntilNursing = pairSamples;
     result.checks.parentFeedsAttachedGrowingDaughter = observedNursing;
+  }
+  if (crown) {
+    Object.assign(obs,crown);
+    result.checks.edgeBuildsHarvesterBesideSignalingCenter = Boolean(crown.firstSpecialization);
   }
   if (id === 'pulse-swimmers') {
     obs.juvenilesWithMotorPulses = pulsed.size;

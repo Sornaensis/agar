@@ -25,8 +25,8 @@ const paths: Record<string, string> = {
 };
 export const icon = (name: string): string => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.cell}</svg>`;
 let dialogSequence = 0;
-export function createDialog(title: string, bodyHtml: string, className = ''): HTMLDialogElement {
-  const dialog = document.createElement('dialog');
+export function createDialog(title: string, bodyHtml: string, className = '', host: Document = document): HTMLDialogElement {
+  const dialog = host.createElement('dialog');
   const headingId = `dialog-heading-${++dialogSequence}`;
   dialog.className = `app-dialog ${className}`;
   dialog.setAttribute('aria-labelledby', headingId);
@@ -39,14 +39,14 @@ export function createDialog(title: string, bodyHtml: string, className = ''): H
     if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();
   });
   dialog.addEventListener('close', () => dialog.remove(), { once: true });
-  document.body.append(dialog);
+  host.body.append(dialog);
   dialog.showModal();
   return dialog;
 }
 export function setDialogError(dialog: HTMLDialogElement, error: unknown): void {
   let target = dialog.querySelector<HTMLElement>('.form-error');
   if (!target) {
-    target = document.createElement('p'); target.className = 'form-error'; target.setAttribute('role', 'alert');
+    target = dialog.ownerDocument.createElement('p'); target.className = 'form-error'; target.setAttribute('role', 'alert');
     dialog.querySelector('.dialog-body')!.append(target);
   }
   target.textContent = error instanceof Error ? error.message : String(error);

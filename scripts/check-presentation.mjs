@@ -65,7 +65,7 @@ const appFunction = name => {
   let reads = 0, paints = 0;
   const engine = { async cellSnapshot(id) { reads++; return { id, genomeId: 1 }; } };
   const session = { revision: 0, stateVersion: 1, tick: 10, world: { cells: [{ id: 1 }] }, inspect: read => read(engine) };
-  const context = vm.createContext({ active: session, selectedId: 1, inspectorView: 'overview', inspectorEpoch: 0,
+  const context = vm.createContext({ active: session, cellTool: null, selectedId: 1, inspectorView: 'overview', inspectorEpoch: 0,
     inspectorStamp: '', inspectorPending: false, cellInspection: null, inspectorProgram: null,
     $: id => id === 'inspector-content' ? content : null,
     paintInspector: () => paints++, renderInspector: () => assert.fail('Living cell should remain selected'),
@@ -94,7 +94,7 @@ const appFunction = name => {
     {name:'Fiber',role:'filament',mass:1},
   ]}}),getMemory:()=>[{name:'rf001',type:'scalar',value:0},{name:'rs001',type:'string',value:'<private>'}]};
   const session={stateVersion:1,tick:0,world:{cells:[cell]},inspect:read=>read(engine)};
-  const context=vm.createContext({active:session,selectedId:1,inspectorView:'memory',inspectorEpoch:0,
+  const context=vm.createContext({active:session,cellTool:null,selectedId:1,inspectorView:'memory',inspectorEpoch:0,
     inspectorStamp:'',inspectorPending:false,cellInspection:null,memoryFilter:'',memoryPage:0,
     $:id=>elements[id],queryUi:selector=>selector.includes('memory-next')?next:selector.includes('memory-previous')?previous:null,
     esc:value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'),

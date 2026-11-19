@@ -200,7 +200,7 @@ canvas#world { display: block; position: absolute; inset: 0; width: 100%; height
 .playback .play-button { width: 36px; height: 36px; min-width: 36px; min-height: 36px; padding: 0; border: 0; border-radius: 50%; color: #1b3b29; background: #a3dfb8; }
 .playback .play-button:hover { background: #c5f1cf; color: #10291b; }
 .playback .play-button .icon { width: 17px; height: 17px; }
-.playback select.playback-speed { width: 65px; min-height: 32px; height: 32px; padding: 4px 23px 4px 9px; border: 0; border-radius: 14px; background-color: transparent; color: #c9cecf; font: 12px var(--mono); }
+.playback select.playback-speed { width: 65px; min-height: 32px; height: 32px; padding: 4px 3px 4px 9px; border: 0; border-radius: 14px; background-color: transparent; color: #c9cecf; font: 12px var(--mono); }
 .playback select.playback-speed:hover { background-color: #333738; }
 .player-toolbar [data-action="add-organism"] { min-height: 44px; border-radius: 22px; padding-left: 15px; padding-right: 16px; border-color: #494e4f; background: #212424ed; color: #d1d6d7; box-shadow: 0 4px 20px #0004; backdrop-filter: blur(14px); }
 .player-toolbar [data-action="add-organism"]:hover { background: #333839; border-color: #8a9192; }

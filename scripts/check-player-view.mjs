@@ -175,6 +175,7 @@ const createPlayer = opener => { const host = opener.document.createElement('div
 {
   const appSource = await readFile(new URL('../src/app.ts', import.meta.url), 'utf8');
   const parsed = ts.createSourceFile('app.ts', appSource, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
+  const pauseSaveStates = [];
   const names = ['renderView', 'navigate', 'frame', 'playerIsVisible', 'viewPresentationOptions', 'simulationWork', 'advanceSimulation', 'togglePlayback', 'playerVisibilityChanged', 'handleUiClick', 'handleUiInput', 'handleUiChange', 'handleUiKeydown', 'handleUiDismissMenus', 'bindUiDocument'];
   const functions = names.map(name => {
     const declaration = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
@@ -205,7 +206,7 @@ const createPlayer = opener => { const host = opener.document.createElement('div
     $: id => id === 'workspace' ? workspace : null, queryUi: () => null, esc: value => value, icon: () => '',
     renderCatalog: () => '<section>Catalog</section>', renderCatalogCards() {}, refreshCatalogs: async () => {}, persistPreferences() {},
     playerPlaceholderMarkup: () => '<section>Player is popped out</section>', metricsMarkup: () => '<section>Metrics</section>', settingsMarkup: () => '<section>Settings</section>',
-    renderLiveEnvironment() {}, updateSimulationUi() { calls.ui++; }, updatePlayback() {}, runError: (_session, error) => fail(error), toast: fail, readableError: String,
+    renderLiveEnvironment() {}, updateSimulationUi() { calls.ui++; }, updatePlayback() {}, saveStatus(state, _error, scope) { if (scope === 'pause-checkpoint') pauseSaveStates.push(state); }, runError: (_session, error) => fail(error), toast: fail, readableError: String,
   });
   vm.runInContext(appCode, context);
   for (const tab of ['genomes', 'environments']) {
@@ -262,7 +263,9 @@ const createPlayer = opener => { const host = opener.document.createElement('div
   button.closest = selector => selector === 'button' ? button : null;
   const click = () => { const event = new floating.Event('click'); Object.defineProperty(event, 'target', { value: button }); floating.document.dispatchEvent(event); };
   const unbind = context.bindUiDocument(floating.document);
-  click(); await Promise.all(actions);
+  click(); assert.deepEqual(pauseSaveStates, ['saving']);
+  await Promise.all(actions);
+  assert.deepEqual(pauseSaveStates, ['saving','saved']);
   assert.equal(session.metadata.paused, true); assert.deepEqual(calls.actions, ['play']);
   assert.equal(context.transitioning, false); before = calls.advances.length; frame(); assert.equal(calls.advances.length, before);
   click(); await Promise.all(actions); assert.equal(session.metadata.paused, false); frame(); assert.equal(calls.advances.length, before + 1);

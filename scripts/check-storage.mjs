@@ -25,8 +25,8 @@ const { BUILTIN_GENOMES: genomes, BUILTIN_ENVIRONMENTS: environments, BUILTIN_SI
 const copy = value => structuredClone(value);
 
 const slugs = rows => rows.map(row => row.id.split(':').at(-1)).sort();
-assert.deepEqual(slugs(genomes), ['forager','mixotroph','nurse-rosette','phototroph','predator','pulse-swimmer','rememberer']);
-assert.deepEqual(slugs(simulations), ['hunting-ground','light-and-shade','mixed-ecosystem','nurse-rosette','pulse-swimmers']);
+assert.deepEqual(slugs(genomes), ['crown-rosette','forager','mixotroph','nurse-rosette','phototroph','predator','pulse-swimmer','rememberer']);
+assert.deepEqual(slugs(simulations), ['crown-rosette','hunting-ground','light-and-shade','mixed-ecosystem','nurse-rosette','pulse-swimmers']);
 assert.equal(new Set(environments.map(row => row.id)).size, environments.length);
 for (const id of ['still-water','sunlit-pond','thermal-currents','colony-pool','current-bands']) {
   assert.ok(environments.some(row => row.id === 'builtin:environment:' + id), 'Historical environment remains addressable: ' + id);

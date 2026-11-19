@@ -26,6 +26,8 @@ impl World {
         }
         for v in [self.carbon_fixed_total, self.carbon_respired_total,
             self.decay_carbon_respired_total, self.carbon_imports, self.legacy_carbon_imports] { w.f64(v); }
+        w.f64(self.energy_withdrawn);
+        w.f64(self.mineral_withdrawn);
         w.u32(self.next_id);
         w.u64(self.next_food_id);
         w.u32(self.rng.0);
@@ -124,6 +126,9 @@ impl World {
         let food_credit = r.range(0.0, 1.0)?;
         let mut chemistry = [0.0; 5];
         if version >= 9 { for value in &mut chemistry { *value = r.range(0.0, 1e100)?; } }
+        let (energy_withdrawn, mineral_withdrawn) = if version >= 12 {
+            (r.range(0.0, 1e100)?, r.range(0.0, 1e100)?)
+        } else { (0.0, 0.0) };
         let next_id = r.u32()?;
         let next_food_id = r.u64()?;
         let rng = r.u32()?;
@@ -390,7 +395,7 @@ impl World {
             mutation_rate,
             photosynthesis_total,
             nutrient_imports,
-            energy_imports,
+            energy_imports, energy_withdrawn, mineral_withdrawn,
             carbon_fixed_total: chemistry[0], carbon_respired_total: chemistry[1],
             decay_carbon_respired_total: chemistry[2], carbon_imports: chemistry[3], legacy_carbon_imports: chemistry[4],
             food_credit,
@@ -428,7 +433,7 @@ impl World {
         ensure(
             material.is_finite()
                 && introduced_material.is_finite()
-                && (material + world.environment.nutrient_removed_total() - introduced_material).abs() <= material_tolerance,
+                && (material + world.environment.nutrient_removed_total() + world.mineral_withdrawn - introduced_material).abs() <= material_tolerance,
             "material ledger does not match recorded introductions",
         )?;
         // Introduction energy includes fabrication heat; metabolism, conversion
@@ -437,7 +442,7 @@ impl World {
         let supplied = world.energy_input_total() + world.photosynthesis_total;
         let energy_tolerance = 1e-6 + supplied.abs() * 1e-9;
         ensure(
-            energy.is_finite() && supplied.is_finite() && energy <= supplied + energy_tolerance,
+            energy.is_finite() && supplied.is_finite() && energy + world.energy_withdrawn <= supplied + energy_tolerance,
             "stored energy exceeds recorded introductions and photosynthesis",
         )?;
         Ok(world)

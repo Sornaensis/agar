@@ -250,7 +250,7 @@ impl Program {
 
     #[cfg(test)]
     pub(crate) fn read_checkpoint(r: &mut Reader<'_>) -> Result<Self> {
-        Self::read_checkpoint_version(r, 11)
+        Self::read_checkpoint_version(r, crate::checkpoint::VERSION)
     }
 
     pub(crate) fn read_checkpoint_version(r: &mut Reader<'_>, version: u32) -> Result<Self> {
@@ -317,6 +317,8 @@ impl Program {
                     version >= 6 || !matches!(kind, AssemblyKind::Mechanism(_)),
                     "mechanism assemblies need checkpoint version 6",
                 )?;
+                ensure(version >= 12 || kind != AssemblyKind::Mechanism(crate::cellular::MechanismKind::JunctionSignal),
+                    "signal junctions need checkpoint version 12")?;
                 ensure(version >= 11 || !matches!(kind, AssemblyKind::Mechanism(k) if k as usize >= 27),
                     "junction machinery needs checkpoint version 11")?;
                 ensure(version >= 10 || kind.name() != "adhere()", "adhesion needs checkpoint version 10")?;
@@ -410,6 +412,7 @@ impl Program {
                         .get(r.u8()? as usize)
                         .copied()
                         .ok_or("Invalid simulation save: unknown receptor field.")?;
+                    ensure(version >= 12 || field != ReceptorField::Count, "junction count needs checkpoint version 12")?;
                     ensure(version >= 11 || !matches!(field, ReceptorField::Signal | ReceptorField::SignalValid),
                         "contact payloads need checkpoint version 11")?;
                     ensure(version >= 10 || !matches!(field, ReceptorField::Message | ReceptorField::MessageValid),

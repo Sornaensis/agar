@@ -71,6 +71,31 @@ impl World {
             let reading = &mut input.receptors[recipe_index];
             reading.available = true;
             match kind {
+                MechanismKind::JunctionSignal => {
+                    if !(reads(ReceptorField::Valid) || reads(ReceptorField::Value) || reads(ReceptorField::Count)) {
+                        continue;
+                    }
+                    let Some(&local) = signals.get(index) else { continue; };
+                    if local.adhesion.is_none() || local.published.is_none() { continue; }
+                    let mut contributors = Vec::new();
+                    for peer in cell_grid.nearby_radius(cell.x, cell.y, cell.radius() + max_radius + adhesion::CONTACT_GAP) {
+                        if peer == index || capacities[peer].signal_junction <= 0.0 { continue; }
+                        let remote = signals[peer];
+                        if let Some(value) = remote.signal {
+                            let other = &self.cells[peer];
+                            if adhesion::bonded(&self.environment, cell, other, local, remote) {
+                                contributors.push((other.id, value));
+                            }
+                        }
+                    }
+                    // The addition order is independent of the spatial hash and the cells' storage order.
+                    contributors.sort_unstable_by_key(|&(id, _)| id);
+                    reading.count = contributors.len() as u32;
+                    reading.valid = reading.count > 0;
+                    if reading.valid && reads(ReceptorField::Value) {
+                        reading.value = contributors.iter().map(|&(_, value)| value).sum::<f64>() / f64::from(reading.count);
+                    }
+                }
                 MechanismKind::SenseLight => {
                     reading.valid = true;
                     if reads(ReceptorField::Level) {

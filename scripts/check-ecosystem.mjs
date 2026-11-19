@@ -97,14 +97,17 @@ for (const randomSeed of options.seeds) {
     const metrics = new Float64Array(api.memory.buffer, metricsPointer, 51).slice();
     const carbonDelta = metrics[36] + metrics[49] - metrics[37];
     const oxygenDelta = metrics[44] + metrics[45] + metrics[48] + metrics[41] + metrics[42] - metrics[40] - metrics[47];
-    const materialRemoved = api.nutrient_removed_total();
+    // Historical comparison engines predate player withdrawals.
+    const energyWithdrawn = api.energy_withdrawn_total?.() ?? 0;
+    const mineralWithdrawn = api.mineral_withdrawn_total?.() ?? 0;
+    const materialRemoved = api.nutrient_removed_total() + mineralWithdrawn;
     const accounting = {
       material: state.material, materialIntroduced: state.materialIntroduced, materialRemoved,
       materialDelta: state.material + materialRemoved - state.materialIntroduced,
       materialTolerance: Math.max(1e-7, state.materialIntroduced * 1e-10),
-      energy: state.energy, energyIntroduced: state.energyIntroduced,
+      energy: state.energy, energyWithdrawn, energyIntroduced: state.energyIntroduced,
       photosynthesis: state.photosynthesis, energyTolerance: 1e-7,
-      energyExcess: state.energy - state.energyIntroduced - state.photosynthesis,
+      energyExcess: state.energy + energyWithdrawn - state.energyIntroduced - state.photosynthesis,
       carbon: metrics[36], carbonIntroduced: metrics[37], carbonRemoved: metrics[49], carbonDelta,
       carbonTolerance: Math.max(1e-7, metrics[37] * 1e-10),
       oxygen: metrics[44] + metrics[45], oxygenIntroduced: metrics[47], oxygenRemoved: metrics[48], oxygenDelta,
@@ -112,7 +115,7 @@ for (const randomSeed of options.seeds) {
       carbonFixed: metrics[40], carbonRespired: metrics[41], carbonDecayed: metrics[42],
     };
     const materialAccounted = Math.abs(accounting.materialDelta) < accounting.materialTolerance;
-    const energyAccounted = accounting.energy <= accounting.energyIntroduced + accounting.photosynthesis + accounting.energyTolerance;
+    const energyAccounted = accounting.energy + accounting.energyWithdrawn <= accounting.energyIntroduced + accounting.photosynthesis + accounting.energyTolerance;
     const carbonAccounted = Math.abs(accounting.carbonDelta) < accounting.carbonTolerance;
     const oxygenAccounted = Math.abs(accounting.oxygenDelta) < accounting.oxygenTolerance;
     const producers = state.cells.filter(cell => lineage(cell.genome) === 'Phototroph');

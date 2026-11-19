@@ -137,6 +137,12 @@ export const BUILTIN_SIMULATIONS: readonly BuiltinSimulation[] = freeze([
     populations: [{ genomeId: 'builtin:genome:nurse-rosette', count: 1 }],
   },
   {
+    id: 'builtin:simulation:crown-rosette', name: 'Crown rosette',
+    description: 'One founder grows a colony. Around 160 simulated seconds, edge cells beside a signaling center build extra light harvesters.',
+    environmentId: 'builtin:environment:colony-pool', seed: 42,
+    populations: [{ genomeId: 'builtin:genome:crown-rosette', count: 1 }],
+  },
+  {
     id: 'builtin:simulation:pulse-swimmers', name: 'Pulse swimmers',
     description: 'After division, mature cells start a pulse. Attached young cells relay it, swim briefly and rest before responding again.',
     environmentId: 'builtin:environment:colony-pool', seed: 42,

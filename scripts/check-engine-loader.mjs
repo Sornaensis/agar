@@ -165,7 +165,7 @@ export async function checkEngineLoader() {
     const organicSaved=organicProbe.saveState();organicProbe.restoreState(organicSaved);
     assert.equal(organicProbe.snapshot().food.length,1401);
     const current=editorA.saveState();
-    assert.equal(new DataView(current.buffer,current.byteOffset,current.byteLength).getUint32(8,true),11);
+    assert.equal(new DataView(current.buffer,current.byteOffset,current.byteLength).getUint32(8,true),12);
     for (const filename of ['trophic-v1.bin','trophic-v2.bin']) {
       const legacy=new Uint8Array(await readFile(new URL('../engine/fixtures/'+filename,import.meta.url)));
       assert.throws(()=>editorA.restoreState(legacy),/Unsupported simulation version.*preserved/);
@@ -178,7 +178,7 @@ export async function checkEngineLoader() {
     const migrated = await Engine.load();
     migrated.restoreState(historical);
     const upgraded = migrated.saveState();
-    assert.equal(new DataView(upgraded.buffer, upgraded.byteOffset, upgraded.byteLength).getUint32(8,true), 11);
+    assert.equal(new DataView(upgraded.buffer, upgraded.byteOffset, upgraded.byteLength).getUint32(8,true), 12);
     // Canonical public projections recorded on ABI14 from the authentic v9 save.
     // v11 also stores the last exchange counters, so the save layout differs.
     function physicalStateHash(instance) {
@@ -187,7 +187,15 @@ export async function checkEngineLoader() {
       for (const [read, len, width] of [['snapshot_ptr','snapshot_len',8],
         ['environment_snapshot_ptr','environment_snapshot_len',4], ['metrics_snapshot_ptr','presentation_len',8]]) {
         const pointer = api[read]();
-        hash.update(new Uint8Array(api.memory.buffer, pointer, api[len]() * width));
+        const bytes = new Uint8Array(api.memory.buffer, pointer, api[len]() * width);
+        if (read === 'metrics_snapshot_ptr') {
+          // Preserve the ABI14 reference hash. ABI16 inserted two withdrawal
+          // counters after its original 51 metric words and before genome rows.
+          const counters = new Float64Array(api.memory.buffer, pointer + 51 * width, 2);
+          assert.deepEqual([...counters], [0,0]);
+          hash.update(bytes.subarray(0, 51 * width));
+          hash.update(bytes.subarray(53 * width));
+        } else hash.update(bytes);
       }
       return hash.digest('hex');
     }
@@ -227,7 +235,7 @@ export async function checkEngineLoader() {
   } finally {
     globalThis.fetch = originalFetch; WebAssembly.compile = originalCompile;
   }
-  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, version11 body/product/substrate/mechanism/control/environment/gas continuation and explicit atomic rejection of pre-organelle checkpoints.');
+  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, version12 body/product/substrate/mechanism/control/environment/gas continuation and explicit atomic rejection of pre-organelle checkpoints.');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await checkEngineLoader();

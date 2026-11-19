@@ -474,7 +474,7 @@ fn mechanism_checkpoints_resume_exactly_and_reject_unknown_body_tags_atomically(
     original.world = world;
     original.genomes = genomes;
     let bytes = crate::checkpoint::save(&original).unwrap();
-    assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 11);
+    assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), crate::checkpoint::VERSION);
     let mut restored = crate::checkpoint::restore(&bytes).unwrap();
     assert_eq!(crate::checkpoint::save(&restored).unwrap(), bytes);
     for _ in 0..120 {

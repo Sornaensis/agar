@@ -277,6 +277,7 @@ pub struct BodyCapacities {
     pub heat_sensing: f64,
     pub chemical_sensing: f64,
     pub mechanical_sensing: f64,
+    pub signal_junction: f64,
     pub optical_sensing: f64,
     pub optical_range: f64,
     // Descriptive storage/action aliases for callers that don't use short names.
@@ -834,6 +835,7 @@ impl Body {
             heat_sensing: mass[Thermoreceptor as usize],
             chemical_sensing: mass[Chemoreceptor as usize],
             mechanical_sensing: mass[Mechanoreceptor as usize],
+            signal_junction: 0.0,
             optical_sensing: optical,
             optical_range: if optical > 0.0 {
                 (35.0 + 300.0 * optical.sqrt()).min(190.0)
@@ -1597,14 +1599,14 @@ impl Body {
     }
     #[cfg(test)]
     pub(crate) fn read_checkpoint(reader: &mut Reader<'_>) -> CheckpointResult<Self> {
-        Self::read_checkpoint_version(reader, 11)
+        Self::read_checkpoint_version(reader, crate::checkpoint::VERSION)
     }
     pub(crate) fn read_checkpoint_version(
         reader: &mut Reader<'_>,
         version: u32,
     ) -> CheckpointResult<Self> {
         ensure(
-            (3..=11).contains(&version),
+            (3..=crate::checkpoint::VERSION).contains(&version),
             "unsupported body checkpoint version",
         )?;
         let area = reader.range(MIN_AREA, MAX_AREA)?;

@@ -1,5 +1,5 @@
 {
-  "wasmSha256": "905fa094a14cfc9cb9bf63b475d747dc2c1f74894b3fe526f706386ef19c159c",
+  "wasmSha256": "8c07cb6a48bd19efc8298eb5dbccfb1c976e6f0504bc786f3bc06676d252bf22",
   "ticksPerSecond": 30,
   "founderPlacement": "Seeded uniform scatter from the normal launch path",
   "environments": {
@@ -559,6 +559,121 @@
           },
           "checks": {
             "parentFeedsAttachedGrowingDaughter": true
+          },
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "crown-rosette",
+      "habitat": "builtin:environment:colony-pool",
+      "seconds": 360,
+      "sampleSeconds": 2,
+      "settings": {
+        "initialFood": 0,
+        "mutationRate": 0.1
+      },
+      "cohorts": [
+        {
+          "name": "Crown rosette",
+          "count": 1,
+          "sourceSha256": "d78062aa2a5933349f73280ff8a3bf5de35508d8856824bf6517bfa71adbff97"
+        }
+      ],
+      "runs": [
+        {
+          "seed": 42,
+          "observations": {
+            "alive": {
+              "Crown rosette": 16
+            },
+            "observedDescendants": {
+              "Crown rosette": 15
+            },
+            "firstObservedBirth": 90,
+            "firstObservedKill": null,
+            "kills": 0,
+            "attacks": 0,
+            "foodCaptures": 0,
+            "maximumAttachedNeighbors": 4,
+            "maximumSignalPartners": 4,
+            "peakActiveRimHarvest": 0.060000000000000005,
+            "firstSpecialization": {
+              "second": 162,
+              "population": 3,
+              "center": 3,
+              "centerPartners": 2,
+              "rim": 1,
+              "rimGeneration": 0,
+              "rimHarvesterMass": 0.060000000000000005
+            }
+          },
+          "checks": {
+            "edgeBuildsHarvesterBesideSignalingCenter": true
+          },
+          "passed": true
+        },
+        {
+          "seed": 7,
+          "observations": {
+            "alive": {
+              "Crown rosette": 16
+            },
+            "observedDescendants": {
+              "Crown rosette": 15
+            },
+            "firstObservedBirth": 90,
+            "firstObservedKill": null,
+            "kills": 0,
+            "attacks": 0,
+            "foodCaptures": 0,
+            "maximumAttachedNeighbors": 3,
+            "maximumSignalPartners": 3,
+            "peakActiveRimHarvest": 0.060000000000000005,
+            "firstSpecialization": {
+              "second": 162,
+              "population": 3,
+              "center": 3,
+              "centerPartners": 2,
+              "rim": 1,
+              "rimGeneration": 0,
+              "rimHarvesterMass": 0.060000000000000005
+            }
+          },
+          "checks": {
+            "edgeBuildsHarvesterBesideSignalingCenter": true
+          },
+          "passed": true
+        },
+        {
+          "seed": 2026,
+          "observations": {
+            "alive": {
+              "Crown rosette": 16
+            },
+            "observedDescendants": {
+              "Crown rosette": 15
+            },
+            "firstObservedBirth": 90,
+            "firstObservedKill": null,
+            "kills": 0,
+            "attacks": 0,
+            "foodCaptures": 0,
+            "maximumAttachedNeighbors": 4,
+            "maximumSignalPartners": 4,
+            "peakActiveRimHarvest": 0.060000000000000005,
+            "firstSpecialization": {
+              "second": 162,
+              "population": 3,
+              "center": 3,
+              "centerPartners": 2,
+              "rim": 1,
+              "rimGeneration": 0,
+              "rimHarvesterMass": 0.060000000000000005
+            }
+          },
+          "checks": {
+            "edgeBuildsHarvesterBesideSignalingCenter": true
           },
           "passed": true
         }

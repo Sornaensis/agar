@@ -11,7 +11,7 @@ export const MECHANISM_KINDS = [
   'import(mineral)', 'import(particle)', 'engulf()', 'digest(exudate)', 'digest(tissue)', 'digest(waste)',
   'propel()', 'pierce()', 'shield()', 'repair()', 'sense(light)', 'sense(heat)', 'sense(chemical)',
   'sense(contact)', 'sense(optical)', 'grow()', 'replicate()', 'constrict()', 'recycle()',
-  'respire(oxygen)', 'adhere()', 'junction(energy)', 'junction(mineral)', 'junction(carbon)',
+  'respire(oxygen)', 'adhere()', 'junction(energy)', 'junction(mineral)', 'junction(carbon)', 'junction(signal)',
 ] as const;
 export type MechanismKind = typeof MECHANISM_KINDS[number];
 export type CellularAssemblyKind = OrganelleKind | 'membrane' | 'replicator' | 'constrictor' | MechanismKind;
@@ -333,7 +333,7 @@ export interface WorldSnapshot {
   eaten: number; width: number; height: number; foodRate: number;
   mutationRate: number; mutatedBirths: number; mutationSkipped: number; genomeCount: number; genomeLimit: number;
   genomeBytes: number; genomeByteLimit: number; predationCount: number; attackCount: number; photosynthesisTotal: number;
-  energyTotal:number; energyInputTotal:number;
+  energyTotal:number; energyInputTotal:number; energyWithdrawnTotal:number; mineralWithdrawnTotal:number;
   nutrientTotal: number; nutrientInputTotal: number; nutrientDissolvedTotal: number; nutrientFoodTotal: number; nutrientCellTotal: number;
   environment: EnvironmentSnapshot;
 }
@@ -357,6 +357,7 @@ export interface MetricsSnapshot extends SimulationSummary {
   tick:number; eaten:number; mutationRate:number; mutatedBirths:number; mutationSkipped:number;
   genomeCount:number; genomeLimit:number; genomeBytes:number; genomeByteLimit:number;
   predationCount:number; attackCount:number; photosynthesisTotal:number; energyTotal:number; energyInputTotal:number;
+  energyWithdrawnTotal:number; mineralWithdrawnTotal:number;
   nutrientTotal:number; nutrientInputTotal:number; nutrientDissolvedTotal:number; nutrientFoodTotal:number; nutrientCellTotal:number;
   trophic:{autotrophs:number;heterotrophs:number;mixotrophs:number;hunters:number};
   flow:{production:number;digestion:number;exudation:number};
@@ -370,7 +371,7 @@ export interface MetricsSnapshot extends SimulationSummary {
 
 const RENDER_HEADER = 12;
 const RENDER_CELL_STRIDE = 21;
-const METRICS_HEADER = 51;
+const METRICS_HEADER = 53;
 
 /** Decode a worker-transferred compact buffer without any WASM calls. */
 export function decodeRenderSnapshot(data: Float64Array): RenderSnapshot {
@@ -432,7 +433,7 @@ export function decodeMetricsSnapshot(data: Float64Array): MetricsSnapshot {
     carbonTotal:data[36],carbonInputTotal:data[37],organicCellTotal:data[38],organicFoodTotal:data[39],
     carbonFixedTotal:data[40],carbonRespiredTotal:data[41],decayRespiredTotal:data[42],legacyCarbonImported:data[43],
     oxygenCellTotal:data[44],oxygenDissolvedTotal:data[45],inorganicCarbonTotal:data[46],oxygenInputTotal:data[47],
-    oxygenRemovedTotal:data[48],carbonRemovedTotal:data[49],internalInorganicCarbonTotal:data[50],genomes};
+    oxygenRemovedTotal:data[48],carbonRemovedTotal:data[49],internalInorganicCarbonTotal:data[50],energyWithdrawnTotal:data[51],mineralWithdrawnTotal:data[52],genomes};
 }
 
 interface WasmExports extends WebAssembly.Exports {
@@ -449,6 +450,10 @@ interface WasmExports extends WebAssembly.Exports {
   alloc_state(len: number): number;
   save_state_ptr(): number; save_state_len(): number;
   restore_state(ptr: number, len: number): number;
+  place_cell(genomeId:number, x:number, y:number):number;
+  move_cell(id:number, x:number, y:number, colony:number):number;
+  set_cell_stores(id:number, mask:number, energy:number, minerals:number):number;
+  energy_withdrawn_total():number; mineral_withdrawn_total():number;
   seed_cells(genomeId: number, count: number, x: number, y: number): number;
   language_schema_ptr():number; language_schema_len():number;
   cell_body_ptr(id:number):number; cell_body_len():number;
@@ -601,6 +606,24 @@ export class Engine {
   }
   private readError(): string {
     return new TextDecoder().decode(new Uint8Array(this.wasm.memory.buffer, this.wasm.error_ptr(), this.wasm.error_len()));
+  }
+  private editId(value:number): number {
+    if (!Number.isSafeInteger(value) || value <= 0 || value > 0xffffffff) throw new Error('Choose a valid organism or genome ID.');
+    return value;
+  }
+  placeCell(genomeId:number, x:number, y:number): number {
+    const id = this.wasm.place_cell(this.editId(genomeId), x, y);
+    if (!id) throw new Error(this.readError());
+    return id;
+  }
+  moveCell(cellId:number, x:number, y:number, colony = false): number {
+    const count = this.wasm.move_cell(this.editId(cellId), x, y, Number(colony));
+    if (!count) throw new Error(this.readError());
+    return count;
+  }
+  setCellStores(cellId:number, energy:number|null, minerals:number|null): void {
+    const mask = (energy === null ? 0 : 1) | (minerals === null ? 0 : 2);
+    if (!this.wasm.set_cell_stores(this.editId(cellId), mask, energy ?? NaN, minerals ?? NaN)) throw new Error(this.readError());
   }
   seed(genomeId: number, count = 8, x = -1, y = -1): number {
     if (!Number.isSafeInteger(count) || count < 0) throw new Error('Organism count must be a nonnegative safe whole number.');
@@ -819,6 +842,7 @@ export class Engine {
       genomeBytes: this.wasm.genome_bytes(), genomeByteLimit: this.wasm.genome_byte_limit(),
       predationCount: this.wasm.predation_count(), attackCount: this.wasm.attack_count(), photosynthesisTotal: this.wasm.photosynthesis_total(),
       energyTotal:this.wasm.energy_total(),energyInputTotal:this.wasm.energy_input_total(),
+      energyWithdrawnTotal:this.wasm.energy_withdrawn_total(),mineralWithdrawnTotal:this.wasm.mineral_withdrawn_total(),
       nutrientTotal: this.wasm.nutrient_total(), nutrientInputTotal: this.wasm.nutrient_input_total(),
       nutrientDissolvedTotal: this.wasm.nutrient_dissolved_total(), nutrientFoodTotal: this.wasm.nutrient_food_total(), nutrientCellTotal: this.wasm.nutrient_cell_total(),
       environment: this.environment() };

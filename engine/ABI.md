@@ -2,11 +2,11 @@
 
 ## Cellular extension
 
-ABI 15 accepts an explicit `cellular;` source mode. It includes typed product declarations, gene expression, physical recipes, pool/concentration/built reads, named receptor observations, pure functions, assembly initiation, activity and paid recycling. Existing unmarked programs retain the action/register language documented below. See [cellular language and accounting](../design/cellular.md) for the implemented rules.
+ABI 16 accepts an explicit `cellular;` source mode. It includes typed product declarations, gene expression, physical recipes, pool/concentration/built reads, named receptor observations, pure functions, assembly initiation, activity and paid recycling. Existing unmarked programs retain the action/register language documented below. See [cellular language and accounting](../design/cellular.md) for the implemented rules.
 
 `language_schema_ptr` retains schema version 3. Its additive `cellular.mechanisms` array lists each canonical constructor, typed target, required material roles, effect description and typed `receptorFields` with `requiresValid` flags. `cellular.recipeControls` describes activity, start_when and recycle types/defaults; `cellular.userFunctions` gives numeric-parameter and inlining limits. Top-level `functions` supplies builtin names and arities. Graph/evaluation JSON identifies its mode; cellular roots describe genes, activity, boolean initiation and recycling. `cell_body_ptr` adds material pools, ingredient-level assemblies, lifecycle progress and sampled construction/recovery controls. Compact rendering remains unchanged; ABI 12 extends full cell records and aggregate metrics with gas/carbon state. Render summaries do not grant legacy family capabilities to mechanisms.
 
-Mutation kinds additionally accept gene silence (4), gene duplication (5), and future placement changes (6). Checkpoint 11 stores contact declarations, independent signal channels, junction diagnostics, the cellular graph, mechanism identities, construction controls and physical state; readers also accept versions 3 through 10. Bare family kinds retain their combined capabilities; constructor kinds such as `store(food)` and `digest(tissue)` each grant one explicit operation. The same minimal paid founder core bootstraps both modes.
+Mutation kinds additionally accept gene silence (4), gene duplication (5), and future placement changes (6). Checkpoint 12 stores contact declarations, independent signal channels, junction diagnostics, the cellular graph, mechanism identities, construction controls and physical state; readers also accept versions 3 through 11. Bare family kinds retain their combined capabilities; constructor kinds such as `store(food)` and `digest(tissue)` each grant one explicit operation. The same minimal paid founder core bootstraps both modes.
 
 
 The dependency-free Rust crate owns simulation, genome compilation, mutation, and cell memory. TypeScript loads WASM, renders snapshots, and stores browser-local catalogs/checkpoints. There is no simulation server or JavaScript simulation fallback.
@@ -70,7 +70,7 @@ Family order is part of the ABI. The minimum is material per functional unit; in
 | 14 | `mechanoreceptor` | 0.01 | Flow and contact measurements |
 | 15 | `optical` | 0.02 | Generic object observations |
 
-## Contact signaling and exchange in ABI 15
+## Contact signaling and exchange
 
 Cellular programs share the existing five sparse register banks and their synchronous write semantics. A program can publish a recognition marker and a second scalar payload using separate registers. Avoidance and adhesion selectors match the recognition marker. A literal on a publication initializes it at birth. Named contact receptors report the selected neighbor’s `message` and `message_valid`. The same observation has independent `signal` and `signal_valid` fields. Weapon filtering and reciprocal adhesion use start-of-tick values for their actual candidate. The Rust compiler's `cellular.registers` and `cellular.contactMessages` schema entries describe this surface. Contact declarations appear in program inspection, and `cell_memory_ptr` exposes occupied slots for cellular and legacy programs. The full cell and environment projections retain their layouts. `cell_body_ptr` adds `colony` with `neighbors` and three signed net amounts for the last exchange (`energyNet`, `mineralNet`, `carbonNet`). [Declaration and physical interaction rules](../design/cellular.md#register-memory-contact-messages-and-colonies)
 
@@ -213,13 +213,13 @@ Light, heat, flow, dissolved minerals, and organic cues are local fields. Source
 
 Usable reserves, raw gut energy, mineral reserves, frame material, organelle material, and embodied structural energy remain distinct. Digestive assimilation and residue depend on the substrate, as listed above; inorganic minerals do not turn into free usable energy. Loss of storage capacity follows the same explicit overflow path as recycling or damage. Ecological outcomes emerge from resource and physical constraints; there are no guild quotas or guaranteed predator persistence.
 
-## WASM API, version 13
+## WASM API, version 16
 
 The module exports `memory`. Pointers/lengths use bytes, except snapshot lengths, which count elements: float64 for the world and float32 for the environment. Returned buffers are engine-owned: read the matching length and copy immediately before other allocating calls. Refresh JavaScript views after memory growth. Never free engine-owned buffers. Caller-allocated source buffers must be freed once with their exact pointer/length.
 
 | Exports | Behavior |
 | --- | --- |
-| `abi_version() -> u32` | Returns 13 |
+| `abi_version() -> u32` | Returns 16 |
 | `alloc(len) -> ptr`, `dealloc(ptr, len)` | Allocate/free a zeroed source buffer; above 256 KiB returns null |
 | `compile_genome(ptr, len) -> u32` | UTF-8 source → ID ≥ 1; zero plus readable error on failure |
 | `analyze_genome(ptr, len) -> ptr`, `genome_analysis_len()` | Authoritative compiler analysis as engine-owned UTF-8 JSON; no genome registration or simulation mutation |
@@ -235,6 +235,10 @@ The module exports `memory`. Pointers/lengths use bytes, except snapshot lengths
 | `error_ptr()`, `error_len()` | Latest UTF-8 error |
 | `reset(seed, genome_id) -> u32` | Recreate world; 1 on success, 0 plus readable error on invalid genome or allocation failure |
 | `seed_cells(genome_id, count: f64, x: f32, y: f32) -> u32` | Introduce the requested minimal cells atomically; return count added. Count must be a finite nonnegative integer within the addressable ID range. Invalid counts, ID exhaustion, and allocation failure return zero with a readable error; count zero is a successful no-op. Negative/nonfinite coordinates scatter globally; otherwise within 38 units |
+| `place_cell(genome_id: u32, x: f64, y: f64) -> u32` | Introduces one ordinary founder at the exact wrapped coordinate and returns its cell ID. A blocked destination returns zero without advancing RNG or introductions. |
+| `move_cell(id: u32, x: f64, y: f64, colony: u32) -> u32` | Relocates a living cell. Mode 1 translates its entire current, physically attached component by the same offset. Checks destination bodies, barriers and attached links before moving any member. Returns the number moved. A successful drop retains velocity, orientation and intracellular state. |
+| `set_cell_stores(id: u32, mask: u32, energy: f64, minerals: f64) -> u32` | Bit 0 sets available ATP, bit 1 sets free minerals. Each selected value must lie within the current compartment capacity. Zero ATP triggers ordinary death, releases gases and returns remaining material. Returns 1 on success. |
+| `energy_withdrawn_total()`, `mineral_withdrawn_total()` | Cumulative external withdrawals from cell compartments. Increasing either store increments the normal introduction ledger. Mineral absorbers have a separate removal ledger. |
 | `add_food(x: f32, y: f32, count: f64) -> u32` | Add the requested exudate particles atomically; return count added or zero with a readable error. Counts must be finite nonnegative integers representable by the engine. Negative/nonfinite coordinates scatter globally; otherwise within 45 units |
 | `set_food_rate(rate: f32)` | Set 0–60 particles/s; nonfinite input becomes zero |
 | `tick(steps) -> u32` | Run at most 120 steps; 1 on success, 0 plus readable error if a step cannot allocate. Earlier completed steps in the batch remain valid |
@@ -380,7 +384,7 @@ The presentation exports retain their ownership rules. ABI 12 extended full cell
 
 The visual family capacities retain their existing meaning: functional mass divided by the family's minimum mass. They are not action throughput values. `cell_snapshot_ptr(id)` supplies the full 163-value cell record when inspection needs it, without packing the rest of the world. A missing cell clears the presentation buffer; it does not replace the latest simulation error.
 
-`metrics_snapshot_ptr()` returns a 51-value header followed by three values for each living genome group. Groups are sorted by genome ID; each is `[genome_id, population, maximum_generation]`. Registry counts include all registered genomes, whereas groups contain only genomes with living cells.
+`metrics_snapshot_ptr()` returns a 53-value header followed by three values for each living genome group. Groups are sorted by genome ID; each is `[genome_id, population, maximum_generation]`. Registry counts include all registered genomes, whereas groups contain only genomes with living cells.
 
 | Metric offsets | Fields in order |
 | --- | --- |
@@ -395,6 +399,7 @@ The visual family capacities retain their existing meaning: functional mass divi
 | 40–43 | cumulative fixed carbon, cellular respired carbon, background-decay respired carbon, legacy organic-carbon baseline |
 | 44–46 | internal cellular O2, dissolved O2, dissolved inorganic carbon |
 | 47–50 | external O2 introductions, external O2 removals, external inorganic-carbon removals, internal cellular inorganic carbon |
+| 51–52 | cumulative ATP and free minerals withdrawn by player edits |
 
 Metric 18 sums usable energy, embodied structural energy and chemical potential in structural/reserve/gut/particle carbon. It is a total energy inventory; the cell's `energy` field reports its ATP-like usable reserve. Feeding categories follow the same functional photosynthetic/digestive organ checks as cell inspection; attack-capable count is independent. Rates and ledgers preserve the full snapshot's meanings. `summary_snapshot_ptr()` returns `[time, population, food_count, births, deaths, maximum_generation, tick]` and performs no particle, organelle or field export.
 
@@ -543,9 +548,9 @@ Constant writes, constant guards, unconditional clears, and omitted output defau
 
 ### Persistent checkpoints
 
-Current checkpoint format is **11**, using the `CELLAR01` magic, a separate version, exact byte length, FNV-1a corruption checksum, and bounded little-endian values. The checksum is not authentication; every decoded value is independently checked. Checkpoints preserve actual frame and organelles, integrity, resource/embodied-energy ledgers, construction progress, protein stocks and their embodied energy, separate gut substrates and particle kinds, memory occupancy and values, sensor tracks and scan controls, sources/fields, deterministic RNG state, counters, and the genome registry with lineage.
+Current checkpoint format is **12**, using the `CELLAR01` magic, a separate version, exact byte length, FNV-1a corruption checksum, and bounded little-endian values. The checksum is not authentication; every decoded value is independently checked. Checkpoints preserve actual frame and organelles, integrity, resource/embodied-energy ledgers, construction progress, protein stocks and their embodied energy, separate gut substrates and particle kinds, memory occupancy and values, sensor tracks and scan controls, sources/fields, deterministic RNG state, counters, and the genome registry with lineage.
 
-Version-1 and version-2 body schemas are explicitly unsupported. They cannot be silently interpreted as paid structures or hardware-gated observations. Existing exports are preserved; create a new simulation with rewritten genomes. Future unknown versions are also rejected. Version-3 checkpoints remain supported. Existing organs, energy, minerals, memory and program source are preserved; formerly unclassified particles and gut contents import as tissue, and protein pools initialize empty. New digestion/expression rules govern subsequent evolution, so continuation is deterministic within the new engine but is not an exact replay of the old engine. Versions 4 through 10 remain supported. Saving writes version 11, including cellular pools, recipe snapshots, ingredient ledgers, sampled construction controls, activity, genetic progress, mechanism kinds, world dimensions, emitter directions, floating obstacle state, gas fields and reservoir configuration, cumulative external species fluxes, internal organism gas/carbon pools, reaction ledgers and cumulative mineral removals. Primitive mechanism tags are rejected before version 6, recycling/local-control additions before version 7, respire(oxygen) before version 9, and contact declarations, cellular register operations and adhere() before version 10. Dynamic signal fields and junction mechanisms require version 11. Old recipe sources default to allowing new starts and requesting no recycling. Optical coverage corrections and directional primitive interactions change affected trajectories; deterministic continuation is verified within the current engine.
+Version-1 and version-2 body schemas are explicitly unsupported. They cannot be silently interpreted as paid structures or hardware-gated observations. Existing exports are preserved; create a new simulation with rewritten genomes. Future unknown versions are also rejected. Version-3 checkpoints remain supported. Existing organs, energy, minerals, memory and program source are preserved; formerly unclassified particles and gut contents import as tissue, and protein pools initialize empty. New digestion/expression rules govern subsequent evolution, so continuation is deterministic within the new engine but is not an exact replay of the old engine. Versions 4 through 11 remain supported. Saving writes version 12, including cellular pools, recipe snapshots, ingredient ledgers, sampled construction controls, activity, genetic progress, mechanism kinds, world dimensions, emitter directions, floating obstacle state, gas fields and reservoir configuration, cumulative external species fluxes, internal organism gas/carbon pools, reaction ledgers and cumulative mineral removals. Primitive mechanism tags are rejected before version 6, recycling/local-control additions before version 7, respire(oxygen) before version 9, and contact declarations, cellular register operations and adhere() before version 10. Dynamic signal fields and resource junctions require version 11. Signal junctions and the two player withdrawal ledgers require version 12. Earlier saves initialize withdrawals to zero. Old recipe sources default to allowing new starts and requesting no recycling. Optical coverage corrections and directional primitive interactions change affected trajectories; deterministic continuation is verified within the current engine.
 
 On pre-version-9 restore, water receives the documented default O2/DIC inventories and matching external baseline ledgers. Existing organic material receives an explicit legacy carbon baseline; old snapshots are preserved but subsequent trajectories follow the gas-aware physiology.
 

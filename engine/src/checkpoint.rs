@@ -8,7 +8,7 @@ use crate::{
 
 pub(crate) const MAX_STATE_BYTES: usize = 128 * 1024 * 1024;
 const MAGIC: &[u8; 8] = b"CELLAR01";
-pub(crate) const VERSION: u32 = 11;
+pub(crate) const VERSION: u32 = 12;
 pub(crate) type Result<T> = std::result::Result<T, String>;
 
 pub(crate) fn ensure(ok: bool, message: &str) -> Result<()> {
@@ -213,7 +213,7 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
     ensure(r.take(8)? == MAGIC, "unknown save format")?;
     let version = r.u32()?;
     if !(3..=VERSION).contains(&version) {
-        return Err(format!("Unsupported simulation version {version}. Agar supports simulation saves 3 through 11. The saved simulation is preserved."));
+        return Err(format!("Unsupported simulation version {version}. Agar supports simulation saves 3 through 12. The saved simulation is preserved."));
     }
     ensure(r.u32()? as usize == bytes.len(), "incorrect save length")?;
     ensure(r.u32()? == checksum(&bytes[20..]), "checksum mismatch")?;
@@ -568,7 +568,7 @@ mod tests {
         let mut live = live_engine();
         let before = save(&live).unwrap();
         assert!(!live.restore_state(bytes));
-        assert!(live.error.contains("simulation saves 3 through 11"));
+        assert!(live.error.contains("simulation saves 3 through 12"));
         assert_eq!(save(&live).unwrap(), before);
         let mut version2 = before.clone();
         version2[8..12].copy_from_slice(&2u32.to_le_bytes());

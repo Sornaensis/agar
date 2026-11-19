@@ -374,7 +374,7 @@ export const CELLULAR_FAMILY_PRESETS: Preset[] = [
 
 
 /** Each recipe installs one operation; no family grants additional hidden machinery. */
-function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?: boolean; giant?: boolean; memory?: boolean; predator?: boolean; conserve?: boolean; local?:boolean; restOnMeal?:boolean; colony?:boolean; multicellular?:'nursery' | 'relay'; scavenger?:boolean } = {}): string {
+function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?: boolean; giant?: boolean; memory?: boolean; predator?: boolean; conserve?: boolean; local?:boolean; restOnMeal?:boolean; colony?:boolean; multicellular?:'nursery' | 'relay' | 'crown'; scavenger?:boolean } = {}): string {
   const hasLight = path !== 'organic', hasGut = path !== 'light';
   const switchesInShade = options.local && path === 'mixed';
   const hunting = options.local && options.predator;
@@ -430,10 +430,15 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
   }
   if (options.colony) recipes.push(
     { name:'Adhesin', kind:'adhere()', parts:[['anchor',0.01],['membrane',0.01]], ready:'powered', activity:'if energy > 12 then 1 else 0' },
-    ...['LeftJunction', 'RightJunction'].map((name, index) => ({
+    ...(options.multicellular === 'crown' ? [] : ['LeftJunction', 'RightJunction']).map((name, index) => ({
       name, kind:'sense(contact)', parts:[['anchor',0.002],['receptor',0.006],['filament',0.002]] as CellularPart[],
       at:index === 0 ? Math.PI/2 : -Math.PI/2, ready:'powered',
     })),
+  );
+  if (options.multicellular === 'crown') recipes.push(
+    { name:'Bus', kind:'junction(signal)', parts:[['membrane',0.012],['receptor',0.008]], ready:'powered' },
+    { name:'RimSolar', kind:'harvest(light)', parts:[['anchor',0.01],['pigment',0.04],['enzyme',0.01]],
+      ready:'rim', goal:'0.06', activity:'if rim then 1 else 0' },
   );
   if (nursery) {
     for (const resource of ['energy','mineral','carbon']) recipes.push({
@@ -664,12 +669,25 @@ let firing = trigger || ri031 > 162;
 ri031 = if trigger then 180 else if ri031 > 0 then ri031 - 1 else 0;
 rf021 = if firing then 1 else 0;`;
 
+const crownBehavior = `# Each cell asks to adhere to any functioning partner carrying the same marker.
+publish rf020 = 87;
+adhere_message rf020;
+signal rf021 = 0;
+let paired_contact = sensed.Bus.valid;
+let partners = sensed.Bus.count;
+let center = partners >= 2;
+rf021 = if center then 1 else 0;
+# Only a one-partner edge touching a signaling center builds extra light harvesters.
+let incoming = sensed.Bus.value;
+let rim = partners == 1 && incoming > 0.5;`;
+
 /** Current defaults share role stocks and control each recipe's initiation explicitly. */
 export const PRESETS: Preset[] = [
   { name:'Forager', description:'Scavenges particles and carcasses. After recognizing a compatible producer it can dock and exchange carbon and minerals.', source:cellularOrganism('organic',grazeAndScavenge,{local:true,restOnMeal:true,scavenger:true}) },
   { name:'Rememberer', description:'Store the last chemical turn and its age, then follow it briefly when the gradient disappears.', source:cellularOrganism('organic',rememberGradient,{local:true,memory:true}) },
   { name:'Phototroph', description:'Uses sunlight to fix carbon and respires its reserves at night. Compatible grazers can dock at its exchange surfaces.', source:cellularOrganism('light','# This stationary producer spends no material on locomotion.',{local:true}) },
   { name:'Predator', description:'Spare cells with a matching contact marker, pierce prey, and follow chemical food cues in darkness.', source:cellularOrganism('organic',localHunting,{local:true,predator:true}) },
+  { name:'Crown rosette', description:'Attached cells with multiple signaling partners become beacons. Edge cells touching a beacon build extra light harvesters.', source:cellularOrganism('light',crownBehavior,{local:true,colony:true,multicellular:'crown'}) },
   { name:'Nurse rosette', description:'Adult cells with a requesting juvenile build extra harvesters, pause growth and exchange energy, organic carbon and minerals through junctions.', source:cellularOrganism('light',nurseBehavior,{local:true,colony:true,multicellular:'nursery'}) },
   { name:'Pulse swimmer', description:'Attached cells relay brief pulses to their neighbors and activate propulsion. A refractory interval separates each burst.', source:cellularOrganism('light',relayBehavior,{local:true,colony:true,multicellular:'relay'}) },
   { name:'Mixotroph', description:'Rests and fixes carbon in bright water. In shade its light receptor switches it to swimming and particle feeding.', source:cellularOrganism('mixed',feedInShade,{local:true,restOnMeal:true}) },

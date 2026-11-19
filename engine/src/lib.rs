@@ -127,7 +127,7 @@ thread_local! { static ENGINE: RefCell<Engine> = RefCell::new(Engine::new()); }
 
 #[no_mangle]
 pub extern "C" fn abi_version() -> u32 {
-    15
+    16
 }
 
 /// Allocate a writable, zero-initialized byte buffer. The caller must deallocate
@@ -818,6 +818,44 @@ fn organic_count(value: f64) -> Option<usize> {
         .then_some(value as usize)
 }
 
+fn edit_world(edit: impl FnOnce(&mut World, &[Genome]) -> Result<u32, String>) -> u32 {
+    ENGINE.with(|engine| {
+        let mut engine = engine.borrow_mut();
+        let Engine { world, genomes, error, .. } = &mut *engine;
+        match edit(world, genomes) {
+            Ok(value) => { error.clear(); value }
+            Err(reason) => { *error = reason; 0 }
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn place_cell(genome: u32, x: f64, y: f64) -> u32 {
+    edit_world(|world, genomes| world.place_cell(genome, x, y, genomes))
+}
+
+#[no_mangle]
+pub extern "C" fn move_cell(id: u32, x: f64, y: f64, colony: u32) -> u32 {
+    edit_world(|world, genomes| {
+        if colony > 1 { return Err("Unknown relocation mode.".into()); }
+        world.move_cell(id, x, y, colony == 1, genomes)
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn set_cell_stores(id: u32, mask: u32, energy: f64, minerals: f64) -> u32 {
+    edit_world(|world, _| {
+        if !(1..=3).contains(&mask) { return Err("Choose ATP, minerals, or both stores.".into()); }
+        world.set_cell_stores(id, (mask & 1 != 0).then_some(energy), (mask & 2 != 0).then_some(minerals))?;
+        Ok(1)
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn energy_withdrawn_total() -> f64 { ENGINE.with(|e| e.borrow().world.energy_withdrawn) }
+#[no_mangle]
+pub extern "C" fn mineral_withdrawn_total() -> f64 { ENGINE.with(|e| e.borrow().world.mineral_withdrawn) }
+
 #[no_mangle]
 pub extern "C" fn seed_cells(genome_id: u32, count: f64, x: f32, y: f32) -> u32 {
     ENGINE.with(|e| {
@@ -1078,7 +1116,7 @@ mod tests {
         engine.world.cells[0].vy = -1.25;
         engine.world.cells[0].integrity = 0.8;
         engine.world.snapshot(&mut engine.snapshot);
-        assert_eq!(abi_version(), 15);
+        assert_eq!(abi_version(), 16);
         assert_eq!(simulation::CELL_STRIDE, 163);
         assert_eq!(engine.snapshot.len(), 12 + 22 * simulation::CELL_STRIDE + 360 * 5);
         assert_eq!(engine.snapshot[7], simulation::WIDTH as f64);

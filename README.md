@@ -23,7 +23,9 @@ Cellular programs can store private values between ticks and publish a recogniti
 
 Select a cell and open **Memory** to see its registers or **Program** to inspect a contact reading. Each cell in a colony still builds its own machinery and pays its own energy costs. The basic adhesion program is also available as an [editable example](examples/colony.cell).
 
-**Nurse rosette** and **Pulse swimmers** are selectable simulation presets. The rosette’s young cells request support. Attached adults increase their light-harvesting effort, and compatible junctions share usable energy, free minerals and organic carbon according to reserve levels. Pulse swimmers pass short signals between their flank receptors. A received pulse activates the young cell’s motor and starts a recovery period before it can fire again.
+**Crown rosette** starts with a single founder. Cells with multiple signaling neighbors emit a beacon. An edge cell receiving that beacon can use a second light harvester. The [editable genome](examples/crown-rosette.cell) reads the count and mean signal of partners linked by active signal junctions. [See the three-cell colony in the player](screenshots/cellular-body.jpg).
+
+**Nurse rosette** and **Pulse swimmers** are also selectable simulation presets. The rosette’s young cells request support. Attached adults increase their light-harvesting effort, and compatible junctions share usable energy, free minerals and organic carbon according to reserve levels. Pulse swimmers pass short signals between their flank receptors. A received pulse activates the young cell’s motor and starts a recovery period before it can fire again.
 
 In the player, a teal rim shows a cell that was attached during the last exchange. A bright violet or amber dot shows a positive or negative public signal, and a small gray dot shows an occupied zero. Select a cell and open **Body → Colony exchange** for its attached-neighbor count and signed transfers in the last tick. **Settings → Colony activity** toggles the highlights. [Nurse rosette](examples/nurse-rosette.cell) · [Pulse swimmer](examples/pulse-swimmer.cell)
 
@@ -37,9 +39,11 @@ See [the cellular language and physical rules](design/cellular.md), [the solar e
 | Environments | Create, inspect, edit a new copy, rename, import, export or delete a habitat recipe. |
 | Genomes | Create or copy programs, check types, mutate a draft, inspect its graph and explicitly save. |
 
-An open simulation has **Player**, **Metrics**, **Settings** and **Genomes** tabs. The player has Play/Pause, 1×/2×/5×/10× speed, **Add organism**, and **Pop out**. Choose a genome to add one cell. Click a cell for **Overview**, **Body**, **Memory** and **Program**. Its program and memory are read-only; saving its genome creates a separate catalog document.
+In **Player**, choose **Add organism**, select a genome, then click or tap the water to place a founder. Choose **Place several** to keep placing that genome or press Escape to finish. With the canvas focused, Enter uses the center of the view.
 
-For cellular programs, the Body inspector shows product inventories, actual synthesis rates, assembled ingredients and lifecycle progress. For legacy programs, it compares actual organ counts and mass with the last construction requests. Expand a family to inspect stable local unit IDs, built mass, integrity and functional state. Internal space, membrane attachment use, family-specific protein stocks and achieved expression/assembly/recycling/repair rates remain visible. Metrics includes resource totals, introduced material and energy, harvested light, populations and feeding capabilities.
+Select a cell to see its energy, minerals, integrity, and colony contacts. Drag the selected cell or choose **Move cell** and click a destination. **Move colony** translates its entire physically attached group. **Edit reserves** changes energy and minerals up to the cell’s current capacity. Setting energy to zero kills the cell and releases its remains. Placement, movement and reserve edits work while running or paused, including in the floating player.
+
+Open **Body** to inspect built machinery, resource exchange and incoming colony signals. Unbuilt recipes, physical budgets and production rates are expandable. **Memory** shows registers and **Program** shows the evaluator. **Metrics** tracks population and feeding capabilities, with food, gas, mineral and energy accounting in expandable sections.
 
 Built-ins stay unchanged. Editing or importing creates independent catalog items. Running simulations own their programs and environment state, so catalog renames and deletions do not alter existing worlds.
 
@@ -221,7 +225,7 @@ In an organism's read-only Program view, hover, place the caret or select an exp
 
 IndexedDB stores documents and complete worlds; localStorage stores preferences and editor drafts. Changing runs checkpoint every two seconds and after key actions, and reopen paused. The save indicator reports failures. The active simulation advances when its main view is visible or its floating player is open, including while the main app shows a catalog. An open player uses a timer when both windows are hidden; browser throttling can slow it. There is no offline catch-up. Web Locks protect a run from competing writers in multiple tabs. Clearing browser site data removes its local saves; export genomes and environments for portable copies.
 
-**Current formats: engine ABI 15, checkpoint 11, genome language 3 with additive cellular metadata.** Genome JSON exports use `agar.genome` version 2 with `languageVersion: 3`; environment JSON remains version 1. Plain `.cell` source is checked with the current compiler. Checkpoint-3 simulations retain their actual organs, resources, memory and source. Their previously unclassified organic particles and gut contents import as tissue; their new protein pools start empty. Checkpoints 4 through 10 also remain readable. Older states receive explicit initial gases and a one-time ledger for existing carbon; their future follows the new chemistry. New saves retain cellular products, ingredient ledgers, replication, mechanism identities and construction controls. Existing recipes default to allowing new starts and requesting no recycling. Corrected optical coverage and directional primitive interactions intentionally change affected trajectories. The old `build.*` source spelling remains an alias for expression.
+**Current formats: engine ABI 16, checkpoint 12, genome language 3 with additive cellular metadata.** Genome JSON exports use `agar.genome` version 2 with `languageVersion: 3`; environment JSON remains version 1. Plain `.cell` source is checked with the current compiler. Checkpoint-3 simulations retain their actual organs, resources, memory and source. Their previously unclassified organic particles and gut contents import as tissue; their new protein pools start empty. Checkpoints 4 through 11 also remain readable. Older runs start with zero player withdrawals. Older states receive explicit initial gases and a one-time ledger for existing carbon; their future follows the new chemistry. New saves retain cellular products, ingredient ledgers, replication, mechanism identities and construction controls. Existing recipes default to allowing new starts and requesting no recycling. Corrected optical coverage and directional primitive interactions intentionally change affected trajectories. The old `build.*` source spelling remains an alias for expression.
 
 The organelle model is an intentional compatibility break. Checkpoints 1/2 are rejected before replacing the engine state. Older saved genomes remain viewable, renameable and exportable, but must be manually updated in a new copy before introduction. Their investment fractions and omniscient sensors are not silently converted into free organs. Saved records and old files remain preserved. New and old browser documents keep the same storage namespace.
 
@@ -289,7 +293,7 @@ npm run test:cellular
 npm run test:multicellular
 npm run test:cellular-ui
 npm run test:food-chain
-npm run test:scenarios    # launch the five curated presets and check their behavior
+npm run test:scenarios    # launch the six curated presets and check their behavior
 npm run test:predator     # one founder in stock Still water, three seeds
 npm run test:ecosystem    # ten simulated minutes of the Sunlit food web preset
 ```
