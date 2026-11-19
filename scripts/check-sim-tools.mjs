@@ -56,6 +56,48 @@ const atPoint = (state,id,p) => {
 };
 const action = (surface,name) => surface.locator(`[data-action="${name}"]`).click();
 
+async function controls(surface,mode) {
+  await surface.waitForFunction(expected => document.body.dataset.playerControls === expected,mode,{timeout:5000});
+}
+async function enterPlayer(surface) {
+  const {width,height}=surface.viewportSize();
+  await surface.mouse.move(width/2,height/2);
+  await controls(surface,'pointer');
+}
+async function leavePlayer(surface) {
+  await surface.mouse.move(-12,surface.viewportSize().height/2);
+  await controls(surface,'hidden');
+}
+async function checkCanvasFrame(surface) {
+  const bounds=await surface.locator('#world').evaluate(canvas=>{
+    const r=canvas.getBoundingClientRect();
+    return [r.x,r.y,innerWidth-r.right,innerHeight-r.bottom];
+  });
+  assert.ok(bounds.every(n=>Math.abs(n)<=1),'Canvas must fill all four edges of the popup: '+bounds.join(', '));
+}
+async function controlCenters(surface) {
+  return surface.locator('.player-toolbar, .player-view-controls, #player-caption, #cell-inspector').evaluateAll(elements=>
+    elements.filter(e=>e.checkVisibility({opacityProperty:true})).map(e=>{
+      const r=e.getBoundingClientRect();
+      return {x:r.x+r.width/2,y:r.y+Math.min(8,r.height/2)};
+    }));
+}
+async function expectCleanCanvas(surface,points) {
+  await surface.waitForFunction(points=>{
+    const layers=[...document.querySelector('.player-stage').children,document.querySelector('#player-window-toast')];
+    return layers.every(el=>el.id==='world'||!el.checkVisibility({opacityProperty:true,visibilityProperty:true}))
+      && points.every(p=>document.elementFromPoint(p.x,p.y)?.id==='world');
+  },points,{timeout:5000});
+}
+async function tabTo(surface,selector) {
+  const limit=await surface.locator('button, input, select, [tabindex="0"]').count()+2;
+  for(let i=0;i<limit;i++){
+    if(await surface.locator(selector).evaluate(el=>el===document.activeElement))return;
+    await surface.keyboard.press('Tab');
+  }
+  assert.fail('Keyboard focus did not reach '+selector);
+}
+
 try {
   await page.goto(process.env.UI_TEST_URL || 'http://127.0.0.1:4173/');
   await page.locator('[data-id="builtin:simulation:nurse-rosette"][data-action="start-template"]').click();
@@ -110,9 +152,38 @@ try {
   const child = await childOpened;
   await child.locator('#world').waitFor();
   await child.setViewportSize({width:420,height:720});
+  assert.equal(await child.locator('.player-window-header, [data-player-window-name], .player-window-mode, .player-window-shell > header').count(),0);
+  assert.ok((await child.title()).endsWith(' · agar player'));
+  assert.equal(await child.locator('body').getAttribute('data-player-window-mode'),'window');
+  await checkCanvasFrame(child);
+  await enterPlayer(child);
+  await child.locator('#playback-speed').click();
+  await child.keyboard.press('Escape');
+  assert.ok(await child.locator('#playback-speed').evaluate(b=>b===document.activeElement));
+  const visibleControls=await controlCenters(child);
+  assert.equal(visibleControls.length,4,'Toolbar, fields and camera, caption and selected organism inspector are visible');
+  await leavePlayer(child);
+  await expectCleanCanvas(child,visibleControls);
+  await enterPlayer(child);
+  assert.equal((await controlCenters(child)).length,4);
+  await leavePlayer(child);
+  await child.keyboard.press('Tab');
+  await controls(child,'keyboard');
+  await tabTo(child,'[data-player-hide]');
+  await child.keyboard.press('Enter');
+  await controls(child,'hidden');
+  await enterPlayer(child);
   await action(child,'edit-reserves');
   await child.locator('#reserve-energy').fill('50');
   await child.locator('#reserve-minerals').fill('0.3');
+  await leavePlayer(child);
+  await child.waitForFunction(()=>{
+    const dialog=document.querySelector('dialog[open]');
+    return dialog && Number(getComputedStyle(dialog).opacity)===0
+      && Number(getComputedStyle(dialog,'::backdrop').opacity)===0;
+  });
+  await enterPlayer(child);
+  assert.equal(await child.locator('#reserve-energy').inputValue(),'50');
   await child.getByRole('button',{name:'Apply reserves'}).click();
   await savedWhen(s => s.cells[1].energy===50 && s.cells[1].nutrients===.3);
   await action(child,'edit-reserves');
@@ -125,13 +196,24 @@ try {
   assert.ok(await child.locator('.reserve-zero').isVisible());
   await child.getByRole('button',{name:'Cancel',exact:true}).click();
   await tool(child,'Phototroph');
+  const toolBeforeTouch=await child.locator('#cell-tool-status').textContent();
+  await leavePlayer(child);
+  await child.touchscreen.tap(210,330);
+  await controls(child,'touch');
+  assert.equal(await child.locator('#cell-tool-status').textContent(),toolBeforeTouch,'The reveal tap preserves the active placement tool');
+  await child.locator('[data-player-hide]').tap();
+  await controls(child,'hidden');
+  await child.touchscreen.tap(210,330);
+  await controls(child,'touch');
   await child.locator('#world').press('Escape');
+  await enterPlayer(child);
   await action(child,'return-player');
   await page.locator('#world').waitFor();
   await action(page,'close-simulation'); await page.locator('[data-action="open-simulation"]').first().click();
   await page.getByRole('button',{name:'Play simulation'}).waitFor();
   await page.evaluate(() => { delete window.testCamera; });
   const reopened = await saved();
+  assert.equal(reopened.population,2,'Neither touch reveal placed an organism');
   assert.ok(atPoint(reopened,2,d) && reopened.cells[1].energy===40 && reopened.cells[1].nutrients===.3 && reopened.ticks===initial.ticks);
 
   // Wait for an actual daughter to attach. Use the paid native colony, then
@@ -199,8 +281,42 @@ try {
   const readout = await page.locator('#toast').textContent();
   assert.ok(carcass.food.some(f => f.kind===1 && readout===`Tissue particle · ${Number(f.energy.toPrecision(4))} food energy · ${Number(f.minerals.toPrecision(4))} minerals`),
     'The tap reads measured particle energy and minerals');
+
+  // Keep the mouse physically outside the popup throughout the observation.
+  // Compare the visible clock with a later worker checkpoint and actual body age.
+  const nextPopup=context.waitForEvent('page');
+  await action(page,'popout-player');
+  const running=await nextPopup;
+  await running.locator('#world').waitFor();
+  await running.setViewportSize({width:720,height:420});
+  await checkCanvasFrame(running);
+  await enterPlayer(running);
+  await running.getByRole('button',{name:'Play simulation'}).click();
+  await leavePlayer(running);
+  await expectCleanCanvas(running,[]);
+  const startCaption=await running.locator('#player-caption').textContent();
+  const startFrame=await running.locator('#world').evaluate(canvas=>canvas.toDataURL());
+  await running.waitForFunction(start=>{
+    const seconds=text=>{const bits=text.match(/(\d+):(\d+)$/);return bits?Number(bits[1])*60+Number(bits[2]):-1;};
+    return seconds(document.querySelector('#player-caption').textContent)>=seconds(start)+3;
+  },startCaption);
+  await running.waitForFunction(start=>document.querySelector('#world').toDataURL()!==start,startFrame,{polling:200,timeout:5000});
+  await controls(running,'hidden');
+  await enterPlayer(running);
+  await running.getByRole('button',{name:'Pause simulation'}).click();
+  const progressed=await savedWhen(s=>s.paused && s.ticks>=carcass.ticks+60);
+  assert.ok(progressed.cells.some(c=>carcass.cells.some(prev=>prev.id===c.id && c.age>prev.age)),'A living body aged while controls were hidden');
+  await leavePlayer(running);
+  await running.keyboard.press('Tab');
+  await tabTo(running,'[data-action="return-player"]');
+  await running.keyboard.press('Enter');
+  await page.locator('#world').waitFor();
+  await page.mouse.move(1,1);
+  assert.equal(await page.locator('body').getAttribute('data-player-controls'),null);
+  assert.ok(await page.locator('.player-toolbar').evaluate(el=>el.checkVisibility({opacityProperty:true})));
+  await page.getByRole('button',{name:'Play simulation'}).waitFor();
   assert.deepEqual(errors,[]);
-  console.log('Player edits passed: exact repeated placement, pinch/pan/cancel, blocked and transformed destinations, direct drag, narrow pop-out editing, live energy withdrawals, checkpoint reopen, an intact parent–daughter colony move, and measured body/packet food energy.');
+  console.log('Player edits and real popup passed: placement, navigation, reserve edits, checkpoint reopen, colony move, food energy, full-frame canvas, hover leave/return after focus, modal draft, keyboard and touch reveal/dismissal, undisturbed playback and docking.');
 } catch (error) {
   console.error('Visible player:',(await page.locator('body').innerText()).slice(-3000));
   throw error;

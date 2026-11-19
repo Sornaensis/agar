@@ -2,7 +2,7 @@
 export type PlayerWindowMode = 'picture-in-picture' | 'window';
 export type PlayerCloseReason = 'return' | 'closed' | 'session' | 'unload';
 interface PictureInPictureApi {
-  requestWindow(options?: { width?: number; height?: number }): Promise<Window>;
+  requestWindow(options?: { width?: number; height?: number; disallowReturnToOpener?: boolean }): Promise<Window>;
 }
 interface PlayerViewCallbacks {
   bindDocument(document: Document): () => void;
@@ -15,6 +15,7 @@ export class PlayerView {
   private element: HTMLElement | null = null;
   private marker: Comment | null = null;
   private unbind: (() => void) | null = null;
+  private removeControls: (() => void) | null = null;
   private opening: Promise<PlayerWindowMode> | null = null;
   private currentMode: PlayerWindowMode | null = null;
   private title = '';
@@ -43,7 +44,7 @@ export class PlayerView {
     let request: Promise<Window>;
     try {
       if (mode === 'picture-in-picture') {
-        request = (this.opener as Window & { documentPictureInPicture: PictureInPictureApi }).documentPictureInPicture.requestWindow({ width, height });
+        request = (this.opener as Window & { documentPictureInPicture: PictureInPictureApi }).documentPictureInPicture.requestWindow({ width, height, disallowReturnToOpener: true });
       } else {
         // Ordinary popups have no web API for enforcing always-on-top behavior.
         const target = this.opener.open('', '_blank', `popup,width=${width},height=${height}`);
@@ -59,13 +60,6 @@ export class PlayerView {
         const base = doc.createElement('base'); base.href = this.opener.document.baseURI; doc.head.append(base);
         this.copyStyles(doc);
         const shell = doc.createElement('main'); shell.className = 'player-window-shell';
-        const header = doc.createElement('header'); header.className = 'player-window-header';
-        const name = doc.createElement('strong'); name.dataset.playerWindowName = ''; name.textContent = title;
-        const status = doc.createElement('span'); status.className = 'player-window-mode';
-        status.textContent = mode === 'picture-in-picture' ? 'Always on top' : 'Separate window · pinning unavailable';
-        const dock = doc.createElement('button'); dock.type = 'button'; dock.className = 'button small subtle';
-        dock.dataset.action = 'return-player'; dock.textContent = 'Return to tab';
-        header.append(name, status, dock); shell.append(header);
         doc.body.className = 'player-window'; doc.body.dataset.playerWindowMode = mode; doc.body.replaceChildren(shell);
         const toast = doc.createElement('div'); toast.className = 'toast'; toast.id = 'player-window-toast'; toast.setAttribute('role', 'status'); toast.setAttribute('aria-live', 'polite'); doc.body.append(toast);
         this.target = target; this.currentMode = mode; this.element = element;
@@ -73,6 +67,7 @@ export class PlayerView {
         element.replaceWith(this.marker); shell.append(element);
         target.addEventListener('pagehide', this.closed, { once: true });
         doc.addEventListener('visibilitychange', this.hidden);
+        this.removeControls = bindFloatingControls(target);
         this.unbind = this.callbacks.bindDocument(doc);
         this.title = title;
         this.callbacks.changed();
@@ -99,8 +94,6 @@ export class PlayerView {
   setTitle(title: string): void {
     if (!this.target || title === this.title) return;
     this.title = title; this.target.document.title = title + ' · agar player';
-    const name = this.target.document.querySelector<HTMLElement>('[data-player-window-name]');
-    if (name) name.textContent = title;
   }
 
   private finish(reason: PlayerCloseReason): void {
@@ -108,6 +101,7 @@ export class PlayerView {
     if (!target) return;
     target.removeEventListener('pagehide', this.closed);
     target.document.removeEventListener('visibilitychange', this.hidden);
+    this.removeControls?.(); this.removeControls = null;
     this.unbind?.(); this.unbind = null;
     const element = this.element, marker = this.marker;
     this.target = null; this.currentMode = null; this.element = null; this.marker = null;
@@ -134,6 +128,65 @@ export class PlayerView {
       }
     }
   }
+}
+
+/** Revealing the floating HUD never replaces controls, moves focus, or alters the canvas. */
+function bindFloatingControls(host:Window):()=>void {
+  const doc=host.document, body=doc.body;
+  const lifetime=new AbortController(), options={capture:true,signal:lifetime.signal};
+  const setMode=(mode:'hidden'|'pointer'|'keyboard'|'touch'):void=>{
+    if (body.dataset.playerControls!==mode) body.dataset.playerControls=mode;
+  };
+  setMode('hidden');
+
+  // The first touch wakes the controls. Its synthetic click must not also
+  // place an organism, edit a barrier, or submit an open modal dialog.
+  const wakingTouches=new Set<number>();
+  let suppressClick=false;
+  const pointer=(event:PointerEvent):void=>{
+    if (event.pointerType==='touch') {
+      if (event.type==='pointerdown') {
+        const waking=body.dataset.playerControls==='hidden' || wakingTouches.size>0;
+        suppressClick=waking; setMode('touch');
+        if (waking) wakingTouches.add(event.pointerId);
+      }
+      if (wakingTouches.has(event.pointerId)) {
+        if (event.type==='pointerup' || event.type==='pointercancel') wakingTouches.delete(event.pointerId);
+        event.preventDefault(); event.stopImmediatePropagation();
+      }
+      return;
+    }
+    if (event.type==='pointerover' || event.type==='pointermove' || event.type==='pointerdown') {
+      if (event.type==='pointerdown') suppressClick=false;
+      // Captured drags can cross the window without a pointerleave event.
+      const outside=event.clientX<0 || event.clientY<0 || event.clientX>=host.innerWidth || event.clientY>=host.innerHeight;
+      // Chromium can recompute mouse boundaries for a stationary pointer
+      // outside this window after a touch has just revealed the controls.
+      if (!outside) setMode('pointer');
+      else if (body.dataset.playerControls!=='touch') setMode('hidden');
+    } else if (event.type==='pointerout' && !event.relatedTarget && body.dataset.playerControls!=='touch') setMode('hidden');
+  };
+  for (const type of ['pointerover','pointermove','pointerout','pointerdown','pointerup','pointercancel'] as const) {
+    doc.addEventListener(type,pointer,options);
+  }
+  doc.addEventListener('keydown',()=>{suppressClick=false;setMode('keyboard');},options);
+  doc.addEventListener('focusin',event=>{
+    if (body.dataset.playerControls==='hidden' && (event.target as Element).matches?.(':focus-visible')) setMode('keyboard');
+  },options);
+  doc.addEventListener('click',event=>{
+    if (suppressClick && event.detail!==0) {
+      suppressClick=false;event.preventDefault();event.stopImmediatePropagation();return;
+    }
+    if ((event.target as Element).closest?.('[data-player-hide]')) {
+      // Explicit dismissal returns keyboard navigation to the world.
+      if ((event.target as Element).closest('[data-player-hide]')===doc.activeElement) doc.getElementById('world')?.focus({preventScroll:true});
+      setMode('hidden');
+    } else if (event.detail===0 && body.dataset.playerControls==='hidden') setMode('keyboard');
+  },options);
+  const hide=():void=>{wakingTouches.clear();suppressClick=false;setMode('hidden');};
+  host.addEventListener('blur',hide,{signal:lifetime.signal});
+  doc.addEventListener('visibilitychange',()=>{if(doc.hidden)hide();},{signal:lifetime.signal});
+  return ()=>lifetime.abort();
 }
 
 /** One clock and pending callback; hidden players use a bounded timer fallback. */

@@ -44,6 +44,12 @@ class BrowserWindow extends EventTarget {
   clearTimeout(id) { this.timers.delete(id); }
   fireTimer() { const entry = this.timers.entries().next().value; if (!entry) return false; this.timers.delete(entry[0]); entry[1].callback(); return true; }
 }
+function sendInput(target, type, fields = {}) {
+  const event = new Event(type, { cancelable: true });
+  for (const [name, value] of Object.entries(fields)) Object.defineProperty(event, name, { value });
+  target.dispatchEvent(event);
+  return event;
+}
 const createPlayer = opener => { const host = opener.document.createElement('div'), player = opener.document.createElement('section'), canvas = opener.document.createElement('canvas'); player.append(canvas); host.append(player); opener.document.body.append(host); return { host, player, canvas }; };
 
 // Document PiP moves the same player/canvas, copies styles, and keeps one state owner.
@@ -51,12 +57,60 @@ const createPlayer = opener => { const host = opener.document.createElement('div
   const opener = new BrowserWindow('opener'), floating = new BrowserWindow('pip'), { host, player, canvas } = createPlayer(opener);
   const engine = { ticks: 123 }; player.engine = engine;
   let requests = 0, binds = 0, unbinds = 0; const changes = [];
-  opener.documentPictureInPicture = { requestWindow: async options => { requests++; assert.ok(options.width <= 1000); return floating; } };
+  opener.documentPictureInPicture = { requestWindow: async options => {
+    requests++;
+    assert.ok(options.width <= 1000);
+    assert.equal(options.disallowReturnToOpener, true, 'Request one in-player return control');
+    return floating;
+  } };
   const view = new PlayerView(opener, { bindDocument: doc => { assert.equal(doc, floating.document); binds++; return () => unbinds++; }, changed: reason => changes.push(reason), visibilityChanged: () => {} });
   assert.equal(view.supportsAlwaysOnTop, true);
   assert.equal(await view.open(player, 'Ecosystem'), 'picture-in-picture');
   assert.equal(requests, 1); assert.equal(binds, 1); assert.equal(player.ownerDocument, floating.document); assert.equal(canvas.ownerDocument, floating.document);
-  assert.equal(player.engine, engine); assert.equal(view.visible, true); assert.match(floating.document.body.text(), /Always on top/);
+  assert.equal(player.engine, engine); assert.equal(view.visible, true);
+  assert.equal(floating.document.title, 'Ecosystem · agar player');
+  assert.equal(floating.document.body.children[0].children.some(node => node.tagName === 'header'), false, 'The canvas fills the shell without a permanent child-window header');
+  const state = () => floating.document.body.dataset.playerControls;
+  assert.equal(state(), 'hidden', 'A newly opened player starts with the simulation visible');
+  floating.innerWidth = 800; floating.innerHeight = 600;
+  const pointer = { pointerType: 'mouse', clientX: 30, clientY: 40, target: canvas };
+  sendInput(floating.document, 'pointerover', pointer);
+  assert.equal(state(), 'pointer');
+  sendInput(floating.document, 'pointerout', { ...pointer, relatedTarget: canvas });
+  assert.equal(state(), 'pointer', 'Moving between elements inside the window keeps controls available');
+  sendInput(floating.document, 'pointermove', { ...pointer, clientX: -2 });
+  assert.equal(state(), 'hidden', 'An object drag can deliver captured moves outside the viewport');
+  sendInput(floating.document, 'keydown', { key: 'Tab', target: canvas });
+  assert.equal(state(), 'keyboard', 'Keyboard users can reveal the controls without pointer input');
+  sendInput(floating, 'blur');
+  assert.equal(state(), 'hidden');
+  const touch = { ...pointer, pointerType: 'touch', pointerId: 7 };
+  assert.ok(sendInput(floating.document, 'pointerdown', touch).defaultPrevented);
+  assert.equal(state(), 'touch');
+  assert.ok(sendInput(floating.document, 'pointerup', touch).defaultPrevented);
+  assert.ok(sendInput(floating.document, 'click', { target: canvas, detail: 1 }).defaultPrevented, 'A wake tap cannot also activate the canvas');
+  const outsideMouse = { ...pointer, clientX: -2, relatedTarget: null };
+  for (const type of ['pointerover', 'pointermove', 'pointerout']) {
+    sendInput(floating.document, type, outsideMouse);
+    assert.equal(state(), 'touch', `A stationary mouse outside the window cannot dismiss touch controls on ${type}`);
+  }
+  assert.equal(sendInput(floating.document, 'pointerdown', touch).defaultPrevented, false);
+  sendInput(floating.document, 'pointerup', touch);
+  assert.equal(sendInput(floating.document, 'click', { target: canvas, detail: 1 }).defaultPrevented, false, 'The next tap is available for normal play');
+  sendInput(floating.document, 'pointerover', { ...pointer, relatedTarget: null });
+  assert.equal(state(), 'pointer', 'A mouse entering the viewport takes over from touch');
+  sendInput(floating.document, 'pointerout', outsideMouse);
+  assert.equal(state(), 'hidden', 'A subsequent real mouse exit hides pointer controls');
+  sendInput(floating.document, 'keydown', { key: 'Tab', target: canvas });
+
+  const hide = floating.document.createElement('button');
+  hide.closest = selector => selector === '[data-player-hide]' ? hide : null;
+  floating.document.activeElement = hide;
+  floating.document.getElementById = id => id === 'world' ? canvas : null;
+  canvas.focus = () => { floating.document.activeElement = canvas; };
+  sendInput(floating.document, 'click', { target: hide, detail: 0 });
+  assert.equal(state(), 'hidden');
+  assert.equal(floating.document.activeElement, canvas, 'Hiding controls from the keyboard returns focus to the world');
   assert.ok(floating.document.head.children.some(node => node.tagName === 'style'));
   await view.open(player, 'Ecosystem'); assert.equal(requests, 1); assert.equal(floating.focused, true);
   opener.document.hidden = true; assert.equal(view.visible, true, 'Hidden opener must not hide PiP');
@@ -68,17 +122,21 @@ const createPlayer = opener => { const host = opener.document.createElement('div
   assert.equal(view.isOpen, false); assert.equal(unbinds, 1); assert.deepEqual(changes, [undefined, 'closed']);
   assert.equal(player.ownerDocument, opener.document, 'Closed window adopts node back even after main navigation');
   assert.equal(canvas.ownerDocument, opener.document); assert.equal(player.engine, engine);
+  const closedState = state();
+  sendInput(floating.document, 'pointermove', pointer);
+  assert.equal(state(), closedState, 'An old window cannot show chrome after its listeners are detached');
   opener.document.body.append(player); assert.equal(player.isConnected, true);
   view.close(); assert.equal(unbinds, 1, 'Closing twice is harmless');
 }
 
-// Explicit return restores the exact slot; fallback is labeled and never claims pinning.
+// The ordinary-window fallback uses the same shell and restores the exact slot.
 {
   const opener = new BrowserWindow('fallback-opener'), floating = new BrowserWindow('popup'), { host, player } = createPlayer(opener);
   opener.open = (url, name, features) => { assert.equal(name, '_blank'); assert.match(features, /popup/); return floating; };
   const reasons = []; const view = new PlayerView(opener, { bindDocument: () => () => {}, changed: reason => reasons.push(reason), visibilityChanged: () => {} });
   assert.equal(view.supportsAlwaysOnTop, false); assert.equal(await view.open(player, 'Run'), 'window');
-  assert.match(floating.document.body.text(), /pinning unavailable/);
+  assert.equal(floating.document.body.dataset.playerWindowMode, 'window');
+  assert.equal(floating.document.title, 'Run · agar player');
   view.close(); assert.equal(host.children[0], player); assert.equal(floating.closed, true); assert.deepEqual(reasons, [undefined, 'return']);
   const reopened = new BrowserWindow('second-popup'); opener.open = () => reopened;
   await view.open(player, 'Run'); assert.equal(player.ownerDocument, reopened.document);
@@ -176,7 +234,7 @@ const createPlayer = opener => { const host = opener.document.createElement('div
   const appSource = await readFile(new URL('../src/app.ts', import.meta.url), 'utf8');
   const parsed = ts.createSourceFile('app.ts', appSource, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
   const pauseSaveStates = [];
-  const names = ['renderView', 'navigate', 'frame', 'playerIsVisible', 'viewPresentationOptions', 'simulationWork', 'advanceSimulation', 'togglePlayback', 'playerVisibilityChanged', 'handleUiClick', 'handleUiInput', 'handleUiChange', 'handleUiKeydown', 'handleUiDismissMenus', 'bindUiDocument'];
+  const names = ['renderView', 'playerPlaceholderMarkup', 'navigate', 'frame', 'playerIsVisible', 'viewPresentationOptions', 'simulationWork', 'advanceSimulation', 'togglePlayback', 'playerVisibilityChanged', 'handleUiClick', 'handleUiInput', 'handleUiChange', 'handleUiKeydown', 'handleUiDismissMenus', 'bindUiDocument'];
   const functions = names.map(name => {
     const declaration = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
     assert.ok(declaration, `Application function ${name} is present`); return declaration.getText(parsed);
@@ -199,16 +257,20 @@ const createPlayer = opener => { const host = opener.document.createElement('div
     document: opener.document, window: opener, performance: { now: () => 0 },
     ready: true, transitioning: false, unloading: false, prefs: { tab: 'simulation', simulationView: 'player', overlay: 'none' },
     active: session, renderer, inspectorProgram: editor, playerElement: player, restoringPlayer: false,
-    inspectorEpoch: 0, selectedId: null, cellInspection: null, catalogQuery: '',
+    inspectorEpoch: 0, selectedId: null, cellInspection: null, catalogQuery: '', environmentOpen: false, liveGasesOpen: false,
     lastPresentation: 0, lastMetrics: 0, lastEnvironment: 0, lastCheckpoint: 0, lastUi: 0, lifecycleFlushes: 0, saveFailed: false,
     playerView: { isOpen: true, visible: true, setTitle() {} },
     frameLoop: { refresh() {} }, simulationLoop: { refresh() {}, reset() {} }, flushLifecycle: async () => {},
     $: id => id === 'workspace' ? workspace : null, queryUi: () => null, esc: value => value, icon: () => '',
     renderCatalog: () => '<section>Catalog</section>', renderCatalogCards() {}, refreshCatalogs: async () => {}, persistPreferences() {},
-    playerPlaceholderMarkup: () => '<section>Player is popped out</section>', metricsMarkup: () => '<section>Metrics</section>', settingsMarkup: () => '<section>Settings</section>',
+    metricsMarkup: () => '<section>Metrics</section>', settingsMarkup: () => '<section>Settings</section>',
     renderLiveEnvironment() {}, updateSimulationUi() { calls.ui++; }, updatePlayback() {}, saveStatus(state, _error, scope) { if (scope === 'pause-checkpoint') pauseSaveStates.push(state); }, runError: (_session, error) => fail(error), toast: fail, readableError: String,
   });
   vm.runInContext(appCode, context);
+  context.playerView.mode = 'window';
+  assert.match(context.playerPlaceholderMarkup(), /cannot keep it always on top/i, 'The main tab explains the ordinary-window limitation');
+  context.playerView.mode = 'picture-in-picture';
+  assert.match(context.playerPlaceholderMarkup(), /data-action="return-player"/, 'The opener retains an accessible way to dock the player');
   for (const tab of ['genomes', 'environments']) {
     await context.navigate(tab);
     // Saving a catalog edit renders its main-app view again.

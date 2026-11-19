@@ -83,8 +83,25 @@ try{
   const opened=context.waitForEvent('page');await action('popout-player');const child=await opened;
   await child.setViewportSize({width:420,height:720});
   await page.locator('[data-view="settings"]').click();
+  await child.mouse.move(210,350);
+  await child.waitForFunction(()=>document.body.dataset.playerControls==='pointer');
   await child.locator('#player-overlay').selectOption('carbon');assert.equal(await page.locator('#setting-overlay').inputValue(),'carbon');
   await page.locator('#setting-overlay').selectOption('none');assert.equal(await child.locator('#player-overlay').inputValue(),'none');
+  await child.mouse.move(215,340);
+  await action('toggle-environment',child);
+  const drawer=child.locator('#live-environment');
+  const drawerPoint=await drawer.evaluate(el=>{
+    const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+20};
+  });
+  await child.mouse.move(-12,340);
+  await child.waitForFunction(({x,y})=>{
+    const el=document.querySelector('#live-environment');
+    return document.body.dataset.playerControls==='hidden' && !el.hidden
+      && !el.checkVisibility({opacityProperty:true}) && document.elementFromPoint(x,y)?.id==='world';
+  },drawerPoint);
+  await child.mouse.move(210,345);
+  await child.waitForFunction(()=>document.querySelector('#live-environment').checkVisibility({opacityProperty:true}));
+  await action('close-environment',child);
   await action('return-player',child);
   await page.locator('[data-view="player"]').click();
   await action('close-simulation');await page.locator('[data-action="open-simulation"]').first().click();
