@@ -853,8 +853,8 @@ fn death_returns_body_and_all_gut_substrates_beyond_the_former_particle_cap() {
     assert!(world.cells.is_empty());
     assert_eq!(world.deaths, 1);
     assert!(world.food.len() > 1300);
-    for kind in OrganicKind::ALL {
-        assert!(world.food.iter().any(|f| f.kind == kind));
+    for k in 0..3 {
+        assert!(world.food.iter().any(|f| f.kind == OrganicKind::Tissue && f.composition.fractions()[k] > 0.0));
     }
     close(world.nutrient_total(), material);
     assert!(world.energy_total() <= energy);
@@ -1229,8 +1229,8 @@ fn particle_capture_partition_and_overflow_preserve_substrate_identity() {
             world
                 .food
                 .iter()
-                .filter(|f| f.kind == kind)
-                .map(|f| f.energy)
+                .filter(|f| f.kind == OrganicKind::Waste)
+                .map(|f| f.energy * f.composition.fractions()[k])
                 .sum(),
             before[k].energy,
         );
@@ -1238,8 +1238,8 @@ fn particle_capture_partition_and_overflow_preserve_substrate_identity() {
             world
                 .food
                 .iter()
-                .filter(|f| f.kind == kind)
-                .map(|f| f.nutrients)
+                .filter(|f| f.kind == OrganicKind::Waste)
+                .map(|f| f.nutrients * f.composition.fractions()[k])
                 .sum(),
             before[k].nutrients,
         );

@@ -9,6 +9,7 @@ pub(crate) struct PeerContact {
     pub message: Option<f64>,
     pub signal: Option<f64>,
     pub division_interface: bool,
+    pub resistance: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -19,15 +20,19 @@ pub(super) enum PeerField {
     SignalValid,
     Signal,
     DivisionInterface,
+    Resistance,
+    ResistanceValid,
 }
 
 impl PeerField {
-    pub(super) const ALL: [Self; 5] = [
+    pub(super) const ALL: [Self; 7] = [
         Self::MessageValid,
         Self::Message,
         Self::SignalValid,
         Self::Signal,
         Self::DivisionInterface,
+        Self::Resistance,
+        Self::ResistanceValid,
     ];
 
     pub(super) fn lookup(name: &str) -> Option<Self> {
@@ -40,11 +45,13 @@ impl PeerField {
             Self::SignalValid => "peer.signal_valid",
             Self::Signal => "peer.signal",
             Self::DivisionInterface => "peer.division_interface",
+            Self::Resistance => "peer.resistance",
+            Self::ResistanceValid => "peer.resistance_valid",
         }
     }
     pub(super) fn ty(self) -> Type {
         match self {
-            Self::Message | Self::Signal => Type::Number,
+            Self::Message | Self::Signal | Self::Resistance => Type::Number,
             _ => Type::Bool,
         }
     }
@@ -55,6 +62,8 @@ impl PeerField {
             Self::SignalValid => Value::Boolean(peer.signal.is_some()),
             Self::Signal => Value::Scalar(peer.signal.unwrap_or(0.0)),
             Self::DivisionInterface => Value::Boolean(peer.division_interface),
+            Self::Resistance => Value::Scalar(peer.resistance.unwrap_or(0.0)),
+            Self::ResistanceValid => Value::Boolean(peer.resistance.is_some()),
         }
     }
 }
@@ -63,7 +72,7 @@ pub(super) fn supports_guard(kind: AssemblyKind) -> bool {
     matches!(
         kind,
         AssemblyKind::Mechanism(
-            MechanismKind::Pierce | MechanismKind::Engulf | MechanismKind::Adhere
+            MechanismKind::Pierce | MechanismKind::ParticleCapture | MechanismKind::Engulf | MechanismKind::Adhere
         ) | AssemblyKind::Organelle(OrganelleKind::Piercer | OrganelleKind::Phagocyte)
     )
 }
@@ -375,6 +384,7 @@ mod tests {
         let mut frozen = Vec::new();
         let mut tmp = Vec::new();
         let peer = PeerContact {
+            resistance: None,
             message: Some(0.0),
             signal: Some(-2.0),
             division_interface: false,

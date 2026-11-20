@@ -35,23 +35,23 @@ let move = if shade_feed && gut.fraction < 0.5 then 0.4 else 0;
 
 let need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);
 let need_Solar = funded && (true) && missing(built.Solar, (if expanding then 0.16 else 0.08), 0.08);
-let need_Canopy = funded && (true) && missing(built.Canopy, (if expanding then 0.02 else 0.01), 0.01);
-let need_Gut = funded && (true) && missing(built.Gut, (if expanding then 0.12 else 0.06), 0.06);
-let need_ExudateEnzyme = funded && (true) && missing(built.ExudateEnzyme, (if expanding then 0.08 else 0.04), 0.04);
-let need_Capture = funded && (enough(built.Gut, 0.06)) && missing(built.Capture, (if expanding then 0.06 else 0.03), 0.03);
-let need_TissueEnzyme = funded && (powered && gut.tissue.energy > 0) && missing(built.TissueEnzyme, (if expanding then 0.02 else 0.01), 0.01);
-let need_WasteEnzyme = funded && (powered && gut.waste.energy > 0) && missing(built.WasteEnzyme, (if expanding then 0.02 else 0.01), 0.01);
+let need_Canopy = funded && (true) && missing(built.Canopy, 0.01, 0.01);
+let need_Gut = funded && (true) && missing(built.Gut, 0.06, 0.06);
+let need_ExudateEnzyme = funded && (true) && missing(built.ExudateEnzyme, 0.04, 0.04);
+let need_Capture = funded && (enough(built.Gut, 0.06)) && missing(built.Capture, 0.03, 0.03);
+let need_TissueEnzyme = funded && (powered && gut.structural.energy > 0) && missing(built.TissueEnzyme, (if expanding then 0.02 else 0.01), 0.01);
+let need_WasteEnzyme = funded && (powered && gut.bound.energy > 0) && missing(built.WasteEnzyme, (if expanding then 0.02 else 0.01), 0.01);
 let need_Translation = funded && (powered) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);
 let need_Minerals = funded && (powered && (nutrient.stored < 1500 || surplus)) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);
 let need_EnergyStore = funded && (powered) && missing(built.EnergyStore, (if expanding || energy.capacity <= 1000000 then 0.08 else 0.04), 0.04);
 let need_MineralStore = funded && (powered && body.area > 1.2) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);
-let need_LeftMotor = funded && (powered) && missing(built.LeftMotor, (if expanding then 0.05 else 0.025), 0.025);
-let need_RightMotor = funded && (powered) && missing(built.RightMotor, (if expanding then 0.05 else 0.025), 0.025);
+let need_LeftMotor = funded && (powered) && missing(built.LeftMotor, 0.025, 0.025);
+let need_RightMotor = funded && (powered) && missing(built.RightMotor, 0.025, 0.025);
 let need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);
 let need_Support = funded && (equipped && energy > 650000) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);
 let need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);
-let need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);
-let need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);
+let need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, 0.02, 0.02);
+let need_Division = funded && (expanding) && missing(built.Division, 0.02, 0.02);
 
 gene supply_Catalyst: Catalyst = if pool.Catalyst < 10 then (if need_Respiration then 1 else 0) + (if need_Solar then 0.166667 else 0) + (if need_ExudateEnzyme then 1 else 0) + (if need_TissueEnzyme then 1 else 0) + (if need_WasteEnzyme then 1 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0) else 0;
 gene supply_Wall: Wall = if pool.Wall < 10 then (if need_Respiration then 0.6 else 0) + (if need_Gut then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0) else 0;
@@ -94,10 +94,10 @@ assembly Gut: store(food) {
   activity: 1;
 }
 
-assembly ExudateEnzyme: digest(exudate) {
+assembly ExudateEnzyme: digest(soluble) {
   Catalyst: 400;
   start_when: need_ExudateEnzyme;
-  activity: if gut.exudate.energy > 0 then 1 else 0;
+  activity: if gut.soluble.energy > 0 then 1 else 0;
 }
 
 assembly Capture: import(particle) {
@@ -107,16 +107,16 @@ assembly Capture: import(particle) {
   activity: if shade_feed && gut.fraction < 0.7 then 1 else 0;
 }
 
-assembly TissueEnzyme: digest(tissue) {
+assembly TissueEnzyme: digest(structural) {
   Catalyst: 100;
   start_when: need_TissueEnzyme;
-  activity: if gut.tissue.energy > 0 then 1 else 0;
+  activity: if gut.structural.energy > 0 then 1 else 0;
 }
 
-assembly WasteEnzyme: digest(waste) {
+assembly WasteEnzyme: digest(bound) {
   Catalyst: 100;
   start_when: need_WasteEnzyme;
-  activity: if gut.waste.energy > 0 then 1 else 0;
+  activity: if gut.bound.energy > 0 then 1 else 0;
 }
 
 assembly Translation: translate() {
@@ -130,7 +130,7 @@ assembly Minerals: import(mineral) {
   Mount: 50;
   Carrier: 200;
   start_when: need_Minerals;
-  activity: if nutrient.fraction < 0.9 then 1 else 0;
+  activity: if nutrient.fraction < 0.9 && energy.fraction > 0.05 then 1 else 0;
 }
 
 assembly EnergyStore: store(energy) {
@@ -197,4 +197,5 @@ assembly Division: constrict() {
   Ring: 80;
   start_when: need_Division;
   activity: if body.area + 0.000001 >= body.birth_area * 2 && energy > 1000000 then 1 else 0;
+  at: 1.5707963267948966;
 }

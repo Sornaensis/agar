@@ -47,7 +47,7 @@ fn fixation_requires_inorganic_carbon_and_light_and_does_not_make_usable_energy(
     close(carbon - w.cells[0].internal_inorganic_carbon, fixed);
     close(w.cells[0].internal_oxygen, fixed);
     close(w.organic_cell_total() + w.organic_food_total() - organics, fixed);
-    close(w.organic_food_total(), fixed * PHOTO_EXUDATION);
+    close(w.organic_food_total(), 0.0);
     w.environment.configure(0.5, 0.0, 0.0);
     w.photosynthesize(&outputs, &caps, &mut [1e9]);
     close(w.carbon_fixed_total, fixed);

@@ -8,10 +8,10 @@ export interface OrganelleSummary { kind: OrganelleKind; count:number; mass:numb
 export type ProductRole = 'scaffold' | 'anchor' | 'motor' | 'filament' | 'pigment' | 'enzyme' | 'membrane' | 'transporter' | 'receptor' | 'regulator' | 'replicase' | 'constrictor' | 'adhesin';
 export const MECHANISM_KINDS = [
   'support()', 'translate()', 'store(energy)', 'store(mineral)', 'store(food)', 'harvest(light)',
-  'import(mineral)', 'import(particle)', 'engulf()', 'digest(exudate)', 'digest(tissue)', 'digest(waste)',
+  'import(mineral)', 'import(particle)', 'engulf()', 'digest(soluble)', 'digest(structural)', 'digest(bound)',
   'propel()', 'pierce()', 'shield()', 'repair()', 'sense(light)', 'sense(heat)', 'sense(chemical)',
   'sense(contact)', 'sense(optical)', 'grow()', 'replicate()', 'constrict()', 'recycle()',
-  'respire(oxygen)', 'adhere()', 'junction(energy)', 'junction(mineral)', 'junction(carbon)', 'junction(signal)',
+  'respire(oxygen)', 'adhere()', 'junction(energy)', 'junction(mineral)', 'junction(carbon)', 'junction(signal)', 'display()', 'export(carbon)',
 ] as const;
 export type MechanismKind = typeof MECHANISM_KINDS[number];
 export type CellularAssemblyKind = OrganelleKind | 'membrane' | 'replicator' | 'constrictor' | MechanismKind;

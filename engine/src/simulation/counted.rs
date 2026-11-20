@@ -161,7 +161,7 @@ impl World {
             if !c.alive(){continue;}
             let q=c.counted.as_mut().unwrap();
             let requested=rate(&mut q.rate_credit[5],outputs[i].absorb*caps[i].uptake*DT)
-                .min(floor(caps[i].minerals).saturating_sub(q.mineral)).min(q.atp.saturating_sub(floor(0.05*caps[i].energy)));
+                .min(floor(caps[i].minerals).saturating_sub(q.mineral)).min(q.atp);
             if requested>0 {ws.group_request(self.environment.patch_index(c.x,c.y),(i,requested as f64));}
         }
         for patch in occupied_patches(&ws.group_patches) {
@@ -179,10 +179,9 @@ impl World {
     }
     pub(super) fn count_decay(&mut self, ws:&mut PhaseWorkspace) {
         ws.clear_groups(self.environment.patch_count());
-        let fractions=ORGANIC_DECAY.map(|k|-(-k*DT).exp_m1());
         for (i,f) in self.food.iter_mut().enumerate() {
             let q=f.counted.as_mut().unwrap();
-            let requested=rate(&mut q.decay_credit,units(q.meal.carbon)*fractions[f.kind as usize]).min(q.meal.carbon);
+            let requested=rate(&mut q.decay_credit,units(q.meal.carbon)*f.composition.decay_fraction()).min(q.meal.carbon);
             if requested>0 {ws.group_request(self.environment.patch_index(f.x,f.y),(i,requested as f64));}
         }
         for patch in occupied_patches(&ws.group_patches) {
@@ -210,6 +209,7 @@ impl World {
 
 impl CellCounts {
     fn split_to(&mut self, daughter_struct:u32, total_struct:u32, fee:u32) -> Self {
+        self.capture_credit.clear(); // Fission separates the old contact interface.
         self.atp-=fee.min(self.atp);
         fn half(n:&mut u32)->u32 {let v=*n/2;*n-=v;v}
         let mut child=Self::default();
@@ -236,12 +236,19 @@ impl Cell {
         daughter.counted=Some(self.counted.as_mut().unwrap().split_to(d,total,nearest(fee)));
         self.project_counts();daughter.project_counts();
     }
-    pub(super) fn count_capture(&mut self, food:&mut Food, cap:&BodyCapacities,budget:f64)->f64 {
+    pub(super) fn count_capture(&mut self, food:&mut Food, cap:&BodyCapacities,budget:f64, port: u32, tick: u64)->f64 {
         let q=self.counted.as_mut().unwrap();let f=food.counted.as_mut().unwrap();
         let (e,m)=q.gut_room(cap);
-        let (carriers, offered) = f.meal.work_portion(&mut q.rate_credit[15], budget, e, m);
-        let meal = f.meal.take(carriers);
-        q.gut[food.kind as usize].join(meal);
+        let mut credit = q.capture_credit.remove(&port).filter(|&(particle, last, _)|
+            particle == food.id && tick.saturating_sub(last) <= 1).map_or(0, |entry| entry.2);
+        let (carriers, offered) = f.meal.work_portion(&mut credit, budget, e, m);
+        if credit != 0 && offered > 0.0 && carriers < f.meal.carbon {
+            q.capture_credit.insert(port, (food.id, tick, credit));
+        }
+        let before = f.meal.carbon;
+        let mut meal = f.meal.take(carriers);
+        let parts = food.composition.taken(u64::from(before), u64::from(f.meal.carbon));
+        for (pool, n) in q.gut.iter_mut().zip(parts) { pool.join(meal.take(n as u32)); }
         self.project_counts();
         food.project_counts();
         offered
@@ -285,24 +292,24 @@ impl Cell {
             let waste=CountMeal{carbon:n-kept,mineral:meal.mineral-accepted.mineral,extra:meal.extra-accepted.extra};
             if waste.carbon>0||waste.mineral>0 {
                 let mut e=OrganicEmission::new(OrganicKind::Waste,x,y,wide_units(waste.energy()),units(waste.mineral)).enriched(units(waste.extra));
+                e.composition=Composition::residue(k);
                 e.outside=Some((self.x,self.y,radius-2.5));emissions.push(e);
             }
         }
         self.digestion_rate=wide_units(assimilated)/DT;self.project_counts();
     }
-    pub(super) fn count_fix(&mut self, photons:u32,cap:&BodyCapacities)->(u32,u32) {
+    pub(super) fn count_fix(&mut self, photons:u32,cap:&BodyCapacities)->u32 {
         let q=self.counted.as_mut().unwrap();
         let exposure = u64::from(photons) + u64::from(q.rate_credit[23]);
         q.rate_credit[23] = (exposure % CARBON_ENERGY) as u32;
         let n = ((exposure / CARBON_ENERGY) as u32).min(q.dic).min(u32::MAX - q.oxygen);
         let room=(floor(cap.energy)/20).saturating_sub(q.carbon);
-        // Each 25 fixed carbons release three. Accumulate the indivisible remainder.
-        let n=n.min(((u64::from(room)*25)/22).min(u32::MAX as u64) as u32);
-        let split=u64::from(n)*3+u64::from(q.rate_credit[14]);
-        let secreted=(split/25) as u32;q.rate_credit[14]=(split%25) as u32;
-        q.dic-=n;q.oxygen+=n;q.carbon+=n-secreted;
+        let n = n.min(room);
+        q.dic -= n;
+        q.oxygen += n;
+        q.carbon += n;
         self.carbon_fixation_rate=units(n)/DT;self.photosynthesis_rate=units(n)*20.0/DT;
-        self.project_counts();(n,secreted)
+        self.project_counts();n
     }
 }
 
@@ -378,7 +385,7 @@ impl Cell {
             let p=&mut q.gut[kind as usize];
             let n=p.fitting(p.carbon,available,minerals);
             let kept=p.take(n);
-            if p.carbon!=0 {out.push(p.emission(kind,self.x,self.y));}
+            if p.carbon!=0 {out.push(p.emission(OrganicKind::Waste,self.x,self.y).material(Composition::pool(kind as usize)));}
             *p=kept;available-=kept.energy();minerals-=kept.mineral;
         }
         self.project_counts();
@@ -423,14 +430,16 @@ impl World {
             let mut batch=Batch::from_emission(&emission);
             self.environment.emit_organic(x,y,emission.energy*0.08);
             if batch.c==0 {deposit(&mut self.environment,&mut self.deposits,x,y,[batch.m as u32,0,0]);continue;}
-            ws.nearby.clear();ws.nearby.extend(grid.nearby_radius(x,y,24.0));ws.nearby.sort_unstable();
+            ws.nearby.clear();ws.nearby.extend(grid.nearby_radius(x,y,emission.merge_radius));ws.nearby.sort_unstable();
             for &i in &ws.nearby {
                 let f=&mut self.food[i];
-                if f.kind!=kind||delta(f.x-x,self.environment.width).hypot(delta(f.y-y,self.environment.height))>24.0
+                if f.kind!=kind||delta(f.x-x,self.environment.width).hypot(delta(f.y-y,self.environment.height))>emission.merge_radius
                     ||self.environment.segment_blocked((x,y),(f.x,f.y)){continue;}
                 let stock=&mut f.counted.as_mut().unwrap().meal;
                 let part=batch.take(limit.saturating_sub(stock.energy()),u32::MAX-stock.mineral,false);
                 if part.carbon==0 {continue;}
+                let incoming = emission.composition.portion(batch.c + u64::from(part.carbon), batch.c);
+                f.composition = f.composition.mix(f64::from(stock.carbon), incoming, f64::from(part.carbon));
                 stock.join(part);f.project_counts();
                 if let Some(envelope)=emission.outside {
                     if delta(f.x-envelope.0,self.environment.width).hypot(delta(f.y-envelope.1,self.environment.height))<envelope.2 {
@@ -443,11 +452,12 @@ impl World {
             let mut n=0;
             while batch.c!=0 {
                 let part=batch.take(limit,u32::MAX,true);
-                let angle=self.rng.unit()*TAU;let radius=if n==0{0.0}else{self.rng.unit()*8.0};
+                let angle=self.rng.unit()*TAU;let radius=if n==0{0.0}else{self.rng.unit()*emission.merge_radius.min(8.0)};
                 let mut pos=(wrap(x+angle.cos()*radius,self.environment.width),wrap(y+angle.sin()*radius,self.environment.height));
                 if let Some(envelope)=emission.outside {pos=outside_envelope(&self.environment,pos,envelope,(x,y));}
                 let i=self.food.len();
                 assert!(self.particle(kind,pos.0,pos.1,wide_units(part.energy()),units(part.mineral)),"preflighted organic storage");
+                self.food[i].composition = emission.composition.portion(batch.c + u64::from(part.carbon), batch.c);
                 self.food[i].counted=Some(FoodCounts{meal:part,decay_credit:0});
                 self.food[i].project_counts();grid.insert(self.food[i].x,self.food[i].y,i);n+=1;
             }

@@ -402,8 +402,8 @@ export class GenomeVisualizer {
     const policy = this.graph?.contactMessages;
     if (node.kind === 'register' && policy) {
       const descriptions = [];
-      if (node.label === policy.publish) descriptions.push('Publishes its occupied scalar to contacting cells.' + (policy.initial === null ? '' : ` Starts at ${policy.initial} at birth.`));
-      if (node.label === policy.signal) descriptions.push('Publishes a separate contact signal.' + (policy.signalInitial === null ? '' : ` Starts at ${policy.signalInitial} at birth.`));
+      if (node.label === policy.publish) descriptions.push('A working membrane display exposes this occupied register to a local reader.' + (policy.initial === null ? '' : ` Starts at ${policy.initial} at birth.`));
+      if (node.label === policy.signal) descriptions.push('Supplies the payload for working signal hardware.' + (policy.signalInitial === null ? '' : ` Starts at ${policy.signalInitial} at birth.`));
       if (descriptions.length) this.details.append(element('p', '', descriptions.join(' ')));
     }
     const literals=element('div','graph-literals');

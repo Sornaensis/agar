@@ -52,9 +52,12 @@ fn activity(cell: &Cell, name: &str) -> f64 {
 fn supply(world: &mut World, kind: OrganicKind, x: f64, y: f64) {
     // This isolated encounter controls the kind and location of accounted
     // substrate. The organism must capture and process the whole specimen.
+    let (x,y) = world.cells.iter().find(|c| c.x == x && c.y == y)
+        .map_or((x,y), Cell::inlet_fixture_position);
     assert_eq!(world.fixture_exudate(x, y, 1), 1);
     let food = world.food.last_mut().unwrap();
     food.kind = kind;
+    food.composition = Composition::pool(kind as usize);
     food.x = wrap(x, WIDTH);
     food.y = wrap(y, HEIGHT);
 }
@@ -70,6 +73,7 @@ fn shipped_forager_induces_tissue_digestion_and_funds_whole_daughters() {
             (name, recipe.parts.iter().map(|(_, mass)| mass).sum::<f64>())
         }).collect();
     let mut useful = 0.0;
+    let mut reserves_at_fission = None;
     for tick in 0..570 * 30 {
         assert_eq!(world.cells.len(), 1, "The founder must fund its growth from captured tissue");
         let cell = &world.cells[0];
@@ -82,28 +86,43 @@ fn shipped_forager_induces_tissue_digestion_and_funds_whole_daughters() {
                 supply(&mut world, OrganicKind::Tissue, x, y);
             }
         }
+        let mother = &world.cells[0];
+        let available = (mother.gut[0].energy + mother.gut[1].energy, mother.organic_carbon);
         checked_step(&mut world, &mut genomes);
         useful += world.cells.iter().map(|cell| cell.digestion_rate * DT).sum::<f64>();
-        if world.births > 0 { break; }
+        if world.births > 0 {
+            reserves_at_fission = Some(available);
+            break;
+        }
     }
     assert_eq!(world.births, 1,
         "A supplied tissue meal must fund the authored cell cycle: {:?}", world.cells.iter().map(|c| (c.energy,c.organic_carbon,c.respiration_rate,c.gut_energy,c.body.area,c.body.space(),c.body.cellular.as_ref().map(|s| s.assemblies.iter().map(|a| (a.recipe.name.as_str(),a.mass())).collect::<Vec<_>>()))).collect::<Vec<_>>());
     assert_eq!(world.cells.len(), 2);
     assert!(useful > 100.0);
     let area_before_split = world.cells.iter().map(|c| c.body.area).sum::<f64>();
+    let (meal_before, carbon_before) = reserves_at_fission.unwrap();
+    assert!(meal_before + carbon_before * CHEMICAL_ENERGY_PER_CARBON >= 7.0 * area_before_split);
     for cell in &world.cells {
         assert!(cell.body.space().used <= cell.body.space().capacity + 1e-8);
         let meal = cell.gut[OrganicKind::Exudate as usize].energy
             + cell.gut[OrganicKind::Tissue as usize].energy;
-        // Energy is sensed before this tick's maintenance and growth charges.
-        let whole_atp_after_fission = ((60.0 - DIVISION_COST * area_before_split) * 0.5).floor();
+        // The authored grazer commits at 49 ATP and 7 units of usable meal
+        // energy per area. Maintenance and the fission charge are paid before
+        // the two daughters receive halves of the available reserves.
+        let whole_atp_after_fission = ((49.0 - DIVISION_COST * area_before_split) * 0.5).floor();
         assert!(cell.energy >= whole_atp_after_fission, "Underfunded daughter with {} ATP", cell.energy);
-        assert!(meal + cell.organic_carbon * CHEMICAL_ENERGY_PER_CARBON >= (6.0 * area_before_split).floor(),
-            "Both halves need a real food or carbon reserve after the ATP cost of division");
-        for (name, mass) in &essential {
-            assert!(working(cell, name) + 1e-7 >= 0.9 * mass,
-                "Daughter {} must inherit a working {name}", cell.id);
-        }
+        // A half without a gut releases its portion of the undigested meal.
+        // Its organic reserve still has the capacity supplied by its ATP store.
+        let retained_meal = (meal_before * 0.5).min(cell.gut_capacity());
+        let retained_carbon = (carbon_before * 0.5).min(cell.organic_carbon_capacity());
+        let retained_energy = retained_meal + retained_carbon * CHEMICAL_ENERGY_PER_CARBON;
+        assert!(retained_carbon > 0.0 && cell.organic_carbon > 0.0);
+        assert!(meal + cell.organic_carbon * CHEMICAL_ENERGY_PER_CARBON >= retained_energy.floor(),
+            "Each half retains its share up to the storage capacity it inherited");
+    }
+    for (name,mass) in &essential {
+        assert!(world.cells.iter().map(|c| working(c,name)).sum::<f64>() + 1e-7 >= 1.8 * mass,
+            "The physical copies of {name} must survive partition across the two daughters");
     }
     eprintln!("Paid Forager tissue culture divided at {:.2}s", world.time());
 }
@@ -112,16 +131,25 @@ fn shipped_forager_induces_tissue_digestion_and_funds_whole_daughters() {
 fn shipped_forager_seeks_a_meal_with_waste_in_its_gut_without_overfilling_it() {
     let (mut world, mut genomes) = forager(0.8);
     let cell = &world.cells[0];
-    let (x, y, angle) = (cell.x, cell.y, cell.angle);
+    let (x, y) = (cell.x, cell.y);
+    supply(&mut world, OrganicKind::Waste, x, y);
+    supply(&mut world, OrganicKind::Waste, x, y);
+    for _ in 0..120 {
+        if world.cells[0].gut[2].energy > 0.5 * world.cells[0].gut_capacity() { break; }
+        let (fx,fy) = world.cells[0].inlet_fixture_position();
+        for food in &mut world.food { food.x=fx; food.y=fy; }
+        checked_step(&mut world, &mut genomes);
+    }
+    assert!(world.cells[0].gut[2].energy > 0.45 * world.cells[0].gut_capacity());
+    let cell = &world.cells[0];
+    let (x, y, angle) = (cell.x,cell.y,cell.angle);
     let started = world.time();
-    supply(&mut world, OrganicKind::Waste, x, y);
-    supply(&mut world, OrganicKind::Waste, x, y);
     supply(&mut world, OrganicKind::Exudate, x + 30.0 * angle.cos(), y + 30.0 * angle.sin());
     let mut searches_with_waste = false;
     let mut capture_pauses_when_full = false;
     let mut captured_at = None;
     let mut useful = 0.0;
-    for _ in 0..30 * 30 {
+    for _ in 0..45 * 30 {
         checked_step(&mut world, &mut genomes);
         assert_eq!(world.cells.len(), 1);
         let cell = &world.cells[0];

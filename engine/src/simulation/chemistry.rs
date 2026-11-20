@@ -110,10 +110,9 @@ impl World {
     pub(super) fn decay_food_in(&mut self, workspace: &mut PhaseWorkspace) {
         if self.uses_count_chemistry() { return self.count_decay(workspace); }
         workspace.clear_groups(self.environment.patch_count());
-        let fractions = ORGANIC_DECAY.map(|rate| -(-rate * DT).exp_m1());
         for (index, food) in self.food.iter().enumerate() {
             let carbon = food.carbon();
-            let requested = if food.energy <= 1e-6 { carbon } else { carbon * fractions[food.kind as usize] };
+            let requested = if food.energy <= 1e-6 { carbon } else { carbon * food.composition.decay_fraction() };
             if requested > 0.0 { workspace.group_request(self.environment.patch_index(food.x, food.y), (index, requested)); }
         }
         for patch in occupied_patches(&workspace.group_patches) {

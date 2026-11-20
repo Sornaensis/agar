@@ -88,7 +88,7 @@ impl World {
         if genomes.iter().any(|g| g.program.participates_in_contact_signaling()) {
             for (index, cell) in self.cells.iter().enumerate() {
                 let program = &genomes[(cell.genome_id - 1) as usize].program;
-                if let Some(value) = program.contact_signal(&cell.memory) {
+                if let Some(value) = CellSignal::outgoing_payload(cell, program) {
                     target.extend_from_slice(&[index as f64, value]);
                     signal_count += 1;
                 }

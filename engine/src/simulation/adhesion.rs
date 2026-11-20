@@ -18,113 +18,100 @@ const ACCELERATION_PER_SITE: f64 = 360.0;
 // full concentration difference. Carbon is measured in reserve units, ATP in energy units.
 const JUNCTION_RATES: [f64; 3] = [120.0, 1.5, 6.0];
 
-#[derive(Default, Clone, Copy)]
-struct ContactPorts {
-    sites: u32,
-    junction: [f64; 3],
-    // One-based handle into the sparse list of endpoints sharing a compatible port.
-    account: usize,
-}
+/// A membrane patch covers a finite arc around its physical mount. A pair
+/// can communicate only when both arcs cover the same intercellular interface.
+const PATCH_HALF_ANGLE: f64 = std::f64::consts::FRAC_PI_6;
 
-impl ContactPorts {
-    fn of(cell: &Cell) -> Self {
-        use MechanismKind::*;
-        let mut ports = Self::default();
-        let mut exposed_adhesin = 0.0;
-        for assembly in cell.body.cellular.iter().flat_map(|state| &state.assemblies) {
-            let mass = match assembly.recipe.kind {
-                AssemblyKind::Mechanism(Adhere) => {
-                    exposed_adhesin += exposed_glue(assembly);
-                    continue;
-                }
-                AssemblyKind::Mechanism(JunctionEnergy) => &mut ports.junction[0],
-                AssemblyKind::Mechanism(JunctionMineral) => &mut ports.junction[1],
-                AssemblyKind::Mechanism(JunctionCarbon) => &mut ports.junction[2],
-                _ => continue,
-            };
-            *mass += assembly.functional_mass() * assembly.activity;
-        }
-        ports.sites = (exposed_adhesin / ADHESIN_PER_SITE + 1e-12).floor() as u32;
-        ports
+pub(super) fn interface_bearing(env: &Environment, cell: &Cell, peer: &Cell) -> f64 {
+    delta(peer.y - cell.y, env.height).atan2(delta(peer.x - cell.x, env.width)) - cell.angle
+}
+pub(super) fn covers_interface(at: f64, bearing: f64) -> bool {
+    relative_angle(at - bearing).abs() <= PATCH_HALF_ANGLE
+}
+fn resource_channel(kind: AssemblyKind) -> Option<usize> {
+    match kind {
+        AssemblyKind::Mechanism(MechanismKind::JunctionEnergy) => Some(0),
+        AssemblyKind::Mechanism(MechanismKind::JunctionMineral) => Some(1),
+        AssemblyKind::Mechanism(MechanismKind::JunctionCarbon) => Some(2),
+        _ => None,
     }
 }
 
-/// A site can draw material only from physical recipes that accept this partner.
-/// Stock is consumed for the duration of a phase, so a permissive small patch
-/// cannot lend the capacity of an unrelated patch on the same membrane.
 #[derive(Default)]
-struct GlueStock(Vec<(usize, f64)>);
+struct ContactPorts {
+    sites: u32,
+    channels: Vec<ResourcePort>,
+    account: usize,
+}
+struct ResourcePort { channel: usize, at: f64, capacity: f64, free: f64 }
+impl ContactPorts {
+    fn of(cell: &Cell) -> Self {
+        let mut ports = Self::default();
+        for assembly in cell.body.cellular.iter().flat_map(|state| &state.assemblies) {
+            ports.sites += (exposed_glue(assembly) / ADHESIN_PER_SITE + 1e-12).floor() as u32;
+            if let Some(channel) = resource_channel(assembly.recipe.kind) {
+                let capacity = assembly.working_mass() * assembly.activity;
+                if capacity > 0.0 {
+                    ports.channels.push(ResourcePort { channel, at: assembly.at(), capacity, free: capacity });
+                }
+            }
+        }
+        ports
+    }
+    fn available(&self, bearing: f64) -> [f64; 3] {
+        let mut totals = [0.0; 3];
+        for p in &self.channels {
+            if covers_interface(p.at, bearing) { totals[p.channel] += p.free; }
+        }
+        totals
+    }
+    fn claim(&mut self, bearing: f64, mut amounts: [f64; 3]) {
+        for p in &mut self.channels {
+            if covers_interface(p.at, bearing) {
+                let used = amounts[p.channel].min(p.free);
+                amounts[p.channel] -= used;
+                p.free -= used;
+            }
+        }
+    }
+}
 
+/// Stable physical patch IDs, independent of body vector order. One site must
+/// fit one patch and its own local engagement predicate.
+#[derive(Default)]
+struct GlueStock(Vec<GluePatch>);
+struct GluePatch { id: u32, definition: usize, at: f64, sites: u32 }
 impl GlueStock {
     fn refill(&mut self, cell: &Cell, program: Option<&Program>) {
         self.0.clear();
-        for (index, assembly) in cell.body.cellular.iter().flat_map(|state| &state.assemblies).enumerate() {
-            let amount = exposed_glue(assembly);
-            if amount <= 0.0 {
-                continue;
-            }
-            let def = match program {
-                None => 0, // Geometry-only removal after an external barrier edit.
+        for (i, a) in cell.body.cellular.iter().flat_map(|s| &s.assemblies).enumerate() {
+            let sites = (exposed_glue(a) / ADHESIN_PER_SITE + 1e-12).floor() as u32;
+            if sites == 0 { continue; }
+            let definition = match program {
+                None => 0,
                 Some(p) => {
-                    let Some(d) = p.cellular().and_then(|def| cell.body.recipe_definition(def, index)) else {
-                        continue;
-                    };
-                    if !p.has_contact_guard(d) {
-                        continue;
-                    }
+                    let Some(d) = p.cellular().and_then(|def| cell.body.recipe_definition(def, i)) else { continue };
+                    if !p.has_contact_guard(d) { continue; }
                     d
                 }
             };
-            if let Some((_, stock)) = self.0.iter_mut().find(|(d, _)| *d == def) {
-                *stock += amount;
-            } else {
-                self.0.push((def, amount));
-            }
+            self.0.push(GluePatch { id: a.id, definition, at: a.at(), sites });
         }
+        self.0.sort_unstable_by_key(|p| p.id);
     }
-
-    fn eligible(
-        &self,
-        program: Option<&Program>,
-        local: &CellSignal,
-        peer: &CellSignal,
-        division: bool,
-        scratch: &mut Vec<crate::genome::Value>,
-    ) -> u64 {
-        let mut mask = 0u64;
-        let mut mass = 0.0;
-        for &(definition, stock) in &self.0 {
-            if stock <= 0.0 {
-                continue;
-            }
-            if program
-                .is_none_or(|p| p.allows_contact(definition, &local.registers, peer.peer(division), scratch))
-            {
-                mask |= 1u64 << definition;
-                mass += stock;
-            }
-        }
-        if mass / ADHESIN_PER_SITE + 1e-12 >= 1.0 {
-            mask
-        } else {
-            0
-        }
+    fn eligible(&self, program: Option<&Program>, env: &Environment, cells: (&Cell,&Cell),
+        local: &CellSignal, other: &CellSignal, division: bool, scratch: &mut Vec<crate::genome::Value>) -> Option<usize> {
+        let (a,b) = cells;
+        let bearing = interface_bearing(env,a,b);
+        let normal = a.angle + bearing;
+        let point = [a.x + a.radius()*normal.cos(), a.y + a.radius()*normal.sin()];
+        let peer = other.peer_at(b,a,point,env,division);
+        self.0.iter().enumerate().filter(|(_,p)| p.sites > 0 && covers_interface(p.at,bearing))
+            .filter(|(_,p)| program.is_none_or(|prog| prog.allows_contact(p.definition,&local.registers,peer,scratch)))
+            .min_by(|(_,p),(_,q)| relative_angle(p.at-bearing).abs().total_cmp(&relative_angle(q.at-bearing).abs())
+                .then(p.id.cmp(&q.id))).map(|(i,_)| i)
     }
-
-    fn claim(&mut self, mask: u64) {
-        let mut need = ADHESIN_PER_SITE;
-        for (definition, stock) in &mut self.0 {
-            if mask & (1u64 << *definition) == 0 {
-                continue;
-            }
-            let take = need.min(*stock);
-            *stock -= take;
-            need -= take;
-            if need <= 0.0 {
-                break;
-            }
-        }
-    }
+    fn claim(&mut self, i: usize) { self.0[i].sites -= 1; }
 }
 
 fn exposed_glue(assembly: &crate::cellular::AssemblyInstance) -> f64 {
@@ -153,11 +140,18 @@ fn contact_geometry(env: &Environment, a: &Cell, b: &Cell, max_gap: f64)
     Some((dx, dy, distance, gap))
 }
 
-pub(super) fn binding_sites(cell: &Cell) -> u32 { ContactPorts::of(cell).sites }
+pub(super) fn binding_sites(cell: &Cell) -> u32 {
+    cell.body.cellular.iter().flat_map(|s| &s.assemblies)
+        .map(|a| (exposed_glue(a)/ADHESIN_PER_SITE + 1e-12).floor() as u32).sum()
+}
 
 pub(super) fn working_contact(env: &Environment, a: &Cell, b: &Cell, max_gap: f64) -> bool {
     a.alive() && b.alive() && contact_geometry(env, a, b, max_gap).is_some()
-        && binding_sites(a) > 0 && binding_sites(b) > 0
+        && [(a,b),(b,a)].into_iter().all(|(local,other)| {
+            let bearing = interface_bearing(env,local,other);
+            local.body.cellular.iter().flat_map(|s| &s.assemblies)
+                .any(|p| exposed_glue(p)+1e-14 >= ADHESIN_PER_SITE && covers_interface(p.at(),bearing))
+        })
 }
 
 #[derive(Default, Clone, Copy)]
@@ -199,6 +193,7 @@ struct JunctionEdge {
     b: usize,
     /// Positive from a to b, negative from b to a.
     request: [f64; 3],
+    capacity: [f64; 3],
 }
 #[derive(Default)]
 pub(super) struct JunctionWorkspace {
@@ -238,11 +233,18 @@ impl JunctionWorkspace {
         port.account - 1
     }
 
-    fn connect(&mut self, i: usize, j: usize, a: &Cell, b: &Cell) {
-        if !(0..3).any(|k| self.ports[i].junction[k] > 0.0 && self.ports[j].junction[k] > 0.0) { return; }
+    fn connect(&mut self, i: usize, j: usize, a: &Cell, b: &Cell, env: &Environment) {
+        let (ba, bb) = (interface_bearing(env,a,b), interface_bearing(env,b,a));
+        let (left, right) = (self.ports[i].available(ba), self.ports[j].available(bb));
+        let capacity = std::array::from_fn(|k| left[k].min(right[k]));
+        if capacity == [0.0; 3] { return; }
+        // Allocate each physical carrier once per phase; another nearby bond
+        // cannot consume its throughput again. Bond candidates have stable priority.
+        self.ports[i].claim(ba, capacity);
+        self.ports[j].claim(bb, capacity);
         let (left, right) = (self.account(i, a), self.account(j, b));
         let (a, b) = if a.id < b.id { (left, right) } else { (right, left) };
-        self.edges.push(JunctionEdge { a, b, request: [0.0; 3] });
+        self.edges.push(JunctionEdge { a, b, request: [0.0; 3], capacity });
     }
 
     fn share(&mut self, cells: &mut [Cell], geometry: &mut CellGeometry) {
@@ -253,9 +255,7 @@ impl JunctionWorkspace {
         // budget also covers stores receiving from one side and donating to another.
         for edge in &mut self.edges {
             for (k, rate) in JUNCTION_RATES.into_iter().enumerate() {
-                let a = self.ports[self.accounts[edge.a].cell].junction[k];
-                let b = self.ports[self.accounts[edge.b].cell].junction[k];
-                let weaker = a.min(b);
+                let weaker = edge.capacity[k];
                 let amount = self.accounts[edge.a].stores[k].plan(&self.accounts[edge.b].stores[k], weaker * rate * DT);
                 edge.request[k] = amount;
                 let (from, to) = if amount >= 0.0 { (edge.a, edge.b) } else { (edge.b, edge.a) };
@@ -265,7 +265,8 @@ impl JunctionWorkspace {
         }
         for account in &mut self.accounts {
             for (k, rate) in JUNCTION_RATES.into_iter().enumerate() {
-                account.stores[k].set_scales(self.ports[account.cell].junction[k] * rate * DT);
+                let total: f64 = self.ports[account.cell].channels.iter().filter(|p| p.channel == k).map(|p| p.capacity).sum();
+                account.stores[k].set_scales(total * rate * DT);
             }
         }
         for edge in &self.edges {
@@ -369,8 +370,9 @@ impl World {
             let program = &genomes[(cell.genome_id - 1) as usize].program;
             let can_attach = cell.alive() && program.has_adhesion_guard();
             let ports = if can_attach { ContactPorts::of(cell) } else { ContactPorts::default() };
+            let has_sites = ports.sites > 0;
             junctions.ports.push(ports);
-            if ports.sites > 0 {
+            if has_sites {
                 junctions.glue[index].refill(cell, Some(program));
                 if junctions.glue[index].0.is_empty() {
                     continue;
@@ -415,26 +417,10 @@ impl World {
             let division = candidate.previous_stage == CLONAL;
             let pa = &genomes[(self.cells[i].genome_id - 1) as usize].program;
             let pb = &genomes[(self.cells[j].genome_id - 1) as usize].program;
-            let ma = junctions.glue[i].eligible(
-                Some(pa),
-                &signals[i],
-                &signals[j],
-                division,
-                &mut workspace.contact_scratch,
-            );
-            if ma == 0 {
-                continue;
-            }
-            let mb = junctions.glue[j].eligible(
-                Some(pb),
-                &signals[j],
-                &signals[i],
-                division,
-                &mut workspace.contact_scratch,
-            );
-            if mb == 0 {
-                continue;
-            }
+            let Some(ma) = junctions.glue[i].eligible(Some(pa), &self.environment, (&self.cells[i], &self.cells[j]),
+                &signals[i], &signals[j], division, &mut workspace.contact_scratch) else { continue };
+            let Some(mb) = junctions.glue[j].eligible(Some(pb), &self.environment, (&self.cells[j], &self.cells[i]),
+                &signals[j], &signals[i], division, &mut workspace.contact_scratch) else { continue };
             junctions.glue[i].claim(ma);
             junctions.glue[j].claim(mb);
             junctions.ports[i].sites -= 1;
@@ -451,7 +437,7 @@ impl World {
             self.had_adhesive_contacts = true;
             a.adhered_neighbors += 1;
             b.adhered_neighbors += 1;
-            junctions.connect(i, j, a, b);
+            junctions.connect(i, j, a, b, &self.environment);
 
             // Dampen sliding and restore surface contact without pulling an
             // overlapping pair closer. Collision response owns repulsion.
@@ -496,7 +482,7 @@ mod tests {
     use super::super::mechanism_tests::equipped;
 
     fn pair() -> (World, Vec<Genome>) {
-        let (mut world, genomes) = equipped("product GlueMaterial = adhesin(Frame); assembly Glue: adhere() { engage_when: peer.message_valid && populated(rf020) && peer.message == rf020; GlueMaterial:0.006; Mount:0.01; Wall:0.01; }\npublish rf020 = 31;");
+        let (mut world, genomes) = equipped("product Fiber=filament(); assembly Touch:sense(contact){Mount:0.002;Fiber:0.002;Detector:0.006;} assembly Badge:display(){Mount:0.004;Wall:0.006;} product GlueMaterial = adhesin(Frame); assembly Glue: adhere() { engage_when: peer.message_valid && populated(rf020) && peer.message == rf020; GlueMaterial:0.006; Mount:0.01; Wall:0.01; }\npublish rf020 = 31;");
         let a = &mut world.cells[0];
         a.x = WIDTH - 7.25;
         a.y = 100.0;
@@ -506,7 +492,7 @@ mod tests {
         let mut b = a.clone();
         b.id = world.next_id;
         world.next_id += 1;
-        b.x = 7.25;
+        b.x = 7.25; b.angle = PI;
         b.vx = 2.0;
         b.vy = -0.5;
         world.cells.push(b);
@@ -557,7 +543,7 @@ mod tests {
         assert_eq!(world.bond_pairs().count(),0);
         world.apply_adhesion_in(&genomes,&mut phases);
         assert_eq!(world.bond_pairs().collect::<Vec<_>>(),[(1,2)]);
-        world.cells[1].x+=1.25;
+        world.cells[1].x+=0.25;
         world.apply_adhesion_in(&genomes,&mut phases);
         assert!(world.has_bond(2,1),"a formed link tolerates a small stretch");
         phases.signals[1].registers[0] = None;

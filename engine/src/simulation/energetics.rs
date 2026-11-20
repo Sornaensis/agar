@@ -117,7 +117,8 @@ mod tests {
         close(w.energy_total(),held+1.0);
         close(w.carbon_total(),carbon+1.0/20.0);
         close(w.food.iter().map(|f|f.energy).sum(),expected.total()+1.0);
-        close(w.food.iter().filter(|f|f.kind==OrganicKind::Waste).map(|f|f.extra_energy).sum(),3.0);
+        close(w.food.iter().map(|f|f.carbon()*f.composition.bound).sum(),0.2);
+        assert!(w.food.iter().all(|f|f.kind==OrganicKind::Tissue));
         assert!(w.food.iter().all(|f| f.carbon()>0.0 && f.energy<=24.0));
         assert_eq!(w.deaths,1);
     }

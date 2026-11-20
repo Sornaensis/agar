@@ -163,7 +163,7 @@ fn each_requested_receptor_field_matches_complete_inspection() {
                 let mut input = workspace.inputs.pop().unwrap();
                 world.receptor_inputs_into(0, program, &mut input, &caps,
                     &workspace.geometry, &workspace.cell_grid, &workspace.food_grid,
-                    workspace.max_radius, &mut workspace.receptor_masses, false, &[]);
+                    workspace.max_radius, false, &[]);
                 let complete = world.sense_program(1, program).unwrap();
                 for &(recipe, field) in program.receptor_reads() {
                     assert_eq!(bits(&input.receptors[recipe], field), bits(&complete.receptors[recipe], field),
@@ -374,4 +374,24 @@ fn cellular_tick_buffers_reuse_allocations_and_v7_continuation_is_exact() {
     assert!(original.world.workspace.observations.inputs[0].products.is_empty());
     assert!(original.world.workspace.observations.inputs[0].receptors.is_empty());
     assert!(original.world.workspace.outputs[0].cellular.is_none());
+}
+
+#[test]
+fn wall_pressure_and_stiffness_are_local_to_the_touch_patch() {
+    let (mut world, genomes) = equipped(r#"
+        product Hair=filament();
+        assembly Finger:sense(contact){ Mount:0.002; Detector:0.006; Hair:0.002; }
+        assembly Back:sense(contact){ Mount:0.002; Detector:0.006; Hair:0.002; at:3.14159265; }
+        rb001=sensed.Finger.valid && sensed.Back.valid;
+        rf001=sensed.Finger.pressure+sensed.Finger.resistance;
+    "#);
+    let x = world.cells[0].x + world.cells[0].radius() + 5.25;
+    for floating in [false, true] {
+        let id = world.environment.add_barrier(x,380.0,40.0,10.0,PI * 0.5,floating);
+        assert!(id > 0);
+        let front = reading(&world, &genomes, "Finger");
+        assert!(front.valid && front.pressure > 0.0 && front.resistance > 0.9);
+        assert!(!reading(&world, &genomes, "Back").valid);
+        world.environment.remove_barrier(id);
+    }
 }

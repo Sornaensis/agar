@@ -146,7 +146,7 @@ const pairedGaps = [];
 for (const adhesive of [true, false]) {
   const api = await fresh({ width:400, height:400, ambientLight:0.85, initialNutrients:3,
     gases:{ mode:'open', exchangeRate:0.5 } });
-  const genome = compile(api, adhesive ? colonySource : colonySource.replace(/engage_when:[^;]+;/, ''));
+  const genome = compile(api, adhesive ? colonySource : colonySource.replaceAll('engage_when: peer.division_interface;', 'engage_when: false;'));
   seed(api, genome, 1, 200, 200);
   let state = snapshot(api);
   while (!state.births && state.seconds < 150) state = advance(api, state.cells[0].area < 1.9 ? 30 : 1);
@@ -233,14 +233,19 @@ for (const preset of PRESETS) {
     assert.ok(cell.replication.genomeMass > 0, 'Paid copied material is inherited instead of disappearing');
   }
   if (preset.name === 'Forager' || preset.name === 'Predator') {
-    const essential = ['Gut', 'ExudateEnzyme', 'Capture', 'LeftMotor', 'RightMotor', 'Vision', 'Touch',
-      ...(preset.name === 'Predator' ? ['TissueEnzyme', 'Piercer', 'LeftHeat', 'RightHeat'] : ['Translation'])];
-    for (const name of essential) {
+    // The grazer provisions duplicate machinery. The hunter places one
+    // forward hunting apparatus and duplicates its internal machinery.
+    const duplicates = preset.name === 'Forager'
+      ? ['Gut','ExudateEnzyme','Capture','LeftMotor','RightMotor','Vision','Touch','Translation']
+      : ['EnergyStore','MineralStore','Translation','Respiration','Envelope'];
+    for (const name of duplicates) {
       assert.ok(machines.filter(machine => machine.name === name && machine.functionalMass > 0).length >= 2,
         `${preset.name} paid for duplicate ${name} machinery before division`);
-      for (const cell of inherited) {
-        assert.ok(cell.assemblies.some(machine => machine.name === name && machine.functionalMass > 0),
-          `${preset.name} gives each daughter an existing working ${name}, including each motor orientation`);
+    }
+    if (preset.name === 'Predator') {
+      for (const name of ['Vision','Touch','Capture','Piercer','LeftMotor','RightMotor','LeftHeat','RightHeat']) {
+        assert.ok(machines.some(machine => machine.name === name && machine.functionalMass > 0),
+          `The hunting apparatus retains its ${name} across division`);
       }
     }
   }
@@ -252,7 +257,7 @@ for (const preset of PRESETS) {
 
   const firstDivisionSeconds = (state.ticks-startTick)/30;
   const bytes = save(api), resumed = await fresh();
-  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 19);
+  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 20);
   assert.equal(restore(resumed, bytes), 1, error(resumed));
   assert.deepEqual(save(resumed), bytes);
   advance(api, 90); advance(resumed, 90);
@@ -278,5 +283,5 @@ for (const preset of PRESETS) {
     firstDivisionSeconds: Math.round(firstDivisionSeconds * 100) / 100, timeLimitSeconds: cycleSeconds });
 }
 
-console.log(`Cellular checks passed in ${countChemistry ? 'counted' : 'continuous'} chemistry: ${PRESETS.length} authored genomes, ${importable.length} importable examples, local receptor separation, bright/shade motor recycling and regrowth, paid development, frozen inspection, resource conservation, whole-machine fission with functioning consumer daughters, gene/placement mutations, and exact v17 continuation.`);
+console.log(`Cellular checks passed in ${countChemistry ? 'counted' : 'continuous'} chemistry: ${PRESETS.length} authored genomes, ${importable.length} importable examples, local receptor separation, bright/shade motor recycling and regrowth, paid development, frozen inspection, resource conservation, whole-machine fission with functioning consumer daughters, gene/placement mutations, and exact checkpoint continuation.`);
 console.log(JSON.stringify({ conditions: 'One founder in lit water. Consumer trials start beside a finite patch of tissue and exudate from a bloom of 25 Phototrophs grown for 60 seconds and killed by thermal stress. No subsequent inputs.', cycles }));

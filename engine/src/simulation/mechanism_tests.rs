@@ -77,7 +77,7 @@ pub(super) fn equipped(extra: &str) -> (World, Vec<Genome>) {
                 }
             })
             .collect();
-        state.assemblies.push(AssemblyInstance {
+        state.assemblies.push(AssemblyInstance { inherited_at: None,
             id: state.next_assembly_id,
             recipe: std::rc::Rc::new(Recipe {
                 name: def.name.clone(),
@@ -363,7 +363,7 @@ fn particle_import_requires_a_compartment_and_grants_no_digestion_or_engulfing()
         assert_eq!(cap.independent_engulf, 0.0);
         assert_eq!(cap.digestion, 0.0);
         assert_eq!(cap.substrate_digestion, [0.0; 3]);
-        let (x, y) = (world.cells[0].x, world.cells[0].y);
+        let (x, y) = world.cells[0].inlet_fixture_position();
         world.fixture_exudate(x, y, 4);
         for particle in &mut world.food {
             particle.x = x;
@@ -530,4 +530,59 @@ fn primitive_digestive_presentation_does_not_grant_legacy_capacity() {
         "The player must identify a built substrate enzyme as digestive hardware");
     assert_eq!(body.capacities(), physical,
         "Presentation must not add the legacy family's storage or processing effects");
+}
+
+#[test]
+fn carrier_and_catalyst_content_set_throughput_at_equal_installed_mass() {
+    let cases = [
+        ("digest(tissue)", "Catalyst: 0.10;", "Catalyst: 0.01; Frame: 0.09;", 10.0),
+        ("harvest(light)", "Mount: 0.01; Pigment: 0.06; Catalyst: 0.03;",
+            "Mount: 0.01; Pigment: 0.015; Catalyst: 0.01; Frame: 0.065;", 4.0),
+        ("propel()", "Mount: 0.02; Rotor: 0.04; Tail: 0.04;",
+            "Mount: 0.02; Rotor: 0.01; Tail: 0.01; Frame: 0.06;", 4.0),
+        ("import(mineral)", "Mount: 0.02; Carrier: 0.08;",
+            "Mount: 0.02; Carrier: 0.01; Frame: 0.07;", 8.0),
+    ];
+    for (kind, rich, lean, ratio) in cases {
+        let assay = |parts| {
+            let src = format!("product Tail=filament(); product Carrier=transporter(); assembly Assay: {kind} {{ {parts} }}");
+            let (w, _) = equipped(&src);
+            let body = &w.cells[0].body;
+            let instance = body.cellular.as_ref().unwrap().assemblies.last().unwrap();
+            let cap = body.capacities();
+            let rate = match kind {
+                "digest(tissue)" => cap.substrate_digestion[1],
+                "harvest(light)" => cap.light_harvest,
+                "propel()" => cap.thrust,
+                _ => cap.uptake,
+            };
+            (instance.functional_mass(), rate)
+        };
+        let (mass, full) = assay(rich);
+        let (padded_mass, padded) = assay(lean);
+        close(mass, padded_mass);
+        assert!(padded > 0.0);
+        close(full, padded * ratio);
+    }
+}
+
+#[test]
+fn scaffold_dilution_reduces_actual_digestion_on_each_of_twelve_ticks() {
+    fn assay(parts: &str) -> [f64; 12] {
+        let recipe = format!("{FOOD_STORE}assembly Hydrolase: digest(structural) {{ {parts} }}");
+        let (mut world, _) = equipped(&recipe);
+        mixed_meal(&mut world);
+        let capacity = world.cells[0].body.capacities();
+        std::array::from_fn(|_| {
+            let before = world.cells[0].gut[1].energy;
+            world.digest(&[Outputs::default()], &[capacity], &mut [0.0]);
+            before - world.cells[0].gut[1].energy
+        })
+    }
+    let rich = assay("Catalyst: 0.10;");
+    let diluted = assay("Catalyst: 0.01; Frame: 0.09;");
+    for (full_rate, diluted_rate) in rich.into_iter().zip(diluted) {
+        assert!(diluted_rate > 0.0);
+        close(full_rate, 10.0 * diluted_rate);
+    }
 }

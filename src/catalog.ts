@@ -138,7 +138,7 @@ export const BUILTIN_SIMULATIONS: readonly BuiltinSimulation[] = freeze([
   },
   {
     id: 'builtin:simulation:crown-rosette', name: 'Crown rosette',
-    description: 'One founder grows a colony. Around 160 simulated seconds, edge cells beside a signaling center build extra light harvesters.',
+    description: 'One founder grows a colony. A cell with two occupied ports can signal an edge cell to build another light harvester.',
     environmentId: 'builtin:environment:colony-pool', seed: 42,
     populations: [{ genomeId: 'builtin:genome:crown-rosette', count: 1 }],
   },

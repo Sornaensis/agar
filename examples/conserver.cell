@@ -36,8 +36,8 @@ let need_Respiration = funded && (true) && missing(built.Respiration, (if expand
 let need_Gut = funded && (true) && missing(built.Gut, (if expanding then 0.12 else 0.06), 0.06);
 let need_ExudateEnzyme = funded && (true) && missing(built.ExudateEnzyme, (if expanding then 0.08 else 0.04), 0.04);
 let need_Capture = funded && (enough(built.Gut, 0.06)) && missing(built.Capture, (if expanding then 0.06 else 0.03), 0.03);
-let need_TissueEnzyme = funded && (powered && gut.tissue.energy > 0) && missing(built.TissueEnzyme, (if expanding then 0.04 else 0.02), 0.02);
-let need_WasteEnzyme = funded && (powered && gut.waste.energy > 0) && missing(built.WasteEnzyme, (if expanding then 0.03 else 0.015), 0.015);
+let need_TissueEnzyme = funded && (powered && gut.structural.energy > 0) && missing(built.TissueEnzyme, (if expanding then 0.04 else 0.02), 0.02);
+let need_WasteEnzyme = funded && (powered && gut.bound.energy > 0) && missing(built.WasteEnzyme, (if expanding then 0.03 else 0.015), 0.015);
 let need_Translation = funded && (surplus) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);
 let need_Minerals = funded && (powered && (nutrient.stored < 1500 || surplus)) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);
 let need_EnergyStore = funded && (surplus) && missing(built.EnergyStore, (if expanding || energy.capacity <= 1000000 then 0.08 else 0.04), 0.04);
@@ -76,10 +76,10 @@ assembly Gut: store(food) {
   activity: 1;
 }
 
-assembly ExudateEnzyme: digest(exudate) {
+assembly ExudateEnzyme: digest(soluble) {
   Catalyst: 400;
   start_when: need_ExudateEnzyme;
-  activity: if gut.exudate.energy > 0 then 1 else 0;
+  activity: if gut.soluble.energy > 0 then 1 else 0;
 }
 
 assembly Capture: import(particle) {
@@ -89,16 +89,16 @@ assembly Capture: import(particle) {
   activity: if gut.fraction < 0.7 then 1 else 0;
 }
 
-assembly TissueEnzyme: digest(tissue) {
+assembly TissueEnzyme: digest(structural) {
   Catalyst: 200;
   start_when: need_TissueEnzyme;
-  activity: if gut.tissue.energy > 0 then 1 else 0;
+  activity: if gut.structural.energy > 0 then 1 else 0;
 }
 
-assembly WasteEnzyme: digest(waste) {
+assembly WasteEnzyme: digest(bound) {
   Catalyst: 150;
   start_when: need_WasteEnzyme;
-  activity: if gut.waste.energy > 0 then 1 else 0;
+  activity: if gut.bound.energy > 0 then 1 else 0;
 }
 
 assembly Translation: translate() {

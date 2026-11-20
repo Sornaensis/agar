@@ -21,7 +21,7 @@ impl World {
             self.cells[index].body.cellular_inputs_into(definition, &mut input.products, &mut input.assemblies);
             self.receptor_inputs_into(index, program, input, &capacities,
                 &workspace.geometry, &workspace.cell_grid, &workspace.food_grid,
-                workspace.max_radius, &mut workspace.receptor_masses, true, &signals);
+                workspace.max_radius, true, &signals);
         }
         workspace.inputs.pop()
     }
@@ -30,7 +30,7 @@ impl World {
     pub(super) fn receptor_inputs_into(
         &self, index: usize, program: &Program, input: &mut Inputs,
         capacities: &[BodyCapacities], geometry: &CellGeometry,
-        cell_grid: &Grid, food_grid: &Grid, max_radius: f64, masses: &mut Vec<f64>,
+        cell_grid: &Grid, food_grid: &Grid, max_radius: f64,
         complete: bool, signals: &[CellSignal],
     ) {
         let Some(definition) = program.cellular() else { return; };
@@ -46,15 +46,13 @@ impl World {
         }
         if requested == 0 { return; }
         let cell = &self.cells[index];
-        cell.body.active_recipe_masses_into(definition, masses);
         while requested != 0 {
             let recipe_index = requested.trailing_zeros() as usize;
             requested &= requested - 1;
             let fields = if complete { u32::MAX } else { fields[recipe_index] };
             let reads = |field: ReceptorField| fields & (1_u32 << field as u8) != 0;
             let Some(recipe) = definition.assemblies.get(recipe_index) else { continue; };
-            let mass = masses.get(recipe_index).copied().unwrap_or(0.0);
-            if mass <= 0.0 { continue; }
+            let Some((mount_at, mount_direction, mass)) = cell.body.receptor_mount(definition,recipe_index) else { continue };
             let kind = match recipe.kind {
                 AssemblyKind::Mechanism(kind) => kind,
                 AssemblyKind::Organelle(Kind::Photoreceptor) => MechanismKind::SenseLight,
@@ -64,7 +62,7 @@ impl World {
                 AssemblyKind::Organelle(Kind::Optical) => MechanismKind::SenseOptical,
                 _ => continue,
             };
-            let attachment = cell.angle + recipe.at;
+            let attachment = cell.angle + mount_at;
             let outward = [attachment.cos(), attachment.sin()];
             let x = wrap(cell.x + cell.radius() * outward[0], self.environment.width);
             let y = wrap(cell.y + cell.radius() * outward[1], self.environment.height);
@@ -72,28 +70,36 @@ impl World {
             reading.available = true;
             match kind {
                 MechanismKind::JunctionSignal => {
-                    if !(reads(ReceptorField::Valid) || reads(ReceptorField::Value) || reads(ReceptorField::Count)) {
-                        continue;
-                    }
-                    if signals.is_empty() { continue; }
-                    let mut contributors = Vec::new();
+                    // Overlapping active hardware gives occupancy even for a silent port.
+                    // In a crowded interface a single opening reads one nearest peer.
+                    let mut selected: Option<(f64,u32,usize)> = None;
                     for peer in cell_grid.nearby_radius(cell.x, cell.y, cell.radius() + max_radius + adhesion::RELEASE_GAP) {
                         if peer == index || capacities[peer].signal_junction <= 0.0 { continue; }
-                        let remote = &signals[peer];
-                        if let Some(value) = remote.signal {
-                            let other = &self.cells[peer];
-                            if self.has_bond(cell.id, other.id)
-                                && adhesion::working_contact(&self.environment, cell, other, adhesion::RELEASE_GAP) {
-                                contributors.push((other.id, value));
-                            }
+                        let other = &self.cells[peer];
+                        if !self.has_bond(cell.id, other.id)
+                            || !adhesion::working_contact(&self.environment,cell,other,adhesion::RELEASE_GAP)
+                            || !adhesion::covers_interface(mount_at,adhesion::interface_bearing(&self.environment,cell,other)) {
+                            continue;
+                        }
+                        let back = adhesion::interface_bearing(&self.environment,other,cell);
+                        if !other.body.cellular.iter().flat_map(|s| &s.assemblies).any(|p|
+                            p.recipe.kind == AssemblyKind::Mechanism(MechanismKind::JunctionSignal)
+                            && p.working_mass()*p.activity > 0.0 && adhesion::covers_interface(p.at(),back)) {
+                            continue;
+                        }
+                        let distance = delta(other.x-x,self.environment.width).hypot(delta(other.y-y,self.environment.height)) - other.radius();
+                        if selected.is_none_or(|(best,id,_)| distance < best || (distance == best && other.id < id)) {
+                            selected = Some((distance,other.id,peer));
                         }
                     }
-                    // The addition order is independent of the spatial hash and the cells' storage order.
-                    contributors.sort_unstable_by_key(|&(id, _)| id);
-                    reading.count = contributors.len() as u32;
-                    reading.valid = reading.count > 0;
-                    if reading.valid && reads(ReceptorField::Value) {
-                        reading.value = contributors.iter().map(|&(_, value)| value).sum::<f64>() / f64::from(reading.count);
+                    if let Some((_,_,peer)) = selected {
+                        reading.valid = true;
+                        reading.count = 1; // Older saved graphs read occupancy here.
+                        if let Some(value) = signals.get(peer).and_then(|s| s.signal) {
+                            reading.signal_valid = true;
+                            reading.value = value;
+                            reading.signal = value;
+                        }
                     }
                 }
                 MechanismKind::SenseLight => {
@@ -151,7 +157,7 @@ impl World {
                             score = -gap;
                         } else {
                             let angle = relative_angle(observation.dy.atan2(observation.dx)
-                                - cell.angle - recipe.direction);
+                                - cell.angle - mount_direction);
                             if angle.abs() > PI * 0.5 || distance > range + observation.radius {
                                 return;
                             }
@@ -177,6 +183,15 @@ impl World {
                             selected = Some((observation, score, target));
                         }
                     };
+                    if kind == MechanismKind::SenseContact {
+                        if let Some((wall, [dx, dy])) = self.environment.touching_wall(x, y, 0.9) {
+                            consider(Observation {
+                                entity: u64::MAX - u64::from(wall.id), dx, dy, radius: 0.0, area: 0.0,
+                                contrast: 0.0, pigment: 0.0, resistance: 1.0,
+                                motion: ObservedMotion::Relative(wall.vx - cell.vx, wall.vy - cell.vy),
+                            }, None);
+                        }
+                    }
                     for other in cell_grid.nearby_radius(x, y, range + max_radius) {
                         if other == index || !geometry.alive[other] { continue; }
                         let [ox, oy] = geometry.positions[other];
@@ -197,10 +212,10 @@ impl World {
                             entity: (food.id << 1) | 1,
                             dx: delta(food.x - x, self.environment.width), dy: delta(food.y - y, self.environment.height),
                             radius: 2.5, area: (2.5 / CELL_RADIUS).powi(2),
-                            contrast: [0.28, 0.4, 0.32][food.kind as usize],
-                            pigment: [0.1, 0.24, 0.06][food.kind as usize],
+                            contrast: food.traits().2,
+                            pigment: food.traits().1,
                             motion: ObservedMotion::ParticleAt(food.x, food.y),
-                            resistance: [0.02, 0.07, 0.04][food.kind as usize],
+                            resistance: food.traits().0,
                         }, None);
                     }
                     if let Some((mut observation, _, target)) = selected {
@@ -219,21 +234,21 @@ impl World {
                             }
                             let identity = reads(ReceptorField::MessageValid) || reads(ReceptorField::Message);
                             let payload = reads(ReceptorField::SignalValid) || reads(ReceptorField::Signal);
-                            if let Some(peer) = target.and_then(|other| signals.get(other)) {
-                                if ((identity && peer.published.is_some()) || (payload && peer.signal.is_some()))
-                                    && !self.environment.segment_blocked((x,y),(x+observation.dx,y+observation.dy)) {
+                            if let Some(other) = target.filter(|_| identity || payload) {
+                                if let Some(peer) = signals.get(other) {
+                                    let visible = peer.displayed_at(&self.cells[other], [x,y], &self.environment);
                                     if identity {
-                                        reading.message_valid = peer.published.is_some();
-                                        reading.message = peer.published.unwrap_or(0.0);
+                                        reading.message_valid = visible.message.is_some();
+                                        reading.message = visible.message.unwrap_or(0.0);
                                     }
                                     if payload {
-                                        reading.signal_valid = peer.signal.is_some();
-                                        reading.signal = peer.signal.unwrap_or(0.0);
+                                        reading.signal_valid = visible.signal.is_some();
+                                        reading.signal = visible.signal.unwrap_or(0.0);
                                     }
                                 }
                             }
                             if reads(ReceptorField::Pressure) { reading.pressure = measure(
-                                (observation.radius - observation.dx.hypot(observation.dy)).max(0.0)
+                                (0.9 + observation.radius - observation.dx.hypot(observation.dy)).max(0.0)
                                 + (-vx * observation.dx - vy * observation.dy).max(0.0)
                                     / (1.0 + observation.dx.hypot(observation.dy)), mass, 0.01); }
                             if reads(ReceptorField::Resistance) {

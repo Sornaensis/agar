@@ -128,6 +128,7 @@ rf002=0; rf003=0;
         let mut frozen = Vec::new();
         let mut scratch = Vec::new();
         let peer = PeerContact {
+            resistance: None,
             message: Some(0.0),
             signal: None,
             division_interface: true,

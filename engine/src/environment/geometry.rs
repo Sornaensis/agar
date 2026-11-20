@@ -410,6 +410,35 @@ impl Environment {
         }
     }
 
+    /// Closest point on a solid rectangle within a receptor's contact reach.
+    /// Test periodic images because a long rotated barrier can cross a seam.
+    pub(crate) fn touching_wall(&self, x: f64, y: f64, reach: f64) -> Option<(&Barrier, [f64; 2])> {
+        let mut best = None;
+        let mut nearest = reach * reach;
+        for (wall, shape) in self.barriers.iter().zip(&self.barrier_cache.shapes) {
+            let (c, s) = (shape.cosine, shape.sine);
+            let (hx, hy) = (wall.length * 0.5, wall.width * 0.5);
+            let dx = delta(x - wall.x, self.width);
+            let dy = delta(y - wall.y, self.height);
+            if dx.abs() > hx * c.abs() + hy * s.abs() + reach
+                || dy.abs() > hx * s.abs() + hy * c.abs() + reach { continue; }
+            for ox in [-self.width, 0.0, self.width] {
+                for oy in [-self.height, 0.0, self.height] {
+                    let lx = (dx + ox) * c + (dy + oy) * s;
+                    let ly = -(dx + ox) * s + (dy + oy) * c;
+                    let tx = lx.clamp(-hx,hx) - lx;
+                    let ty = ly.clamp(-hy,hy) - ly;
+                    let distance = tx * tx + ty * ty;
+                    if distance <= nearest {
+                        nearest = distance;
+                        best = Some((wall, [tx * c - ty * s, tx * s + ty * c]));
+                    }
+                }
+            }
+        }
+        best
+    }
+
     pub fn solid_at(&self, x: f64, y: f64) -> bool {
         self.barriers
             .iter()

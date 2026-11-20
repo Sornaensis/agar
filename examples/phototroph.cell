@@ -9,6 +9,8 @@ product Pigment = pigment();
 product CoatPrecursor = scaffold();
 product Glue = adhesin(CoatPrecursor);
 product Carrier = transporter();
+product Detector = receptor();
+product Tail = filament();
 product Frame = scaffold();
 product Replicase = replicase();
 product Rotor = motor();
@@ -25,10 +27,11 @@ let powered = enough(built.Solar, 0.12) && enough(built.Respiration, 0.04);
 let equipped = powered;
 # Duplicate the four machines a daughter needs to feed and make proteins.
 let preparing_daughters = body.area > body.birth_area * 1.45;
-let provisioned = enough(built.Respiration, 0.08) && enough(built.Solar, 0.24) && enough(built.Minerals, 0.05) && enough(built.Translation, 0.08);
+let provisioned = enough(built.Respiration, 0.08) && enough(built.Solar, 0.24) && enough(built.Minerals, 0.05) && enough(built.Translation, 0.08) && enough(built.MineralStore, 0.06);
 let surplus = equipped && energy > 550000;
 # A receptive grazer can share surplus fixed carbon and dissolved minerals.
-publish rf090 = 41;
+publish rf090;
+rf090 = 41;
 rf091 = 72;
 # This stationary producer spends no material on locomotion.
 
@@ -37,23 +40,29 @@ let need_Solar = funded && (true) && missing(built.Solar, (if preparing_daughter
 let need_Dock = funded && (powered) && missing(built.Dock, (if expanding then 0.04 else 0.02), 0.02);
 let need_CarbonPort = funded && (powered) && missing(built.CarbonPort, (if expanding then 0.1 else 0.05), 0.05);
 let need_MineralPort = funded && (powered) && missing(built.MineralPort, (if expanding then 0.04 else 0.02), 0.02);
+let need_Badge = funded && (powered) && missing(built.Badge, 0.01, 0.01);
+let need_DockReader = funded && (powered) && missing(built.DockReader, 0.01, 0.01);
+let need_Outlet = funded && (powered) && missing(built.Outlet, (if expanding then 0.06 else 0.03), 0.03);
+let need_FarOutlet = funded && (powered) && missing(built.FarOutlet, 0.03, 0.03);
 let need_Translation = funded && (powered) && missing(built.Translation, (if preparing_daughters then 0.08 else 0.04), 0.04);
 let need_Minerals = funded && (powered || nutrient.stored < 1300) && missing(built.Minerals, (if preparing_daughters then 0.05 else 0.025), 0.025);
 let need_EnergyStore = funded && (powered) && missing(built.EnergyStore, (if expanding || energy.capacity <= 1000000 then 0.08 else 0.04), 0.04);
-let need_MineralStore = funded && (powered && body.area > 1.2) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);
+let need_MineralStore = funded && (powered && body.area > 1.2) && missing(built.MineralStore, if preparing_daughters then 0.06 else 0.02, 0.02);
 let need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);
 let need_Support = funded && (powered && energy > 450000) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);
 let need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);
 let need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);
 let need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);
 
-gene supply_CoatPrecursor: CoatPrecursor = if need_Dock && pool.Glue < 10 && pool.CoatPrecursor < 10 then 1 else 0;
+gene supply_CoatPrecursor: CoatPrecursor = if (need_Dock) && pool.Glue < 10 && pool.CoatPrecursor < 10 then 1 else 0;
 gene supply_Catalyst: Catalyst = if pool.Catalyst < 10 then (if need_Respiration then 1 else 0) + (if need_Solar then 0.25 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0) else 0;
-gene supply_Wall: Wall = if pool.Wall < 10 then (if need_Respiration then 0.6 else 0) + (if need_Dock then 1 else 0) + (if need_CarbonPort then 1 else 0) + (if need_MineralPort then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0) else 0;
-gene supply_Mount: Mount = if pool.Mount < 10 then (if need_Solar then 0.25 else 0) + (if need_Dock then 1 else 0) + (if need_Minerals then 0.25 else 0) + (if need_Division then 0.5 else 0) else 0;
+gene supply_Wall: Wall = if pool.Wall < 10 then (if need_Respiration then 0.6 else 0) + (if need_Dock then 1 else 0) + (if need_CarbonPort then 1 else 0) + (if need_MineralPort then 1 else 0) + (if need_Badge then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0) else 0;
+gene supply_Mount: Mount = if pool.Mount < 10 then (if need_Solar then 0.25 else 0) + (if need_Dock then 1 else 0) + (if need_Badge then 0.666667 else 0) + (if need_DockReader then 0.333333 else 0) + (if need_Outlet then 0.25 else 0) + (if need_FarOutlet then 0.25 else 0) + (if need_Minerals then 0.25 else 0) + (if need_Division then 0.5 else 0) else 0;
 gene supply_Pigment: Pigment = if pool.Pigment < 10 then (if need_Solar then 1 else 0) else 0;
 gene supply_Glue: Glue = if pool.Glue < 10 then (if need_Dock then 0.5 else 0) else 0;
-gene supply_Carrier: Carrier = if pool.Carrier < 10 then (if need_CarbonPort then 1 else 0) + (if need_MineralPort then 1 else 0) + (if need_Minerals then 1 else 0) else 0;
+gene supply_Carrier: Carrier = if pool.Carrier < 10 then (if need_CarbonPort then 1 else 0) + (if need_MineralPort then 1 else 0) + (if need_Outlet then 1 else 0) + (if need_FarOutlet then 1 else 0) + (if need_Minerals then 1 else 0) else 0;
+gene supply_Detector: Detector = if pool.Detector < 10 then (if need_DockReader then 1 else 0) else 0;
+gene supply_Tail: Tail = if pool.Tail < 10 then (if need_DockReader then 0.333333 else 0) else 0;
 gene supply_Frame: Frame = if pool.Frame < 10 then (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0) else 0;
 gene supply_Replicase: Replicase = if pool.Replicase < 10 then (if need_Replication then 1 else 0) else 0;
 gene supply_Rotor: Rotor = if pool.Rotor < 10 then (if need_Division then 1 else 0) else 0;
@@ -97,6 +106,36 @@ assembly MineralPort: junction(mineral) {
   activity: if nutrient.fraction < 0.8 then 1 else 0;
 }
 
+assembly Badge: display() {
+  Mount: 40;
+  Wall: 60;
+  start_when: need_Badge;
+  activity: 1;
+}
+
+assembly DockReader: sense(contact) {
+  Mount: 20;
+  Detector: 60;
+  Tail: 20;
+  start_when: need_DockReader;
+  activity: 1;
+}
+
+assembly Outlet: export(carbon) {
+  Mount: 60;
+  Carrier: 240;
+  start_when: need_Outlet;
+  activity: if carbon.organic > 1500 * body.area && energy.fraction > 0.12 then 1 else 0;
+}
+
+assembly FarOutlet: export(carbon) {
+  Mount: 60;
+  Carrier: 240;
+  start_when: need_FarOutlet;
+  activity: if carbon.organic > 3500 * body.area && energy.fraction > 0.25 then 1 else 0;
+  at: 3.141592653589793;
+}
+
 assembly Translation: translate() {
   Frame: 200;
   Catalyst: 200;
@@ -108,7 +147,7 @@ assembly Minerals: import(mineral) {
   Mount: 50;
   Carrier: 200;
   start_when: need_Minerals;
-  activity: if nutrient.fraction < 0.9 then 1 else 0;
+  activity: if nutrient.fraction < 0.9 && energy.fraction > 0.05 then 1 else 0;
 }
 
 assembly EnergyStore: store(energy) {
@@ -155,4 +194,5 @@ assembly Division: constrict() {
   Ring: 80;
   start_when: need_Division;
   activity: if body.area + 0.000001 >= body.birth_area * 2 && provisioned && energy > 1000000 then 1 else 0;
+  at: 1.5707963267948966;
 }

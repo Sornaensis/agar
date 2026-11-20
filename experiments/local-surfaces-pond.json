@@ -1,0 +1,978 @@
+{
+  "habitat": "Grazing shallows",
+  "founders": {
+    "Phototroph": 48,
+    "Forager": 12,
+    "Predator": 1
+  },
+  "mutation_rate": 0.1,
+  "time_unit": "simulated seconds",
+  "additional_controlled_assays": {
+    "isolated_predator_live_prey": "In the 300-second lit treatments, the stock Predator fed and reproduced on seeds 42, 7 and 2026. Each finished with one living predator. The separate isolated-daughter assay did not meet its combined predation, structural-uptake and reproduction criterion.",
+    "isolated_predator_dark_carrion": "On the same three seeds, no stock Predator survived 300 seconds or reproduced on the finite heat-killed producer bloom in darkness.",
+    "isolated_predator_and_48_producers": "Seed 42, 48 producers and one Predator. First hunter division at 136 seconds, 13 kills, and hunter extinction at 328 seconds, before the 600-second survival criterion."
+  },
+  "conditions": {
+    "supplied archive": "Both the engine and three founder programs came from the user-supplied archive.",
+    "revised pond": "The shipped revised engine and three current stock genomes.",
+    "carbon exporters closed": "The same engine and same genomes, except both stock Phototroph export(carbon) activity expressions were replaced with 0. Outlets still cost material to build. Incidental overflow and death still release material.",
+    "flank-mounted Forager constrictor": "Only the Forager constrictor mount changes, from 0 to pi/2 radians. All three founder programs otherwise match. Reproduce with --flank-forager-division. The shipping forward mount allowed the first Forager daughter to produce offspring in the separate finite-food heredity assay.",
+    "uniform composition by origin": "A comparison-only build from the revised engine. At entry to World::emit_organic_pending, before dispatch to either arithmetic mode, set packet.composition = Composition::pool(packet.kind as usize) for each packet in workspace.emissions. This makes every particle of a given origin start with the same soluble/structural/bound split. Mineral and stored energy still affect physical observations. All source, control, and accounting rules otherwise match the revised treatment."
+  },
+  "runs": [
+    {
+      "condition": "supplied archive",
+      "seed": 42,
+      "engine_sha256": "18d91ebca235e5793cbdf7e4177bc19770c1a6ffb8ada9b1a584c61d55db9073",
+      "program_sha256": {
+        "Phototroph": "bd54d8be6d2f26bfa0c48de360e9c2c1115877de79102d90e209434c190f6822",
+        "Forager": "10d84263ef7a2dbe77353313ffc74bf0bc20b7e9147b2d9eb64363d98aa68aa5",
+        "Predator": "76f08a57e450cfbb73218b99b7c251257221c4da16e220307622f91b16b08f86"
+      },
+      "samples": [
+        {
+          "seconds": 300,
+          "lineages": {
+            "Phototroph": {
+              "alive": 189,
+              "births": 148,
+              "deaths": 7,
+              "killed": 6,
+              "depleted": 1,
+              "other_deaths": 0,
+              "living_max_generation": 3,
+              "last_birth_seconds": 297.4,
+              "gut_energy": 0,
+              "total_digestion_rate": 0,
+              "total_exudation_rate": 48.3
+            },
+            "Forager": {
+              "alive": 22,
+              "births": 16,
+              "deaths": 6,
+              "killed": 0,
+              "depleted": 6,
+              "other_deaths": 0,
+              "living_max_generation": 2,
+              "last_birth_seconds": 291.23333333333335,
+              "gut_energy": 35.6756,
+              "total_digestion_rate": 17.241,
+              "total_exudation_rate": 0
+            },
+            "Predator": {
+              "alive": 2,
+              "births": 1,
+              "deaths": 0,
+              "killed": 0,
+              "depleted": 0,
+              "other_deaths": 0,
+              "living_max_generation": 1,
+              "last_birth_seconds": 146.06666666666666,
+              "gut_energy": 7.0266,
+              "total_digestion_rate": 0.168,
+              "total_exudation_rate": 0
+            }
+          },
+          "predations": 6,
+          "particles_eaten": 35143,
+          "cumulative_carbon_fixed": 5173.1884,
+          "particle_inventory": {
+            "exudate": {
+              "count": 125,
+              "energy": 1048.748,
+              "minerals": 0.133
+            },
+            "tissue": {
+              "count": 28,
+              "energy": 96.9744,
+              "minerals": 2.283
+            },
+            "waste": {
+              "count": 118,
+              "energy": 413.8251,
+              "minerals": 5.3693
+            }
+          }
+        }
+      ],
+      "checks_at_all_samples": {
+        "energy_discrepancy_counts": [
+          "0"
+        ],
+        "max_abs_mineral_error": 3.979039320256561e-13,
+        "max_abs_carbon_error": 2.2737367544323206e-13,
+        "max_abs_oxygen_error": 2.2737367544323206e-13
+      }
+    },
+    {
+      "condition": "supplied archive",
+      "seed": 7,
+      "engine_sha256": "18d91ebca235e5793cbdf7e4177bc19770c1a6ffb8ada9b1a584c61d55db9073",
+      "program_sha256": {
+        "Phototroph": "bd54d8be6d2f26bfa0c48de360e9c2c1115877de79102d90e209434c190f6822",
+        "Forager": "10d84263ef7a2dbe77353313ffc74bf0bc20b7e9147b2d9eb64363d98aa68aa5",
+        "Predator": "76f08a57e450cfbb73218b99b7c251257221c4da16e220307622f91b16b08f86"
+      },
+      "samples": [
+        {
+          "seconds": 300,
+          "lineages": {
+            "Phototroph": {
+              "alive": 189,
+              "births": 156,
+              "deaths": 15,
+              "killed": 15,
+              "depleted": 0,
+              "other_deaths": 0,
+              "living_max_generation": 3,
+              "last_birth_seconds": 299.6666666666667,
+              "gut_energy": 0,
+              "total_digestion_rate": 0,
+              "total_exudation_rate": 46.38
+            },
+            "Forager": {
+              "alive": 25,
+              "births": 19,
+              "deaths": 6,
+              "killed": 0,
+              "depleted": 6,
+              "other_deaths": 0,
+              "living_max_generation": 2,
+              "last_birth_seconds": 299.6,
+              "gut_energy": 94.7276,
+              "total_digestion_rate": 6.351,
+              "total_exudation_rate": 0
+            },
+            "Predator": {
+              "alive": 4,
+              "births": 3,
+              "deaths": 0,
+              "killed": 0,
+              "depleted": 0,
+              "other_deaths": 0,
+              "living_max_generation": 2,
+              "last_birth_seconds": 287.9,
+              "gut_energy": 135.1684,
+              "total_digestion_rate": 8.235,
+              "total_exudation_rate": 0
+            }
+          },
+          "predations": 15,
+          "particles_eaten": 26618,
+          "cumulative_carbon_fixed": 5100.1243,
+          "particle_inventory": {
+            "exudate": {
+              "count": 137,
+              "energy": 1047.444,
+              "minerals": 0.0019
+            },
+            "tissue": {
+              "count": 25,
+              "energy": 359.7399,
+              "minerals": 2.7314
+            },
+            "waste": {
+              "count": 113,
+              "energy": 539.0054,
+              "minerals": 8.1204
+            }
+          }
+        }
+      ],
+      "checks_at_all_samples": {
+        "energy_discrepancy_counts": [
+          "0"
+        ],
+        "max_abs_mineral_error": 2.8421709430404007e-13,
+        "max_abs_carbon_error": 2.2737367544323206e-13,
+        "max_abs_oxygen_error": 3.410605131648481e-13
+      }
+    },
+    {
+      "condition": "revised pond",
+      "seed": 42,
+      "engine_sha256": "057d3af6fe841a7e437e5d126839da0b748b05c4da4031817be12a8125bd75eb",
+      "program_sha256": {
+        "Phototroph": "da89d6be90cca56d730d3ff352cb25f87f0ae690581726b9214c2cf2465312af",
+        "Forager": "31bd332eb4ea3adf73c9a6a11efeea9e73c0dbd0b69fe198f5d6842569dee753",
+        "Predator": "e4650b6528bcafb2e5228853f91454c85361ac2f08706008fad933cb5fec9d86"
+      },
+      "samples": [
+        {
+          "seconds": 300,
+          "lineages": {
+            "Phototroph": {
+              "alive": 118,
+              "births": 135,
+              "deaths": 65,
+              "killed": 16,
+              "depleted": 49,
+              "other_deaths": 0,
+              "living_max_generation": 2,
+              "last_birth_seconds": 298,
+              "gut_energy": 0,
+              "total_digestion_rate": 0,
+              "total_exudation_rate": 132.96
+            },
+            "Forager": {
+              "alive": 3,
+              "births": 6,
+              "deaths": 15,
+              "killed": 1,
+              "depleted": 14,
+              "other_deaths": 0,
+              "living_max_generation": 0,
+              "last_birth_seconds": 250.03333333333333,
+              "gut_energy": 6.9348,
+              "total_digestion_rate": 2.28,
+              "total_exudation_rate": 0
+            },
+            "Predator": {
+              "alive": 2,
+              "births": 3,
+              "deaths": 2,
+              "killed": 1,
+              "depleted": 1,
+              "other_deaths": 0,
+              "living_max_generation": 1,
+              "last_birth_seconds": 285.5,
+              "gut_energy": 5.1598,
+              "total_digestion_rate": 33.123,
+              "total_exudation_rate": 0
+            }
+          },
+          "predations": 18,
+          "particles_eaten": 19423,
+          "cumulative_carbon_fixed": 5088.6577,
+          "particle_inventory": {
+            "exudate": {
+              "count": 708,
+              "energy": 3824.086,
+              "minerals": 2.4717
+            },
+            "tissue": {
+              "count": 251,
+              "energy": 3029.6643,
+              "minerals": 58.4709
+            },
+            "waste": {
+              "count": 113,
+              "energy": 431.3413,
+              "minerals": 10.0736
+            }
+          }
+        },
+        {
+          "seconds": 600,
+          "lineages": {
+            "Phototroph": {
+              "alive": 123,
+              "births": 255,
+              "deaths": 180,
+              "killed": 43,
+              "depleted": 137,
+              "other_deaths": 0,
+              "living_max_generation": 2,
+              "last_birth_seconds": 598.1333333333333,
+              "gut_energy": 0,
+              "total_digestion_rate": 0,
+              "total_exudation_rate": 125.1
+            },
+            "Forager": {
+              "alive": 0,
+              "births": 7,
+              "deaths": 19,
+              "killed": 1,
+              "depleted": 18,
+              "other_deaths": 0,
+              "living_max_generation": null,
+              "last_birth_seconds": 333.23333333333335,
+              "gut_energy": 0,
+              "total_digestion_rate": 0,
+              "total_exudation_rate": 0
+            },
+            "Predator": {
+              "alive": 6,
+              "births": 10,
+              "deaths": 5,
+              "killed": 2,
+              "depleted": 3,
+              "other_deaths": 0,
+              "living_max_generation": 2,
+              "last_birth_seconds": 592.1,
+              "gut_energy": 33.9045,
+              "total_digestion_rate": 0,
+              "total_exudation_rate": 0
+            }
+          },
+          "predations": 46,
+          "particles_eaten": 22441,
+          "cumulative_carbon_fixed": 10629.6924,
+          "particle_inventory": {
+            "exudate": {
+              "count": 887,
+              "energy": 3751.9385,
+              "minerals": 1.5745
+            },
+            "tissue": {
+              "count": 399,
+              "energy": 2572.6757,
+              "minerals": 52.2278
+            },
+            "waste": {
+              "count": 138,
+              "energy": 323.9703,
+              "minerals": 10.1222
+            }
+          }
+        },
+        {
+          "seconds": 900,
+          "lineages": {
+            "Phototroph": {
+              "alive": 100,
+              "births": 360,
+              "deaths": 308,
+              "killed": 68,
+              "depleted": 240,
+              "other_deaths": 0,
+              "living_max_generation": 2,
+              "last_birth_seconds": 899.6,
+              "gut_energy": 0,
+              "total_digestion_rate": 0,
+              "total_exudation_rate": 100.62
+            },
+            "Forager": {
+              "alive": 0,
+              "births": 7,
+              "deaths": 19,
+              "killed": 1,
+              "depleted": 18,
+              "other_deaths": 0,
+              "living_max_generation": null,
+              "last_birth_seconds": 333.23333333333335,
+              "gut_energy": 0,
+              "total_digestion_rate": 0,
+              "total_exudation_rate": 0
+            },
+            "Predator": {
+              "alive": 6,
+              "births": 15,
+              "deaths": 10,
+              "killed": 4,
+              "depleted": 6,
+              "other_deaths": 0,
+              "living_max_generation": 1,
+              "last_birth_seconds": 889.9333333333333,
+              "gut_energy": 89.1039,
+              "total_digestion_rate": 3.12,
+              "total_exudation_rate": 0
+            }
+          },
+          "predations": 73,
+          "particles_eaten": 25073,
+          "cumulative_carbon_fixed": 15406.3134,
+          "particle_inventory": {
+            "exudate": {
+              "count": 741,
+              "energy": 3544.6105,
+              "minerals": 2.2351
+            },
+            "tissue": {
+              "count": 402,
+              "energy": 3024.7296,
+              "minerals": 58.976
+            },
+            "waste": {
+              "count": 141,
+              "energy": 296.9898,
+              "minerals": 8.7017
+            }
+          }
+        }
+      ],
+      "checks_at_all_samples": {
+        "energy_discrepancy_counts": [
+          "0"
+        ],
+        "max_abs_mineral_error": 1.1368683772161603e-13,
+        "max_abs_carbon_error": 2.2737367544323206e-13,
+        "max_abs_oxygen_error": 6.821210263296962e-13,
+        "long_ecosystem": {
+          "noExternalOrganicFood": true,
+          "producerLineageReproducesAcrossGenerations": false,
+          "foragerSurvives": false,
+          "predatorSurvives": true,
+          "foragerReproduces": false,
+          "predatorReproduces": false,
+          "attacksOccur": true,
+          "predationOccurs": true,
+          "Phototroph birth after 600s": true,
+          "Forager birth after 600s": false,
+          "Predator birth after 600s": true
+        }
+      }
+    },
+    {
+      "condition": "revised pond",
+      "seed": 7,
+      "engine_sha256": "057d3af6fe841a7e437e5d126839da0b748b05c4da4031817be12a8125bd75eb",
+      "program_sha256": {
+        "Phototroph": "da89d6be90cca56d730d3ff352cb25f87f0ae690581726b9214c2cf2465312af",
+        "Forager": "31bd332eb4ea3adf73c9a6a11efeea9e73c0dbd0b69fe198f5d6842569dee753",
+        "Predator": "e4650b6528bcafb2e5228853f91454c85361ac2f08706008fad933cb5fec9d86"
+      },
+      "samples": [
+        {
+          "seconds": 300,
+          "lineages": {
+            "Phototroph": {
+              "alive": 110,
+              "births": 127,
+              "deaths": 65,
+              "killed": 21,
+              "depleted": 44,
+              "other_deaths": 0,
+              "living_max_generation": 2,
+              "last_birth_seconds": 299.1,
+              "gut_energy": 0,
+              "total_digestion_rate": 0,
+              "total_exudation_rate": 130.14
+            },
+            "Forager": {
+              "alive": 6,
+              "births": 8,
+              "deaths": 14,
+              "killed": 0,
+              "depleted": 14,
+              "other_deaths": 0,
+              "living_max_generation": 1,
+              "last_birth_seconds": 282.9,
+              "gut_energy": 19.0949,
+              "total_digestion_rate": 2.52,
+              "total_exudation_rate": 0
+            },
+            "Predator": {
+              "alive": 5,
+              "births": 5,
+              "deaths": 1,
+              "killed": 0,
+              "depleted": 1,
+              "other_deaths": 0,
+              "living_max_generation": 2,
+              "last_birth_seconds": 296.3,
+              "gut_energy": 1.4981,
+              "total_digestion_rate": 0,
+              "total_exudation_rate": 0
+            }
+          },
+          "predations": 21,
+          "particles_eaten": 25017,
+          "cumulative_carbon_fixed": 4862.3821,
+          "particle_inventory": {
+            "exudate": {
+              "count": 639,
+              "energy": 3358.0475,
+              "minerals": 1.975
+            },
+            "tissue": {
+              "count": 238,
+              "energy": 2601.3702,
+              "minerals": 51.104
+            },
+            "waste": {
+              "count": 130,
+              "energy": 482.0051,
+              "minerals": 12.4896
+            }
+          }
+        }
+      ],
+      "checks_at_all_samples": {
+        "energy_discrepancy_counts": [
+          "0"
+        ],
+        "max_abs_mineral_error": 5.684341886080802e-14,
+        "max_abs_carbon_error": 2.2737367544323206e-13,
+        "max_abs_oxygen_error": 1.3642420526593924e-12
+      }
+    },
+    {
+      "condition": "carbon exporters closed",
+      "seed": 42,
+      "engine_sha256": "057d3af6fe841a7e437e5d126839da0b748b05c4da4031817be12a8125bd75eb",
+      "program_sha256": {
+        "Phototroph": "4073261dca72e350b1f5f05dd58f643a2715a966f8f1725fbea64997ebbe76a0",
+        "Forager": "31bd332eb4ea3adf73c9a6a11efeea9e73c0dbd0b69fe198f5d6842569dee753",
+        "Predator": "e4650b6528bcafb2e5228853f91454c85361ac2f08706008fad933cb5fec9d86"
+      },
+      "samples": [
+        {
+          "seconds": 300,
+          "lineages": {
+            "Phototroph": {
+              "alive": 161,
+              "births": 199,
+              "deaths": 86,
+              "killed": 6,
+              "depleted": 80,
+              "other_deaths": 0,
+              "living_max_generation": 2,
+              "last_birth_seconds": 299.2,
+              "gut_energy": 0,
+              "total_digestion_rate": 0,
+              "total_exudation_rate": 0
+            },
+            "Forager": {
+              "alive": 1,
+              "births": 0,
+              "deaths": 11,
+              "killed": 6,
+              "depleted": 5,
+              "other_deaths": 0,
+              "living_max_generation": 0,
+              "last_birth_seconds": null,
+              "gut_energy": 1.4391,
+              "total_digestion_rate": 7.02,
+              "total_exudation_rate": 0
+            },
+            "Predator": {
+              "alive": 1,
+              "births": 1,
+              "deaths": 1,
+              "killed": 0,
+              "depleted": 1,
+              "other_deaths": 0,
+              "living_max_generation": 1,
+              "last_birth_seconds": 214.56666666666666,
+              "gut_energy": 38.9579,
+              "total_digestion_rate": 5.31,
+              "total_exudation_rate": 0
+            }
+          },
+          "predations": 12,
+          "particles_eaten": 573,
+          "cumulative_carbon_fixed": 4952.0088,
+          "particle_inventory": {
+            "exudate": {
+              "count": 153,
+              "energy": 847.92,
+              "minerals": 0.1731
+            },
+            "tissue": {
+              "count": 285,
+              "energy": 3409.0966,
+              "minerals": 65.5875
+            },
+            "waste": {
+              "count": 47,
+              "energy": 190.7608,
+              "minerals": 6.8363
+            }
+          }
+        }
+      ],
+      "checks_at_all_samples": {
+        "energy_discrepancy_counts": [
+          "0"
+        ],
+        "max_abs_mineral_error": 1.1368683772161603e-13,
+        "max_abs_carbon_error": 6.821210263296962e-13,
+        "max_abs_oxygen_error": 2.2737367544323206e-13
+      }
+    },
+    {
+      "condition": "uniform composition by origin",
+      "seed": 42,
+      "engine_sha256": "902fc60fdc3e86257a1d0cc57c1653a89eaca9184f253960844341ed35f41398",
+      "program_sha256": {
+        "Phototroph": "da89d6be90cca56d730d3ff352cb25f87f0ae690581726b9214c2cf2465312af",
+        "Forager": "31bd332eb4ea3adf73c9a6a11efeea9e73c0dbd0b69fe198f5d6842569dee753",
+        "Predator": "e4650b6528bcafb2e5228853f91454c85361ac2f08706008fad933cb5fec9d86"
+      },
+      "samples": [
+        {
+          "seconds": 300,
+          "lineages": {
+            "Phototroph": {
+              "alive": 115,
+              "births": 124,
+              "deaths": 57,
+              "killed": 18,
+              "depleted": 39,
+              "other_deaths": 0,
+              "living_max_generation": 2,
+              "last_birth_seconds": 298.73333333333335,
+              "gut_energy": 0,
+              "total_digestion_rate": 0,
+              "total_exudation_rate": 137.94
+            },
+            "Forager": {
+              "alive": 0,
+              "births": 6,
+              "deaths": 18,
+              "killed": 0,
+              "depleted": 18,
+              "other_deaths": 0,
+              "living_max_generation": null,
+              "last_birth_seconds": 217.7,
+              "gut_energy": 0,
+              "total_digestion_rate": 0,
+              "total_exudation_rate": 0
+            },
+            "Predator": {
+              "alive": 4,
+              "births": 3,
+              "deaths": 0,
+              "killed": 0,
+              "depleted": 0,
+              "other_deaths": 0,
+              "living_max_generation": 2,
+              "last_birth_seconds": 296.6333333333333,
+              "gut_energy": 12.0306,
+              "total_digestion_rate": 14.706,
+              "total_exudation_rate": 0
+            }
+          },
+          "predations": 18,
+          "particles_eaten": 16057,
+          "cumulative_carbon_fixed": 5032.1673,
+          "particle_inventory": {
+            "exudate": {
+              "count": 732,
+              "energy": 3703.342,
+              "minerals": 2.1803
+            },
+            "tissue": {
+              "count": 231,
+              "energy": 2789.7188,
+              "minerals": 48.7489
+            },
+            "waste": {
+              "count": 128,
+              "energy": 716.5493,
+              "minerals": 15.7116
+            }
+          }
+        }
+      ],
+      "checks_at_all_samples": {
+        "energy_discrepancy_counts": [
+          "0"
+        ],
+        "max_abs_mineral_error": 1.1368683772161603e-13,
+        "max_abs_carbon_error": 4.547473508864641e-13,
+        "max_abs_oxygen_error": 4.547473508864641e-13
+      }
+    },
+    {
+      "condition": "flank-mounted Forager constrictor",
+      "seed": 42,
+      "engine_sha256": "057d3af6fe841a7e437e5d126839da0b748b05c4da4031817be12a8125bd75eb",
+      "program_sha256": {
+        "Phototroph": "da89d6be90cca56d730d3ff352cb25f87f0ae690581726b9214c2cf2465312af",
+        "Forager": "60ba57420966855af1eb8e92e2785b30c313bb94f798ef5834741c7c1aa63f28",
+        "Predator": "e4650b6528bcafb2e5228853f91454c85361ac2f08706008fad933cb5fec9d86"
+      },
+      "samples": [
+        {
+          "seconds": 300,
+          "lineages": {
+            "Phototroph": {
+              "alive": 116,
+              "births": 131,
+              "deaths": 63,
+              "killed": 18,
+              "depleted": 45,
+              "other_deaths": 0,
+              "living_max_generation": 2,
+              "last_birth_seconds": 297.6,
+              "gut_energy": 0,
+              "total_digestion_rate": 0,
+              "total_exudation_rate": 135.96
+            },
+            "Forager": {
+              "alive": 12,
+              "births": 6,
+              "deaths": 6,
+              "killed": 0,
+              "depleted": 6,
+              "other_deaths": 0,
+              "living_max_generation": 1,
+              "last_birth_seconds": 281.9,
+              "gut_energy": 83.6897,
+              "total_digestion_rate": 10.758,
+              "total_exudation_rate": 0
+            },
+            "Predator": {
+              "alive": 2,
+              "births": 2,
+              "deaths": 1,
+              "killed": 1,
+              "depleted": 0,
+              "other_deaths": 0,
+              "living_max_generation": 1,
+              "last_birth_seconds": 203.03333333333333,
+              "gut_energy": 14.6238,
+              "total_digestion_rate": 12.15,
+              "total_exudation_rate": 0
+            }
+          },
+          "predations": 19,
+          "particles_eaten": 26010,
+          "cumulative_carbon_fixed": 5092.8189,
+          "particle_inventory": {
+            "exudate": {
+              "count": 620,
+              "energy": 3349.11,
+              "minerals": 1.3859
+            },
+            "tissue": {
+              "count": 183,
+              "energy": 1967.5839,
+              "minerals": 37.0129
+            },
+            "waste": {
+              "count": 132,
+              "energy": 661.1879,
+              "minerals": 18.3539
+            }
+          }
+        },
+        {
+          "seconds": 600,
+          "lineages": {
+            "Phototroph": {
+              "alive": 121,
+              "births": 243,
+              "deaths": 170,
+              "killed": 40,
+              "depleted": 130,
+              "other_deaths": 0,
+              "living_max_generation": 2,
+              "last_birth_seconds": 589.2,
+              "gut_energy": 0,
+              "total_digestion_rate": 0,
+              "total_exudation_rate": 131.88
+            },
+            "Forager": {
+              "alive": 8,
+              "births": 11,
+              "deaths": 15,
+              "killed": 0,
+              "depleted": 15,
+              "other_deaths": 0,
+              "living_max_generation": 2,
+              "last_birth_seconds": 573.7666666666667,
+              "gut_energy": 78.5688,
+              "total_digestion_rate": 15.195,
+              "total_exudation_rate": 0
+            },
+            "Predator": {
+              "alive": 5,
+              "births": 8,
+              "deaths": 4,
+              "killed": 1,
+              "depleted": 3,
+              "other_deaths": 0,
+              "living_max_generation": 1,
+              "last_birth_seconds": 565.8333333333334,
+              "gut_energy": 58.3313,
+              "total_digestion_rate": 25.329,
+              "total_exudation_rate": 0
+            }
+          },
+          "predations": 41,
+          "particles_eaten": 35717,
+          "cumulative_carbon_fixed": 10580.9111,
+          "particle_inventory": {
+            "exudate": {
+              "count": 733,
+              "energy": 3447.3167,
+              "minerals": 1.3632
+            },
+            "tissue": {
+              "count": 311,
+              "energy": 2468.7738,
+              "minerals": 48.27
+            },
+            "waste": {
+              "count": 158,
+              "energy": 505.8912,
+              "minerals": 15.6295
+            }
+          }
+        },
+        {
+          "seconds": 900,
+          "lineages": {
+            "Phototroph": {
+              "alive": 116,
+              "births": 354,
+              "deaths": 286,
+              "killed": 54,
+              "depleted": 232,
+              "other_deaths": 0,
+              "living_max_generation": 2,
+              "last_birth_seconds": 898.9,
+              "gut_energy": 0,
+              "total_digestion_rate": 0,
+              "total_exudation_rate": 120.3
+            },
+            "Forager": {
+              "alive": 5,
+              "births": 14,
+              "deaths": 21,
+              "killed": 0,
+              "depleted": 21,
+              "other_deaths": 0,
+              "living_max_generation": 2,
+              "last_birth_seconds": 734.3333333333334,
+              "gut_energy": 15.5647,
+              "total_digestion_rate": 10.707,
+              "total_exudation_rate": 0
+            },
+            "Predator": {
+              "alive": 4,
+              "births": 8,
+              "deaths": 5,
+              "killed": 1,
+              "depleted": 4,
+              "other_deaths": 0,
+              "living_max_generation": 1,
+              "last_birth_seconds": 565.8333333333334,
+              "gut_energy": 49.9328,
+              "total_digestion_rate": 0,
+              "total_exudation_rate": 0
+            }
+          },
+          "predations": 55,
+          "particles_eaten": 39961,
+          "cumulative_carbon_fixed": 15761.934,
+          "particle_inventory": {
+            "exudate": {
+              "count": 775,
+              "energy": 3635.7002,
+              "minerals": 1.6397
+            },
+            "tissue": {
+              "count": 406,
+              "energy": 2964.566,
+              "minerals": 57.6295
+            },
+            "waste": {
+              "count": 155,
+              "energy": 210.5972,
+              "minerals": 8.7358
+            }
+          }
+        }
+      ],
+      "checks_at_all_samples": {
+        "energy_discrepancy_counts": [
+          "0"
+        ],
+        "max_abs_mineral_error": 1.1368683772161603e-13,
+        "max_abs_carbon_error": 9.094947017729282e-13,
+        "max_abs_oxygen_error": 1.3642420526593924e-12,
+        "long_ecosystem": {
+          "noExternalOrganicFood": true,
+          "producerLineageReproducesAcrossGenerations": false,
+          "foragerSurvives": true,
+          "predatorSurvives": true,
+          "foragerReproduces": true,
+          "predatorReproduces": false,
+          "attacksOccur": true,
+          "predationOccurs": true,
+          "Phototroph birth after 600s": true,
+          "Forager birth after 600s": true,
+          "Predator birth after 600s": false
+        }
+      }
+    },
+    {
+      "condition": "flank-mounted Forager constrictor",
+      "seed": 7,
+      "engine_sha256": "057d3af6fe841a7e437e5d126839da0b748b05c4da4031817be12a8125bd75eb",
+      "program_sha256": {
+        "Phototroph": "da89d6be90cca56d730d3ff352cb25f87f0ae690581726b9214c2cf2465312af",
+        "Forager": "60ba57420966855af1eb8e92e2785b30c313bb94f798ef5834741c7c1aa63f28",
+        "Predator": "e4650b6528bcafb2e5228853f91454c85361ac2f08706008fad933cb5fec9d86"
+      },
+      "samples": [
+        {
+          "seconds": 300,
+          "lineages": {
+            "Phototroph": {
+              "alive": 111,
+              "births": 124,
+              "deaths": 61,
+              "killed": 20,
+              "depleted": 41,
+              "other_deaths": 0,
+              "living_max_generation": 2,
+              "last_birth_seconds": 297.9,
+              "gut_energy": 0,
+              "total_digestion_rate": 0,
+              "total_exudation_rate": 129.72
+            },
+            "Forager": {
+              "alive": 11,
+              "births": 6,
+              "deaths": 7,
+              "killed": 0,
+              "depleted": 7,
+              "other_deaths": 0,
+              "living_max_generation": 1,
+              "last_birth_seconds": 281.46666666666664,
+              "gut_energy": 73.8967,
+              "total_digestion_rate": 13.737,
+              "total_exudation_rate": 0
+            },
+            "Predator": {
+              "alive": 4,
+              "births": 4,
+              "deaths": 1,
+              "killed": 0,
+              "depleted": 1,
+              "other_deaths": 0,
+              "living_max_generation": 2,
+              "last_birth_seconds": 280.76666666666665,
+              "gut_energy": 34.5731,
+              "total_digestion_rate": 13.377,
+              "total_exudation_rate": 0
+            }
+          },
+          "predations": 20,
+          "particles_eaten": 23784,
+          "cumulative_carbon_fixed": 4849.7245,
+          "particle_inventory": {
+            "exudate": {
+              "count": 616,
+              "energy": 3184.8931,
+              "minerals": 1.904
+            },
+            "tissue": {
+              "count": 193,
+              "energy": 2232.358,
+              "minerals": 42.8052
+            },
+            "waste": {
+              "count": 146,
+              "energy": 644.2998,
+              "minerals": 15.5471
+            }
+          }
+        }
+      ],
+      "checks_at_all_samples": {
+        "energy_discrepancy_counts": [
+          "0"
+        ],
+        "max_abs_mineral_error": 2.2737367544323206e-13,
+        "max_abs_carbon_error": 4.547473508864641e-13,
+        "max_abs_oxygen_error": 5.684341886080801e-13
+      }
+    }
+  ]
+}

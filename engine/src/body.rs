@@ -6,7 +6,7 @@
 //! targets nor damage create or erase material. World handles storage overflow.
 mod funding;
 pub(crate) use funding::BodyFunding;
-use crate::cellular::{AssemblyInstance, AssemblyKind, CellularState, MechanismKind, RecipeIdentity};
+use crate::cellular::{AssemblyInstance, AssemblyKind, CellularState, MechanismKind};
 use crate::checkpoint::{ensure, Reader, Result as CheckpointResult, Writer};
 
 #[cfg(test)]
@@ -869,6 +869,21 @@ impl Body {
             bite_extraction_fraction: 1.0,
         };
         if let Some(state) = &self.cellular {
+            for assembly in &state.assemblies {
+                let AssemblyKind::Organelle(kind) = assembly.recipe.kind else { continue };
+                let physical = measure(assembly);
+                let delta = assembly.operating_mass(physical) - physical;
+                match kind {
+                    Digestive => capacities.digestion += 65.0 * delta,
+                    Photosynthetic => capacities.photosynthesis += 55.0 * delta,
+                    Transporter => capacities.uptake += 0.8 * delta,
+                    Flagellum => {
+                        capacities.thrust += 100.0 * delta;
+                        capacities.turn += 25.0 * delta;
+                    }
+                    _ => {}
+                }
+            }
             state.add_mechanism_capacities(&mut capacities, self.area, measure);
         }
         capacities
@@ -906,7 +921,7 @@ impl Body {
         if let Some(state) = &self.cellular {
             for assembly in &state.assemblies {
                 if assembly.recipe.kind != AssemblyKind::Mechanism(MechanismKind::Shield) { continue; }
-                let facing = (contact_angle - assembly.recipe.at).cos().max(0.0);
+                let facing = (contact_angle - assembly.at()).cos().max(0.0);
                 protection += 6.0 * assembly.functional_mass() / self.area.sqrt()
                     * facing * (0.5 + 0.5 * assembly.activity);
             }
@@ -928,7 +943,7 @@ impl Body {
                 let multiplier = if local {
                     let fraction = hits.iter().map(|&(angle, fraction)| {
                         if angle.is_finite() {
-                            nonnegative(fraction) * (angle - assembly.recipe.at).cos().max(0.0)
+                            nonnegative(fraction) * (angle - assembly.at()).cos().max(0.0)
                         } else { 0.0 }
                     }).sum::<f64>();
                     1.0 - effort(fraction)
@@ -1238,6 +1253,15 @@ impl Body {
         report
     }
 
+    pub fn mount_at(&self, assembly: &AssemblyInstance) -> f64 { assembly.at() }
+
+    /// The strongest intact constrictor sets the normal of the cleavage plane.
+    /// Its immutable ID breaks ties between equally active sites.
+    pub fn cleavage_axis(&self) -> Option<f64> {
+        let state = self.cellular.as_ref()?;
+        state.constriction_axis.or_else(|| state.active_constrictor_axis())
+    }
+
     pub fn can_partition(&self) -> bool {
         if self.cellular.is_some() {
             self.cellular_partition_assignment().is_some()
@@ -1266,14 +1290,20 @@ impl Body {
         };
         let mut daughters = [blank.clone(), blank];
         if let Some(state) = &self.cellular {
+            let axis = self.cleavage_axis();
             for (cellular, index, side) in self.cellular_partition_assignment()? {
                 if cellular {
-                    daughters[side]
-                        .cellular
-                        .as_mut()
-                        .unwrap()
-                        .assemblies
-                        .push(state.assemblies[index].clone());
+                    let mut a = state.assemblies[index].clone();
+                    if let Some(axis) = axis.filter(|_| a.recipe.kind.surface_footprint() > 0.0) {
+                        // As one old semicircle closes into a daughter envelope, its
+                        // outer pole stays outer and its furrow edges meet at the septum.
+                        let pole = axis + if side == 0 { std::f64::consts::PI } else { 0.0 };
+                        let angle = 2.0 * a.at() - pole;
+                        let angle = angle.sin().atan2(angle.cos());
+                        if (angle - a.recipe.at).abs() > EPS { a.inherited_at = Some(angle); }
+                        else { a.inherited_at = None; }
+                    }
+                    daughters[side].cellular.as_mut().unwrap().assemblies.push(a);
                 } else {
                     daughters[side].organs.push(self.organs[index].clone());
                 }
@@ -1296,14 +1326,7 @@ impl Body {
     /// assembled from products is as essential as the founder's physical core;
     /// incomplete cores cannot support either daughter. No recipe is cloned.
     fn cellular_partition_assignment(&self) -> Option<Vec<(bool, usize, usize)>> {
-        // Distribute already duplicated machinery before balancing the remaining
-        // load. A packing fallback preserves divisions that the old load-only
-        // placement can fit when the identity preference cannot.
-        self.cellular_partition_with_balance(true)
-            .or_else(|| self.cellular_partition_with_balance(false))
-    }
-
-    fn cellular_partition_with_balance(&self, balance_identities: bool) -> Option<Vec<(bool, usize, usize)>> {
+        let axis = self.cleavage_axis();
         let state = self.cellular.as_ref()?;
         let area = self.area * 0.5;
         if area < MIN_AREA || !self.viable() {
@@ -1316,12 +1339,9 @@ impl Body {
             core: f64,
             inside: f64,
             surface: f64,
-            identity: usize,
-            functional: bool,
+            side: Option<usize>,
         }
         let mut items = Vec::with_capacity(self.organs.len() + state.assemblies.len());
-        let mut identities = std::collections::HashMap::new();
-        let mut functional_copies = vec![[0_usize; 2]; FAMILY_COUNT];
         for (index, organ) in self.organs.iter().enumerate() {
             items.push(Item {
                 cellular: false,
@@ -1334,15 +1354,15 @@ impl Body {
                 },
                 inside: organ.internal_space(),
                 surface: organ.surface_space(),
-                identity: organ.kind as usize,
-                functional: organ.functional_mass() > 0.0,
+                side: None,
             });
         }
         for (index, assembly) in state.assemblies.iter().enumerate() {
-            let identity = *identities.entry(RecipeIdentity::from_recipe(&assembly.recipe))
-                .or_insert_with(|| {
-                    functional_copies.push([0; 2]);
-                    functional_copies.len() - 1
+            let side = axis.filter(|_| assembly.recipe.kind.surface_footprint() > 0.0)
+                .and_then(|normal| {
+                    let projection = (assembly.at() - normal).cos();
+                    // Exactly on the cleavage line, the patch fits either daughter.
+                    (projection.abs() > 1e-6).then_some(usize::from(projection > 0.0))
                 });
             items.push(Item {
                 cellular: true,
@@ -1355,8 +1375,7 @@ impl Body {
                 },
                 inside: assembly.internal_space(),
                 surface: assembly.surface_space(),
-                identity,
-                functional: assembly.functional_mass() > 0.0,
+                side,
             });
         }
         if items.iter().filter(|item| item.core > 0.0).count() < 2 {
@@ -1381,28 +1400,28 @@ impl Body {
                     (item.inside / internal).max(item.surface / surface)
                 }
             };
-            yc.cmp(&xc)
+            y.side.is_some().cmp(&x.side.is_some()).then(yc.cmp(&xc))
                 .then_with(|| score(y).total_cmp(&score(x)))
                 .then(x.id.cmp(&y.id))
         });
         let mut assignment = Vec::with_capacity(items.len());
         for item in items {
-            let load = |side: usize| (used[side][0] / internal).max(used[side][1] / surface);
-            let first = if item.core > 0.0 {
+            // An interior compartment cannot relieve an overloaded surface.
+            // Balance each freely movable item by the space it actually occupies.
+            let load = |side: usize| used[side][0] * item.inside / internal.powi(2)
+                + used[side][1] * item.surface / surface.powi(2);
+            let first = item.side.unwrap_or_else(|| if item.core > 0.0 {
                 usize::from(core[1] < core[0])
-            } else if balance_identities && item.functional
-                && functional_copies[item.identity][0] != functional_copies[item.identity][1] {
-                usize::from(functional_copies[item.identity][1] < functional_copies[item.identity][0])
             } else {
                 usize::from(load(1) < load(0))
-            };
+            });
             let fits = |side: usize| {
                 used[side][0] + item.inside <= internal + EPS
                     && used[side][1] + item.surface <= surface + EPS
             };
             let side = if fits(first) {
                 first
-            } else if fits(1 - first) {
+            } else if item.side.is_none() && fits(1 - first) {
                 1 - first
             } else {
                 return None;
@@ -1410,9 +1429,6 @@ impl Body {
             used[side][0] += item.inside;
             used[side][1] += item.surface;
             core[side] += item.core;
-            if item.functional {
-                functional_copies[item.identity][side] += 1;
-            }
             assignment.push((item.cellular, item.index, side));
         }
         if core.iter().any(|&mass| mass + EPS < required) {
@@ -1873,7 +1889,7 @@ mod tests {
                 body.organs.push(Organelle { id: (i+2) as u32, kind, mass,
                     integrity: if i%4 == 0 {0.1} else {0.873}, embodied_energy: 0.0 });
                 let product = ProductDef { name: "Frame".into(),kind: ProductKind::Scaffold,half_life:0.0 };
-                state.assemblies.push(AssemblyInstance { id:(i+1) as u32,
+                state.assemblies.push(AssemblyInstance { inherited_at: None, id:(i+1) as u32,
                     recipe:Rc::new(Recipe { name:format!("Unit{i}"),kind:AssemblyKind::Organelle(kind),
                         parts:vec![RecipePart{product,required_mass:mass}],at:0.0,direction:0.0 }),
                     ingredients:vec![Ingredient{mass:if i%3 == 0 {mass*0.5}else{mass},embodied_energy:0.0}],

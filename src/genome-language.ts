@@ -129,12 +129,12 @@ const sensorRows: ReadonlyArray<readonly [string, PrimitiveType, string]> = [
   ['object.contrast', 'scalar', 'Measured optical contrast. Selection depends on visibility, angle and distance, never hidden energy.'],
   ['object.pigment', 'scalar', 'Measured visible surface appearance. This is not a species, feeding-strategy or edible flag.'],
   ['object.motion', 'vec2', 'Estimated relative motion of the visible object in the cell’s body frame. Zero when invalid.'],
-  ['gut.exudate.energy', 'scalar', 'Raw energy in captured soluble organic releases. Exudate is readily processed; it is separate from usable energy.'],
-  ['gut.exudate.nutrients', 'scalar', 'Mineral material carried with exudate in the gut. Digestion can transfer it to free reserves.'],
-  ['gut.tissue.energy', 'scalar', 'Raw energy in captured cell tissue. Tissue takes more digestive work than exudate and produces refractory waste.'],
-  ['gut.tissue.nutrients', 'scalar', 'Mineral material in captured cell tissue. Some remains in the waste produced during digestion.'],
-  ['gut.waste.energy', 'scalar', 'Residual raw energy in captured waste. Waste is slow to process and yields less usable energy.'],
-  ['gut.waste.nutrients', 'scalar', 'Mineral material in captured waste. Processing returns unassimilated minerals to the surrounding water.'],
+  ['gut.soluble.energy', 'scalar', 'Chemical energy in the soluble fraction of captured food.'],
+  ['gut.soluble.nutrients', 'scalar', 'Minerals held with soluble carbon in the gut. Digestion can transfer it to free reserves.'],
+  ['gut.structural.energy', 'scalar', 'Chemical energy in the structural fraction of captured food.'],
+  ['gut.structural.nutrients', 'scalar', 'Minerals held with structural carbon in the gut. Some remains in the waste produced during digestion.'],
+  ['gut.bound.energy', 'scalar', 'Chemical energy in the refractory, bound fraction of captured food.'],
+  ['gut.bound.nutrients', 'scalar', 'Minerals held with bound carbon in the gut. Processing returns unassimilated minerals to the surrounding water.'],
   ['expression.rate', 'scalar', 'Assembly-protein material synthesized per second during the last completed tick. Synthesis spends energy and minerals and shares finite core throughput with assembly and growth.'],
   ['assembly.rate', 'scalar', 'Organelle material assembled per second during the last completed tick. Assembly consumes previously synthesized proteins of the matching family.'],
   ['assembly.capacity', 'scalar', 'Current shared core work capacity in material-equivalent units per second. Protein synthesis, organelle assembly, frame growth, recycling and repair compete for it.'],
@@ -200,13 +200,15 @@ export const CELLULAR_CONSTRUCTORS: readonly GenomeSymbol[] = Object.freeze(CELL
       ? 'Declares a persistent regulatory product. Its positive half-life is measured in seconds; pool.Name reads its physical stock. Synthesis costs material and energy, and stock partitions at division.'
       : role === 'adhesin' ? 'Finishes a named scaffold precursor into a binding protein. Expression consumes existing precursor stock, usable energy and translation work. Adhesion surfaces install the finished protein together with membrane and anchor material.'
       : `Declares a ${role} product. Genes synthesize its stock; assembly recipes consume it as a physical component. A declaration by itself creates no material.`)));
-export const CONTACT_RECIPE_KINDS = ['pierce()', 'engulf()', 'adhere()', 'piercer', 'phagocyte'] as const;
+export const CONTACT_RECIPE_KINDS = ['pierce()', 'import(particle)', 'engulf()', 'adhere()', 'piercer', 'phagocyte'] as const;
 export const CONTACT_FIELDS: readonly GenomeSymbol[] = [
   ['message_valid', 'boolean', 'True when this surface’s current contact partner publishes an occupied marker.'],
   ['message', 'scalar', 'The marker presented by this physical contact partner. Check peer.message_valid to distinguish an absent marker from zero.'],
   ['signal_valid', 'boolean', 'True when this contact partner publishes an occupied second channel.'],
   ['signal', 'scalar', 'The second scalar published by this contact partner. Check peer.signal_valid before reading it.'],
   ['division_interface', 'boolean', 'True on the interface formed at division, including the retained interface after the cells separate into daughters. False on ordinary encounters.'],
+  ['resistance', 'scalar', 'Local physical resistance of a candidate particle at this inlet.'],
+  ['resistance_valid', 'boolean', 'A local contact receptor measured the resistance of this inlet candidate.'],
 ].map(([name, type, description]) => symbol(`peer.${name}`, 'signal', type, `peer.${name}: ${type}`, description + ' Available inside engage_when.'));
 export const CELLULAR_KEYWORDS: readonly GenomeSymbol[] = Object.freeze([
   { ...symbol('cellular', 'keyword', 'mode', 'cellular counts;', 'Starts a cellular program with whole resource counts. The earlier cellular; header uses continuous units. Declare products, express them with genes, and combine their stocks into physical assemblies.'), insertText: 'cellular counts;\n' },
@@ -214,9 +216,9 @@ export const CELLULAR_KEYWORDS: readonly GenomeSymbol[] = Object.freeze([
   { ...symbol('gene', 'keyword', 'expression', 'gene drive: Motor = expression;', 'Allocates synthesis effort to a named product. Effort is bounded to 0–1; actual production shares finite translation work, minerals, energy and space.'), insertText: 'gene ' },
   { ...symbol('assembly', 'keyword', 'recipe', 'assembly Swim: propel() { components; }', 'Names a physical recipe. Its product masses determine composition; stocks from the start of the tick are consumed as components are installed.'), insertText: 'assembly ' },
   { ...symbol('fn', 'keyword', 'declaration', 'fn response(value, threshold) = expression;', 'Defines a pure function with numeric arguments. It can read earlier bindings and start-of-tick registers. Calls expand into the bounded expression graph.'), insertText: 'fn ' },
-  { ...symbol('publish', 'keyword', 'contact message', 'publish rf001 = 17;', 'Exposes one occupied scalar register to a touching cell. The optional initializer sets its value at birth. Later register writes change the message, and clearing it withdraws the message.'), insertText: 'publish ' },
-  { ...symbol('signal', 'keyword', 'contact signal', 'signal rf002 = 0;', 'Exposes a second scalar to a touching receptor. Assign or clear this register to communicate while keeping the recognition marker stable.'), insertText: 'signal ' },
-  { ...symbol('engage_when', 'keyword', 'boolean', 'engage_when: condition;', 'Evaluated for each contact partner at a piercing, engulfing or adhesive surface. Both adhesive surfaces must allow a bond. Unguarded weapons engage by default; unguarded adhesive surfaces remain closed.'), insertText: 'engage_when: ' },
+  { ...symbol('publish', 'keyword', 'contact message', 'publish rf001;', 'Selects the marker register for display() patches. Assign a value with an ordinary register write. Only an active patch facing a working touch receptor can present it.'), insertText: 'publish ' },
+  { ...symbol('signal', 'keyword', 'contact signal', 'signal rf002;', 'Selects the payload register for display() or junction(signal). An empty register is silent. A stored zero is a valid payload.'), insertText: 'signal ' },
+  { ...symbol('engage_when', 'keyword', 'boolean', 'engage_when: condition;', 'Evaluated for each candidate at a particle inlet, piercing, engulfing or adhesive surface. Both adhesive surfaces must allow a bond. Unguarded weapons engage by default; unguarded adhesive surfaces remain closed.'), insertText: 'engage_when: ' },
   { ...symbol('start_when', 'keyword', 'boolean', 'start_when: condition;', 'Allows another instance of this recipe to start when true; defaults to true. Existing incomplete instances continue paid installation when this becomes false.'), insertText: 'start_when: ' },
   { ...symbol('recycle', 'keyword', 'scalar', 'recycle: expression;', 'Requests paid disassembly of machinery with this recipe name, bounded to 0–1; defaults to zero. Requires a built, active recycle() mechanism. Recovered ingredients keep their original identities and become available on a later tick.'), insertText: 'recycle: ' },
   { ...symbol('activity', 'keyword', 'scalar', 'activity: expression;', 'Controls the activity of this assembly, bounded to 0–1. Activity does not create missing components or substitute for a finished machine.'), insertText: 'activity: ' },
@@ -226,7 +228,7 @@ export const CELLULAR_KEYWORDS: readonly GenomeSymbol[] = Object.freeze([
 export const CELLULAR_READ_SIGNALS: readonly GenomeSymbol[] = Object.freeze(BUILTIN_SIGNALS.filter(item =>
   ['energy', 'energy.fraction', 'energy.capacity', 'age', 'speed', 'integrity', 'oxygen', 'respiration.rate', 'memory.used', 'memory.cost'].includes(item.name)
   || (item.name.startsWith('body.') && item.name !== 'body.division_ready')
-  || /^(nutrient|gut|light|heat|chemical|flow|contact|object|carbon)\./.test(item.name)));
+  || /^(nutrient|gut|carbon)\./.test(item.name)));
 const cellularReadNames = new Set(CELLULAR_READ_SIGNALS.map(item => item.name));
 export const CELLULAR_ASSEMBLY_KINDS: readonly GenomeSymbol[] = Object.freeze([
   ...ORGANELLE_CATALOG.map(item => symbol(item.kind, 'keyword', 'assembly', `${item.kind} { components; activity: expression; }`, item.description)),
@@ -291,7 +293,7 @@ export function usesCountUnits(source: string): boolean { return cellularHeader.
 
 export const COUNT_RESOURCE_SIGNALS = Object.freeze([
   'energy','energy.capacity','nutrient.stored','nutrient.capacity','gut.energy','gut.capacity',
-  'gut.exudate.energy','gut.exudate.nutrients','gut.tissue.energy','gut.tissue.nutrients','gut.waste.energy','gut.waste.nutrients',
+  'gut.soluble.energy','gut.soluble.nutrients','gut.structural.energy','gut.structural.nutrients','gut.bound.energy','gut.bound.nutrients',
   'carbon.organic','carbon.inorganic','oxygen',
 ]);
 const countSignals = CELLULAR_READ_SIGNALS.map(item => COUNT_RESOURCE_SIGNALS.includes(item.name)
@@ -309,8 +311,8 @@ export const CELLULAR_RECEPTOR_FIELDS: Readonly<Record<string, readonly Receptor
   'sense(light)': [...receptorFlags, measured('level', 'scalar', 'Brightness at the receptor attachment point, from 0 to 1.')],
   'sense(heat)': [...receptorFlags, measured('value', 'scalar', 'Temperature at the receptor attachment point, from 0 to 1.')],
   'sense(chemical)': [...receptorFlags, measured('mineral', 'scalar', 'Dissolved mineral concentration at this receptor.'), measured('organic', 'scalar', 'Organic cue concentration at this receptor, without a supplied gradient or food identity.')],
-  'sense(contact)': [...receptorFlags, measured('offset', 'vec2', 'Measured body-relative displacement to a contacting surface.'), measured('pressure', 'scalar', 'Measured contact pressure.'), measured('resistance', 'scalar', 'Measured resistance of the contacting surface.'), measured('flow', 'vec2', 'Relative water flow at the receptor, in body coordinates.'), measured('speed', 'scalar', 'Magnitude of the measured relative flow.'), measured('bearing', 'scalar', 'Body-relative direction of the measured flow, in radians.'), measured('message_valid', 'boolean', 'True when the cell touched by this receptor has populated its published scalar register.'), measured('message', 'scalar', 'The scalar that the touched cell published at the start of the tick. A published zero is valid.'), measured('signal_valid', 'boolean', 'True when the touched cell has populated its signal register.'), measured('signal', 'scalar', 'The signal payload from the same touched cell and start-of-tick snapshot as the recognition marker.'), measured('bonded','boolean','True when this receptor touches a cell directly bonded to its owner. A matching marker alone can come from a stranger.')],
-  'junction(signal)': [...receptorFlags, measured('value', 'scalar', 'Mean start-of-tick signal from directly attached peers with a working signal junction and populated signal register.'), measured('count', 'scalar', 'Number of directly attached peers contributing a signal, including a stored zero.')],
+  'sense(contact)': [...receptorFlags, measured('offset', 'vec2', 'Measured body-relative displacement to a contacting surface.'), measured('pressure', 'scalar', 'Measured contact pressure.'), measured('resistance', 'scalar', 'Measured resistance of the contacting surface.'), measured('flow', 'vec2', 'Relative water flow at the receptor, in body coordinates.'), measured('speed', 'scalar', 'Magnitude of the measured relative flow.'), measured('bearing', 'scalar', 'Body-relative direction of the measured flow, in radians.'), measured('message_valid', 'boolean', 'True when a working display on the touched patch presents a marker.'), measured('message', 'scalar', 'The scalar that the touched cell published at the start of the tick. A published zero is valid.'), measured('signal_valid', 'boolean', 'True when a working display on the touched patch presents a payload.'), measured('signal', 'scalar', 'The signal payload from the same touched cell and start-of-tick snapshot as the recognition marker.'), measured('bonded','boolean','True when this receptor touches a cell directly bonded to its owner. A matching marker alone can come from a stranger.')],
+  'junction(signal)': [...receptorFlags, measured('value', 'scalar', 'Start-of-tick payload at the paired signal port.'), measured('signal_valid', 'boolean', 'An occupied register supplies a payload across this port, including zero.'), measured('signal', 'scalar', 'Start-of-tick payload at the contacting signal port.')],
   'sense(optical)': [...receptorFlags, measured('offset', 'vec2', 'Body-relative displacement to an object visible through this receptor.'), measured('area', 'scalar', 'Measured apparent area of the visible object.'), measured('contrast', 'scalar', 'Measured optical contrast.'), measured('pigment', 'scalar', 'Measured visible surface appearance.'), measured('motion', 'vec2', 'Measured relative motion in body coordinates.')],
 });
 
@@ -589,7 +591,8 @@ function cellularCompletionContext(source: string, position: number): GenomeComp
   if (braces.length) {
     const brace = braces[braces.length - 1];
     // The opening brace follows either a named family or a mechanism call.
-    const kind = preceding[brace - 1]?.text === ')' ? preceding[brace - 3]?.text + '()' : preceding[brace - 1]?.text;
+    const header = preceding.slice(Math.max(0, brace - 5), brace).map(token => token.text);
+    const kind = header.slice(header.lastIndexOf(':') + 1).join('');
     const contactRecipe = CONTACT_RECIPE_KINDS.some(candidate => candidate === kind);
     if (!tokens.length || !tokens.some(token => token.text === ':')) return { kind: 'component', contactRecipe };
     if (tokens[0].text === 'engage_when') {
@@ -767,9 +770,9 @@ const outputExamples: Readonly<Record<string, string>> = Object.freeze({
   photosynthesize: 'photosynthesize = 1;', engulf: 'engulf = contact.valid && gut.fraction < 0.5;',
   bite: 'bite = if contact.valid && gut.fraction < 0.5 then 0.8 else 0;', defend: 'defend = if contact.valid then 0.5 else 0;',
   repair: 'repair = if integrity < 0.9 && energy.fraction > 0.5 then 0.5 else 0;', absorb: 'absorb = if nutrient.fraction < 0.8 then 1 else 0;',
-  feed: 'feed = 1;', 'digest.exudate': 'digest.exudate = if gut.exudate.energy > 0 then 1 else 0;',
-  'digest.tissue': 'digest.tissue = if gut.tissue.energy > 0 then 0.8 else 0;',
-  'digest.waste': 'digest.waste = if gut.exudate.energy + gut.tissue.energy < 1 then 1 else 0.1;',
+  feed: 'feed = 1;', 'digest.exudate': 'digest.exudate = if gut.soluble.energy > 0 then 1 else 0;',
+  'digest.tissue': 'digest.tissue = if gut.structural.energy > 0 then 0.8 else 0;',
+  'digest.waste': 'digest.waste = if gut.soluble.energy + gut.structural.energy < 1 then 1 else 0.1;',
   'scan.bearing': 'scan.bearing = sin(age * 0.2) * 1.5;', 'scan.width': 'scan.width = 3.141593;',
   'scan.target': 'scan.target = if populated(rs001) then rs001 else "";',
 });
@@ -783,7 +786,7 @@ export function genomeSymbolDocumentation(item: GenomeSymbol, counted = false): 
       notes:[mechanism.description,'Build separate mechanisms for the other operations the organism needs. Each recipe retains its physical ingredients and identity.']};
   }
   if (item.name === 'signal' && item.category === 'keyword') {
-    return { example: 'publish rf001 = 17;\nsignal rf002 = 0;\nrf002 = if energy.fraction < 0.4 then 1 else 0;',
+    return { example: 'publish rf001;\nrf001 = 17;\nsignal rf002;\nrf002 = if energy.fraction < 0.4 then 1 else 0;',
       notes: ['Contact receptors read signal_valid and signal at the start of the tick. The two public channels use distinct scalar addresses.'] };
   }
   if (item.name === 'engage_when' || CONTACT_FIELDS.some(field => field.name === item.name)) {
@@ -791,11 +794,11 @@ export function genomeSymbolDocumentation(item: GenomeSymbol, counted = false): 
     const condition = item.name === 'peer.division_interface' ? 'peer.division_interface'
       : item.name.startsWith('peer.signal') ? 'peer.signal_valid && peer.signal > 0.5'
       : '!populated(rf001) || !peer.message_valid || peer.message != rf001';
-    return { example: `publish rf001 = 17;\nproduct Mount = anchor();\nproduct Tail = filament();\nproduct Enzyme = enzyme();\nassembly Needle: pierce() {\n  Mount: ${mass};\n  Tail: ${mass};\n  Enzyme: ${mass};\n  engage_when: ${condition};\n}`,
-      notes: ['The condition can use this candidate’s two public channels, the division interface, local registers and pure expressions. One surface can admit a partner while another excludes it.'] };
+    return { example: `publish rf001;\nrf001 = 17;\nproduct Mount = anchor();\nproduct Tail = filament();\nproduct Enzyme = enzyme();\nassembly Needle: pierce() {\n  Mount: ${mass};\n  Tail: ${mass};\n  Enzyme: ${mass};\n  engage_when: ${condition};\n}`,
+      notes: ['A working touch receptor at this patch can recognize a facing display. The condition can use these measurements, the division interface, local registers and pure expressions. One surface can admit a partner while another excludes it.'] };
   }
   if (item.type === 'contact message') {
-    return { example: ['publish rf001 = 17;', ...(item.name === 'publish' ? [] : [`${item.name} rf001;`])].join('\n'),
+    return { example: ['publish rf001;', 'rf001 = 17;', ...(item.name === 'publish' ? [] : [`${item.name} rf001;`])].join('\n'),
       notes: ['Each declaration accepts one scalar address from rf001 through rf999. Registers use their start-of-tick values. A stored zero counts as a message.'] };
   }
   if (CELLULAR_KEYWORDS.some(keyword=>keyword.name===item.name) || item.category==='function' && item.type==='product') {

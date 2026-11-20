@@ -13,7 +13,7 @@ const details = [
   ['area','Envelope area'], ['mass','Body mass'], ['growth','Area gained / s'], ['upkeep','Energy upkeep / s'],
   ['digestion','Substrate digested / s'], ['fixation','Carbon fixed / s'], ['respiration','Carbon respired / s'],
   ['carbon','Organic carbon reserve'], ['oxygen','Internal oxygen'], ['inorganic','Internal inorganic carbon'],
-  ['exudate','Gut exudate energy'], ['tissue','Gut tissue energy'], ['waste','Gut waste energy'],
+  ['exudate','Soluble gut energy'], ['tissue','Structural gut energy'], ['waste','Bound gut energy'],
 ] as const;
 
 export function organismOverview(): string {

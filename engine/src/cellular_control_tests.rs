@@ -319,7 +319,7 @@ fn cached_bindings_reused_buffers_and_phase_summaries_preserve_exact_snapshot_va
                 .map(AssemblyInstance::functional_mass).sum::<f64>();
             assert_eq!(built[i].to_bits(), expected.to_bits());
             let expected = state.assemblies.iter().filter(|a| a.recipe.matches(&program, def))
-                .map(|a| a.functional_mass() * a.activity).sum::<f64>();
+                .map(|a| a.working_mass() * a.activity).sum::<f64>();
             assert_eq!(active[i].to_bits(), expected.to_bits());
         }
         let summary = body.work_snapshot(&mut measures);

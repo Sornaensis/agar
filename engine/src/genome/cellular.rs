@@ -230,6 +230,9 @@ impl CellularGraph {
 }
 
 impl Sensor {
+    pub(super) fn legacy_external(self) -> bool {
+        (Self::LightAvailable as usize..=Self::ObjectMotion as usize).contains(&(self as usize))
+    }
     pub(super) fn cellular_allowed(self) -> bool {
         let name = self.name();
         matches!(
@@ -241,12 +244,6 @@ impl Sensor {
                 "nutrient.",
                 "carbon.",
                 "gut.",
-                "light.",
-                "heat.",
-                "chemical.",
-                "flow.",
-                "contact.",
-                "object.",
             ]
             .iter()
             .any(|prefix| name.starts_with(prefix))
@@ -523,6 +520,7 @@ impl Parser {
 
     pub(super) fn cellular_program(&mut self, stored: bool) -> Result<Program, CompileError> {
         self.cellular_mode = true;
+        self.stored_source = stored;
         self.keyword("cellular")?;
         self.count_units = matches!(&self.peek().kind, Kind::Name(name) if name == "counts");
         if self.count_units { self.take(); }
@@ -632,7 +630,7 @@ impl Parser {
                             }
                             "engage_when" if !self.historical_contact && !literal_ingredient => {
                                 if !contact_guard::supports_guard(kind) {
-                                    return Err(field.location.error("engage_when requires a piercer, engulfment or adhesive surface."));
+                                    return Err(field.location.error("engage_when requires contact hardware such as a piercer, inlet or adhesive surface."));
                                 }
                                 let root = self.expression(0, 0)?;
                                 self.require(root, Type::Bool, field.location)?;
@@ -707,6 +705,7 @@ impl Parser {
                         self.take();
                         let location = self.peek().location;
                         let initial = self.material_number()?;
+                        self.initializer_locations[role] = Some(self.tokens[self.position - 1].location);
                         if !initial.is_finite() || initial.abs() > MAX_SIGNAL {
                             return Err(location.error("message initializer exceeds the scalar limit."));
                         }
@@ -778,7 +777,10 @@ impl Parser {
         }
         let validate = if stored { CellularProgram::validate_stored } else { CellularProgram::validate };
         for &(index, field, location) in &self.receptor_references {
-            if !ReceptorField::for_kind(definition.assemblies[index].kind).contains(&field) {
+            let kind = definition.assemblies[index].kind;
+            let historical_count = stored && field == ReceptorField::Count &&
+                kind == AssemblyKind::Mechanism(MechanismKind::JunctionSignal);
+            if !historical_count && !ReceptorField::for_kind(kind).contains(&field) {
                 return Err(location.error(format!(
                     "assembly '{}' does not measure '{}'.",
                     definition.assemblies[index].name,
@@ -905,7 +907,7 @@ pub(super) fn schema_json() -> String {
     let scale = crate::counts::SCALE;
     let peer_fields = PeerField::ALL.iter().map(|field| format!("{{\"name\":{},\"type\":{}}}", quote(field.name()),quote(field.ty().label())))
         .collect::<Vec<_>>().join(",");
-    format!("{{\"marker\":\"cellular;\",\"counts\":{{\"marker\":\"cellular counts;\",\"perUnit\":{scale},\"integerSignals\":[{count_signals}]}},\"products\":[{products}],\"assemblies\":[{assemblies}],\"mechanisms\":[{mechanisms}],\"reads\":[{reads}],\"maxProducts\":{MAX_PRODUCTS},\"maxAssemblies\":{MAX_ASSEMBLIES},\"maxGenes\":{MAX_GENES},\"registers\":{{\"prefixes\":[\"ri\",\"rf\",\"rb\",\"rs\",\"rv\"],\"addressesPerType\":{REGISTER_COUNT},\"upkeepPerSecond\":{REGISTER_ENERGY_COST},\"clearWins\":true}},\"contactMessages\":{{\"declarations\":[\"publish\",\"signal\"],\"registerType\":\"scalar\",\"receptor\":\"sense(contact)\",\"validField\":\"message_valid\",\"valueField\":\"message\",\"signalValidField\":\"signal_valid\",\"signalValueField\":\"signal\",\"bondedField\":\"bonded\",\"peerFields\":[{peer_fields}],\"initializerLimit\":{MAX_SIGNAL}}},\"recipeControls\":[{{\"name\":\"activity\",\"type\":\"scalar\",\"default\":1}},{{\"name\":\"start_when\",\"type\":\"boolean\",\"default\":true}},{{\"name\":\"recycle\",\"type\":\"scalar\",\"default\":0}},{{\"name\":\"engage_when\",\"type\":\"boolean\",\"default\":true,\"defaultByMechanism\":{{\"adhere()\":false}},\"mechanisms\":[\"pierce()\",\"engulf()\",\"adhere()\",\"piercer\",\"phagocyte\"]}}],\"concentration\":\"pool mass / body.area\",\"userFunctions\":{{\"keyword\":\"fn\",\"maxParameters\":8,\"parameterType\":\"scalar\",\"maxFunctions\":64,\"recursive\":false}}}}")
+    format!("{{\"marker\":\"cellular;\",\"counts\":{{\"marker\":\"cellular counts;\",\"perUnit\":{scale},\"integerSignals\":[{count_signals}]}},\"products\":[{products}],\"assemblies\":[{assemblies}],\"mechanisms\":[{mechanisms}],\"reads\":[{reads}],\"maxProducts\":{MAX_PRODUCTS},\"maxAssemblies\":{MAX_ASSEMBLIES},\"maxGenes\":{MAX_GENES},\"registers\":{{\"prefixes\":[\"ri\",\"rf\",\"rb\",\"rs\",\"rv\"],\"addressesPerType\":{REGISTER_COUNT},\"upkeepPerSecond\":{REGISTER_ENERGY_COST},\"clearWins\":true}},\"contactMessages\":{{\"declarations\":[\"publish\",\"signal\"],\"registerType\":\"scalar\",\"receptor\":\"sense(contact)\",\"validField\":\"message_valid\",\"valueField\":\"message\",\"signalValidField\":\"signal_valid\",\"signalValueField\":\"signal\",\"bondedField\":\"bonded\",\"peerFields\":[{peer_fields}],\"initializerLimit\":{MAX_SIGNAL}}},\"recipeControls\":[{{\"name\":\"activity\",\"type\":\"scalar\",\"default\":1}},{{\"name\":\"start_when\",\"type\":\"boolean\",\"default\":true}},{{\"name\":\"recycle\",\"type\":\"scalar\",\"default\":0}},{{\"name\":\"engage_when\",\"type\":\"boolean\",\"default\":true,\"defaultByMechanism\":{{\"adhere()\":false}},\"mechanisms\":[\"pierce()\",\"import(particle)\",\"engulf()\",\"adhere()\",\"piercer\",\"phagocyte\"]}}],\"concentration\":\"pool mass / body.area\",\"userFunctions\":{{\"keyword\":\"fn\",\"maxParameters\":8,\"parameterType\":\"scalar\",\"maxFunctions\":64,\"recursive\":false}}}}")
 }
 
 #[cfg(test)]
@@ -923,7 +925,7 @@ let ready = energy > 20 && nutrient.stored > 0.01;
 gene drive: Motor = if ready && built.Swim < 0.08 && pool.Motor < 0.02 then 1 else 0;
 gene mount: Anchor = if pool.Anchor < 0.01 then 0.5 else 0;
 gene tail: Tail = if pool.Tail < 0.04 then 1 else 0;
-gene latch: Run = if chemical.valid && chemical.mineral > 0.2 then 0.4 else 0;
+gene latch: Run = if nutrient.stored > 0.02 then 0.4 else 0;
 assembly Swim: flagellum {
   Anchor: 0.005;
   Motor: 0.01;
@@ -938,8 +940,6 @@ assembly Swim: flagellum {
         Inputs {
             energy: 50.0,
             nutrient_stored: 0.05,
-            chemical_valid: true,
-            chemical_mineral: 0.8,
             products: vec![0.0, 0.0, 0.0, 0.003],
             assemblies: vec![0.04],
             ..Inputs::default()
@@ -1556,7 +1556,7 @@ assembly Digest: digest(tissue) { Catalyst: 0.04; activity: if gut.tissue.energy
         let program = Program::compile(source).unwrap();
         let definition = program.cellular().unwrap();
         assert_eq!(definition.assemblies[0].kind.name(), "store(food)");
-        assert_eq!(definition.assemblies[1].kind.name(), "digest(tissue)");
+        assert_eq!(definition.assemblies[1].kind.name(), "digest(structural)");
         let output = program
             .evaluate(&Inputs {
                 products: vec![0.0, 0.0],
@@ -1650,10 +1650,10 @@ assembly Digest: digest(tissue) { Catalyst: 0.04; activity: if gut.tissue.energy
         }
         let mut writer = Writer::new();
         program.write_checkpoint(&mut writer);
-        for previous in 5..16 {
+        for previous in 5..crate::checkpoint::VERSION {
             assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0), previous).is_err());
         }
-        let restored = Program::read_checkpoint_version(&mut Reader::new(&writer.0), 16).unwrap();
+        let restored = Program::read_checkpoint_version(&mut Reader::new(&writer.0), crate::checkpoint::VERSION).unwrap();
         assert_eq!(program.cellular(), restored.cellular());
         assert_eq!(program.evaluate(&inputs()), restored.evaluate(&inputs()));
         assert!(restored.checkpoint_source_matches(&program, &source, true));

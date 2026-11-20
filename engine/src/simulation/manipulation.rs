@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn moves_connected_component_across_seams_and_rejects_any_blocked_member() {
-        let (mut world, genomes) = equipped("product GlueMaterial = adhesin(Frame); assembly Glue: adhere() { engage_when: peer.message_valid && populated(rf020) && peer.message == rf020; GlueMaterial:0.006; Mount:0.01; Wall:0.01; }\npublish rf020 = 31;");
+        let (mut world, genomes) = equipped("product GlueMaterial = adhesin(Frame); assembly Glue: adhere() { engage_when: true; GlueMaterial:0.006; Mount:0.01; Wall:0.01; } assembly Back: adhere() {at:3.14159265; engage_when:true; GlueMaterial:0.006; Mount:0.01; Wall:0.01;}");
         genomes[0].program.initialize_message(&mut world.cells[0].memory);
         world.cells[0].x = WIDTH - 13.0;
         world.cells[0].y = 50.0;

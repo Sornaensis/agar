@@ -7,7 +7,7 @@ const { BUILTIN_SIMULATIONS, BUILTIN_ENVIRONMENTS, BUILTIN_GENOMES, simulationSt
 const template = BUILTIN_SIMULATIONS.find(s => s.id.endsWith(':crown-rosette'));
 const {config} = BUILTIN_ENVIRONMENTS.find(e => e.id === template.environmentId);
 const source = BUILTIN_GENOMES.find(g => g.id === template.populations[0].genomeId).source;
-const disabled = source.replace(/(assembly Bus: junction\(signal\) \{[^}]*?activity: )1;/, (_, rule) => rule + '0;');
+const disabled = source.replace(/(assembly (?:Left|Right)Bus: junction\(signal\) \{[^}]*?activity: )1;/g, (_, rule) => rule + '0;');
 assert.notEqual(source, disabled);
 for (const [label, program] of [['open',source],['closed',disabled]]) {
   const api=await fresh({...config,...simulationStartSettings(config),seed:template.seed});
@@ -23,9 +23,9 @@ for (const [label, program] of [['open',source],['closed',disabled]]) {
   assert.ok(state.births>=2 && observation.maximumAttachedNeighbors>=2,'One founder paid for a multi-contact colony');
   assert.equal(Boolean(observation.firstSpecialization), label==='open');
   if(label==='closed'){
-    assert.equal(observation.maximumSignalPartners,0);
+    assert.equal(observation.maximumOccupiedPorts,0);
     assert.equal(observation.peakActiveRimHarvest,0);
-    assert.ok(state.cells.some(cell=>body(api,cell.id).cellular.assemblies.some(a=>a.name==='Bus'&&a.complete&&a.activity===0)));
+    assert.ok(state.cells.some(cell=>body(api,cell.id).cellular.assemblies.some(a=>a.name.endsWith('Bus')&&a.complete&&a.activity===0)));
   } else {
     const copy=await fresh();
     assert.equal(restore(copy,save(api)),1);

@@ -25,17 +25,18 @@ let funded = (energy > 100000 || gut.energy > 0) && nutrient.stored > 10;
 let expanding = body.area > body.birth_area * 1.6;
 let powered = enough(built.Gut, 0.06) && enough(built.ExudateEnzyme, 0.04) && enough(built.Capture, 0.03) && enough(built.Respiration, 0.04);
 let equipped = powered && enough(built.LeftMotor, 0.025) && enough(built.RightMotor, 0.025) && enough(built.Vision, 0.02) && enough(built.Touch, 0.01);
-let scavenging = gut.tissue.energy > 60000 && !rb093;
-let provisioning = expanding && (energy > 600000 || gut.exudate.energy + gut.tissue.energy > 100000);
+let scavenging = gut.structural.energy > 60000 && !rb093;
+let provisioning = expanding && (energy > 600000 || gut.soluble.energy + gut.structural.energy > 100000);
 # Commit after a substantial meal or a productive carbon connection.
 # A daughter can start with a smaller inherited ATP compartment.
 rb061 = true when equipped && energy > min(650000, 0.85 * energy.capacity)
-  && (gut.exudate.energy + gut.tissue.energy > 120000
-    || (gut.exudate.energy + gut.tissue.energy > 30000 && carbon.organic > 8000 * body.area)
+  && (gut.soluble.energy + gut.structural.energy > 55000
+    || (gut.soluble.energy + gut.structural.energy > 30000 && carbon.organic > 8000 * body.area)
     || (built.CarbonPort > 0.045 && carbon.organic > 12000 * body.area && energy.fraction > 0.85));
 let surplus = equipped && rb061 && energy > min(320000, 0.65 * energy.capacity);
 # After recognizing a producer, build reciprocal junctions for future encounters.
-publish rf090 = 72;
+publish rf090;
+rf090 = 72;
 rf091 = 41;
 let docked = sensed.Touch.message_valid && sensed.Touch.message == rf091;
 rb093 = true when docked;
@@ -45,7 +46,7 @@ let seen = sensed.Vision.valid;
 let blocked = sensed.Touch.valid && sensed.Touch.resistance >= 0.12;
 let obstacle = if sensed.Touch.valid then angle(sensed.Touch.offset) else 0;
 let escape = if obstacle >= 0 then obstacle - 1.8 else obstacle + 1.8;
-let meal = gut.exudate.energy + gut.tissue.energy;
+let meal = gut.soluble.energy + gut.structural.energy;
 let meal_fraction = if gut.capacity > 0 then meal / gut.capacity else 0;
 let seek = meal_fraction < 0.55;
 # Leave a known feeding contact if stored carbon and ATP stay low despite docking.
@@ -56,24 +57,29 @@ rf095 = age when starved_at_contact && (!populated(rf095) || age - rf095 > 24);
 let leaving = populated(rf095) && age - rf095 < 8;
 let grazing = seen && sensed.Vision.area >= 0.35
   && length(sensed.Vision.offset) < 7 * sqrt(sensed.Vision.area) + 5;
+let particle = seen && sensed.Vision.area < 0.35;
+let gradient = sensed.LeftChemistry.organic - sensed.RightChemistry.organic;
+let has_gradient = sensed.LeftChemistry.valid && sensed.RightChemistry.valid && abs(gradient) > 0.0001;
 let steer = if blocked then clamp(escape * 2, -1, 1)
   else if injured || leaving then 0
+  else if seek && particle then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1)
+  else if seek && has_gradient then clamp(gradient * 35, -1, 1)
   else if grazing then clamp((angle(sensed.Vision.offset) - 1.4) * 1.8, -1, 1)
   else if seek && seen then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1)
   else sin(age * 0.65) * 0.35;
 let move = if blocked || injured || leaving then 0.65 else if meal_fraction > 0.45 then 0
-  else if seek && seen then 0.5
-  else if sensed.Chemistry.valid && sensed.Chemistry.organic > 0.001 then 0.18 else 0.28;
+  else if seek && particle then 0.55 else if has_gradient then 0.35 else 0.23;
 
 let need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);
 let need_Dock = funded && (equipped && rb093) && missing(built.Dock, (if provisioning then 0.04 else 0.02), 0.02);
 let need_CarbonPort = funded && (equipped && rb093) && missing(built.CarbonPort, (if provisioning then 0.1 else 0.05), 0.05);
 let need_MineralPort = funded && (equipped && rb093) && missing(built.MineralPort, (if provisioning then 0.04 else 0.02), 0.02);
+let need_Badge = funded && (powered) && missing(built.Badge, 0.01, 0.01);
 let need_Gut = funded && (true) && missing(built.Gut, (if provisioning then 0.12 else 0.06), 0.06);
 let need_ExudateEnzyme = funded && (true) && missing(built.ExudateEnzyme, (if provisioning then 0.08 else 0.04), 0.04);
 let need_Capture = funded && (enough(built.Gut, 0.06)) && missing(built.Capture, (if provisioning then 0.06 else 0.03), 0.03);
-let need_TissueEnzyme = funded && (powered && gut.tissue.energy > 0) && missing(built.TissueEnzyme, (if scavenging then 0.08 else if provisioning then 0.08 else 0.04), 0.04);
-let need_WasteEnzyme = funded && (powered && gut.waste.energy > 0) && missing(built.WasteEnzyme, (if provisioning then 0.03 else 0.015), 0.015);
+let need_TissueEnzyme = funded && (powered && gut.structural.energy > 0) && missing(built.TissueEnzyme, (if scavenging then 0.08 else if provisioning then 0.08 else 0.04), 0.04);
+let need_WasteEnzyme = funded && (powered && gut.bound.energy > 0) && missing(built.WasteEnzyme, (if provisioning then 0.03 else 0.015), 0.015);
 let need_Translation = funded && (powered) && missing(built.Translation, (if body.area > body.birth_area * 1.3 then 0.08 else 0.04), 0.04);
 let need_Minerals = funded && (powered && (nutrient.stored < 1500 || surplus)) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);
 let need_EnergyStore = funded && (surplus) && missing(built.EnergyStore, (if expanding then 0.04 else 0.02), 0.02);
@@ -82,23 +88,26 @@ let need_LeftMotor = funded && (powered) && missing(built.LeftMotor, (if provisi
 let need_RightMotor = funded && (powered) && missing(built.RightMotor, (if provisioning then 0.05 else 0.025), 0.025);
 let need_Vision = funded && (powered) && missing(built.Vision, (if provisioning then 0.04 else 0.02), 0.02);
 let need_Touch = funded && (powered) && missing(built.Touch, (if provisioning then 0.02 else 0.01), 0.01);
-let need_Chemistry = funded && (surplus) && missing(built.Chemistry, (if provisioning then 0.03 else 0.015), 0.015);
+let need_LeftChemistry = funded && (powered) && missing(built.LeftChemistry, (if provisioning then 0.03 else 0.015), 0.015);
+let need_RightChemistry = funded && (powered) && missing(built.RightChemistry, (if provisioning then 0.03 else 0.015), 0.015);
 let need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if provisioning then 0.05 else 0.025), 0.025);
 let need_Support = funded && (surplus) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);
 let need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if provisioning then 0.04 else 0.02), 0.02);
 let need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if provisioning then 0.04 else 0.02), 0.02);
 let need_Division = funded && (surplus && body.area > 1.5 * body.birth_area) && missing(built.Division, (if provisioning then 0.04 else 0.02), 0.02);
+let need_FlankInlet = funded && (powered) && missing(built.FlankInlet, 0.015, 0.015);
+let need_FarInlet = funded && (powered) && missing(built.FarInlet, 0.015, 0.015);
 
-gene supply_CoatPrecursor: CoatPrecursor = if need_Dock && pool.Glue < 10 && pool.CoatPrecursor < 10 then 1 else 0;
+gene supply_CoatPrecursor: CoatPrecursor = if (need_Dock) && pool.Glue < 10 && pool.CoatPrecursor < 10 then 1 else 0;
 gene supply_Catalyst: Catalyst = if pool.Catalyst < 10 then (if need_Respiration then 1 else 0) + (if need_ExudateEnzyme then 1 else 0) + (if need_TissueEnzyme then 1 else 0) + (if need_WasteEnzyme then 1 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0) else 0;
-gene supply_Wall: Wall = if pool.Wall < 10 then (if need_Respiration then 0.6 else 0) + (if need_Dock then 1 else 0) + (if need_CarbonPort then 1 else 0) + (if need_MineralPort then 1 else 0) + (if need_Gut then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0) else 0;
-gene supply_Mount: Mount = if pool.Mount < 10 then (if need_Dock then 1 else 0) + (if need_Capture then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_LeftMotor then 0.5 else 0) + (if need_RightMotor then 0.5 else 0) + (if need_Vision then 0.333333 else 0) + (if need_Touch then 0.333333 else 0) + (if need_Chemistry then 0.25 else 0) + (if need_Division then 0.5 else 0) else 0;
+gene supply_Wall: Wall = if pool.Wall < 10 then (if need_Respiration then 0.6 else 0) + (if need_Dock then 1 else 0) + (if need_CarbonPort then 1 else 0) + (if need_MineralPort then 1 else 0) + (if need_Badge then 1 else 0) + (if need_Gut then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0) else 0;
+gene supply_Mount: Mount = if pool.Mount < 10 then (if need_Dock then 1 else 0) + (if need_Badge then 0.666667 else 0) + (if need_Capture then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_LeftMotor then 0.5 else 0) + (if need_RightMotor then 0.5 else 0) + (if need_Vision then 0.333333 else 0) + (if need_Touch then 0.333333 else 0) + (if need_LeftChemistry then 0.25 else 0) + (if need_RightChemistry then 0.25 else 0) + (if need_Division then 0.5 else 0) + (if need_FlankInlet then 0.5 else 0) + (if need_FarInlet then 0.5 else 0) else 0;
 gene supply_Glue: Glue = if pool.Glue < 10 then (if need_Dock then 0.5 else 0) else 0;
 gene supply_Carrier: Carrier = if pool.Carrier < 10 then (if need_CarbonPort then 1 else 0) + (if need_MineralPort then 1 else 0) + (if need_Minerals then 1 else 0) else 0;
-gene supply_Rotor: Rotor = if pool.Rotor < 10 then (if need_Capture then 1 else 0) + (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Division then 1 else 0) else 0;
+gene supply_Rotor: Rotor = if pool.Rotor < 10 then (if need_Capture then 1 else 0) + (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Division then 1 else 0) + (if need_FlankInlet then 1 else 0) + (if need_FarInlet then 1 else 0) else 0;
 gene supply_Frame: Frame = if pool.Frame < 10 then (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0) else 0;
 gene supply_Tail: Tail = if pool.Tail < 10 then (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Touch then 0.333333 else 0) else 0;
-gene supply_Detector: Detector = if pool.Detector < 10 then (if need_Vision then 1 else 0) + (if need_Touch then 1 else 0) + (if need_Chemistry then 1 else 0) else 0;
+gene supply_Detector: Detector = if pool.Detector < 10 then (if need_Vision then 1 else 0) + (if need_Touch then 1 else 0) + (if need_LeftChemistry then 1 else 0) + (if need_RightChemistry then 1 else 0) else 0;
 gene supply_Pigment: Pigment = if pool.Pigment < 10 then (if need_Vision then 0.333333 else 0) else 0;
 gene supply_Replicase: Replicase = if pool.Replicase < 10 then (if need_Replication then 1 else 0) else 0;
 gene supply_Ring: Ring = if pool.Ring < 10 then (if need_Division then 1 else 0) else 0;
@@ -133,16 +142,23 @@ assembly MineralPort: junction(mineral) {
   activity: if nutrient.fraction > 0.72 && nutrient.stored > 3000 * body.area then 1 else 0;
 }
 
+assembly Badge: display() {
+  Mount: 40;
+  Wall: 60;
+  start_when: need_Badge;
+  activity: 1;
+}
+
 assembly Gut: store(food) {
   Wall: 600;
   start_when: need_Gut;
   activity: 1;
 }
 
-assembly ExudateEnzyme: digest(exudate) {
+assembly ExudateEnzyme: digest(soluble) {
   Catalyst: 400;
   start_when: need_ExudateEnzyme;
-  activity: if gut.exudate.energy > 0 then 1 else 0;
+  activity: if gut.soluble.energy > 0 then 1 else 0;
 }
 
 assembly Capture: import(particle) {
@@ -152,16 +168,16 @@ assembly Capture: import(particle) {
   activity: if gut.fraction < 0.7 then 1 else 0;
 }
 
-assembly TissueEnzyme: digest(tissue) {
+assembly TissueEnzyme: digest(structural) {
   Catalyst: 400;
   start_when: need_TissueEnzyme;
-  activity: if gut.tissue.energy > 0 then 1 else 0;
+  activity: if gut.structural.energy > 0 then 1 else 0;
 }
 
-assembly WasteEnzyme: digest(waste) {
+assembly WasteEnzyme: digest(bound) {
   Catalyst: 150;
   start_when: need_WasteEnzyme;
-  activity: if gut.waste.energy > 0 then 1 else 0;
+  activity: if gut.bound.energy > 0 then 1 else 0;
 }
 
 assembly Translation: translate() {
@@ -175,7 +191,7 @@ assembly Minerals: import(mineral) {
   Mount: 50;
   Carrier: 200;
   start_when: need_Minerals;
-  activity: if nutrient.fraction < 0.9 then 1 else 0;
+  activity: if nutrient.fraction < 0.9 && energy.fraction > 0.05 then 1 else 0;
 }
 
 assembly EnergyStore: store(energy) {
@@ -226,11 +242,20 @@ assembly Touch: sense(contact) {
   activity: 1;
 }
 
-assembly Chemistry: sense(chemical) {
+assembly LeftChemistry: sense(chemical) {
   Mount: 30;
   Detector: 120;
-  start_when: need_Chemistry;
+  start_when: need_LeftChemistry;
   activity: 1;
+  at: 1.570796;
+}
+
+assembly RightChemistry: sense(chemical) {
+  Mount: 30;
+  Detector: 120;
+  start_when: need_RightChemistry;
+  activity: 1;
+  at: -1.570796;
 }
 
 assembly Repair: repair() {
@@ -264,5 +289,22 @@ assembly Division: constrict() {
   Rotor: 80;
   Ring: 80;
   start_when: need_Division;
-  activity: if body.area + 0.000001 >= body.birth_area * 2 && enough(built.Minerals,0.05) && enough(built.EnergyStore,0.04) && enough(built.MineralStore,0.04) && enough(built.Respiration,0.08) && enough(built.Translation,0.08) && (!rb093 || enough(built.Dock,0.04) && enough(built.CarbonPort,0.1)) && energy > 600000 && meal + carbon.organic * 20 > 120000 * body.area then 1 else 0;
+  activity: if body.area + 0.000001 >= body.birth_area * 2 && enough(built.Minerals,0.05) && enough(built.EnergyStore,0.04) && enough(built.MineralStore,0.04) && enough(built.Respiration,0.08) && enough(built.Translation,0.08) && energy > 490000 && meal + carbon.organic * 20 > 70000 * body.area then 1 else 0;
+  at: 0;
+}
+
+assembly FlankInlet: import(particle) {
+  Mount: 50;
+  Rotor: 100;
+  start_when: need_FlankInlet;
+  activity: if gut.fraction < 0.9 then 1 else 0;
+  at: 1.5707963267948966;
+}
+
+assembly FarInlet: import(particle) {
+  Mount: 50;
+  Rotor: 100;
+  start_when: need_FarInlet;
+  activity: if gut.fraction < 0.9 then 1 else 0;
+  at: -1.5707963267948966;
 }

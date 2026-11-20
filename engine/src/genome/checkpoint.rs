@@ -364,6 +364,7 @@ impl Program {
                     version >= 6 || !matches!(kind, AssemblyKind::Mechanism(_)),
                     "mechanism assemblies need checkpoint version 6",
                 )?;
+                ensure(version >= 20 || !matches!(kind, AssemblyKind::Mechanism(crate::cellular::MechanismKind::Display | crate::cellular::MechanismKind::CarbonExport)), "surface display needs checkpoint version 20")?;
                 ensure(version >= 12 || kind != AssemblyKind::Mechanism(crate::cellular::MechanismKind::JunctionSignal),
                     "signal junctions need checkpoint version 12")?;
                 ensure(version >= 11 || !matches!(kind, AssemblyKind::Mechanism(k) if k as usize >= 27),
@@ -472,13 +473,19 @@ impl Program {
                     ensure(version >= 10 || !matches!(field, ReceptorField::Message | ReceptorField::MessageValid),
                         "contact messages need checkpoint version 10")?;
                     ensure(
-                        ReceptorField::for_kind(definition.assemblies[index].kind).contains(&field),
+                        ReceptorField::for_kind(definition.assemblies[index].kind).contains(&field)
+                            || field == ReceptorField::Count && definition.assemblies[index].kind ==
+                                AssemblyKind::Mechanism(crate::cellular::MechanismKind::JunctionSignal),
                         "receptor does not supply that measurement",
                     )?;
                     Op::Receptor(index, field)
                 }
                 14 if version >= 19 && cellular.is_some() => {
-                    Op::Peer(*PeerField::ALL.get(r.u8()? as usize).ok_or("Invalid simulation save: unknown contact field.")?)
+                    {
+                    let tag = r.u8()? as usize;
+                    ensure(version >= 20 || tag < 5, "physical contact resistance needs checkpoint version 20")?;
+                    Op::Peer(*PeerField::ALL.get(tag).ok_or("Invalid simulation save: unknown contact field.")?)
+                    }
                 }
                 _ => return Err("Invalid simulation save: unknown expression operation.".into()),
             };
@@ -516,7 +523,7 @@ impl Program {
             if cellular.is_some() {
                 ensure(
                     match &op {
-                        Op::Sensor(sensor) => sensor.cellular_allowed()
+                        Op::Sensor(sensor) => (sensor.cellular_allowed() || sensor.legacy_external())
                             && (version >= 10 || !matches!(sensor, Sensor::MemoryUsed | Sensor::MemoryCost)),
                         Op::Register(_) | Op::Populated(_) => version >= 10,
                         _ => true,

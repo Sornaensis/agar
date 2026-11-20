@@ -9,8 +9,8 @@ product Pigment = pigment();
 product CoatPrecursor = scaffold();
 product Glue = adhesin(CoatPrecursor);
 product Detector = receptor();
-product Tail = filament();
 product Rotor = motor();
+product Tail = filament();
 product Frame = scaffold();
 product Carrier = transporter();
 product Replicase = replicase();
@@ -26,15 +26,16 @@ let expanding = body.area > body.birth_area * 1.6;
 let powered = enough(built.Solar, 0.12) && enough(built.Respiration, 0.04);
 let equipped = powered;
 let surplus = equipped && energy > 550000;
-# Retain a daughter at division using matching markers and active adhesive surfaces.
-publish rf020 = 73;
-let left_peer = sensed.LeftJunction.bonded && sensed.LeftJunction.message_valid && sensed.LeftJunction.message == rf020;
-let right_peer = sensed.RightJunction.bonded && sensed.RightJunction.message_valid && sensed.RightJunction.message == rf020;
+# A recent drop in area records that this cell has already divided.
+rb041 = true when populated(rf040) && body.area + 0.2 < rf040;
+rf040 = body.area;
+let left_peer = sensed.LeftBus.valid;
+let right_peer = sensed.RightBus.valid;
 let paired_contact = left_peer || right_peer;
 # The identity marker stays stable while rf021 carries a changing pulse.
 signal rf021;
-let left_wave = left_peer && sensed.LeftJunction.signal_valid && sensed.LeftJunction.signal > 0.5;
-let right_wave = right_peer && sensed.RightJunction.signal_valid && sensed.RightJunction.signal > 0.5;
+let left_wave = left_peer && sensed.LeftBus.signal_valid && sensed.LeftBus.value > 0.5;
+let right_wave = right_peer && sensed.RightBus.signal_valid && sensed.RightBus.value > 0.5;
 let pacemaker = paired_contact && age > 40 && sin(age * 0.9) > 0.985;
 let trigger = ri031 == 0 && (pacemaker || left_wave || right_wave);
 let firing = trigger || ri031 > 162;
@@ -45,29 +46,30 @@ rf021 = if firing then 1 else 0;
 
 let need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);
 let need_Solar = funded && (true) && missing(built.Solar, (if expanding then 0.24 else 0.12), 0.12);
-let need_Adhesin = funded && (powered) && missing(built.Adhesin, (if expanding then 0.04 else 0.02), 0.02);
-let need_LeftJunction = funded && (powered) && missing(built.LeftJunction, (if expanding then 0.02 else 0.01), 0.01);
-let need_RightJunction = funded && (powered) && missing(built.RightJunction, (if expanding then 0.02 else 0.01), 0.01);
+let need_LeftGlue = funded && (powered) && missing(built.LeftGlue, if expanding && (paired_contact || rb041) then 0.04 else 0.02, 0.02);
+let need_LeftBus = funded && (powered) && missing(built.LeftBus, if expanding && (paired_contact || rb041) then 0.04 else 0.02, 0.02);
+let need_RightGlue = funded && (powered) && missing(built.RightGlue, if expanding && (paired_contact || rb041) then 0.04 else 0.02, 0.02);
+let need_RightBus = funded && (powered) && missing(built.RightBus, if expanding && (paired_contact || rb041) then 0.04 else 0.02, 0.02);
 let need_PulseMotor = funded && (powered) && missing(built.PulseMotor, (if expanding then 0.05 else 0.025), 0.025);
 let need_Translation = funded && (powered) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);
 let need_Minerals = funded && (powered) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);
-let need_EnergyStore = funded && (powered) && missing(built.EnergyStore, if expanding || paired_contact then 0.08 else 0.04, 0.04);
-let need_MineralStore = funded && (powered && body.area > 1.2) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);
+let need_EnergyStore = funded && (powered) && missing(built.EnergyStore, if expanding then 0.08 else 0.04, 0.02);
+let need_MineralStore = funded && (powered && body.area > 1.2) && missing(built.MineralStore, if expanding then 0.06 else 0.02, 0.02);
 let need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);
 let need_Support = funded && (powered && energy > 450000) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);
 let need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);
 let need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);
 let need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);
 
-gene supply_CoatPrecursor: CoatPrecursor = if need_Adhesin && pool.Glue < 10 && pool.CoatPrecursor < 10 then 1 else 0;
+gene supply_CoatPrecursor: CoatPrecursor = if (need_LeftGlue || need_RightGlue) && pool.Glue < 10 && pool.CoatPrecursor < 10 then 1 else 0;
 gene supply_Catalyst: Catalyst = if pool.Catalyst < 10 then (if need_Respiration then 1 else 0) + (if need_Solar then 0.25 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0) else 0;
-gene supply_Wall: Wall = if pool.Wall < 10 then (if need_Respiration then 0.6 else 0) + (if need_Adhesin then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0) else 0;
-gene supply_Mount: Mount = if pool.Mount < 10 then (if need_Solar then 0.25 else 0) + (if need_Adhesin then 1 else 0) + (if need_LeftJunction then 0.333333 else 0) + (if need_RightJunction then 0.333333 else 0) + (if need_PulseMotor then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_Division then 0.5 else 0) else 0;
+gene supply_Wall: Wall = if pool.Wall < 10 then (if need_Respiration then 0.6 else 0) + (if need_LeftGlue then 1 else 0) + (if need_LeftBus then 1 else 0) + (if need_RightGlue then 1 else 0) + (if need_RightBus then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0) else 0;
+gene supply_Mount: Mount = if pool.Mount < 10 then (if need_Solar then 0.25 else 0) + (if need_LeftGlue then 1 else 0) + (if need_RightGlue then 1 else 0) + (if need_PulseMotor then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_Division then 0.5 else 0) else 0;
 gene supply_Pigment: Pigment = if pool.Pigment < 10 then (if need_Solar then 1 else 0) else 0;
-gene supply_Glue: Glue = if pool.Glue < 10 then (if need_Adhesin then 0.5 else 0) else 0;
-gene supply_Detector: Detector = if pool.Detector < 10 then (if need_LeftJunction then 1 else 0) + (if need_RightJunction then 1 else 0) else 0;
-gene supply_Tail: Tail = if pool.Tail < 10 then (if need_LeftJunction then 0.333333 else 0) + (if need_RightJunction then 0.333333 else 0) + (if need_PulseMotor then 1 else 0) else 0;
+gene supply_Glue: Glue = if pool.Glue < 10 then (if need_LeftGlue then 0.5 else 0) + (if need_RightGlue then 0.5 else 0) else 0;
+gene supply_Detector: Detector = if pool.Detector < 10 then (if need_LeftBus then 0.666667 else 0) + (if need_RightBus then 0.666667 else 0) else 0;
 gene supply_Rotor: Rotor = if pool.Rotor < 10 then (if need_PulseMotor then 1 else 0) + (if need_Division then 1 else 0) else 0;
+gene supply_Tail: Tail = if pool.Tail < 10 then (if need_PulseMotor then 1 else 0) else 0;
 gene supply_Frame: Frame = if pool.Frame < 10 then (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0) else 0;
 gene supply_Carrier: Carrier = if pool.Carrier < 10 then (if need_Minerals then 1 else 0) else 0;
 gene supply_Replicase: Replicase = if pool.Replicase < 10 then (if need_Replication then 1 else 0) else 0;
@@ -86,33 +88,43 @@ assembly Solar: harvest(light) {
   Catalyst: 200;
   start_when: need_Solar;
   activity: 1;
+  at: 1.5707963267948966;
 }
 
-assembly Adhesin: adhere() {
+assembly LeftGlue: adhere() {
   Mount: 80;
   Wall: 80;
   Glue: 40;
-  start_when: need_Adhesin;
-  activity: if energy > 120000 then 1 else 0;
-  engage_when: peer.division_interface && populated(rf020) && peer.message_valid && peer.message == rf020;
+  start_when: need_LeftGlue;
+  activity: 1;
+  engage_when: peer.division_interface;
+  at: 1.540796;
 }
 
-assembly LeftJunction: sense(contact) {
-  Mount: 20;
-  Detector: 60;
-  Tail: 20;
-  start_when: need_LeftJunction;
+assembly LeftBus: junction(signal) {
+  Wall: 120;
+  Detector: 80;
+  start_when: need_LeftBus;
   activity: 1;
-  at: 1.570796;
+  at: 1.540796;
 }
 
-assembly RightJunction: sense(contact) {
-  Mount: 20;
-  Detector: 60;
-  Tail: 20;
-  start_when: need_RightJunction;
+assembly RightGlue: adhere() {
+  Mount: 80;
+  Wall: 80;
+  Glue: 40;
+  start_when: need_RightGlue;
   activity: 1;
-  at: -1.570796;
+  engage_when: peer.division_interface;
+  at: 1.600796;
+}
+
+assembly RightBus: junction(signal) {
+  Wall: 120;
+  Detector: 80;
+  start_when: need_RightBus;
+  activity: 1;
+  at: 1.600796;
 }
 
 assembly PulseMotor: propel() {
@@ -136,11 +148,12 @@ assembly Minerals: import(mineral) {
   Mount: 50;
   Carrier: 200;
   start_when: need_Minerals;
-  activity: if nutrient.fraction < 0.9 then 1 else 0;
+  activity: if nutrient.fraction < 0.9 && energy.fraction > 0.05 then 1 else 0;
+  at: 1.5707963267948966;
 }
 
 assembly EnergyStore: store(energy) {
-  Wall: 400;
+  Wall: 200;
   start_when: need_EnergyStore;
   activity: 1;
 }
@@ -168,6 +181,7 @@ assembly Envelope: grow() {
   Catalyst: 50;
   start_when: need_Envelope;
   activity: if energy > 900000 && body.area < body.birth_area * 2 then 0.8 else 0;
+  at: 1.5707963267948966;
 }
 
 assembly Replication: replicate() {
@@ -183,4 +197,5 @@ assembly Division: constrict() {
   Ring: 80;
   start_when: need_Division;
   activity: if body.area + 0.000001 >= body.birth_area * 2 && energy > 1000000 then 1 else 0;
+  at: 0;
 }

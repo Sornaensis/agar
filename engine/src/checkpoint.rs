@@ -8,7 +8,7 @@ use crate::{
 
 pub(crate) const MAX_STATE_BYTES: usize = 128 * 1024 * 1024;
 const MAGIC: &[u8; 8] = b"CELLAR01";
-pub(crate) const VERSION: u32 = 19;
+pub(crate) const VERSION: u32 = 20;
 pub(crate) type Result<T> = std::result::Result<T, String>;
 
 pub(crate) fn ensure(ok: bool, message: &str) -> Result<()> {

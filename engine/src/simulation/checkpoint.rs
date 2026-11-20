@@ -117,6 +117,8 @@ impl World {
             ] {
                 w.f64(v);
             }
+            w.count(c.mouth_ready.len());
+            for (&id, &until) in &c.mouth_ready { w.u32(id); w.u64(until); }
             for pool in &c.gut {
                 w.f64(pool.energy);
                 w.f64(pool.nutrients);
@@ -159,6 +161,8 @@ impl World {
             }
             w.u8(f.kind as u8);
             w.f64(f.extra_energy);
+            w.f64(f.composition.structural);
+            w.f64(f.composition.bound);
             if let Some(q)=f.counted {q.meal.write(w);w.u32(q.decay_credit);}
         }
         w.count(self.contacts.len());
@@ -254,6 +258,14 @@ impl World {
             let engulf_cooldown = r.range(0.0, 2.0)?;
             let scan_bearing = r.range(-PI, PI)?;
             let scan_width = r.range(0.0, TAU)?;
+            let mut mouth_ready = std::collections::BTreeMap::new();
+            if version >= 20 {
+                let n = r.count(r.remaining() / 12)?;
+                for _ in 0..n {
+                    let (id, until) = (r.u32()?, r.u64()?);
+                    ensure(id != 0 && until <= counts[0].saturating_add(60) && mouth_ready.insert(id,until).is_none(), "invalid engulfing inlet cooldown")?;
+                }
+            }
             let mut gut = [OrganicMatter::default(); 3];
             let synthesis_rate;
             if version >= 4 {
@@ -300,7 +312,7 @@ impl World {
             }
             let mut body = Body::read_checkpoint_version(r, version)?;
             let counted=if environment.uses_count_chemistry() {
-                let q=crate::counts::CellCounts::read(r)?;
+                let q=crate::counts::CellCounts::read(r,version)?;
                 body.count_funding=Some(crate::body::BodyFunding::read(r)?);
                 body.validate_count_funding()?;
                 let raw=[q.atp,q.mineral,q.carbon,q.oxygen,q.dic,q.reserve_extra,q.structural_extra];
@@ -399,6 +411,7 @@ impl World {
                 recycling_rate: rates[6],
                 repair_rate: rates[7],
                 engulf_cooldown,
+                mouth_ready,
                 requested,
                 scan_bearing,
                 scan_width,
@@ -431,7 +444,7 @@ impl World {
             cells.push(c);
         }
         let count = r.u32()? as usize;
-        let particle_bytes = if version >= 13 { 49 } else if version >= 4 { 41 } else { 40 };
+        let particle_bytes = if version >= 20 { 65 } else if version >= 13 { 49 } else if version >= 4 { 41 } else { 40 };
         ensure(
             count <= r.remaining() / particle_bytes,
             "particle count exceeds checkpoint data",
@@ -465,6 +478,12 @@ impl World {
                 "invalid particle",
             )?;
             let extra_energy = read_substrate_enrichment(r, version, energy)?;
+            let composition = if version >= 20 {
+                let structural = r.range(0.0, 1.0)?;
+                let bound = r.range(0.0, 1.0)?;
+                ensure(structural + bound <= 1.0 + 1e-15, "particle carbon fractions exceed its contents")?;
+                Composition { structural, bound }
+            } else { Composition::pool(kind as usize) };
             let counted=if environment.uses_count_chemistry(){
                 let q=crate::counts::CountMeal::read(r)?;
                 ensure(q.carbon>0 && energy==crate::counts::wide_units(q.energy()) && nutrients==crate::counts::units(q.mineral)
@@ -472,6 +491,7 @@ impl World {
                 Some(crate::counts::FoodCounts{meal:q,decay_credit:r.u32()?})
             }else{None};
             food.push(Food {
+                composition,
                 counted,
                 id,
                 kind,
@@ -667,6 +687,9 @@ mod tests {
             engine.world.environment.write_checkpoint(&mut env);
             let offset = world.0.windows(env.0.len()).position(|w| w == env.0).unwrap();
             let position = bytes.len() - world.0.len() + offset;
+            // v20 stores each cell's mounted mouth cooldowns after its scalar header.
+            let cooldowns = position + env.0.len() + 4 + 4 * 4 + 24 * 8;
+            assert_eq!(bytes.drain(cooldowns..cooldowns+4).collect::<Vec<_>>(), [0;4]);
             assert_eq!(bytes.remove(position), 0);
             let mut census = Writer::new();
             engine.world.census.write(&mut census);
@@ -686,7 +709,7 @@ mod tests {
         close(c.nutrient_stored, corrected.minerals);
         close(c.organic_carbon, corrected.energy / CHEMICAL_ENERGY_PER_CARBON);
         close(c.gut_energy, 0.0);
-        assert!(migrated.world.food.iter().any(|p| p.kind == OrganicKind::Tissue && p.extra_energy > 0.0));
+        assert!(migrated.world.food.iter().any(|p| p.composition.structural > 0.0 && p.extra_energy > 0.0));
         close(old.world.energy_total(), migrated.world.energy_total());
         close(old.world.nutrient_total(), migrated.world.nutrient_total());
         close(old.world.carbon_total(), migrated.world.carbon_total());

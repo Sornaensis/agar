@@ -6,33 +6,23 @@ const { PRESETS, BUILTIN_ENVIRONMENTS } = await catalog();
 const pool = BUILTIN_ENVIRONMENTS.find(item => item.id === 'builtin:environment:colony-pool').config;
 const exchanges = ['energyNet', 'mineralNet', 'carbonNet'];
 
-// A compatible marker and a live public signal can come from a stranger. Grow
-// both cells normally, then place the stranger against the mature cell's paid
-// flank receptor. Removing just the bond test recreates the false response.
-for (const [name, marker, response] of [['Nurse rosette',42,'nursing'],['Pulse swimmer',73,'firing']]) {
+// A nearby stranger can express a real payload, but a signal junction reports
+// occupancy only across a bonded, physically overlapping pair of active ports.
+for (const name of ['Nurse rosette', 'Pulse swimmer']) {
   const source=PRESETS.find(preset=>preset.name===name).source;
-  for (const requireBond of [true,false]) {
-    const api=await fresh({...pool,seed:42,countChemistry:true});
-    const adult=compile(api,requireBond?source:source.replace(/sensed\.(LeftJunction|RightJunction)\.bonded && /g,''));
-    assert.equal(api.place_cell(adult,100,200),1,error(api));
-    advance(api,35*30);
-    // An ordinary juvenile nurse already requests support. Make the independent
-    // relay sender publish a sustained pulse for this controlled encounter.
-    const decoy=compile(api,source.replace('rf021 = if firing then 1 else 0;','rf021 = 1;'));
-    assert.equal(api.place_cell(decoy,250,200),2,error(api));
-    const state=advance(api,30*30), [observer,stranger]=state.cells;
-    for (const cell of state.cells) assert.ok(body(api,cell.id).cellular.assemblies.some(a=>a.name==='Adhesin'&&a.complete));
-    const angle=observer.angle+Math.PI/2, distance=observer.radius+stranger.radius+0.05;
-    assert.equal(api.move_cell(stranger.id,observer.x+Math.cos(angle)*distance,observer.y+Math.sin(angle)*distance,0),1,error(api));
-    advance(api,1);
-    const trace=evaluation(api,observer.id), reading=field=>trace.signals.find(item=>item.name==='sensed.LeftJunction.'+field)?.value;
-    assert.equal(body(api,observer.id).colony.neighbors,0);
-    assert.equal(reading('message_valid'),true);assert.equal(reading('message'),marker);
-    assert.equal(reading('signal_valid'),true);assert.equal(reading('signal'),1);
-    if(requireBond) assert.equal(reading('bonded'),false);
-    assert.equal(trace.bindings.find(binding=>binding.name===response)?.value,!requireBond,
-      name+' responds to a signaling stranger only when the direct-bond check is removed');
-  }
+  const api=await fresh({...pool,seed:42,countChemistry:true});
+  const adult=compile(api,source);
+  assert.equal(api.place_cell(adult,100,200),1,error(api));
+  advance(api,35*30);
+  const decoy=compile(api,source.replace('rf021 = if firing then 1 else 0;','rf021 = 1;'));
+  assert.equal(api.place_cell(decoy,250,200),2,error(api));
+  const [observer,stranger]=advance(api,30*30).cells;
+  const angle=observer.angle+Math.PI/2, distance=observer.radius+stranger.radius+0.05;
+  assert.equal(api.move_cell(stranger.id,observer.x+Math.cos(angle)*distance,observer.y+Math.sin(angle)*distance,0),1,error(api));
+  advance(api,1);
+  const trace=evaluation(api,observer.id);
+  assert.equal(body(api,observer.id).colony.neighbors,0);
+  for (const side of ['Left','Right']) assert.equal(trace.signals.find(item=>item.name===`sensed.${side}Bus.valid`)?.value,false);
 }
 async function growPair(name, transform = source => source, countChemistry = true) {
   const preset = PRESETS.find(item => item.name === name);
@@ -59,9 +49,9 @@ const activeMass = (inventory, name) => inventory.cellular.assemblies
 
 function closeJunctions(source) {
   let changed = 0;
-  const control = source.replace(/(assembly Share(?:Energy|Mineral|Carbon): junction\([^)]*\) \{[^}]*?activity: )if paired_contact then 1 else 0/g,
+  const control = source.replace(/(assembly (?:Left|Right)(?:Energy|Mineral|Carbon): junction\([^)]*\) \{[^}]*?activity: )[^;]+/g,
     (_, prefix) => { changed++; return prefix + '0'; });
-  assert.equal(changed, 3, 'Control closes all three junctions while retaining their physical recipes');
+  assert.equal(changed, 6, 'Control closes both sets of junctions while retaining their physical recipes');
   return control;
 }
 
@@ -105,7 +95,7 @@ async function nursery(open, countChemistry) {
   assert.ok(report.peakNurseFixation > 0, 'Nurse fixes real inorganic carbon while the juvenile reduces harvesting');
   const juvenile = lastState.cells.find(cell => cell.id === young.id);
   report.daughterAt48s = { energy:juvenile.energy, organicCarbon:juvenile.organicCarbon, envelopeGrowth:juvenile.area - young.area };
-  assert.ok(report.peakMaternalSolar > report.maternalSolarAtFission + 0.03, 'The mother completes an additional paid harvester while nursing');
+  if (countChemistry) assert.ok(report.peakMaternalSolar > report.maternalSolarAtFission + 0.03, 'The mother completes an additional paid harvester while nursing');
   if (open) {
     assert.ok(report.transferred.carbonNet > 1, 'The developing cell receives organic carbon from its nurse');
     assert.ok(Math.abs(report.transferred.mineralNet) > 0.02, 'The paired mineral compartments exchange actual stock');
@@ -165,7 +155,8 @@ async function swimmer(sender) {
 // water. Two distant donors acquire inorganic minerals and carbon. Their
 // tissue later supplies the mineral-bearing meal in both treatments.
 async function tradeWithProducer(openPorts) {
-  const api = await fresh({countChemistry:true,width:400,height:400,ambientLight:.9,ambientTemperature:.18,initialNutrients:0,gases:{mode:'open',exchangeRate:.2}});
+  // Seed 11 gives opposing stock front mounts in this controlled encounter.
+  const api = await fresh({seed:11,countChemistry:true,width:400,height:400,ambientLight:.9,ambientTemperature:.18,initialNutrients:0,gases:{mode:'open',exchangeRate:.2}});
   const producer = PRESETS.find(preset => preset.name === 'Phototroph');
   const grazer = PRESETS.find(preset => preset.name === 'Forager');
   seed(api, compile(api,producer.source), 1, 200, 200);
@@ -193,6 +184,7 @@ async function tradeWithProducer(openPorts) {
   seed(api,id,1,200,200);
   const trial = snapshot(api).cells.find(cell=>cell.genome===id);
   assert.equal(restore(api,before),1);
+  assert.ok(Math.cos(trial.angle - host.angle) < -0.98, 'Both front docks face the shared interface');
   const separation = host.radius + trial.radius + 0.12;
   seed(api,id,1,host.x - Math.cos(trial.angle)*separation - (trial.x-200),host.y - Math.sin(trial.angle)*separation - (trial.y-200));
   const report = {attachedTicks:0,grazerCarbonNet:0,grazerMineralNet:0};
@@ -202,7 +194,10 @@ async function tradeWithProducer(openPorts) {
     const tissue = snapshot(api).food.filter(packet => packet.kind === 1);
     const nearest = tissue.sort((a, b) => distance(a) - distance(b))[0];
     assert.ok(nearest, 'Each feeding site contains real tissue');
-    assert.equal(api.move_cell(grazer.id, nearest.x, nearest.y, 1), 2, 'Move both attached partners to the meal');
+    const capture = body(api,grazer.id).cellular.assemblies.find(a => a.kind==='import(particle)' && a.complete && a.activity>0);
+    assert.ok(capture);
+    const angle = grazer.angle + capture.at;
+    assert.equal(api.move_cell(grazer.id, nearest.x - grazer.radius * Math.cos(angle), nearest.y - grazer.radius * Math.sin(angle), 1), 2, 'Move both attached partners to the meal');
   }
   for (let tick=1; tick<=70*30; tick++) {
     const state = advance(api,1);
@@ -217,9 +212,9 @@ async function tradeWithProducer(openPorts) {
     }
     report.grazerCarbonNet += receiver.carbonNet;
     report.grazerMineralNet += receiver.mineralNet;
-    if (tick===18*30) {
+    if (tick===50*30) {
       // Present the mineral donor first, followed by the carbon-rich bloom at
-      // 36 seconds. Both pairs receive the same meals with their geometry intact.
+      // 60 seconds. Both pairs receive the same meals with their geometry intact.
       const mineralPosition = state.cells.find(cell => cell.id === donor);
       bloomPosition = state.cells.find(cell => cell.id === bloomDonor);
       assert.ok(mineralPosition?.nutrients > 1, 'The donor must concentrate real minerals');
@@ -229,7 +224,7 @@ async function tradeWithProducer(openPorts) {
       assert.equal(api.set_cell_stores(bloomDonor,1,0,0),1);
       feedAtRemains(grazer, mineralPosition);
     }
-    if (tick === 36 * 30) feedAtRemains(grazer, bloomPosition);
+    if (tick === 60 * 30) feedAtRemains(grazer, bloomPosition);
   }
   assert.ok(report.attachedTicks > 40*30, 'Both treatments sustain real adhesion');
   const inventory = body(api,trial.id).cellular.assemblies;

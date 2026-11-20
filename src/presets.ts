@@ -246,12 +246,12 @@ const sharedProduct: Record<string,string> = {
 };
 
 const tradingContact = 'populated(rf091) && peer.message_valid && peer.message == rf091';
-const daughterContact = 'peer.division_interface && populated(rf020) && peer.message_valid && peer.message == rf020';
+const daughterContact = 'peer.division_interface';
 
 /** Explicit initiation lets independently regulated recipes share physical stocks. */
 function controlledProgram(recipes: CellularRecipe[], logic: string, regulator = false, duplicationArea = 1.6): string {
   const roles = [...new Set(recipes.flatMap(recipe => recipe.parts.map(([role]) => role)))];
-  const adhesion = recipes.find(recipe => recipe.kind === 'adhere()');
+  const adhesives = recipes.filter(recipe => recipe.kind === 'adhere()');
   return `# Shared products supply independently regulated physical recipes.
 # Genes make stock; start_when permits new machines; activity runs built ones.
 cellular counts;
@@ -275,7 +275,7 @@ ${recipes.map(recipe => {
     return `let need_${recipe.name} = funded && (${recipe.ready ?? 'true'}) && missing(built.${recipe.name}, ${goal}, ${amount(mass)});`;
   }).join('\n')}
 
-${adhesion ? `gene supply_CoatPrecursor: CoatPrecursor = if need_${adhesion.name} && pool.Glue < 10 && pool.CoatPrecursor < 10 then 1 else 0;\n` : ''}${roles.map(role => {
+${adhesives.length ? `gene supply_CoatPrecursor: CoatPrecursor = if (${adhesives.map(recipe => 'need_' + recipe.name).join(' || ')}) && pool.Glue < 10 && pool.CoatPrecursor < 10 then 1 else 0;\n` : ''}${roles.map(role => {
     const requests = recipes.flatMap(recipe => {
       const part = recipe.parts.find(([kind]) => kind === role);
       if (!part) return [];
@@ -379,6 +379,13 @@ export const CELLULAR_FAMILY_PRESETS: Preset[] = [
 ];
 
 
+// Historical examples retain their original aliases. Current genomes name the
+// measured gut fractions and the enzymes acting on those fractions.
+function substrateNames(expression: string): string {
+  return expression.replace(/(gut\.|digest\()(exudate|tissue|waste)\b/g, (_, prefix, food: string) =>
+    prefix + ({exudate:'soluble', tissue:'structural', waste:'bound'} as Record<string,string>)[food]);
+}
+
 /** Each recipe installs one operation; no family grants additional hidden machinery. */
 function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?: boolean; giant?: boolean; memory?: boolean; predator?: boolean; conserve?: boolean; local?:boolean; restOnMeal?:boolean; colony?:boolean; multicellular?:'nursery' | 'relay' | 'crown'; scavenger?:boolean } = {}): string {
   const quantity = (amount:number) => options.local ? Math.round(amount * COUNTS_PER_UNIT) : amount;
@@ -411,7 +418,7 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
   }
   const usesVision = !options.local || behavior.includes('sensed.Vision');
   const usesTouch = !options.local || behavior.includes('sensed.Touch') || options.predator;
-  const usesChemistry = !options.local || behavior.includes('sensed.Chemistry') || options.memory;
+  const usesChemistry = !options.local || behavior.includes('sensed.Chemistry') || options.memory || options.scavenger;
   const equipped = (hasGut || options.drift) && !hasLight
     ? ['powered', sufficient('LeftMotor', 0.025), sufficient('RightMotor', 0.025),
       ...(usesVision ? [sufficient('Vision', 0.02)] : []),
@@ -445,24 +452,39 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
         activity:tradingProducer ? 'if nutrient.fraction < 0.8 then 1 else 0' : 'if nutrient.fraction > 0.45 then 1 else 0' },
     );
   }
-  if (options.colony) recipes.push(
-    { name:'Adhesin', kind:'adhere()', engageWhen:daughterContact, parts:[['anchor',0.008],['membrane',0.008],['adhesin',0.004]], ready:'powered', activity:'if energy > 120000 then 1 else 0' },
-    ...(options.multicellular === 'crown' ? [] : ['LeftJunction', 'RightJunction']).map((name, index) => ({
-      name, kind:'sense(contact)', parts:[['anchor',0.002],['receptor',0.006],['filament',0.002]] as CellularPart[],
-      at:index === 0 ? Math.PI/2 : -Math.PI/2, ready:'powered',
-    })),
-  );
-  if (options.multicellular === 'crown') recipes.push(
-    { name:'Bus', kind:'junction(signal)', parts:[['membrane',0.012],['receptor',0.008]], ready:'powered' },
-    { name:'RimSolar', kind:'harvest(light)', parts:[['anchor',0.01],['pigment',0.04],['enzyme',0.01]],
-      ready:'rim', goal:'0.06', activity:'if rim then 1 else 0' },
-  );
-  if (nursery) {
-    for (const resource of ['energy','mineral','carbon']) recipes.push({
-      name:`Share${resource[0].toUpperCase() + resource.slice(1)}`, kind:`junction(${resource})`,
-      parts:[['membrane',0.012],['transporter',0.008]], ready:'powered', activity:'if paired_contact then 1 else 0',
-    });
+  if (tradingProducer || options.scavenger || hunting) {
+    recipes.push({name:'Badge', kind:'display()', parts:[['anchor',0.004],['membrane',0.006]],
+      ready:hunting ? 'true' : 'powered', goal:'0.01'});
+    if (tradingProducer) recipes.push(
+      {name:'DockReader', kind:'sense(contact)', parts:[['anchor',0.002],['receptor',0.006],['filament',0.002]], ready:'powered', goal:'0.01'},
+      {name:'Outlet', kind:'export(carbon)', parts:[['anchor',0.006],['transporter',0.024]], ready:'powered',
+        activity:'if carbon.organic > 1500 * body.area && energy.fraction > 0.12 then 1 else 0'},
+    );
   }
+  if (tradingProducer) recipes.push({name:'FarOutlet', kind:'export(carbon)', at:String(Math.PI),
+    parts:[['anchor',0.006],['transporter',0.024]], ready:'powered', goal:'0.03',
+    activity:'if carbon.organic > 3500 * body.area && energy.fraction > 0.25 then 1 else 0'});
+  if (options.colony) {
+    for (const [side, at] of [['Left', Math.PI / 2 - 0.03], ['Right', Math.PI / 2 + 0.03]] as const) {
+      const name = side.toLowerCase();
+      recipes.push(
+        {name:side + 'Glue', kind:'adhere()', engageWhen:daughterContact, at,
+          parts:[['anchor',0.008],['membrane',0.008],['adhesin',0.004]], ready:nursery ? 'powered && (!paired_contact || body.area > body.birth_area * 1.25)' : 'powered', goal:'if expanding && (paired_contact || rb041) then 0.04 else 0.02'},
+        {name:side + 'Bus', kind:'junction(signal)', at, parts:[['membrane',0.012],['receptor',0.008]], ready:nursery ? 'powered && (!paired_contact || body.area > body.birth_area * 1.25)' : 'powered', goal:'if expanding && (paired_contact || rb041) then 0.04 else 0.02'},
+      );
+      if (nursery) {
+        for (const resource of ['energy','mineral','carbon']) recipes.push({
+          name:side + resource[0].toUpperCase() + resource.slice(1), kind:`junction(${resource})`, at,
+          parts:[['membrane',0.012],['transporter',0.008]], ready:nursery ? 'powered && (!paired_contact || body.area > body.birth_area * 1.25)' : 'powered', goal:'if expanding && (paired_contact || rb041) then 0.04 else 0.02',
+          activity:`if ${name}_peer && (developing || ${name}_request) then 1 else 0`,
+        });
+      }
+    }
+  }
+  if (options.multicellular === 'crown') recipes.push(
+    {name:'RimSolar', kind:'harvest(light)', parts:[['anchor',0.01],['pigment',0.04],['enzyme',0.01]],
+      ready:'rim', goal:'0.06', activity:'if rim then 1 else 0'},
+  );
   if (options.multicellular === 'relay') recipes.push({
     name:'PulseMotor', kind:'propel()', parts:[['anchor',0.005],['motor',0.01],['filament',0.01]],
     ready:'powered', activity:'if firing then 0.6 else 0', at:0, direction:0,
@@ -470,19 +492,19 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
   if (hasGut) recipes.push(
     { name:'Gut', kind:'store(food)', parts:[['membrane',0.06]] },
     { name:'ExudateEnzyme', kind:'digest(exudate)', parts:[['enzyme',exudateMass]], activity:'if gut.exudate.energy > 0 then 1 else 0' },
-    { name:'Capture', kind:'import(particle)', parts:[['anchor',0.01],['motor',0.02]], activity:hunting ? 'if !waste_contact && (gut.fraction < 0.9 || meal < 40000) then 1 else 0' : switchesInShade ? 'if shade_feed && gut.fraction < 0.7 then 1 else 0' : 'if gut.fraction < 0.7 then 1 else 0', ready:sufficient('Gut', 0.06) },
+    { name:'Capture', kind:'import(particle)', parts:[['anchor',0.01],['motor',0.02]], engageWhen:hunting ? '!peer.resistance_valid || peer.resistance < 0.085' : undefined, activity:hunting ? 'if gut.fraction < 0.9 || meal < 40000 then 1 else 0' : switchesInShade ? 'if shade_feed && gut.fraction < 0.7 then 1 else 0' : 'if gut.fraction < 0.7 then 1 else 0', ready:sufficient('Gut', 0.06) },
     { name:'TissueEnzyme', kind:'digest(tissue)', parts:[['enzyme',tissueMass]], ready:options.local && !options.predator ? 'powered && gut.tissue.energy > 0' : 'powered', activity:'if gut.tissue.energy > 0 then 1 else 0' },
     { name:'WasteEnzyme', kind:'digest(waste)', parts:[['enzyme',options.drift?0.03:hasLight?0.01:0.015]], ready:options.local ? 'powered && gut.waste.energy > 0' : 'powered', activity:'if gut.waste.energy > 0 then 1 else 0' },
   );
   recipes.push(
     { name:'Translation', kind:'translate()', parts:[['scaffold',0.02],['enzyme',0.02]], ready:hunting ? 'powered && body.area > body.birth_area * 1.3' : surplusReady,
       goal:hunting ? '0.08' : undefined },
-    { name:'Minerals', kind:'import(mineral)', parts:[['anchor',0.005],['transporter',0.02]], ready:options.local && hasGut ? 'powered && (nutrient.stored < 1500 || surplus)' : 'powered', activity:'if nutrient.fraction < 0.9 then 1 else 0' },
-    { name:'EnergyStore', kind:'store(energy)', parts:[['membrane',options.local?0.04:0.08]], ready:surplusReady,
+    { name:'Minerals', kind:'import(mineral)', parts:[['anchor',0.005],['transporter',0.02]], ready:options.local && hasGut ? 'powered && (nutrient.stored < 1500 || surplus)' : 'powered', activity:options.local ? 'if nutrient.fraction < 0.9 && energy.fraction > 0.05 then 1 else 0' : 'if nutrient.fraction < 0.9 then 1 else 0' },
+    { name:'EnergyStore', kind:'store(energy)', parts:[['membrane',options.colony ? 0.02 : options.local ? 0.04 : 0.08]], ready:surplusReady,
       goal:needsGrowthStorage ? '(if expanding || energy.capacity <= 1000000 then 0.08 else 0.04)'
-        : options.colony ? 'if expanding || paired_contact then 0.08 else 0.04' : undefined },
+        : options.colony ? 'if expanding then 0.08 else 0.04' : undefined },
     { name:'MineralStore', kind:'store(mineral)', parts:[['membrane',0.02]], ready:hunting ? 'powered && body.area > body.birth_area * 1.3' : options.local?`${surplusReady} && body.area > 1.2`:surplusReady,
-      goal:hunting ? '0.04' : undefined },
+      goal:options.colony ? 'if expanding then 0.06 else 0.02' : hunting ? '0.04' : undefined },
   );
   const movementReady = hasLight && hasGut && !switchesInShade ? 'powered && body.area > 1.2' : 'powered';
   const restMotors = options.scavenger ? 'if (docked || meal > 20000) && !injured && !leaving then 0 else '
@@ -492,7 +514,7 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
     { name:'RightMotor', kind:'propel()', parts:[['anchor',0.005],['motor',0.01],['filament',0.01]], ready:movementReady, activity:`${restMotors}clamp(move + steer * 0.5, 0, 1)`, at:-Math.PI/2, direction:0 },
     ...(usesVision ? [{ name:'Vision', kind:'sense(optical)', parts:[['anchor',0.004],['receptor',0.012],['pigment',0.004]] as CellularPart[], ready:movementReady }] : []),
     ...(usesTouch ? [{ name:'Touch', kind:'sense(contact)', parts:[['anchor',0.002],['receptor',0.006],['filament',0.002]] as CellularPart[], ready:movementReady }] : []),
-    ...(usesChemistry ? options.local && options.memory ? [
+    ...(usesChemistry ? options.local && (options.memory || options.scavenger) ? [
       { name:'LeftChemistry', kind:'sense(chemical)', parts:[['anchor',0.003],['receptor',0.012]] as CellularPart[], ready:movementReady, at:Math.PI/2 },
       { name:'RightChemistry', kind:'sense(chemical)', parts:[['anchor',0.003],['receptor',0.012]] as CellularPart[], ready:movementReady, at:-Math.PI/2 },
     ] : [{ name:'Chemistry', kind:'sense(chemical)', parts:[['anchor',0.003],['receptor',0.012]] as CellularPart[], ready:options.local ? 'surplus' : movementReady }] : []),
@@ -509,29 +531,80 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
   const growthArea = options.giant ? 'max(3, body.birth_area * 2)' : 'body.birth_area * 2';
   recipes.push(
     { name:'Support', kind:'support()', parts:[['scaffold',0.06]], ready:options.local && hasGut ? `equipped && energy > ${quantity(options.conserve?70:65)}${hasLight?'':feedingReserve}` : `powered && energy > ${quantity(options.conserve?60:45)}`, goal:options.giant?'max(0.24, body.birth_area * 0.12)':'max(0.12, body.birth_area * 0.12)' },
-    { name:'Envelope', kind:'grow()', parts:[['membrane',0.015],['enzyme',0.005]], ready:sufficient('Support', hunting ? 0.06 : 0.12),
-      activity:hunting ? 'if energy > 600000 && body.area < body.birth_area * 2 then (if crowded then 0.04 else 0.2 + 0.6 * clamp((gut.tissue.energy - 300000 * body.area) / 200000, 0, 1)) else 0'
+    { name:'Envelope', kind:'grow()', parts:[['membrane',0.015],['enzyme',0.005]], ready:sufficient('Support', hunting || nursery ? 0.06 : 0.12),
+      activity:hunting ? 'if (energy > 600000 || body.space.free < 0.05 && energy > 240000) && body.area < body.birth_area * 2 then (if body.space.free < 0.05 then 0.65 else if crowded then 0.04 else 0.26 + 0.35 * clamp((meal - 130000 * body.area) / 150000, 0, 1)) else 0'
         : nursery ? 'if !nursing && energy > (if developing then 450000 else 900000) && body.area < body.birth_area * 2 then 0.8 else 0' : `if energy > ${quantity(90)} && body.area < ${growthArea} then 0.8 else 0` },
     { name:'Replication', kind:'replicate()', parts:[['scaffold',0.005],['replicase',0.015]], ready:sufficient('Support', 0.12), activity:nursery ? 'if !nursing && energy > (if developing then 500000 else 800000) then 1 else 0' : `if energy > ${quantity(hunting ? 55 : 80)} then 1 else 0` },
-    { name:'Division', kind:'constrict()', parts:[['anchor',0.004],['motor',0.008],['constrictor',0.008]], ready:'expanding',
+    { name:'Division', kind:'constrict()', parts:[['anchor',0.004],['motor',0.008],['constrictor',0.008]], ready:'expanding', at:options.local ? (options.colony ? 0 : String(Math.PI / 2)) : undefined,
       activity:hunting ? 'if body.area + 0.000001 >= body.birth_area * 2 && enough(built.Envelope,0.04) && enough(built.Translation,0.08) && enough(built.EnergyStore,0.08) && enough(built.MineralStore,0.04) && enough(built.Respiration,0.08) && !crowded && energy > 580000 then 1 else 0'
         : `if body.area + 0.000001 >= ${growthArea} && energy > ${quantity(100)} then 1 else 0` },
   );
+  if (options.colony) {
+    // Keep harvesting and envelope machinery along the furrow. Each half can
+    // inherit a paid copy when these assemblies have grown in duplicate.
+    for (const recipe of recipes) {
+      if (['Solar','Minerals','Envelope','RimSolar'].includes(recipe.name)) recipe.at = String(Math.PI / 2);
+    }
+  }
   // Paired flank thermoreceptors add paid local information; keep their tested
   // placement exact and append them after existing recipes to retain work order.
   if (options.local && options.predator) recipes.push(
     { name:'LeftHeat', kind:'sense(heat)', parts:[['anchor',0.002],['receptor',0.008]], ready:'powered', at:String(Math.PI/2) },
     { name:'RightHeat', kind:'sense(heat)', parts:[['anchor',0.002],['receptor',0.008]], ready:'powered', at:String(-Math.PI/2) },
   );
-  if (hunting) {
-    // A single working copy suffices for these operations during growth.
-    // Save the extra cytoplasm for feeding, respiration and the daughter's hunting gear.
-    // Each daughter needs its own working envelope before a packed body
-    // can install another machine. A full ATP store cannot create space.
-    const singleCopy = new Set(['Minerals','Engulfment','Replication','Division']);
+  if (options.local && options.memory) {
+    // The inlet grazes the flank as the two chemical receptors steer. Build
+    // storage as soon as the feeding apparatus works, before the next meal.
+    for (const recipe of recipes) {
+      if (recipe.name === 'Capture') recipe.at = String(Math.PI / 2);
+      if (recipe.name === 'EnergyStore') {
+        recipe.ready = 'powered';
+        recipe.goal = '(if expanding || energy.capacity <= 1000000 then 0.12 else 0.04)';
+      }
+      if (recipe.name === 'MineralStore') {
+        recipe.ready = 'powered && body.area > 1.2';
+        recipe.goal = '(if expanding then 0.06 else 0.02)';
+      }
+      if (recipe.name === 'Division') {
+        recipe.activity = 'if body.area + 0.000001 >= body.birth_area * 2 && enough(built.EnergyStore,0.12) && enough(built.MineralStore,0.06) && energy > 1000000 then 1 else 0';
+      }
+    }
+  }
+  if (switchesInShade) {
+    // Maintain one shade-feeding apparatus so daughters have room to rebuild
+    // the harvesting and storage machinery they need in bright water.
+    const singleCopy = new Set(['Canopy','Gut','Capture','ExudateEnzyme','LeftMotor','RightMotor','Division','Replication']);
     for (const recipe of recipes) if (singleCopy.has(recipe.name)) {
       recipe.goal = amount(recipe.parts.reduce((mass, [, part]) => mass + part, 0));
     }
+  }
+  if (hunting) {
+    // A forward pole keeps the piercer, inlet and reader facing the same way
+    // after division. Its paired motors travel with the feeding apparatus.
+    const singleCopy = new Set(['Minerals','Engulfment','Replication','Division',
+      'LeftMotor','RightMotor','Vision','Touch','Piercer','Capture','LeftNose','RightNose','LeftHeat','RightHeat']);
+    for (const recipe of recipes) {
+      if (recipe.name === 'Division') recipe.at = 0;
+      if (recipe.name === 'LeftMotor') recipe.at = 0.52;
+      if (recipe.name === 'RightMotor') recipe.at = -0.52;
+      if (recipe.name === 'Engulfment' || recipe.name === 'Minerals') recipe.at = String(Math.PI);
+      if (recipe.name === 'Envelope') recipe.at = String(Math.PI / 2);
+      if (recipe.name === 'EnergyStore') recipe.ready = 'powered && (energy.capacity < 950000 || surplus)';
+      if (singleCopy.has(recipe.name)) recipe.goal = amount(recipe.parts.reduce((mass, [, part]) => mass + part, 0));
+    }
+    // Equip the tail before fission. This pole can forage while the daughter
+    // regrows its frontal equipment. The left motor switches the rear drive off.
+    const tail = {at:String(Math.PI),ready:'body.area > 1.3 * body.birth_area'};
+    recipes.push(
+      {...tail,name:'TailInlet',kind:'import(particle)',parts:[['anchor',0.0055],['motor',0.0105]],goal:'0.016',
+        engageWhen:'!peer.resistance_valid || peer.resistance < 0.085',activity:'if gut.fraction < 0.9 then 1 else 0'},
+      {...tail,name:'TailMotor',kind:'propel()',parts:[['anchor',0.005],['motor',0.01],['filament',0.01]],goal:'0.025',
+        direction:Math.PI,activity:'if built.LeftMotor < 0.02 && gut.fraction < 0.65 then 0.85 else 0'},
+      {...tail,name:'TailTouch',kind:'sense(contact)',parts:[['anchor',0.002],['receptor',0.006],['filament',0.002]],goal:'0.01'},
+      {...tail,name:'TailBadge',kind:'display()',parts:[['anchor',0.004],['membrane',0.006]],goal:'0.01'},
+      {...tail,name:'TailPiercer',kind:'pierce()',parts:[['anchor',0.0055],['filament',0.0145],['enzyme',0.005]],goal:'0.025',
+        engageWhen:'may_strike',activity:'if sensed.TailTouch.valid && sensed.TailTouch.resistance > 0.1 && hunting_budget && meal < 170000 * body.area then 1 else 0'},
+    );
   }
   let surplusRule = `let surplus = equipped && energy > 550000${hasGut&&!hasLight?feedingReserve:''};`;
   if (tradingProducer) {
@@ -542,37 +615,59 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
         recipe.goal = `(if preparing_daughters then ${amount(2 * mass)} else ${amount(mass)})`;
       }
       if (recipe.name === 'Minerals') recipe.ready = 'powered || nutrient.stored < 1300';
+      // Three small mineral stores leave room for unequal whole-part inheritance.
+      if (recipe.name === 'MineralStore') recipe.goal = 'if preparing_daughters then 0.06 else 0.02';
       if (recipe.name === 'Division') {
         recipe.activity = 'if body.area + 0.000001 >= body.birth_area * 2 && provisioned && energy > 1000000 then 1 else 0';
       }
     }
     surplusRule = `# Duplicate the four machines a daughter needs to feed and make proteins.
 let preparing_daughters = body.area > body.birth_area * 1.45;
-let provisioned = enough(built.Respiration, 0.08) && enough(built.Solar, 0.24) && enough(built.Minerals, 0.05) && enough(built.Translation, 0.08);
+let provisioned = enough(built.Respiration, 0.08) && enough(built.Solar, 0.24) && enough(built.Minerals, 0.05) && enough(built.Translation, 0.08) && enough(built.MineralStore, 0.06);
 ${surplusRule}`;
   }
   if (options.scavenger) {
+    // While orbiting a producer, the food-facing flank can graze even when the
+    // forward inlet is pointing along the producer's surface.
+    recipes.push({name:'FlankInlet', kind:'import(particle)', at:String(Math.PI / 2),
+      parts:[['anchor',0.005],['motor',0.01]], ready:'powered', goal:'0.015',
+      activity:'if gut.fraction < 0.9 then 1 else 0'},
+      {name:'FarInlet', kind:'import(particle)', at:String(-Math.PI / 2),
+        parts:[['anchor',0.005],['motor',0.01]], ready:'powered', goal:'0.015',
+        activity:'if gut.fraction < 0.9 then 1 else 0'});
+
     regulateGrazer(recipes);
     surplusRule = `let scavenging = gut.tissue.energy > 60000 && !rb093;
 let provisioning = expanding && (energy > 600000 || gut.exudate.energy + gut.tissue.energy > 100000);
 # Commit after a substantial meal or a productive carbon connection.
 # A daughter can start with a smaller inherited ATP compartment.
 rb061 = true when equipped && energy > min(650000, 0.85 * energy.capacity)
-  && (gut.exudate.energy + gut.tissue.energy > 120000
+  && (gut.exudate.energy + gut.tissue.energy > 55000
     || (gut.exudate.energy + gut.tissue.energy > 30000 && carbon.organic > 8000 * body.area)
     || (built.CarbonPort > 0.045 && carbon.organic > 12000 * body.area && energy.fraction > 0.85));
 let surplus = equipped && rb061 && energy > min(320000, 0.65 * energy.capacity);`;
     behavior = `# After recognizing a producer, build reciprocal junctions for future encounters.
-publish rf090 = 72;
+publish rf090;
+rf090 = 72;
 rf091 = 41;
 let docked = sensed.Touch.message_valid && sensed.Touch.message == rf091;
 rb093 = true when docked;
 ${behavior}`;
   } else if (tradingProducer) {
     behavior = `# A receptive grazer can share surplus fixed carbon and dissolved minerals.
-publish rf090 = 41;
+publish rf090;
+rf090 = 41;
 rf091 = 72;
 ${behavior}`;
+  }
+  if (options.local) {
+    for (const recipe of recipes) {
+      if (recipe.kind.startsWith('digest(')) recipe.kind = substrateNames(recipe.kind);
+      if (recipe.activity) recipe.activity = substrateNames(recipe.activity);
+      if (recipe.ready) recipe.ready = substrateNames(recipe.ready);
+    }
+    behavior = substrateNames(behavior);
+    surplusRule = substrateNames(surplusRule);
   }
   return options.local ? controlledProgram(recipes, `let powered = ${ready};\nlet equipped = ${equipped};\n${surplusRule}\n${behavior}`, options.memory, hunting ? 1.75 : 1.6)
     : cellularProgram(recipes, `let powered = ${ready};\n${behavior}`, options.memory, 0.001);
@@ -592,7 +687,8 @@ function regulateGrazer(recipes: CellularRecipe[]): void {
     Support:{ready:'surplus'},
     Envelope:{activity:'if energy > 340000 && body.area < body.birth_area * 2 then 0.8 else 0'},
     Replication:{activity:'if energy > 340000 then 1 else 0'},
-    Division:{ready:'surplus && body.area > 1.5 * body.birth_area', activity:'if body.area + 0.000001 >= body.birth_area * 2 && enough(built.Minerals,0.05) && enough(built.EnergyStore,0.04) && enough(built.MineralStore,0.04) && enough(built.Respiration,0.08) && enough(built.Translation,0.08) && (!rb093 || enough(built.Dock,0.04) && enough(built.CarbonPort,0.1)) && energy > 600000 && meal + carbon.organic * 20 > 120000 * body.area then 1 else 0'},
+    // The forward daughter inherits the feeding pole and its mineral pumps.
+    Division:{at:0, ready:'surplus && body.area > 1.5 * body.birth_area', activity:'if body.area + 0.000001 >= body.birth_area * 2 && enough(built.Minerals,0.05) && enough(built.EnergyStore,0.04) && enough(built.MineralStore,0.04) && enough(built.Respiration,0.08) && enough(built.Translation,0.08) && energy > 490000 && meal + carbon.organic * 20 > 70000 * body.area then 1 else 0'},
   };
   for (const recipe of recipes) {
     Object.assign(recipe, controls[recipe.name]);
@@ -631,22 +727,27 @@ rf095 = age when starved_at_contact && (!populated(rf095) || age - rf095 > 24);
 let leaving = populated(rf095) && age - rf095 < 8;
 let grazing = seen && sensed.Vision.area >= 0.35
   && length(sensed.Vision.offset) < 7 * sqrt(sensed.Vision.area) + 5;
+let particle = seen && sensed.Vision.area < 0.35;
+let gradient = sensed.LeftChemistry.organic - sensed.RightChemistry.organic;
+let has_gradient = sensed.LeftChemistry.valid && sensed.RightChemistry.valid && abs(gradient) > 0.0001;
 let steer = if blocked then clamp(escape * 2, -1, 1)
   else if injured || leaving then 0
+  else if seek && particle then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1)
+  else if seek && has_gradient then clamp(gradient * 35, -1, 1)
   else if grazing then clamp((angle(sensed.Vision.offset) - 1.4) * 1.8, -1, 1)
   else if seek && seen then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1)
   else sin(age * 0.65) * 0.35;
 let move = if blocked || injured || leaving then 0.65 else if meal_fraction > 0.45 then 0
-  else if seek && seen then 0.5
-  else if sensed.Chemistry.valid && sensed.Chemistry.organic > 0.001 then 0.18 else 0.28;`;
+  else if seek && particle then 0.55 else if has_gradient then 0.35 else 0.23;`;
 
-const localHunting = `# Advertise a contact marker from birth. Spare matching targets of either weapon.
-publish rf001 = 17;
+const localHunting = `# Once the badge is built, present this marker to nearby contact receptors.
+publish rf001;
+rf001 = 17;
 let may_strike = !populated(rf001) || !peer.message_valid || peer.message != rf001;
 let peer = sensed.Touch.message_valid && sensed.Touch.message == rf001;
 # After a kin encounter, feed when stored fuel is low and leave room for neighbours before dividing.
 rf004 = age when peer;
-let recent_peer = populated(rf004) && age - rf004 < 240;
+let recent_peer = populated(rf004) && age - rf004 < 10;
 let crowded = peer || recent_peer;
 let leave_peer = if angle(sensed.Touch.offset) >= 0 then -0.8 else 0.8;
 let firm_contact = sensed.Touch.valid && sensed.Touch.resistance > 0.1;
@@ -656,9 +757,6 @@ let prey_cue = !peer && (firm_contact || sensed.Vision.valid && sensed.Vision.ar
 rf003 = age when prey_cue;
 let hunting = prey_cue || populated(rf003) && age - rf003 < 18;
 let processing = meal > (if hunting then 230000 else 140000) * body.area;
-let waste_contact = sensed.Touch.valid && sensed.Touch.resistance > 0.03 && sensed.Touch.resistance < 0.055;
-let waste_seen = sensed.Vision.valid && sensed.Vision.area < 0.25 && sensed.Vision.pigment < 0.078;
-let wasted_turn = if angle(sensed.Vision.offset) >= 0 then -0.9 else 0.9;
 let hungry = (energy.fraction < 0.7 || carbon.organic * 20 < energy.capacity * 0.4) && !processing;
 # Paired local temperatures select the cooler side before tissue is damaged.
 let heat_escape = sensed.LeftHeat.valid && sensed.RightHeat.valid
@@ -667,7 +765,6 @@ let heat_delta = sensed.RightHeat.value - sensed.LeftHeat.value;
 let cool_turn = if heat_delta < -0.002 then -0.75 else 0.75;
 # Search for decaying food by its local chemical gradient when vision has no target.
 let steer = if heat_escape then cool_turn else if peer then leave_peer else if processing then 0
-  else if hungry && waste_seen then wasted_turn
   else if hungry && sensed.Vision.valid then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1)
   else if sensed.LeftNose.valid && sensed.RightNose.valid then clamp((sensed.LeftNose.organic - sensed.RightNose.organic) * 22 + sin(age * 0.25) * 0.10, -1, 1)
   else sin(age * 0.5) * (if equipped then 0.12 else 0.4);
@@ -693,28 +790,29 @@ let shade_feed = sensed.Canopy.valid && (sensed.Canopy.level < 0.35
 let steer = if shade_feed then sin(age * 0.7) * 0.35 else 0;
 let move = if shade_feed && gut.fraction < 0.5 then 0.4 else 0;`;
 
-const colonyContact = (marker: number) => `# Retain a daughter at division using matching markers and active adhesive surfaces.
-publish rf020 = ${marker};
-let left_peer = sensed.LeftJunction.bonded && sensed.LeftJunction.message_valid && sensed.LeftJunction.message == rf020;
-let right_peer = sensed.RightJunction.bonded && sensed.RightJunction.message_valid && sensed.RightJunction.message == rf020;
+const colonyContact = `# A recent drop in area records that this cell has already divided.
+rb041 = true when populated(rf040) && body.area + 0.2 < rf040;
+rf040 = body.area;
+let left_peer = sensed.LeftBus.valid;
+let right_peer = sensed.RightBus.valid;
 let paired_contact = left_peer || right_peer;`;
 
-const nurseBehavior = `${colonyContact(42)}
+const nurseBehavior = `${colonyContact}
 # Young cells ask their partners for support. Age runs from each cell's own birth.
 signal rf021;
 rf021 = if age < 50 then 1 else 0;
 let developing = age < 50 && paired_contact;
-let left_request = left_peer && sensed.LeftJunction.signal_valid && sensed.LeftJunction.signal > 0.5;
-let right_request = right_peer && sensed.RightJunction.signal_valid && sensed.RightJunction.signal > 0.5;
+let left_request = left_peer && sensed.LeftBus.signal_valid && sensed.LeftBus.value > 0.5;
+let right_request = right_peer && sensed.RightBus.signal_valid && sensed.RightBus.value > 0.5;
 let nursing = age >= 50 && (left_request || right_request);
 # The attached nurse builds extra harvesters and pauses envelope growth.
 # Its juvenile invests in growth. Each solute moves down its own gradient.`;
 
-const relayBehavior = `${colonyContact(73)}
+const relayBehavior = `${colonyContact}
 # The identity marker stays stable while rf021 carries a changing pulse.
 signal rf021;
-let left_wave = left_peer && sensed.LeftJunction.signal_valid && sensed.LeftJunction.signal > 0.5;
-let right_wave = right_peer && sensed.RightJunction.signal_valid && sensed.RightJunction.signal > 0.5;
+let left_wave = left_peer && sensed.LeftBus.signal_valid && sensed.LeftBus.value > 0.5;
+let right_wave = right_peer && sensed.RightBus.signal_valid && sensed.RightBus.value > 0.5;
 let pacemaker = paired_contact && age > 40 && sin(age * 0.9) > 0.985;
 let trigger = ri031 == 0 && (pacemaker || left_wave || right_wave);
 let firing = trigger || ri031 > 162;
@@ -723,16 +821,14 @@ let firing = trigger || ri031 > 162;
 ri031 = if trigger then 180 else if ri031 > 0 then ri031 - 1 else 0;
 rf021 = if firing then 1 else 0;`;
 
-const crownBehavior = `# Keep a direct daughter at division when both cells have functioning adhesive surfaces.
-publish rf020 = 87;
-signal rf021 = 0;
-let paired_contact = sensed.Bus.valid;
-let partners = sensed.Bus.count;
+const crownBehavior = `${colonyContact}
+signal rf021;
+let partners = (if left_peer then 1 else 0) + (if right_peer then 1 else 0);
 let center = partners >= 2;
 rf021 = if center then 1 else 0;
-# Only a one-partner edge touching a signaling center builds extra light harvesters.
-let incoming = sensed.Bus.value;
-let rim = partners == 1 && incoming > 0.5;`;
+let incoming = (sensed.LeftBus.signal_valid && sensed.LeftBus.value > 0.5)
+  || (sensed.RightBus.signal_valid && sensed.RightBus.value > 0.5);
+let rim = partners == 1 && incoming;`;
 
 /** Current defaults share role stocks and control each recipe's initiation explicitly. */
 export const PRESETS: Preset[] = [

@@ -28,7 +28,7 @@ The simplified balanced reactions are:
 
 Water is an abundant implicit reservoir. One carbon unit and one oxygen unit participate in each reaction extent. Fixation stores 20 chemical-potential energy units per carbon. Respiration converts 80% of the chemical potential carried by the carbon oxidized to usable energy. Plain substrate yields 16 ATP per carbon. Energy-rich substrate can yield more, within the same machinery and ATP storage limits. These are model parameters, not biochemical calibration.
 
-`harvest(light)` and legacy photosynthetic organs fix carbon using shared local light, available internal DIC, built capacity and reserve space. They produce only the oxygen corresponding to actual fixation. A fixed 12% of newly fixed carbon is released as exudate; the rest enters organic reserves.
+`harvest(light)` and legacy photosynthetic organs fix carbon using shared local light, available internal DIC, built capacity and reserve space. They produce only the oxygen corresponding to actual fixation. Fixed carbon enters organic reserves. An active `export(carbon)` outlet spends ATP to secrete carbon independently of fixation.
 
 `respire(oxygen)` requires both enzyme and membrane products. Built cores provide basal respiration toward a working reserve of 25% of usable-energy capacity; legacy metabolic complexes and explicitly constructed respiratory machinery can fill the larger store. Respiration is limited by organic carbon, internal oxygen, usable-energy storage and functional machinery. Activity regulates the explicit machine. Both phototrophs and heterotrophs respire; no genome name selects a metabolic behavior. A producer can therefore consume net oxygen in darkness.
 

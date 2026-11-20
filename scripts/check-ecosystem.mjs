@@ -8,9 +8,11 @@ import { bytes, fresh, compile, seed, snapshot, advance, body, save, catalog } f
 
 // Measure the actual shipped mixed scenario, without the supplied-food or
 // stationary-organism shortcuts used by isolated pathway tests.
-const options = { seeds: [42], duration: 600, birthsAfter: null, mutation: undefined, output: null, wasm: null, assert: false };
+const options = { seeds: [42], duration: 600, birthsAfter: null, mutation: undefined, output: null, wasm: null, assert: false, disableExport: false, flankDivision: false };
 for (let i = 2; i < process.argv.length; i++) {
   const key = process.argv[i];
+  if (key === '--flank-forager-division') { options.flankDivision = true; continue; }
+  if (key === '--disable-stock-export') { options.disableExport = true; continue; }
   if (key === '--assert') { options.assert = true; continue; }
   const value = process.argv[++i];
   assert.ok(value && ['--seed', '--duration', '--births-after', '--mutation', '--output', '--wasm'].includes(key), `Unknown or missing argument: ${key}`);
@@ -35,13 +37,27 @@ const startSettings = simulationStartSettings();
 options.mutation ??= startSettings.mutationRate;
 assert.ok(options.mutation >= 0 && options.mutation <= 1);
 const populations = template.populations.map(row => ({ ...BUILTIN_GENOMES.find(item => item.id === row.genomeId), ...row }));
+// Matched secretion control: retain the outlet, its cost, and every other
+// expression. Close only the stock producer's outlet during this run.
+if (options.disableExport) {
+  const producer = populations.find(p => p.name === 'Phototroph');
+  const outlet = /(assembly \w+: export\(carbon\) \{[^}]*?activity: )[^;]+/g;
+  assert.match(producer.source, outlet);
+  producer.source = producer.source.replace(outlet, (_, declaration) => declaration + '0');
+}
+if (options.flankDivision) {
+  const forager = populations.find(entry => entry.name === 'Forager');
+  const mount = /(assembly Division: constrict\(\) \{[^}]*?at: )[^;]+/;
+  assert.match(forager.source, mount);
+  forager.source = forager.source.replace(mount, (_, prefix) => prefix + String(Math.PI / 2));
+}
 assert.equal('foodRate' in environment.config,false, 'Habitats cannot provision organic particles');
 const samplesAt = [...new Set([0, 15, 30, 60, 120, 180, 300, 600, 900, options.duration].filter(n => n <= options.duration))].sort((a, b) => a - b);
 const study = {
   startedAt: new Date().toISOString(), wasmSha256: createHash('sha256').update(binary).digest('hex'), wasmBytes: binary.length,
   template, environment, populations, seeds: options.seeds, mutationRate: options.mutation,
   durationSeconds: options.duration, sampleSeconds: samplesAt, results: [],
-  assertConsumers: options.assert,
+  assertConsumers: options.assert, stockExportDisabled: options.disableExport, flankForagerDivision: options.flankDivision,
   rateDefinitions: {
     upkeep: 'Body maintenance before temperature scaling; excludes the extra 0.15 ATP/s per area basal cost.',
     metabolism: 'Complete basal maintenance at local temperature; motor, weapon, construction and repair costs are additional.',
@@ -159,7 +175,7 @@ for (const randomSeed of options.seeds) {
         name, count: cells.length, census: census.get(name), ...Object.fromEntries(totalKeys.map(key => [key, round(sum(cells, key))])),
         meanEnergyFraction: cells.length ? round(cells.reduce((total, cell) => total + cell.energy / cell.capacity, 0) / cells.length) : null,
         maxGeneration: cells.length ? Math.max(...cells.map(cell => cell.generation)) : null,
-        gutByKind: Object.fromEntries(kindNames.map((kind, i) => [kind, round(cells.reduce((total, cell) => total + cell.gutEnergyByKind[i], 0))])),
+        gutByFraction: Object.fromEntries(['soluble','structural','bound'].map((kind, i) => [kind, round(cells.reduce((total, cell) => total + cell.gutEnergyByKind[i], 0))])),
         machinery: [...machinery.values()].map(entry => ({ ...entry, mass: round(entry.mass) })),
         consumers: name === 'Phototroph' ? undefined : cells.map(cell => ({
           id: cell.id, generation: cell.generation, x: round(cell.x), y: round(cell.y), angle: round(cell.angle),

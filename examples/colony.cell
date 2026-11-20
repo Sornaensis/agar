@@ -27,20 +27,20 @@ let expanding = body.area > body.birth_area * 1.6;
 let powered = enough(built.Solar, 0.12) && enough(built.Respiration, 0.04);
 let equipped = powered;
 let surplus = equipped && energy > 550000;
-# Retain a daughter at division using matching markers and active adhesive surfaces.
-publish rf020 = 31;
-let paired_contact = (sensed.LeftJunction.bonded && sensed.LeftJunction.message_valid && sensed.LeftJunction.message == rf020)
-  || (sensed.RightJunction.bonded && sensed.RightJunction.message_valid && sensed.RightJunction.message == rf020);
+# The two glue patches straddle the furrow. Each daughter inherits a patch at the new septum.
+let paired_contact = sensed.LeftJunction.bonded || sensed.RightJunction.bonded;
 # A connected producer builds extra energy storage from its own material.
 
 let need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);
 let need_Solar = funded && (true) && missing(built.Solar, (if expanding then 0.24 else 0.12), 0.12);
-let need_Adhesin = funded && (powered) && missing(built.Adhesin, (if expanding then 0.04 else 0.02), 0.02);
+let need_LeftGlue = funded && powered && missing(built.LeftGlue, 0.02, 0.02);
+let need_RightGlue = funded && powered && missing(built.RightGlue, 0.02, 0.02);
+let need_Adhesin = need_LeftGlue || need_RightGlue;
 let need_LeftJunction = funded && (powered) && missing(built.LeftJunction, (if expanding then 0.02 else 0.01), 0.01);
 let need_RightJunction = funded && (powered) && missing(built.RightJunction, (if expanding then 0.02 else 0.01), 0.01);
 let need_Translation = funded && (powered) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);
 let need_Minerals = funded && (powered) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);
-let need_EnergyStore = funded && (powered) && missing(built.EnergyStore, if expanding || paired_contact then 0.08 else 0.04, 0.04);
+let need_EnergyStore = funded && (powered) && missing(built.EnergyStore, if expanding || paired_contact then 0.08 else 0.04, 0.02);
 let need_MineralStore = funded && (powered && body.area > 1.2) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);
 let need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);
 let need_Support = funded && (powered && energy > 450000) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);
@@ -73,17 +73,29 @@ assembly Solar: harvest(light) {
   Mount: 200;
   Pigment: 800;
   Catalyst: 200;
+  at: 1.5707963268;
   start_when: need_Solar;
   activity: 1;
 }
 
-assembly Adhesin: adhere() {
+assembly LeftGlue: adhere() {
   Mount: 80;
   Wall: 80;
   Glue: 40;
-  start_when: need_Adhesin;
+  at: 1.5407963268;
+  start_when: need_LeftGlue;
   activity: if energy > 120000 then 1 else 0;
-  engage_when: peer.division_interface && populated(rf020) && peer.message_valid && peer.message == rf020;
+  engage_when: peer.division_interface;
+}
+
+assembly RightGlue: adhere() {
+  Mount: 80;
+  Wall: 80;
+  Glue: 40;
+  at: 1.6007963268;
+  start_when: need_RightGlue;
+  activity: if energy > 120000 then 1 else 0;
+  engage_when: peer.division_interface;
 }
 
 assembly LeftJunction: sense(contact) {
@@ -92,7 +104,7 @@ assembly LeftJunction: sense(contact) {
   Tail: 20;
   start_when: need_LeftJunction;
   activity: 1;
-  at: 1.570796;
+  at: 1.5407963268;
 }
 
 assembly RightJunction: sense(contact) {
@@ -101,7 +113,7 @@ assembly RightJunction: sense(contact) {
   Tail: 20;
   start_when: need_RightJunction;
   activity: 1;
-  at: -1.570796;
+  at: 1.6007963268;
 }
 
 assembly Translation: translate() {
@@ -114,12 +126,13 @@ assembly Translation: translate() {
 assembly Minerals: import(mineral) {
   Mount: 50;
   Carrier: 200;
+  at: 1.5707963268;
   start_when: need_Minerals;
-  activity: if nutrient.fraction < 0.9 then 1 else 0;
+  activity: if nutrient.fraction < 0.9 && energy.fraction > 0.05 then 1 else 0;
 }
 
 assembly EnergyStore: store(energy) {
-  Wall: 400;
+  Wall: 200;
   start_when: need_EnergyStore;
   activity: 1;
 }
@@ -145,6 +158,7 @@ assembly Support: support() {
 assembly Envelope: grow() {
   Wall: 150;
   Catalyst: 50;
+  at: 1.5707963268;
   start_when: need_Envelope;
   activity: if energy > 900000 && body.area < body.birth_area * 2 then 0.8 else 0;
 }

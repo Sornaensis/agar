@@ -59,19 +59,24 @@ function resourceExchange(body:BodyInspection, counted:boolean):string {
   </section>`;
 }
 
-function receptionPanel(recipes:CellularRecipe[], expanded:ReadonlySet<string|undefined>, readings?:GenomeSignalEvaluation[]):string {
-  const junctions = recipes.filter(item=>item.kind==='junction(signal)');
+function receptionPanel(recipes:CellularRecipe[], assemblies:CellularAssembly[], expanded:ReadonlySet<string|undefined>, readings?:GenomeSignalEvaluation[]):string {
+  const junctions = recipes.filter(recipe => recipe.kind === 'junction(signal)' &&
+    assemblies.some(a => a.name === recipe.name && a.kind === recipe.kind && a.complete && a.functionalMass > 0));
   if (!junctions.length) return '';
   const names = new Map(readings?.map(signal=>[signal.name,signal.value]));
   const content = readings ? junctions.map(recipe=>{
-    const prefix = 'sensed.' + recipe.name + '.', count = names.get(prefix+'count'), value = names.get(prefix+'value');
-    const valid = names.get(prefix+'valid'), available = names.get(prefix+'available');
-    const parts = [
-      typeof count === 'number' ? `${count} signaling neighbor${count === 1 ? '' : 's'}` : '',
-      valid === false || count === 0 ? 'No incoming signal' : typeof value === 'number' ? `${valid === true || (typeof count==='number' && count>0) ? 'Mean incoming signal' : 'Signal readout'} ${Number(value.toPrecision(3))}` : valid === true ? 'Receiving' : '',
-    ].filter(Boolean);
-    const hardware = available === true ? 'Junction available' : available === false ? 'Junction unavailable' : 'No readings used by this program';
-    return `<div class="junction-reading"><strong>${esc(recipe.name)}</strong><span>${parts.join(' · ') || hardware}</span></div>`;
+    const prefix = 'sensed.' + recipe.name + '.';
+    const value = names.get(prefix+'value') ?? names.get(prefix+'signal');
+    const valid = names.get(prefix+'valid'), payload = names.get(prefix+'signal_valid');
+    const active = assemblies.some(a => a.name === recipe.name && a.kind === recipe.kind
+      && a.complete && a.functionalMass * a.activity > 0) && names.get(prefix+'available') !== false;
+    const parts = [active ? (valid === true ? 'Paired port' : valid === false ? 'Open port' : '') : 'Inactive port'];
+    if (active && valid !== false) {
+      if (payload === false && valid === true) parts.push('No payload');
+      else if (typeof value === 'number') parts.push((payload === true ? 'Payload ' : 'Reading ') + Number(value.toPrecision(3)));
+      else if (payload === true) parts.push('Payload present');
+    }
+    return `<div class="junction-reading"><strong>${esc(recipe.name)}</strong><span>${parts.filter(Boolean).join(' · ') || 'No readings used by this program'}</span></div>`;
   }).join('') : '<p class="cellular-section-note">Reading junctions…</p>';
   return `<details class="cellular-section" data-kind="colony-reception"${expanded.has('colony-reception')?' open':''}><summary><span>Incoming signals</span></summary>${content}</details>`;
 }
@@ -87,7 +92,7 @@ export function renderCellularBody(body:BodyInspection, expanded:ReadonlySet<str
   const meter = (name:string,value:number):string => `<div class="cellular-life-step"><div><span>${name}</span><strong>${percent(value)}</strong></div><progress max="1" value="${progress(value)}" aria-label="${name}"></progress></div>`;
   return `<div class="cellular-body">
     ${resourceExchange(body,counted)}
-    ${receptionPanel(cellular.recipes.filter(recipe=>cellular.assemblies.some(a=>a.name===recipe.name && a.kind===recipe.kind && a.complete && a.functionalMass>0)),expanded,readings)}
+    ${receptionPanel(cellular.recipes,cellular.assemblies,expanded,readings)}
     <div class="body-inventory-title"><h3>Cell machinery</h3><span>${finished} complete · ${incomplete} developing</span></div>
     <div class="cellular-machines">${cellular.assemblies.map(assembly=>assemblyCard(assembly,cellular.recipes.find(recipe=>recipe.name===assembly.name),expanded,counted)).join('') || '<p class="body-empty">No cellular machinery built yet.</p>'}</div>
     <details class="cellular-section" data-kind="cellular-division"${expanded.has('cellular-division')?' open':''}><summary><span>Cell division</span></summary><div class="cellular-life">${meter('Replication',cellular.replication.progress)}${meter('Constriction',cellular.constriction.progress)}</div></details>

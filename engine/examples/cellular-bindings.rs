@@ -57,7 +57,7 @@ fn fixture(definitions: usize, copies: usize) -> (Body, CellularProgram) {
             let parts: Vec<_> = def.parts.iter().map(|&(p, mass)| RecipePart {
                 product: program.products[p].clone(), required_mass: mass,
             }).collect();
-            state.assemblies.push(AssemblyInstance {
+            state.assemblies.push(AssemblyInstance { inherited_at: None,
                 id: state.next_assembly_id,
                 recipe: std::rc::Rc::new(Recipe { name: def.name.clone(), kind: def.kind,
                     parts: parts.clone(), at: def.at, direction: def.direction }),

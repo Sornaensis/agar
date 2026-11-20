@@ -12,12 +12,11 @@ impl World {
         let PhaseWorkspace {
             geometry,
             cell_grid: grid,
-            budgets,
             ..
         } = workspace;
         grid.configure(self.environment.width,self.environment.height);
         let max_radius = grid.index_cells(geometry);
-        budgets.clear();
+        let mut budgets = Vec::<f64>::new();
         budgets.extend(
             caps.iter()
                 .zip(outputs)
@@ -59,7 +58,7 @@ impl World {
                     .clamp(0.0, 1.0);
                 let energy = food.energy * fraction;
                 let minerals = food.nutrients * fraction;
-                c.ingest(food.kind, energy, minerals);
+                c.ingest_mixture(food.composition, energy, minerals, 0.0);
                 food.energy = (food.energy - energy).max(0.0);
                 food.nutrients = (food.nutrients - minerals).max(0.0);
                 budgets[i] = (budgets[i] - energy).max(0.0);
@@ -149,7 +148,7 @@ fn eligible_capture_index_preserves_empty_exhausted_wrapped_and_mineral_cases() 
         }
         let mut optimized_work = std::mem::take(&mut optimized.workspace.phases);
         let mut reference_work = std::mem::take(&mut reference.workspace.phases);
-        optimized.eat_in(&outputs, &caps, &mut optimized_work);
+        optimized.eat_in(&outputs, &caps, &[], &mut optimized_work);
         reference.eat_reference_in(&outputs, &caps, &mut reference_work);
         assert_eq!(state(&optimized), state(&reference), "capture scenario {scenario}");
     }

@@ -16,6 +16,7 @@ struct ParsedSource {
     bindings: Vec<Location>,
     writes: Vec<Location>,
     messages: [Option<Location>; 4],
+    initializers: [Option<Location>; 4],
     genes: Vec<cellular::GeneLocation>,
     geometry: Vec<cellular::GeometryLocation>,
 }
@@ -33,6 +34,7 @@ impl ParsedSource {
             bindings: parser.binding_locations,
             writes: parser.write_locations,
             messages: parser.message_locations,
+            initializers: parser.initializer_locations,
             genes: parser.gene_locations,
             geometry: parser.geometry_locations,
         })
@@ -148,6 +150,11 @@ impl Program {
                 candidates.push((index, MutationKind::Reference));
             }
         }
+        if matches!(requested, MutationKind::Any | MutationKind::Constant) {
+            for (role, location) in parsed.initializers.iter().enumerate() {
+                if location.is_some() { candidates.push((program.nodes.len() + role, MutationKind::Constant)); }
+            }
+        }
         if let Some(cellular) = &program.cellular {
             for index in 0..cellular.genes.len() {
                 if matches!(requested, MutationKind::Any | MutationKind::GeneSilence) {
@@ -172,6 +179,19 @@ impl Program {
         }
         let mut rng = MutationRng::new(seed);
         let (index, kind) = candidates[rng.index(candidates.len())];
+        // Historical birth initializers sit outside the expression graph. Their
+        // numeric token is still a constant mutation site, including a silent zero.
+        if kind == MutationKind::Constant && index >= program.nodes.len() {
+            let role = index - program.nodes.len();
+            let literal = parsed.initializers[role]?;
+            let old = source[literal.from..literal.to].parse::<f64>().ok()?;
+            let Value::Scalar(changed) = mutate_constant(&Value::Scalar(old), &mut rng) else { return None; };
+            let magnitude = changed.abs().clamp(0.0, MAX_SIGNAL);
+            let magnitude = if magnitude == old { if old < 1.0 { old + 1.0 } else { old * 0.5 } } else { magnitude };
+            let mut patched = source.to_string();
+            patched.replace_range(literal.from..literal.to, &magnitude.to_string());
+            return Some(Mutation { program: Self::compile_stored(&patched).ok()?, source: patched, kind });
+        }
         if kind == MutationKind::Geometry {
             return Self::mutate_geometry(source, &parsed, index, &mut rng);
         }
@@ -489,7 +509,8 @@ impl Program {
         json.push_str("],\"signals\":[");
         let mut signals = Sensor::ALL
             .iter()
-            .filter(|sensor| program.cellular.is_none() || sensor.cellular_allowed())
+            .filter(|sensor| program.cellular.is_none() || sensor.cellular_allowed()
+                || (sensor.legacy_external() && program.reads_sensor(**sensor)))
             .map(|sensor| {
                 (
                     sensor.name().to_string(),

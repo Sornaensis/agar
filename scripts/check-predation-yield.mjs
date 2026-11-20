@@ -99,6 +99,7 @@ async function run(file) {
   const newbornId = api.place_cell(photo,250,100);
   ok(newbornId,'seed identical newborn Phototroph');
   const start = save(api);
+  const materialFractions = new DataView(start.buffer,start.byteOffset).getUint32(8,true) >= 20;
 
   function runEncounter(name, preyId, carcassOnly = false) {
     ok(restore(api,start),'restore common encounter');
@@ -117,7 +118,10 @@ async function run(file) {
       providedTissue = sum(packets,f => f.energy);
       // Put the consumer once at the actual carcass. All harvesting, digestion
       // and respiration after this controlled first contact remain autonomous.
-      ok(api.move_cell(hunterId,packets[0].x,packets[0].y,0),'first contact with a real tissue packet');
+      const intake = body(api,hunter.id).cellular.assemblies.find(a => a.kind === 'import(particle)' && a.complete);
+      const angle = hunter.angle + (intake?.at ?? 0);
+      const offset = materialFractions ? hunter.radius : 0;
+      ok(api.move_cell(hunterId,packets[0].x - Math.cos(angle)*offset,packets[0].y - Math.sin(angle)*offset,0),'first contact at the intake with a real carcass packet');
     }
     let current = snapshot(api), previous = live(current,hunterId), previousPrey = live(current,preyId);
     let previousPreyPotential = previousPrey && foodPotential(previousPrey);
@@ -162,13 +166,17 @@ async function run(file) {
       hunterAreaAtEnd:previous.area,hunterOffspring:offspring.size,hunterFamilyATPAtEnd:sum(family,c => c.energy),
       preyAgeAtPlacement:prey?.age ?? null,preyAreaAtPlacement:prey?.area ?? null,
       firstHit,kill,predations:current.predations,providedTissue,
-      observedTissueIn,observedTissueOut,peakGutTissue,peakNonTissueGut:otherGut,
+      observedTissueIn,observedTissueOut,peakGutTissue,peakOtherGutFractions:otherGut,
       assimilatedFoodEnergy:digested,respiredCarbon:respired,grossRespiratoryATP:grossATP,tissueLeft:tissue(current)};
     if (!prey) {
       assert.equal(current.predations,0); close(peakGutTissue,0); close(digested,0);
     } else {
       assert.ok(observedTissueIn > 0 && observedTissueOut > 0 && digested > 0 && grossATP > 0);
-      if (carcassOnly) { assert.equal(current.predations,0); close(otherGut,0); }
+      if (carcassOnly) {
+        assert.equal(current.predations,0);
+        if (materialFractions) assert.ok(otherGut > 0, 'Both reserve carbon and structural carbon enter the gut from a real carcass');
+        else close(otherGut,0);
+      }
       else { assert.ok(firstHit !== null && kill && current.predations === 1); }
     }
     report.encounters[name] = result;

@@ -107,28 +107,34 @@ pub enum MechanismKind {
     LightHarvest, MineralImport, ParticleCapture, Engulf,
     DigestExudate, DigestTissue, DigestWaste, Propulsion, Pierce, Shield,
     Repair, SenseLight, SenseHeat, SenseChemical, SenseContact, SenseOptical,
-    Grow, Replicate, Constrict, Recycle, RespireOxygen, Adhere, JunctionEnergy, JunctionMineral, JunctionCarbon, JunctionSignal,
+    Grow, Replicate, Constrict, Recycle, RespireOxygen, Adhere, JunctionEnergy, JunctionMineral, JunctionCarbon, JunctionSignal, Display, CarbonExport,
 }
 impl MechanismKind {
-    pub const ALL: [Self; 31] = [
+    pub const ALL: [Self; 33] = [
         Self::Support, Self::Translation, Self::EnergyStorage, Self::MineralStorage,
         Self::FoodStorage, Self::LightHarvest, Self::MineralImport, Self::ParticleCapture,
         Self::Engulf, Self::DigestExudate, Self::DigestTissue, Self::DigestWaste,
         Self::Propulsion, Self::Pierce, Self::Shield, Self::Repair, Self::SenseLight,
         Self::SenseHeat, Self::SenseChemical, Self::SenseContact, Self::SenseOptical,
         Self::Grow, Self::Replicate, Self::Constrict, Self::Recycle, Self::RespireOxygen, Self::Adhere,
-        Self::JunctionEnergy, Self::JunctionMineral, Self::JunctionCarbon, Self::JunctionSignal,
+        Self::JunctionEnergy, Self::JunctionMineral, Self::JunctionCarbon, Self::JunctionSignal, Self::Display, Self::CarbonExport,
     ];
     pub fn name(self) -> &'static str {
         ["support()", "translate()", "store(energy)", "store(mineral)", "store(food)",
          "harvest(light)", "import(mineral)", "import(particle)", "engulf()",
-         "digest(exudate)", "digest(tissue)", "digest(waste)", "propel()", "pierce()",
+         "digest(soluble)", "digest(structural)", "digest(bound)", "propel()", "pierce()",
          "shield()", "repair()", "sense(light)", "sense(heat)", "sense(chemical)",
          "sense(contact)", "sense(optical)", "grow()", "replicate()", "constrict()", "recycle()", "respire(oxygen)", "adhere()",
-         "junction(energy)", "junction(mineral)", "junction(carbon)", "junction(signal)"]
+         "junction(energy)", "junction(mineral)", "junction(carbon)", "junction(signal)", "display()", "export(carbon)"]
             [self as usize]
     }
     pub fn from_name(name: &str) -> Option<Self> {
+        let name = match name {
+            "digest(exudate)" => "digest(soluble)",
+            "digest(tissue)" => "digest(structural)",
+            "digest(waste)" => "digest(bound)",
+            other => other,
+        };
         Self::ALL.into_iter().find(|kind| kind.name() == name)
     }
     pub fn constructor(self) -> &'static str {
@@ -148,9 +154,9 @@ impl MechanismKind {
          "Imports dissolved minerals using energy; requires available mineral storage.",
          "Captures nearby organic particles into available food storage; no digestion.",
          "Engulfs sufficiently small, damaged cells into available food storage.",
-         "Processes stored exudate; does not process tissue or waste.",
-         "Processes stored tissue; does not process exudate or waste.",
-         "Processes stored waste; does not process exudate or tissue.",
+         "Hydrolyses soluble carbon from captured material.",
+         "Hydrolyses structural carbon from captured material.",
+         "Hydrolyses resistant, bound carbon from captured material.",
          "Applies force at the declared attachment angle, with physical torque and energy cost.",
          "Damages contacted cells; released tissue needs separate capture, storage and digestion.",
          "Physical protection from damage; no repair or growth.",
@@ -169,7 +175,9 @@ impl MechanismKind {
          "Exchanges stored ATP with an adhered neighbor carrying an active energy junction.",
          "Exchanges free mineral with an adhered neighbor carrying an active mineral junction.",
          "Exchanges organic carbon reserves with an adhered neighbor carrying an active carbon junction.",
-         "Reads the number and mean published signal of directly adhered neighbors with active signal junctions."]
+         "Reads occupancy and the frozen payload of one overlapping signal port on a bonded neighbor.",
+         "Displays the selected marker and payload registers at this membrane patch.",
+         "Spends one ATP per organic carbon transported from reserve to this membrane opening."]
             [self as usize]
     }
     pub fn required_roles(self) -> &'static [ProductKind] {
@@ -182,8 +190,9 @@ impl MechanismKind {
             Self::RespireOxygen => &[Enzyme, Membrane],
             Self::Adhere => &[Anchor, Membrane, Adhesin],
             Self::JunctionSignal => &[Membrane, Receptor],
+            Self::Display => &[Anchor, Membrane],
             Self::JunctionEnergy | Self::JunctionMineral | Self::JunctionCarbon => &[Membrane, Transporter],
-            Self::MineralImport => &[Anchor, Transporter],
+            Self::CarbonExport | Self::MineralImport => &[Anchor, Transporter],
             Self::ParticleCapture => &[Anchor, Motor],
             Self::Engulf => &[Anchor, Motor, Membrane],
             Self::DigestExudate | Self::DigestTissue | Self::DigestWaste | Self::Repair | Self::Recycle => &[Enzyme],
@@ -200,17 +209,17 @@ impl MechanismKind {
     pub fn minimum_mass(self) -> f64 {
         [0.04, 0.02, 0.02, 0.02, 0.04, 0.04, 0.015, 0.015, 0.025,
          0.01, 0.01, 0.01, 0.025, 0.025, 0.02, 0.025, 0.01, 0.01,
-         0.015, 0.01, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02][self as usize]
+         0.015, 0.01, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.01, 0.015][self as usize]
     }
     fn internal_footprint(self) -> f64 {
         [1.0, 1.0, 2.4, 2.4, 2.5, 1.35, 0.7, 0.8, 0.8,
          1.0, 1.0, 1.0, 0.65, 0.8, 0.35, 1.0, 0.8, 0.8,
-         1.0, 0.7, 1.3, 1.0, 1.0, 1.0, 1.0, 1.2, 1.0, 0.7, 0.7, 0.7, 0.7][self as usize]
+         1.0, 0.7, 1.3, 1.0, 1.0, 1.0, 1.0, 1.2, 1.0, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7][self as usize]
     }
     fn surface_footprint(self) -> f64 {
         [0.0, 0.0, 0.0, 0.0, 0.0, 0.55, 1.8, 2.2, 2.2,
          0.0, 0.0, 0.0, 1.5, 2.0, 3.0, 0.0, 1.2, 1.1,
-         1.5, 1.1, 2.0, 1.5, 0.0, 1.5, 0.0, 0.0, 1.4, 1.4, 1.4, 1.4, 1.4][self as usize]
+         1.5, 1.1, 2.0, 1.5, 0.0, 1.5, 0.0, 0.0, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.8][self as usize]
     }
 }
 
@@ -572,6 +581,8 @@ pub struct Ingredient {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AssemblyInstance {
+    /// Physical location after the envelope divides; new assemblies use the recipe anchor.
+    pub inherited_at: Option<f64>,
     pub id: u32,
     pub recipe: Rc<Recipe>,
     pub ingredients: Vec<Ingredient>,
@@ -589,6 +600,9 @@ fn ingredient_complete(mass: f64, required: f64) -> bool {
     mass > 0.0 && required - mass <= required * EPS
 }
 impl AssemblyInstance {
+    pub fn at(&self) -> f64 { self.inherited_at.unwrap_or(self.recipe.at) }
+    pub fn direction(&self) -> f64 { self.recipe.direction + (self.at() - self.recipe.at) }
+
     pub fn mass(&self) -> f64 {
         self.ingredients.iter().map(|p| p.mass).sum()
     }
@@ -620,6 +634,56 @@ impl AssemblyInstance {
             0.0
         }
     }
+    /// Operating capacity is calibrated per unit of the ingredient that does
+    /// the work. Extra support material still occupies space and costs ATP.
+    pub fn working_mass(&self) -> f64 {
+        self.operating_mass(self.functional_mass())
+    }
+
+    pub(crate) fn operating_mass(&self, functional: f64) -> f64 {
+        if functional <= 0.0 { return 0.0; }
+        use MechanismKind as M;
+        use ProductKind as P;
+        let kind = match self.recipe.kind {
+            AssemblyKind::Mechanism(kind) => kind,
+            AssemblyKind::Organelle(kind) => match kind {
+                OrganelleKind::Digestive => M::DigestTissue,
+                OrganelleKind::Flagellum => M::Propulsion,
+                OrganelleKind::Photosynthetic => M::LightHarvest,
+                OrganelleKind::Transporter => M::MineralImport,
+                _ => return functional,
+            },
+            _ => return functional,
+        };
+        let installed = |role| self.recipe.parts.iter().zip(&self.ingredients)
+            .filter(|(part, _)| part.product.kind == role)
+            .map(|(_, ingredient)| ingredient.mass).sum::<f64>();
+        // Reference fractions set rates for mixed machines. Both of the
+        // harvester's stages must keep up with the same carbon flux.
+        let capacity = match kind {
+            M::DigestExudate | M::DigestTissue | M::DigestWaste | M::Repair | M::Recycle => installed(P::Enzyme),
+            M::Translation => installed(P::Enzyme) * 2.0,
+            M::RespireOxygen => installed(P::Enzyme) * 1.6,
+            M::LightHarvest => (installed(P::Pigment) * 1.5).min(installed(P::Enzyme) * 6.0),
+            M::MineralImport | M::CarbonExport => installed(P::Transporter) * 1.25,
+            M::JunctionEnergy | M::JunctionCarbon | M::JunctionMineral => installed(P::Transporter) * 2.0,
+            M::Propulsion => (installed(P::Motor) * 2.5).min(installed(P::Filament) * 2.5),
+            M::Engulf => installed(P::Motor) * 2.5,
+            M::ParticleCapture => installed(P::Motor) * 1.5,
+            M::Pierce => (installed(P::Filament) * (5.0 / 3.0)).min(installed(P::Enzyme) * 5.0),
+            M::Adhere => installed(P::Adhesin) * 5.0,
+            M::Grow => installed(P::Enzyme) * 4.0,
+            M::Replicate => installed(P::Replicase) * (4.0 / 3.0),
+            M::Constrict => (installed(P::Constrictor) * 2.5).min(installed(P::Motor) * 2.5),
+            M::SenseLight | M::SenseContact | M::SenseOptical => installed(P::Receptor) * (5.0 / 3.0),
+            M::SenseHeat | M::SenseChemical => installed(P::Receptor) * 1.25,
+            M::Display => installed(P::Membrane),
+            M::JunctionSignal => installed(P::Receptor) * 2.5,
+            _ => return functional,
+        };
+        capacity * self.integrity
+    }
+
     pub fn internal_space(&self) -> f64 {
         self.mass() * self.recipe.kind.internal_footprint()
     }
@@ -823,7 +887,7 @@ impl Body {
                 assembly_space += measure.mass * assembly.recipe.kind.internal_footprint();
                 assembly_surface += measure.mass * assembly.recipe.kind.surface_footprint();
                 assembly_damage += measure.mass * (1.0 - assembly.integrity);
-                let active = measure.functional * assembly.activity;
+                let active = assembly.operating_mass(measure.functional) * assembly.activity;
                 match assembly.recipe.kind {
                     AssemblyKind::Organelle(kind) => {
                         result.active[kind as usize] += active;
@@ -866,6 +930,8 @@ pub struct CellularState {
     pub replica_mass: f64,
     pub replica_energy: f64,
     pub constriction: f64,
+    /// Orientation established by the first paid work on this furrow.
+    pub constriction_axis: Option<f64>,
     pub control_reports: Vec<RecipeControlReport>,
     pub bindings: DerivedBindings,
 }
@@ -880,6 +946,7 @@ impl Default for CellularState {
             replica_mass: 0.0,
             replica_energy: 0.0,
             constriction: 0.0,
+            constriction_axis: None,
             control_reports: Vec::new(),
             bindings: DerivedBindings::default(),
         }
@@ -918,7 +985,7 @@ impl CellularState {
         use MechanismKind::*;
         for assembly in &self.assemblies {
             let AssemblyKind::Mechanism(kind) = assembly.recipe.kind else { continue; };
-            let mass = functional(assembly);
+            let mass = assembly.operating_mass(functional(assembly));
             let active = mass * assembly.activity;
             match kind {
                 // Capacity is physical room. Switching activity off never
@@ -948,7 +1015,7 @@ impl CellularState {
                 SenseContact => cap.mechanical_sensing += active,
                 JunctionSignal => cap.signal_junction += active,
                 SenseOptical => cap.optical_sensing += active,
-                Support | Grow | Replicate | Constrict | Recycle | Adhere | JunctionEnergy | JunctionMineral | JunctionCarbon => {},
+                CarbonExport | Display | Support | Grow | Replicate | Constrict | Recycle | Adhere | JunctionEnergy | JunctionMineral | JunctionCarbon => {},
             }
         }
         cap.optical_range = if cap.optical_sensing > 0.0 {
@@ -1048,6 +1115,15 @@ impl CellularState {
     pub fn replication_progress(&self, area: f64) -> f64 {
         (self.replica_mass / (REPLICA_MASS_PER_AREA * area)).clamp(0.0, 1.0)
     }
+    pub(crate) fn active_constrictor_axis(&self) -> Option<f64> {
+        self.assemblies.iter()
+            .filter(|a| matches!(a.recipe.kind, AssemblyKind::Constrictor | AssemblyKind::Mechanism(MechanismKind::Constrict)))
+            .map(|a| (a.working_mass() * a.activity, a))
+            .filter(|(power, _)| *power > 0.0)
+            .max_by(|(pa, a), (pb, b)| pa.total_cmp(pb).then(b.id.cmp(&a.id)))
+            .map(|(_, a)| a.at())
+    }
+
     pub fn partition_base(&self) -> Self {
         Self {
             pools: self
@@ -1068,6 +1144,7 @@ impl CellularState {
             replica_mass: 0.0,
             replica_energy: 0.0,
             constriction: 0.0,
+            constriction_axis: None,
             control_reports: self.control_reports.iter().map(|report| RecipeControlReport {
                 recycle_rate: 0.0, ..report.clone()
             }).collect(),
@@ -1111,6 +1188,8 @@ impl CellularState {
                 assembly.id > 0 && assembly.id < self.next_assembly_id && ids.insert(assembly.id),
                 "invalid or duplicate assembly identifier",
             )?;
+            ensure(assembly.inherited_at.is_none_or(|at| at.is_finite() && at.abs() <= std::f64::consts::PI),
+                "invalid inherited membrane position")?;
             let recipe = &assembly.recipe;
             let program = CellularProgram::new(
                 recipe.parts.iter().map(|p| p.product.clone()).collect(),
@@ -1193,6 +1272,10 @@ impl CellularState {
         ] {
             writer.f64(value);
         }
+        if let Some(axis) = self.constriction_axis {
+            writer.u32(u32::MAX);
+            writer.f64(axis);
+        }
         writer.count(self.pools.len());
         for pool in &self.pools {
             write_product(writer, &pool.product);
@@ -1224,6 +1307,11 @@ impl CellularState {
             ] {
                 writer.f64(value);
             }
+            // Keep unshifted records byte-compatible with old fixtures.
+            if let Some(at) = assembly.inherited_at {
+                writer.u32(u32::MAX);
+                writer.f64(at);
+            }
             writer.count(assembly.recipe.parts.len());
             for (part, ingredient) in assembly.recipe.parts.iter().zip(&assembly.ingredients) {
                 write_product(writer, &part.product);
@@ -1250,7 +1338,16 @@ impl CellularState {
             constriction: reader.f64()?,
             ..Self::default()
         };
-        let count = reader.count(MAX_POOLS)?;
+        let header = reader.u32()?;
+        let count = if header == u32::MAX && version >= 20 {
+            let axis = reader.f64()?;
+            ensure(axis.is_finite() && axis.abs() <= 1e12 && state.constriction > 0.0, "invalid furrow orientation")?;
+            state.constriction_axis = Some(axis);
+            reader.count(MAX_POOLS)?
+        } else {
+            ensure(header as usize <= MAX_POOLS,"invalid cellular pool count")?;
+            header as usize
+        };
         for _ in 0..count {
             state.pools.push(ProductPool {
                 product: read_product(reader, version)?,
@@ -1272,6 +1369,8 @@ impl CellularState {
                 43 if version >= 7 => AssemblyKind::Mechanism(MechanismKind::Recycle),
                 44 if version >= 9 => AssemblyKind::Mechanism(MechanismKind::RespireOxygen),
                 45 if version >= 10 => AssemblyKind::Mechanism(MechanismKind::Adhere),
+                51 if version >= 20 => AssemblyKind::Mechanism(MechanismKind::CarbonExport),
+                50 if version >= 20 => AssemblyKind::Mechanism(MechanismKind::Display),
                 49 if version >= 12 => AssemblyKind::Mechanism(MechanismKind::JunctionSignal),
                 tag @ 46..=48 if version >= 11 => AssemblyKind::Mechanism(MechanismKind::ALL[(tag - 19) as usize]),
                 value => AssemblyKind::Organelle(
@@ -1283,7 +1382,13 @@ impl CellularState {
             let direction = reader.f64()?;
             let integrity = reader.f64()?;
             let activity = reader.f64()?;
-            let count = reader.count(MAX_PRODUCTS)?;
+            let header = reader.u32()?;
+            let (inherited_at, count) = if header == u32::MAX && version >= 20 {
+                (Some(reader.f64()?), reader.count(MAX_PRODUCTS)?)
+            } else {
+                ensure(header as usize <= MAX_PRODUCTS, "invalid assembly ingredient count")?;
+                (None, header as usize)
+            };
             let mut parts = Vec::with_capacity(count);
             let mut ingredients = Vec::with_capacity(count);
             for _ in 0..count {
@@ -1297,7 +1402,7 @@ impl CellularState {
                 });
             }
             state.assemblies.push(AssemblyInstance {
-                id,
+                inherited_at, id,
                 recipe: Rc::new(Recipe {
                     name,
                     kind,
@@ -1423,9 +1528,25 @@ impl Body {
         bindings.ensure(program, &state.pools, &state.assemblies, state.next_assembly_id);
         for (assembly, definition) in state.assemblies.iter().zip(&bindings.instance_definition) {
             if let Some(definition) = definition {
-                masses[*definition] += assembly.functional_mass() * assembly.activity;
+                masses[*definition] += assembly.working_mass() * assembly.activity;
             }
         }
+    }
+
+    /// Copies of a named receptor can land on different parts of a daughter.
+    /// Read its strongest active mount, adding only copies at the same position.
+    pub(crate) fn receptor_mount(&self, program: &CellularProgram, definition: usize) -> Option<(f64,f64,f64)> {
+        let state = self.cellular.as_ref()?;
+        let mut bindings = state.bindings.0.borrow_mut();
+        bindings.ensure(program, &state.pools, &state.assemblies, state.next_assembly_id);
+        let indices = bindings.definition_instances.get(definition)?;
+        let copies = || indices.iter().map(|&i| &state.assemblies[i]);
+        let power = |a: &AssemblyInstance| a.working_mass() * a.activity;
+        let mount = copies().filter(|a| power(a) > 0.0)
+            .max_by(|a,b| power(a).total_cmp(&power(b)).then(b.id.cmp(&a.id)))?;
+        let mass = copies().filter(|a| (a.at() - mount.at()).cos() > 1.0 - 1e-12)
+            .map(power).sum();
+        Some((mount.at(), mount.direction(), mass))
     }
 
     /// Resolve inherited hardware by its complete physical recipe, just as activity does.
@@ -1441,7 +1562,7 @@ impl Body {
         let mut bindings = state.bindings.0.borrow_mut();
         bindings.ensure(program, &state.pools, &state.assemblies, state.next_assembly_id);
         bindings.definition_instances.get(definition).map_or(0.0, |indices| indices.iter()
-            .map(|&i| state.assemblies[i].functional_mass() * state.assemblies[i].activity).sum())
+            .map(|&i| state.assemblies[i].working_mass() * state.assemblies[i].activity).sum())
     }
 
     /// Freeze activities of already installed machines before any construction.
@@ -1475,7 +1596,7 @@ impl Body {
             assembly.activity = bindings.instance_definition[index].map_or(0.0, |definition| {
                 effort(controls.activity.get(definition).copied().unwrap_or(0.0))
             });
-            let functional = assembly.functional_mass();
+            let functional = assembly.working_mass();
             let mass = functional * assembly.activity;
             match assembly.recipe.kind {
                 AssemblyKind::Organelle(kind) => {
@@ -1491,17 +1612,17 @@ impl Body {
             if matches!(assembly.recipe.kind, AssemblyKind::Organelle(OrganelleKind::Flagellum)
                 | AssemblyKind::Mechanism(MechanismKind::Propulsion)) {
                     let force = 100.0 * mass;
-                    let fx = force * assembly.recipe.direction.cos();
-                    let fy = force * assembly.recipe.direction.sin();
+                    let fx = force * assembly.direction().cos();
+                    let fy = force * assembly.direction().sin();
                     actions.force_x += fx;
                     actions.force_y += fy;
                     actions.torque +=
-                        radius * (assembly.recipe.at.cos() * fy - assembly.recipe.at.sin() * fx);
+                        radius * (assembly.at().cos() * fy - assembly.at().sin() * fx);
                     actions.motor_cost += force * 0.06;
             } else if matches!(assembly.recipe.kind, AssemblyKind::Organelle(OrganelleKind::Optical)
                 | AssemblyKind::Mechanism(MechanismKind::SenseOptical)) {
-                    optical_direction[0] += mass * assembly.recipe.direction.cos();
-                    optical_direction[1] += mass * assembly.recipe.direction.sin();
+                    optical_direction[0] += mass * assembly.direction().cos();
+                    optical_direction[1] += mass * assembly.direction().sin();
             }
         }
         let ratio = |kind: OrganelleKind| {
@@ -1724,7 +1845,7 @@ impl Body {
             }
             pending_ids += 1;
             state.assemblies.push(AssemblyInstance {
-                id: 0,
+                inherited_at: None, id: 0,
                 recipe: program.recipe(definition),
                 ingredients: vec![Ingredient::default(); def.parts.len()],
                 integrity: 1.0,
@@ -1820,6 +1941,9 @@ impl Body {
                 ));
             }
         }
+        let furrow_axis = if constrictor > 0.0 && division_geometry_ready && state.constriction_axis.is_none() {
+            state.active_constrictor_axis()
+        } else { None };
         let damaged = snapshot.damaged;
         if damaged > EPS {
             let repair = (0.08 * active[OrganelleKind::Repair as usize] * dt / damaged).min(1.0);
@@ -1941,6 +2065,7 @@ impl Body {
                     report.dissipated_energy += spent * (1.0 - EMBODIED_FRACTION);
                 }
                 CellOperation::Constrict => {
+                    if state.constriction_axis.is_none() { state.constriction_axis = furrow_axis; }
                     state.constriction = (state.constriction + amount).min(1.0);
                     report.dissipated_energy += spent;
                 }
@@ -2111,7 +2236,7 @@ impl Body {
                 write!(&mut json, "{{\"id\":{},\"name\":{:?},\"kind\":{:?},\"mass\":{},\"requiredMass\":{},\"functionalMass\":{},\"complete\":{},\"integrity\":{},\"activity\":{},\"at\":{},\"direction\":{},\"recycleRequested\":{},\"bottleneck\":",
                     assembly.id, assembly.recipe.name, assembly.recipe.kind.name(), assembly.mass(),
                     assembly.recipe.required_mass(), assembly.functional_mass(), assembly.complete(),
-                    assembly.integrity, assembly.activity, assembly.recipe.at, assembly.recipe.direction, recycle).unwrap();
+                    assembly.integrity, assembly.activity, assembly.at(), assembly.direction(), recycle).unwrap();
                 if assembly.complete() {
                     json.push_str("null");
                 } else {
@@ -2358,7 +2483,7 @@ mod tests {
             })
             .collect();
         AssemblyInstance {
-            id,
+            inherited_at: None, id,
             recipe,
             ingredients,
             integrity: 1.0,
@@ -2552,14 +2677,14 @@ mod tests {
         );
         close(body.embodied_energy() - before_install.0, (before_install.1 - energy) * 0.90);
         close(second.constructed_mass, 0.04);
-        close(body.capacities().thrust, 4.0);
+        close(body.capacities().thrust, 2.5);
         close(body.structural_mass() + minerals, initial_material);
         close(
             body.embodied_energy() + energy + report.dissipated_energy + second.dissipated_energy,
             initial_energy,
         );
         let outputs = body.cellular_actions(&program, &controls(&program, 0.0));
-        close(outputs.force_x, 4.0);
+        close(outputs.force_x, 2.5);
         close(outputs.torque, 0.0);
     }
 
@@ -2602,7 +2727,7 @@ mod tests {
             &mut minerals,
             1.0,
         );
-        close(body.capacities().thrust, 4.0);
+        close(body.capacities().thrust, 2.5);
         close(body.building(OrganelleKind::Flagellum), 0.0);
     }
 
@@ -2696,22 +2821,22 @@ mod tests {
         add_complete(&mut body, &program, 1);
         body.validate().unwrap();
         let action = body.cellular_actions(&program, &controls(&program, 0.0));
-        close(action.force_x, 8.0);
+        close(action.force_x, 5.0);
         close(action.force_y, 0.0);
         close(action.torque, 0.0);
         let mut request = controls(&program, 0.0);
         request.activity[1] = 0.0;
         let action = body.cellular_actions(&program, &request);
-        close(action.force_x, 4.0);
-        close(action.torque, -4.0 * body.radius());
+        close(action.force_x, 2.5);
+        close(action.torque, -2.5 * body.radius());
 
         program.assemblies[1].direction = std::f64::consts::PI;
         body.cellular.as_mut().unwrap().assemblies[1] = complete(&program, 1, 2);
         let action = body.cellular_actions(&program, &controls(&program, 0.0));
         close(action.force_x, 0.0);
         close(action.force_y, 0.0);
-        close(action.torque, -8.0 * body.radius());
-        close(action.motor_cost, 8.0 * 0.06);
+        close(action.torque, -5.0 * body.radius());
+        close(action.motor_cost, 5.0 * 0.06);
     }
 
     #[test]
@@ -2980,7 +3105,7 @@ mod tests {
                 .force_x,
             0.0,
         );
-        close(body.capacities().thrust, 4.0); // retained physical flagellum
+        close(body.capacities().thrust, 2.5); // retained physical flagellum
         close(minerals + body.structural_mass(), initial_material);
     }
 

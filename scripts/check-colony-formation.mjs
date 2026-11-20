@@ -5,13 +5,13 @@ import { advance, body, catalog, compile, error, fresh, restore, save, snapshot 
 const { BUILTIN_ENVIRONMENTS, PRESETS } = await catalog();
 const pool = BUILTIN_ENVIRONMENTS.find(env => env.id.endsWith(':colony-pool')).config;
 const nurse = PRESETS.find(genome => genome.name === 'Nurse rosette').source;
-const recruit = nurse.replace('peer.division_interface && ', '');
+const recruit = nurse.replaceAll('engage_when: peer.division_interface;', 'engage_when: true;');
 assert.notEqual(nurse, recruit);
 
 const degree = (api, id) => body(api, id).colony.neighbors;
 function hasSurface(api, id) {
   return body(api, id).cellular.assemblies.some(machine =>
-    machine.name === 'Adhesin' && machine.complete && machine.functionalMass * machine.activity > 0);
+    machine.kind === 'adhere()' && machine.complete && machine.functionalMass * machine.activity > 0);
 }
 function placeBeside(api) {
   const [a,b] = snapshot(api).cells;
@@ -19,8 +19,17 @@ function placeBeside(api) {
 }
 async function growIndependent(first, second) {
   const api = await fresh({ ...pool, seed:42, mutationRate:0 });
-  assert.equal(api.place_cell(compile(api, first),160,180),1,error(api));
-  assert.equal(api.place_cell(compile(api, second),270,180),2,error(api));
+  // The placement command preserves polarity. Measure the deterministic
+  // founder headings, then author test patches facing the shared interface.
+  const before = save(api);
+  const probe = compile(api, 'cellular;');
+  api.place_cell(probe,160,180); api.place_cell(probe,270,180);
+  const [a,b] = snapshot(api).cells;
+  assert.equal(restore(api,before),1,error(api));
+  const oriented = (source, angle) => source.replace(/(assembly (?:Left|Right)Glue: adhere\(\) \{[^}]*?at: )[^;]+/g,
+    (_,prefix)=>prefix + Math.atan2(Math.sin(angle),Math.cos(angle)));
+  assert.equal(api.place_cell(compile(api, oriented(first,-a.angle)),160,180),1,error(api));
+  assert.equal(api.place_cell(compile(api, oriented(second,Math.PI-b.angle)),270,180),2,error(api));
   let state = snapshot(api);
   while (state.seconds < 80 && !state.cells.every(cell => hasSurface(api, cell.id))) state = advance(api, 5);
   assert.equal(state.population,2);
@@ -85,7 +94,7 @@ for (const [file,version] of [['independent-founders-v14.bin',14],['family-v14.b
     }
   }
   const upgraded = save(api), copy = await fresh();
-  assert.equal(new DataView(upgraded.buffer).getUint32(8,true),19);
+  assert.equal(new DataView(upgraded.buffer).getUint32(8,true),20);
   assert.equal(restore(copy,upgraded),1,error(copy));
   advance(api,1); advance(copy,1);
   assert.equal(degree(api,1),0);

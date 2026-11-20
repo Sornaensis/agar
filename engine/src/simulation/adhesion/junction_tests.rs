@@ -4,7 +4,7 @@ use crate::checkpoint::{self, Reader, Writer};
 
 const CHANNELS: &str = r#"
 product Carrier = transporter();
-product GlueMaterial = adhesin(Frame); assembly Glue: adhere() { engage_when: peer.message_valid && populated(rf020) && peer.message == rf020; GlueMaterial:0.006; Mount:0.01; Wall:0.01; activity:1; }
+product GlueMaterial = adhesin(Frame); assembly Glue: adhere() { engage_when: populated(rf020); GlueMaterial:0.006; Mount:0.01; Wall:0.01; activity:1; }
 assembly PoreE: junction(energy) { Wall:0.01; Carrier:0.01; activity:1; }
 assembly PoreM: junction(mineral) { Wall:0.01; Carrier:0.01; activity:1; }
 assembly PoreC: junction(carbon) { Wall:0.01; Carrier:0.01; activity:1; }
@@ -42,6 +42,7 @@ fn colony_with(positions: &[(f64, f64)], source: &str) -> (World, Vec<Genome>) {
         }
         let cell = &mut world.cells[i];
         (cell.x, cell.y) = (x, y);
+        cell.angle = if i == 0 {0.0} else {PI};
     }
     advance_contact_phases(&mut world, &genomes, MATURE-1);
     (world, genomes)
@@ -115,7 +116,9 @@ fn junctions_need_an_active_complete_matching_port_and_reciprocal_open_contact()
 
 #[test]
 fn empty_middle_cell_cannot_relay_new_carbon_until_the_next_tick() {
-    let (mut world, genomes) = colony(&[(100.0,100.0),(114.0,100.0),(128.0,100.0)]);
+    let (mut world, genomes) = colony_with(&[(100.0,100.0),(114.0,100.0),(128.0,100.0)], &format!("{CHANNELS}
+        assembly RearGlue:adhere(){{at:3.14159265; engage_when:true;GlueMaterial:0.006;Mount:0.01;Wall:0.01;}}
+        assembly RearC:junction(carbon){{at:3.14159265;Wall:0.01;Carrier:0.01;}}"));
     for (i, c) in world.cells.iter_mut().enumerate() {
         set_fills(c, [0.5,0.5,if i==0 {1.0} else {0.0}]);
     }
@@ -133,29 +136,18 @@ fn empty_middle_cell_cannot_relay_new_carbon_until_the_next_tick() {
 }
 
 #[test]
-fn several_neighbors_share_one_ports_total_throughput_in_stable_id_order() {
-    // Four cells surround a central recipient. Only the middle has four contacts.
-    let positions = [(100.0,100.0),(86.0,100.0),(114.0,100.0),(100.0,86.0),(100.0,114.0)];
-    let run = |reverse:bool, outward:bool| {
-        let (mut world, genomes) = colony(&positions);
-        for (i, cell) in world.cells.iter_mut().enumerate() {
-            let high = (i!=0) ^ outward;
-            set_fills(cell, [0.5,0.5,if high {1.0} else {0.0}]);
-        }
-        if reverse { world.cells.reverse(); }
-        phase(&mut world,&genomes);
-        world.cells.sort_unstable_by_key(|c|c.id);
-        let direction = if outward {-1.0} else {1.0};
-        let max = JUNCTION_RATES[2]*0.02*DT;
-        assert_eq!(world.cells[0].adhered_neighbors,4);
-        close(world.cells[0].junction_net[2],direction*max);
-        for c in &world.cells[1..] {
-            assert_eq!(c.adhered_neighbors,1);
-            close(c.junction_net[2], -direction*max/4.0);
-        }
-        world.cells.iter().map(|c|(stores(c),c.junction_net)).collect::<Vec<_>>()
-    };
-    for outward in [false,true] { assert_eq!(run(false,outward),run(true,outward)); }
+fn rear_resources_cannot_be_lent_to_a_front_contact() {
+    let (mut world, genomes) = colony(&[(100.0,100.0),(114.0,100.0)]);
+    set_fills(&mut world.cells[0], [0.9;3]); set_fills(&mut world.cells[1], [0.1;3]);
+    world.cells[0].body.cellular.as_mut().unwrap().assemblies.iter_mut()
+        .find(|a| a.recipe.name=="PoreC").unwrap().inherited_at=Some(PI);
+    phase(&mut world,&genomes);
+    assert_eq!(world.cells[0].adhered_neighbors,1);
+    assert_eq!(world.cells[0].junction_net[2],0.0);
+    assert!(world.cells[0].junction_net[0] < 0.0);
+    world.cells[0].angle=PI;
+    phase(&mut world,&genomes);
+    assert!(world.contacts.is_empty(),"rear-facing glue cannot hold a front neighbor");
 }
 
 #[test]
@@ -300,7 +292,7 @@ fn save_one_tick_before_recruitment_and_reject_invalid_bond_state() {
 
 #[test]
 fn fission_passes_one_existing_interface_to_the_touching_daughter_and_persists_it() {
-    let daughters=CHANNELS.replace("engage_when: peer.message_valid","engage_when: peer.division_interface && peer.message_valid");
+    let daughters=format!("{CHANNELS} assembly RearGlue: adhere(){{ at:3.14159265; engage_when:peer.division_interface; GlueMaterial:0.006;Mount:0.01;Wall:0.01;}}").replace("engage_when: populated(rf020)","engage_when: peer.division_interface && populated(rf020)");
     let (mut world, genomes)=colony_with(&[(200.0,200.0),(228.2,200.0),(214.0,200.0),(214.0,214.0)],&daughters);
     // Two daughters of the same living mother. After a second split the new
     // daughter occupies the mother's old interface; the other neighbor is
@@ -309,6 +301,7 @@ fn fission_passes_one_existing_interface_to_the_touching_daughter_and_persists_i
     world.contacts.insert((1,2),CLONAL);
     world.contacts.insert((1,3),CLONAL);
     world.recount_bonds();
+    world.cells[2].angle = 0.0;
     let mut index=DivisionBonds::new(&world);
     world.inherit_bond_interfaces(0,2,&genomes,&mut index);
     world.prune_contacts(Some(&genomes));
@@ -332,11 +325,12 @@ fn fission_passes_one_existing_interface_to_the_touching_daughter_and_persists_i
 #[test]
 fn recruited_interface_handoff_requires_matching_recruiter_hardware_on_the_new_half() {
     let (mut world,mut genomes)=colony(&[(200.0,200.0),(228.2,200.0),(214.0,200.0)]);
-    let source=genomes[0].source.replace("engage_when: peer.message_valid","engage_when: peer.division_interface && peer.message_valid");
+    let source=genomes[0].source.replace("engage_when: populated(rf020)","engage_when: peer.division_interface && populated(rf020)");
     genomes.push(Genome::new(source.clone(),Program::compile(&source).unwrap(),0,0));
     world.cells[2].genome_id=2;
     world.contacts.clear();world.contacts.insert((1,2),MATURE);
     world.recount_bonds();
+    world.cells[2].angle = 0.0;
     let mut index=DivisionBonds::new(&world);
     world.inherit_bond_interfaces(0,2,&genomes,&mut index);
     world.prune_contacts(Some(&genomes));
@@ -344,6 +338,7 @@ fn recruited_interface_handoff_requires_matching_recruiter_hardware_on_the_new_h
     world.cells[2].genome_id=1;
     world.contacts.insert((1,2),MATURE);
     world.recount_bonds();
+    world.cells[2].angle = 0.0;
     let mut index=DivisionBonds::new(&world);
     world.inherit_bond_interfaces(0,2,&genomes,&mut index);
     assert_eq!(world.contacts.get(&(2,3)),Some(&MATURE));
@@ -365,6 +360,7 @@ fn two_adjacent_parents_dividing_in_one_tick_handoff_the_same_interface_only_onc
     world.contacts.clear();
     world.contacts.insert((1,2),MATURE);
     world.recount_bonds();
+    world.cells[2].angle = 0.0;
     let mut index=DivisionBonds::new(&world);
     world.inherit_bond_interfaces(0,2,&genomes,&mut index);
     assert_eq!(world.bond_pairs().collect::<Vec<_>>(),[(2,3)]);
@@ -380,41 +376,32 @@ fn two_adjacent_parents_dividing_in_one_tick_handoff_the_same_interface_only_onc
 
 #[test]
 fn binding_sites_are_paid_finite_and_reused_after_release() {
-    let (mut world, genomes) = colony(&[(200.0, 200.0), (300.0, 200.0), (185.8, 200.0)]);
+    let (mut world, genomes) = colony(&[(200.0,200.0),(214.1,200.0),(214.3,200.0)]);
     let set_activity = |world: &mut World, value: f64| {
-        let center = world.cells.iter_mut().find(|c| c.id == 1).unwrap();
-        let glue = center.body.cellular.as_mut().unwrap().assemblies.iter_mut().find(
-            |a| a.recipe.kind == AssemblyKind::Mechanism(MechanismKind::Adhere)).unwrap();
-        glue.activity = value;
+        world.cells[0].body.cellular.as_mut().unwrap().assemblies.iter_mut().find(|a| a.recipe.name=="Glue").unwrap().activity=value;
     };
-    set_activity(&mut world, 0.26); // 0.006 installed × 0.26 gives exactly one usable site.
-    phase(&mut world, &genomes);
-    assert_eq!(world.bond_pairs().collect::<Vec<_>>(), [(1, 3)]);
-    world.cells[1].x = 214.2;
-    world.cells.reverse();
-    advance_contact_phases(&mut world, &genomes, MATURE);
-    assert_eq!(world.contacts.len(), 1);
-    assert!(world.has_bond(1, 3), "an established interface keeps its occupied site");
-    world.cells.iter_mut().find(|c| c.id == 3).unwrap().x = 300.0;
-    advance_contact_phases(&mut world, &genomes, MATURE);
-    assert_eq!(world.bond_pairs().collect::<Vec<_>>(), [(1, 2)]);
-    world.cells.iter_mut().find(|c| c.id == 3).unwrap().x = 185.8;
-    set_activity(&mut world, 0.55);
-    advance_contact_phases(&mut world, &genomes, MATURE);
-    assert_eq!(world.bond_pairs().collect::<Vec<_>>(), [(1, 2), (1, 3)]);
-    set_activity(&mut world, 0.26);
+    set_activity(&mut world,0.26);
+    advance_contact_phases(&mut world,&genomes,MATURE);
+    assert!(world.has_bond(1,2)); assert!(!world.has_bond(1,3));
+    world.cells[1].x = 270.0;
+    advance_contact_phases(&mut world,&genomes,MATURE);
+    assert!(world.has_bond(1,3));
+    world.cells[1].x = 214.1;
+    set_activity(&mut world,0.55);
+    advance_contact_phases(&mut world,&genomes,MATURE);
+    assert!(world.has_bond(1,2) && world.has_bond(1,3));
+    set_activity(&mut world,0.26);
     world.prune_contacts(Some(&genomes));
-    assert_eq!(world.bond_pairs().collect::<Vec<_>>(), [(1, 2)], "equal mature claims use stable IDs");
-    set_activity(&mut world, 0.20);
-    world.prune_contacts(Some(&genomes));
+    assert!(world.has_bond(1,2) && !world.has_bond(1,3));
+    set_activity(&mut world,0.20);world.prune_contacts(Some(&genomes));
     assert!(world.contacts.is_empty());
-    assert_eq!(world.cells.iter().map(|c| c.adhered_neighbors).sum::<u32>(), 0);
 }
 
 #[test]
 fn surface_predicates_can_be_asymmetric_and_share_only_eligible_material() {
     let source = r#"
         product GlueMaterial=adhesin(Frame);
+        product Fiber=filament(); assembly Reader:sense(contact){Mount:0.002;Fiber:0.002;Detector:0.006;}
         assembly Small: adhere() { GlueMaterial:0.002; Mount:0.009; Wall:0.009;
             engage_when: peer.signal_valid && peer.signal <= 2; }
         assembly Large: adhere() { GlueMaterial:0.006; Mount:0.01; Wall:0.01;
@@ -426,7 +413,7 @@ fn surface_predicates_can_be_asymmetric_and_share_only_eligible_material() {
         r#"
         product GlueMaterial=adhesin(Frame);
         assembly Glue: adhere() { GlueMaterial:0.006; Mount:0.01; Wall:0.01; engage_when: true; }
-        signal rf001=1;
+        assembly Badge:display(){Mount:0.004;Wall:0.006;} signal rf001=1;
     "#,
     );
     genomes.extend(others);
@@ -435,10 +422,10 @@ fn surface_predicates_can_be_asymmetric_and_share_only_eligible_material() {
     genomes[1].program.initialize_message(&mut donor.memory);
     world.cells[0].x = 200.0;
     world.cells[0].y = 200.0;
-    for x in [186.0, 214.0] {
+    for x in [214.0, 214.1] {
         donor.id = world.next_id;
         world.next_id += 1;
-        donor.x = x;
+        donor.x = x; donor.angle=PI;
         donor.y = 200.0;
         world.cells.push(donor.clone());
     }

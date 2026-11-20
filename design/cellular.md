@@ -86,7 +86,7 @@ storage, mineral uptake, growth and reproduction.
 
 An assembly names one operation. Several independently constructed assemblies
 make a working pathway: `import(particle)` captures food, `store(food)` holds it,
-and `digest(tissue)` processes the tissue already in that compartment. Removing
+and `digest(structural)` processes structural carbon already in that compartment. Removing
 one step removes that capability. Activity regulates the existing machine;
 building another enzyme does not grant storage or capture.
 
@@ -99,9 +99,11 @@ building another enzyme does not grant storage or capture.
 | `store(food)` | Undigested-food capacity. |
 | `harvest(light)` | Uses local light and dissolved inorganic carbon to fix organic carbon and release oxygen. |
 | `import(mineral)` | Paid uptake of dissolved minerals into free storage. |
-| `import(particle)` | Captures nearby organic particles into food storage. |
-| `engulf()` | Transfers sufficiently small, damaged organisms into food storage. |
-| `digest(exudate)`, `digest(tissue)`, `digest(waste)` | Processes only the named stored substrate. |
+| `import(particle)` | Captures a portion of a packet touching this inlet. Motor mass and activity limit its rate. Its `engage_when` expression runs for each candidate here. |
+| `engulf()` | Checks feasible prey at this opening. Each swallowed cell must fit both its aperture and the remaining gut, and starts a two-second handling time on that opening. |
+| `digest(soluble)`, `digest(structural)`, `digest(bound)` | Installed enzyme processes the corresponding gut fraction. |
+| `export(carbon)` | Uses transporter and anchor material to release reserve carbon at the outlet, spending ATP. |
+| `display()` | Uses anchor and membrane material to present selected register values at the mount. |
 | `propel()` | Applies a force at its declared attachment point. |
 | `pierce()` | Contact damage; collecting food still requires the relevant machinery. |
 | `shield()` | Protection from damage. |
@@ -143,7 +145,7 @@ Damage and reduced activity lower capacity. A released site can serve another
 contact. An old saved two-part surface retains its materials but has zero sites.
 
 Storage and support are passive physical structures: setting activity to zero
-does not erase their capacity. Active enzymes, importers and motors obey activity.
+does not erase their capacity. Active enzymes, importers and motors obey activity. Throughput depends on installed enzyme, carrier or motor content. Pigment and enzyme both limit harvesting. Extra scaffold occupies space and costs material.
 Receptors use the stored activity from the preceding tick when observations are
 sampled, so regulation cannot rewrite the current observation.
 
@@ -166,8 +168,11 @@ on the new support machinery and inherit actual storage and translation machines
 Each cell has five private register banks for integers, scalars, booleans, strings and vectors. An occupied slot costs 0.0025 energy per simulated second. Writes and guards read the state from the start of the tick. Writes commit together, and a simultaneous clear wins. For example, an active contact receptor named Touch can copy a neighbor’s publication into local memory.
 
 ```text
-publish rf001 = 17;
-signal rf021 = 0;
+publish rf001;
+signal rf021;
+rf001 = 17;
+rf021 = if energy.fraction < 0.25 then 1 else 0;
+assembly Badge: display() { Mount: 40; Skin: 60; at: 0; activity: 1; }
 rf002 = sensed.Touch.message when sensed.Touch.message_valid;
 ```
 
@@ -185,6 +190,7 @@ The first term allows engagement when the hunter has cleared its own marker. The
 | --- | --- |
 | `peer.message_valid`, `peer.message` | Occupancy and value of the candidate's first public scalar |
 | `peer.signal_valid`, `peer.signal` | Occupancy and value of its independent second public scalar |
+| `peer.resistance_valid`, `peer.resistance` | Resistance measured by a contact receptor within reach of this opening and candidate |
 | `peer.division_interface` | Whether this contact originated at division, including a retained interface |
 | `rf091`, `populated(rf091)` | Value and occupancy of the acting cell's own register |
 
@@ -199,11 +205,11 @@ Guards can reuse pure functions and local bindings over registers, constants and
 
 An adhesive surface might open on `peer.signal_valid && peer.signal >= 2` or require `peer.division_interface` for daughter retention. A bond needs physically active surfaces with free binding sites at both ends. Both surface expressions must allow the partner. Ordinary encounters also need 15 consecutive ticks of contact. The default for an omitted condition is open on weapons and closed on adhesion. The Graph view shows the dependencies of each contact condition. Its value is specific to a physical cell pair.
 
-Each declaration accepts one scalar address. The recognition marker and signal payload have distinct addresses. Each can be used independently. All other slots are private. A working named contact receptor reports `message_valid` and `message` for its particular contact. Particles, silent cells and missing contacts return false and zero. A cell publishing zero returns true and zero. All cells exchange values from the same start-of-tick snapshot. The same receptor reports an independently valid payload through `signal_valid` and `signal` for that very same contact. A daughter initializes any declared marker and signal from its inherited program. Other registers start empty. Restoring a world preserves the actual registers, including a cleared publication.
+Each declaration accepts one scalar address. The recognition marker and signal payload have distinct addresses. Each can be used independently. All other slots are private. A working named contact receptor reports `message_valid` and `message` for its particular contact. Particles, silent cells and missing contacts return false and zero. A cell publishing zero returns true and zero. All cells exchange values from the same start-of-tick snapshot. The same receptor reports an independently valid payload through `signal_valid` and `signal` for that very same contact. New counted genomes write the selected registers using ordinary, mutable expressions. The value becomes externally visible at an active display patch. Restoring a world preserves the actual registers, including a cleared publication.
 
 **Predator** uses marker 17 for attack avoidance. Any program can publish that marker. A contact receptor’s boolean `sensed.Touch.bonded` reports whether the particular cell it touches is a direct physical partner. A particle, barrier, unrelated neighbor or missing contact gives false. The marker and payload remain readable from a functioning contact receptor before a bond forms.
 
-[Colony phototroph](../examples/colony.cell) publishes marker 31, finishes a scaffold precursor into adhesin and installs it alongside membranes and anchors, and retains daughters. Its two contact receptors check for a direct bonded partner before it builds additional storage. When a bonded cell divides, an existing interface can follow the daughter that remains against the original neighbor, provided both still have compatible, working adhesive surfaces. [Forager](../examples/forager.cell) and [Phototroph](../examples/phototroph.cell) instead permit encounter recruitment with complementary markers 72 and 41. Each cell still supplies its own adhesive surface. Resource transfer requires working junctions on both ends.
+[Colony phototroph](../examples/colony.cell) finishes a scaffold precursor into adhesin and installs it alongside membranes and anchors, and retains daughters. Its two contact receptors check for a direct bonded partner before it builds additional storage. When a bonded cell divides, an existing interface can follow the daughter that remains against the original neighbor, provided both still have compatible, working adhesive surfaces. [Forager](../examples/forager.cell) and [Phototroph](../examples/phototroph.cell) instead permit encounter recruitment with complementary markers 72 and 41. Each cell still supplies its own adhesive surface. Resource transfer requires working junctions on both ends.
 
 The daughter-retention route models clonal growth observed in the choanoflagellate *Salpingoeca rosetta*. The recruitment timer is a simulation parameter. [Fairclough, Dayel and King, 2010](https://pmc.ncbi.nlm.nih.gov/articles/PMC2978077/)
 
@@ -227,13 +233,13 @@ The pair needs reciprocal adhesion and a completed, active junction of the same 
 | `junction(mineral)` | 1.5 |
 | `junction(carbon)` | 6 |
 
-The fractional imbalance and the weaker side’s active mass limit the amount on each connection. All of a cell’s connections share its throughput for that resource. The exchange uses starting inventories for every pair in the phase. Material received in a tick can travel farther through the colony on a later tick. Closing a junction stops that resource exchange while adhesion and signaling can continue. The Body inspector records each cell’s net change in the last exchange. Separate production, respiration and spending still run for each cell.
+The fractional imbalance and the weaker side’s active mass limit the amount on each connection. Each connection uses the throughput of the patches overlapping at its own interface. The exchange uses starting inventories for every pair in the phase. Material received in a tick can travel farther through the colony on a later tick. Closing a junction stops that resource exchange while adhesion and signaling can continue. The Body inspector records each cell’s net change in the last exchange. Separate production, respiration and spending still run for each cell.
 
 **Nurse rosette** and **Pulse swimmer** retain daughters. Their left and right receptors require the measured cell to be a direct bonded partner before a juvenile request or relay pulse can change their behavior. The swimmer’s refractory interval separates successive pulses. Both programs grow their own machinery from the same founding body. [Nurse rosette](../examples/nurse-rosette.cell) · [Pulse swimmer](../examples/pulse-swimmer.cell)
 
-A named `junction(signal)` uses membrane and receptor material. Both cells must be attached and operate signal junctions. For a junction named `Bus`, `sensed.Bus.count` counts directly attached partners with a populated signal register, and `sensed.Bus.value` gives their arithmetic mean. An occupied zero contributes to the mean. With no contributing partners, `sensed.Bus.valid` is false, and count and value are zero. Each cell reads the same start-of-tick publications, so a relay needs a new tick for each hop.
+A named `junction(signal)` reads one overlapping port on a bonded neighbor. For a port named `LeftBus`, `sensed.LeftBus.valid` identifies a connection, `.signal_valid` identifies an occupied payload, and `.value` reads its value. A payload of zero is valid. Ports read the start-of-tick state, so signals travel one hop per tick.
 
-[Crown rosette](../examples/crown-rosette.cell) uses this count to recognize a cell with two or more signaling neighbors. It publishes 1. A cell with one signaling neighbor and an incoming mean above 0.5 activates a second light harvester. The player shows these readings under **Body → Incoming signals**.
+[Crown rosette](../examples/crown-rosette.cell) counts its occupied ports in its own program and activates an extra light harvester when a neighboring port carries a beacon. The nurse opens resource ports according to the request at the corresponding patch.
 
 ## Physical memory and pure functions
 
@@ -274,7 +280,7 @@ Each `sensed.Recipe.field` reads the named recipe's physical receptors at their
 body-relative attachment point. Light, heat and chemical receptors report local
 field values, without a supplied gradient direction. Optical receptors use their
 declared viewing direction, light, range and occlusion. Contact receptors report
-nearby surfaces and relative flow at their attachment point.
+local pressure, resistance and relative flow at their attachment point. Fixed and floating walls, other cells and particles can contact that receptor.
 
 | Mechanism | Named fields in addition to `available` and `valid` |
 | --- | --- |
@@ -291,9 +297,9 @@ and zero observation values. Contact receptors still measure flow when no
 surface is touching: guard `flow`, `speed` and `bearing` with `available`.
 Other measurements require `valid`.
 
-Matching instances of a recipe share its exact attachment and direction. Their
-functional mass, multiplied by stored activity, is summed to determine sampling
-quality and range; they do not duplicate a reading or select separate targets.
+Division can move inherited copies of a recipe to different mounts. The named
+reading uses the strongest active copy, with ties broken by instance ID. Only
+copies at the same physical mount contribute their strength to that sample.
 Different named recipes are sampled independently. Optical selection ranks
 visible contrast, distance and angular offset; contact selects the closest
 surface gap to the receptor. Only channels used by the program are sampled.
@@ -305,8 +311,7 @@ let difference = sensed.LeftEye.level - sensed.RightEye.level;
 Two motors can react differently to this difference. The full
 [local-control.cell](../examples/local-control.cell) example compares two light
 receptors, builds a decaying brake in shade, dismantles motors and permits their
-regrowth when the brake concentration falls. Existing whole-cell sensor names
-remain available for earlier sources.
+regrowth when the brake concentration falls. Earlier sources restored from a checkpoint can still use their original whole-cell readings. The compiler requires named receptors in new cellular sources.
 
 ## Construction control and material recovery
 
@@ -369,22 +374,15 @@ proportional to empty energy-storage capacity. Cellular envelope repair follows
 the same affordability rule. Authored activity conditions can require a larger
 reserve. Legacy programs retain their existing reserve rules.
 
-Cellular partitioning prefers to distribute complete functional duplicates of
-each exact recipe between the two cells. Identity includes ingredient definitions,
-amounts and attachment geometry, so opposite motors or altered products remain
-distinct. Core support and physical space take priority; the allocator can fall
-back to the existing load-based packing when necessary. It never copies a lone
-instance or guarantees that a cell which failed to build duplicates will produce
-two independently functioning daughters.
+The strongest active constrictor sets the separation direction when the first paid furrow work begins. The furrow keeps that direction through regulation changes. Each mounted machine goes whole to its own hemisphere. As that hemisphere closes into a daughter envelope, its outer pole stays outer and its cut edges meet at the new septum. Opposing patches placed just to either side of the cut can thus meet after fission. Their physical angles are visible in the Body inspector. A split must fit the hardware and provide core support in both halves. Unmounted machinery and mounts exactly on the cut share the remaining room.
 
 Overflow after partition can exhaust a daughter with no functioning energy
 compartment. If it dies in that same tick, its body and gut material still return
 to the environment through the ordinary death path.
 
-Secreted organic particles are placed just outside the emitter's inclusive
-capture surface, including when a secretion merges with an existing packet.
-This geometric clearance prevents immediate reingestion. It does not prevent
-later capture after the cell and particle move back into contact.
+Secretion releases soluble carbon at the installed outlet. A nearby inlet can collect that carbon if its opening reaches the packet. Gut readouts and hydrolases distinguish soluble, structural and bound carbon. A lysed cell contributes its actual mixture of reserve and body carbon, plus the contents of its gut. A partially hydrolysed meal leaves resistant material mixed with remaining substrate. Packet origin remains available to the player.
+
+An inlet can apply `engage_when: !peer.resistance_valid || peer.resistance < 0.085;`. Reading resistance requires an active touch receptor at that opening touching the same particle. The source's expression leaves an opening without a reading active.
 
 ## Tick and accounting rules
 

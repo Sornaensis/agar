@@ -347,3 +347,17 @@ fn geometry_mutations_change_one_future_angle_and_preserve_material_definitions(
         .filter_map(|seed| Program::mutate_source(&source, seed, MutationKind::Any))
         .any(|m| m.kind == MutationKind::Geometry));
 }
+
+#[test]
+fn authoring_requires_named_receptors_and_marker_values_can_mutate() {
+    for global in ["contact.valid", "chemical.organic_bearing", "light.level", "heat.value", "object.area", "flow.speed"] {
+        let source = format!("cellular counts; let measure={global};");
+        assert!(Program::compile(&source).unwrap_err().contains("named receptor"));
+        assert!(Program::compile_stored(&source).is_ok());
+    }
+    for source in ["cellular counts; publish rf001; rf001=17;", "cellular counts; publish rf001=17;", "cellular; publish rf001=17;"] {
+        let mutated = Program::mutate_source(source, 19, MutationKind::Constant).unwrap();
+        assert_ne!(source, mutated.source);
+        assert!(Program::compile(&mutated.source).is_ok());
+    }
+}

@@ -189,7 +189,7 @@ impl ReceptorField {
             AssemblyKind::Mechanism(M::SenseLight) | AssemblyKind::Organelle(O::Photoreceptor) => {
                 &[Available, Valid, Level]
             }
-            AssemblyKind::Mechanism(M::JunctionSignal) => &[Available, Valid, Value, Count],
+            AssemblyKind::Mechanism(M::JunctionSignal) => &[Available, Valid, Value, SignalValid, Signal],
             AssemblyKind::Mechanism(M::SenseHeat) | AssemblyKind::Organelle(O::Thermoreceptor) => {
                 &[Available, Valid, Value]
             }
@@ -1153,12 +1153,12 @@ impl Sensor {
             Self::ObjectContrast => "object.contrast",
             Self::ObjectPigment => "object.pigment",
             Self::ObjectMotion => "object.motion",
-            Self::GutExudateEnergy => "gut.exudate.energy",
-            Self::GutExudateNutrients => "gut.exudate.nutrients",
-            Self::GutTissueEnergy => "gut.tissue.energy",
-            Self::GutTissueNutrients => "gut.tissue.nutrients",
-            Self::GutWasteEnergy => "gut.waste.energy",
-            Self::GutWasteNutrients => "gut.waste.nutrients",
+            Self::GutExudateEnergy => "gut.soluble.energy",
+            Self::GutExudateNutrients => "gut.soluble.nutrients",
+            Self::GutTissueEnergy => "gut.structural.energy",
+            Self::GutTissueNutrients => "gut.structural.nutrients",
+            Self::GutWasteEnergy => "gut.bound.energy",
+            Self::GutWasteNutrients => "gut.bound.nutrients",
             Self::ExpressionRate => "expression.rate",
             Self::AssemblyRate => "assembly.rate",
             Self::AssemblyCapacity => "assembly.capacity",
@@ -1234,6 +1234,15 @@ impl Sensor {
         } else { value }
     }
     fn lookup(name: &str) -> Option<(Self, Type)> {
+        let name = match name {
+            "gut.exudate.energy" => "gut.soluble.energy",
+            "gut.exudate.nutrients" => "gut.soluble.nutrients",
+            "gut.tissue.energy" => "gut.structural.energy",
+            "gut.tissue.nutrients" => "gut.structural.nutrients",
+            "gut.waste.energy" => "gut.bound.energy",
+            "gut.waste.nutrients" => "gut.bound.nutrients",
+            other => other,
+        };
         Self::ALL
             .into_iter()
             .find(|s| s.name() == name)
@@ -3318,8 +3327,10 @@ struct Parser {
     node_locations: Vec<source::NodeLocation>,
     write_locations: Vec<Location>,
     message_locations: [Option<Location>; 4],
+    initializer_locations: [Option<Location>; 4],
     cellular_mode: bool,
     historical_contact: bool,
+    stored_source: bool,
     count_units: bool,
     product_names: HashMap<String, usize>,
     assembly_names: HashMap<String, usize>,
@@ -3342,8 +3353,10 @@ impl Parser {
             node_locations: Vec::new(),
             write_locations: Vec::new(),
             message_locations: [None; 4],
+            initializer_locations: [None; 4],
             cellular_mode: false,
             historical_contact: false,
+            stored_source: false,
             count_units: false,
             product_names: HashMap::new(),
             assembly_names: HashMap::new(),
@@ -3731,7 +3744,10 @@ impl Parser {
                 } else if let Some(&target) = self.bindings.get(&name) {
                     self.add(Op::Reference(target), self.nodes[target].ty, location)?
                 } else if let Some((sensor, _)) = Sensor::lookup(&name) {
-                    if self.cellular_mode && !sensor.cellular_allowed() {
+                    if self.cellular_mode && sensor.legacy_external() && !self.stored_source {
+                        return Err(location.error(format!("'{name}' needs a named receptor. Read sensed.Recipe.field at its attachment.")));
+                    }
+                    if self.cellular_mode && !sensor.cellular_allowed() && !(self.stored_source && sensor.legacy_external()) {
                         return Err(location.error(format!("'{name}' is not a cellular measurement; read named pool.* or built.* stocks and local sensors.")));
                     }
                     self.add(Op::Sensor(sensor), sensor.program_type(self.count_units), location)?

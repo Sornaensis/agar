@@ -1,7 +1,7 @@
 // Controlled assays use ordinary cells and the exported simulation operations.
 // A finite donor's death transfers its existing carbon and minerals into tissue.
 import assert from 'node:assert/strict';
-import {advance, compile, error, seed, snapshot} from './organelle-harness.mjs';
+import {advance, body, compile, error, seed, snapshot} from './organelle-harness.mjs';
 
 const inert = 'thrust=0;turn=0;divide=false;absorb=0;feed=0;';
 export function lyseDonor(api,x,y) {
@@ -46,7 +46,9 @@ export function placeByTissue(api,cell,noseDistance) {
   lyseDonor(api,70,70);
   const particles = snapshot(api).food.filter(p => p.kind === 1);
   assert.ok(particles.length);
-  const dx = Math.cos(cell.angle), dy = Math.sin(cell.angle);
+  const intake = body(api,cell.id).cellular?.assemblies.find(a => a.kind === 'import(particle)' && a.complete);
+  const angle = cell.angle + (intake?.at ?? 0);
+  const dx = Math.cos(angle), dy = Math.sin(angle);
   const front = particles.reduce((a,b) => a.x*dx + a.y*dy < b.x*dx + b.y*dy ? a : b);
   const distance = cell.radius + noseDistance;
   assert.ok(api.move_cell(cell.id,front.x - dx*distance,front.y - dy*distance,0),error(api));

@@ -2,6 +2,8 @@ use super::*;
 use super::mechanism_tests::equipped;
 use crate::genome::Value;
 
+const BADGE: &str = "assembly Badge: display() { Mount:0.004; Wall:0.006; }";
+
 const TOUCH: &str = r#"
 product Hair = filament();
 assembly Touch: sense(contact) { Mount:0.005; Detector:0.01; Hair:0.005; at:0; }
@@ -27,6 +29,21 @@ fn seed(world: &mut World, genomes: &[Genome], id: u32, x: f64, y: f64) -> usize
     index
 }
 
+/// Add a complete paid test sender with its actual recipe, body and genome.
+fn sender(world: &mut World, genomes: &mut Vec<Genome>, declarations: &str, x: f64, y: f64, angle: f64) -> usize {
+    let (mut batch, mut stock) = equipped(&format!("{BADGE}\n{declarations}"));
+    let g = stock.remove(0);
+    let mut cell = batch.cells.remove(0);
+    g.program.initialize_message(&mut cell.memory);
+    cell.id = world.next_id;
+    world.next_id += 1;
+    cell.genome_id = genomes.len() as u32 + 1;
+    place(&mut cell, x, y, angle);
+    genomes.push(g);
+    world.cells.push(cell);
+    world.cells.len()-1
+}
+
 fn read_touch(world: &World, genomes: &[Genome], id: u32) -> ReceptorInput {
     let program = &genomes[0].program;
     let recipe = program.cellular().unwrap().assemblies.iter().position(|a| a.name == "Touch").unwrap();
@@ -38,10 +55,13 @@ fn message_requires_a_working_receptor_and_its_actual_publishing_contact() {
     let (mut world, mut genomes) = equipped(&format!("{TOUCH} rb010=sensed.Touch.signal_valid;rf010=sensed.Touch.signal;"));
     place(&mut world.cells[0], WIDTH - 7.0, 100.0, 0.0);
     genomes.push(genome("cellular; publish rf001 = 0; signal rf005 = -2.5;"));
-    genomes.push(genome("cellular; rf001 = 19;"));
-    let sender = seed(&mut world, &genomes, 2, 7.0, 100.0);
-    let private = seed(&mut world, &genomes, 3, 200.0, 100.0);
-    genomes[2].program.evaluate_cell(&Inputs::default(), &mut world.cells[private].memory, &mut EvalScratch::default());
+    let private = seed(&mut world, &genomes, 2, 7.0, 100.0);
+    let hidden = read_touch(&world, &genomes, 1);
+    assert!(hidden.valid && !hidden.message_valid && !hidden.signal_valid, "a bare newborn has no display");
+    place(&mut world.cells[private], 200.0, 100.0, 0.0);
+    let sender = sender(&mut world, &mut genomes, "publish rf001=0; signal rf005=-2.5;", 7.0, 100.0, 0.0);
+    assert!(!read_touch(&world, &genomes, 1).message_valid, "the badge faces away");
+    world.cells[sender].angle = PI;
     let read = read_touch(&world, &genomes, 1);
     assert!(read.valid && read.message_valid);
     assert_eq!(read.message, 0.0, "an occupied public zero crosses the seam");
@@ -66,7 +86,7 @@ fn message_requires_a_working_receptor_and_its_actual_publishing_contact() {
     place(&mut world.cells[sender], 30.0, 100.0, 0.0);
     assert!(!read_touch(&world, &genomes, 1).message_valid);
     assert!(!read_touch(&world, &genomes, 1).signal_valid);
-    place(&mut world.cells[sender], 7.0, 100.0, 0.0);
+    place(&mut world.cells[sender], 7.0, 100.0, PI);
     let touch = world.cells[0].body.cellular.as_mut().unwrap().assemblies.iter_mut()
         .find(|assembly| assembly.recipe.name == "Touch").unwrap();
     touch.integrity = 0.0;
@@ -75,7 +95,7 @@ fn message_requires_a_working_receptor_and_its_actual_publishing_contact() {
 
 #[test]
 fn contact_reads_last_committed_values_across_cell_evaluation_order() {
-    let (mut world, mut genomes) = equipped(&format!("{TOUCH}\npublish rf001 = 2; rf001 = rf001 + 1;"));
+    let (mut world, mut genomes) = equipped(&format!("{TOUCH}{BADGE}\npublish rf001 = 2; rf001 = rf001 + 1;"));
     // Both paid receivers have the same program and face one another. The
     // earlier cell's write must not be visible to the later cell this tick.
     genomes[0].program.initialize_message(&mut world.cells[0].memory);
@@ -97,7 +117,7 @@ fn contact_reads_last_committed_values_across_cell_evaluation_order() {
 
 #[test]
 fn payload_reads_frozen_selected_peer_while_identity_stays_constant() {
-    let (mut world, mut genomes) = equipped(&format!("{TOUCH}
+    let (mut world, mut genomes) = equipped(&format!("{TOUCH}{BADGE}
 publish rf001=17; signal rf009=0;
 rf009=rf009+2; rf004=if sensed.Touch.signal_valid then sensed.Touch.signal else -99;"));
     genomes[0].program.initialize_message(&mut world.cells[0].memory);
@@ -133,8 +153,9 @@ rf009=rf009+2; rf004=if sensed.Touch.signal_valid then sensed.Touch.signal else 
 fn three_cell_relay_advances_one_physical_contact_per_tick() {
     // B and C each have a paid receptor on their left membrane. They forward
     // its scalar while retaining their own independent identity of 17.
-    let (mut world, mut genomes) = equipped(&format!("{TOUCH}
+    let (mut world, mut genomes) = equipped(&format!("{TOUCH}{BADGE}
 publish rf001=17; signal rf009=0;
+assembly Back: display() {{ Mount:0.004; Wall:0.006; at:3.141592653589793; }}
 rf009=if sensed.Touch.signal_valid then sensed.Touch.signal else -99;"));
     let relay_id = world.cells[0].id;
     genomes[0].program.initialize_message(&mut world.cells[0].memory);
@@ -143,15 +164,14 @@ rf009=if sensed.Touch.signal_valid then sensed.Touch.signal else -99;"));
     let last_id = last.id;
     world.next_id += 1;
     world.cells.push(last);
-    genomes.push(genome("cellular; publish rf001=91; signal rf011=0; rf011=7;"));
-    let source = seed(&mut world, &genomes, 2, 586.0,380.0);
+    let source = sender(&mut world, &mut genomes, "publish rf001=91; signal rf011=0; rf011=7;", 586.0,380.0,0.0);
     let source_id = world.cells[source].id;
     // The pulse starts as an ordinary A register write at tick 1. B samples
     // that change at tick 2, and C can first sample B's forwarded value at 3.
     for (relay, downstream) in [(0.0,0.0),(7.0,0.0),(7.0,7.0)] {
         for cell in &mut world.cells {
             let x = if cell.id == source_id { 586.0 } else if cell.id == relay_id { 600.0 } else { 614.0 };
-            place(cell,x,380.0,PI);
+            place(cell,x,380.0,if cell.id == source_id {0.0} else {PI});
         }
         world.step(&mut genomes);
         let by_id = |id| world.cells.iter().find(|cell| cell.id == id).unwrap();
@@ -202,14 +222,17 @@ assembly Sting: pierce() { engage_when: !(populated(rf001) && peer.message_valid
 assembly Old: piercer { engage_when: !(populated(rf001) && peer.message_valid && peer.message == rf001); Mount:0.01; Barb:0.04; Catalyst:0.01; }
 publish rf001 = 17;
 "#;
-    for marked in [true, false] {
-        let (mut world, mut genomes) = equipped(weapons);
+    for (marked, reader) in [(true, true), (false, true), (true, false)] {
+        let (mut world, mut genomes) = equipped(&format!("{TOUCH}{weapons}"));
+        if !reader {
+            world.cells[0].body.cellular.as_mut().unwrap().assemblies.iter_mut()
+                .find(|part| part.recipe.name == "Touch").unwrap().integrity = 0.0;
+        }
         genomes[0].program.initialize_message(&mut world.cells[0].memory);
-        genomes.push(genome(if marked { "cellular; publish rf001 = 17;" } else { "cellular; publish rf001 = 23;" }));
         genomes.push(genome("cellular; rf001 = 17;"));
         place(&mut world.cells[0], WIDTH-7.0, 100.0, 0.0);
-        let closer = seed(&mut world, &genomes, 2, 7.0, 100.0);
-        let prey = seed(&mut world, &genomes, 3, 7.0, 104.0);
+        let closer = sender(&mut world, &mut genomes, if marked { "publish rf001=17;" } else { "publish rf001=23;" }, 7.0, 100.0, PI);
+        let prey = seed(&mut world, &genomes, 2, 7.0, 104.0);
         let caps: Vec<_> = world.cells.iter().map(|cell| cell.body.capacities()).collect();
         let mut workspace = PhaseWorkspace::default();
         world.freeze_contact_signals(&genomes, &mut workspace.signals);
@@ -217,8 +240,8 @@ publish rf001 = 17;
         let mut outputs = vec![Outputs::default(); 3];
         outputs[0].bite = 1.0;
         world.resolve_predation_in(&outputs,&caps,&genomes,&mut workspace);
-        let victim = if marked { prey } else { closer };
-        let untouched = if marked { closer } else { prey };
+        let victim = if marked && reader { prey } else { closer };
+        let untouched = if marked && reader { closer } else { prey };
         assert_eq!(workspace.targets[0], Some(victim), "whole-cell weapon");
         assert_eq!(workspace.primitive_hits[0].1, victim, "mounted weapon");
         assert_eq!(world.attacks, 2);
@@ -229,19 +252,17 @@ publish rf001 = 17;
 
 #[test]
 fn engulf_uses_actual_victim_prior_message_even_after_an_authorized_change() {
-    let (mut world, mut genomes) = equipped(r#"
+    let (mut world, mut genomes) = equipped(&format!("{TOUCH}{}",r#"
 assembly Gut: store(food) { Wall:0.2; }
 assembly Mouth: engulf() { engage_when: !(populated(rf001) && peer.message_valid && peer.message == rf001); Mount:0.03; Rotor:0.03; Wall:0.04; }
 publish rf001 = 0; rf001=3;
-"#);
+"#));
     genomes[0].program.initialize_message(&mut world.cells[0].memory);
-    genomes.push(genome("cellular; publish rf001 = 0; rf001 = 3;"));
-    genomes.push(genome("cellular; publish rf001 = 3;"));
     world.cells[0].body.area = 2.0;
     place(&mut world.cells[0], 600.0, 380.0, 0.0);
     let edge = 600.0 + world.cells[0].radius() + CELL_RADIUS;
-    let marked = seed(&mut world, &genomes, 2, edge, 380.0);
-    let prey = seed(&mut world, &genomes, 3, edge, 382.0);
+    let marked = sender(&mut world, &mut genomes, "publish rf001=0; rf001=3;", edge, 380.0, PI);
+    let prey = sender(&mut world, &mut genomes, "publish rf001=3;", edge, 382.0, PI);
     for i in [marked, prey] {
         // Both candidate meals fit the paid gut, including remaining ATP.
         let cell = &mut world.cells[i];
@@ -270,31 +291,38 @@ fn predator_contact_position(degrees: f64) -> (f64, f64) {
     (600.0 + 14.05 * angle.cos(), 380.0 + 14.05 * angle.sin())
 }
 
-fn equipped_predator_beside_newborn_peer() -> (World, Vec<Genome>, usize) {
+fn equipped_predator_beside_displaying_peer() -> (World, Vec<Genome>, usize) {
     // Install only the two paid surface devices needed for this encounter.
     // Geometry, activity expressions, publication and matching use the shipped
     // programs. Three unit-radius bodies start clear of all overlaps.
     let (mut world, _) = equipped(r#"
 product Tail = filament();
 assembly Touch: sense(contact) { Mount:0.002; Detector:0.006; Tail:0.002; }
+assembly Badge: display() { Mount:0.004; Wall:0.006; }
 assembly Piercer: pierce() { Mount:0.01; Tail:0.03; Catalyst:0.01; }
 "#);
     let genomes = vec![genome(include_str!("../../../examples/predator.cell")),
         genome(include_str!("../../../examples/forager.cell"))];
     let predator = &genomes[0].program;
-    predator.initialize_message(&mut world.cells[0].memory);
+    predator.evaluate_cell(&Inputs::default(), &mut world.cells[0].memory, &mut EvalScratch::default());
     let marker = predator.published_message(&world.cells[0].memory);
     assert!(marker.is_some());
     assert!(predator.has_contact_guards());
     place(&mut world.cells[0], 600.0, 380.0, 0.0);
     let (x, y) = predator_contact_position(20.0);
-    let peer = seed(&mut world, &genomes, 1, x, y);
+    let peer = world.cells.len();
+    let mut sibling = world.cells[0].clone();
+    sibling.body.cellular.as_mut().unwrap().assemblies.retain(|a| a.recipe.name != "Piercer");
+    sibling.id = world.next_id;
+    world.next_id += 1;
+    place(&mut sibling,x,y,(380.0-y).atan2(607.0-x));
+    world.cells.push(sibling);
     (world, genomes, peer)
 }
 
 #[test]
-fn shipped_predator_spares_a_newborn_peer_and_can_strike_adjacent_unmarked_prey() {
-    let (mut world, mut genomes, peer) = equipped_predator_beside_newborn_peer();
+fn shipped_predator_spares_a_displaying_peer_and_can_strike_adjacent_unmarked_prey() {
+    let (mut world, mut genomes, peer) = equipped_predator_beside_displaying_peer();
     let (x, y) = predator_contact_position(-40.0);
     let prey = seed(&mut world, &genomes, 2, x, y);
     world.step(&mut genomes);
@@ -306,7 +334,7 @@ fn shipped_predator_spares_a_newborn_peer_and_can_strike_adjacent_unmarked_prey(
 #[test]
 fn shipped_predator_rations_prey_after_recognizing_kin_until_fuel_is_needed() {
     for hungry in [false, true] {
-        let (mut world, mut genomes, peer) = equipped_predator_beside_newborn_peer();
+        let (mut world, mut genomes, peer) = equipped_predator_beside_displaying_peer();
         world.step(&mut genomes);
         assert!(world.cells[0].memory.value("rf004").is_some(), "the previous kin contact was registered");
         if hungry {
@@ -315,7 +343,7 @@ fn shipped_predator_rations_prey_after_recognizing_kin_until_fuel_is_needed() {
         }
         place(&mut world.cells[0], 600.0, 380.0, 0.0);
         let (x, y) = predator_contact_position(20.0);
-        place(&mut world.cells[peer], x, y, 0.0);
+        place(&mut world.cells[peer], x, y, (380.0-y).atan2(607.0-x));
         let (x, y) = predator_contact_position(-40.0);
         let prey = seed(&mut world, &genomes, 2, x, y);
         world.step(&mut genomes);
@@ -326,68 +354,53 @@ fn shipped_predator_rations_prey_after_recognizing_kin_until_fuel_is_needed() {
 }
 
 const PORT: &str = r#"
-product GlueMaterial = adhesin(Frame); assembly Glue: adhere() { engage_when: peer.message_valid && populated(rf001) && peer.message == rf001; GlueMaterial:0.006; Mount:0.01; Wall:0.01; }
+product GlueMaterial = adhesin(Frame);
+assembly Glue: adhere() { engage_when: true; GlueMaterial:0.006; Mount:0.01; Wall:0.01; }
+assembly RearGlue: adhere() { at:3.14159265; engage_when: true; GlueMaterial:0.006; Mount:0.01; Wall:0.01; }
 assembly Bus: junction(signal) { Detector:0.01; Wall:0.01; }
-publish rf001=83;
+assembly Rear: junction(signal) { at:3.14159265; Detector:0.01; Wall:0.01; }
 signal rf003=0;
-rf006=sensed.Bus.count; rb005=sensed.Bus.valid; rf004=sensed.Bus.value;
+rb005=sensed.Bus.valid; rf004=sensed.Bus.value; rb007=sensed.Bus.signal_valid;
+rb008=sensed.Rear.valid; rf006=sensed.Rear.value;
 "#;
 
-fn read_bus(world: &World, genomes: &[Genome], id: u32) -> ReceptorInput {
+fn read_bus(world: &World, genomes: &[Genome], id: u32, name: &str) -> ReceptorInput {
     let cell = world.cells.iter().find(|cell| cell.id == id).unwrap();
     let program = &genomes[(cell.genome_id - 1) as usize].program;
-    let index = program.cellular().unwrap().assemblies.iter().position(|recipe| recipe.name == "Bus").unwrap();
+    let index = program.cellular().unwrap().assemblies.iter().position(|recipe| recipe.name == name).unwrap();
     world.sense_program_in_registry(id, program, genomes).unwrap().receptors[index]
 }
 
 #[test]
-fn signal_junction_averages_only_attached_paid_publishers_and_accepts_zero() {
-    let unmarked = PORT.replace("publish rf001=83;", "")
-        .replace("peer.message_valid && populated(rf001) && peer.message == rf001", "true");
-    let (mut world, mut genomes) = equipped(&unmarked);
-    assert!(genomes[0].program.published_message(&world.cells[0].memory).is_none());
+fn signal_ports_report_distinct_local_peers_and_distinguish_silence_from_zero() {
+    let (mut world, mut genomes) = equipped(PORT);
     let original = genomes[0].source.clone();
-    place(&mut world.cells[0], 200.0, 200.0, 0.0);
-    genomes[0].program.initialize_message(&mut world.cells[0].memory);
-    for (offset, declaration) in [
-        ([14.2, 0.0], "signal rf003=0;"),
-        ([-14.2, 0.0], "signal rf003=-6;"),
-        ([0.0, 14.2], "signal rf003=12;"),
-        ([0.0, -14.2], "signal rf003;"),
-    ] {
+    place(&mut world.cells[0],200.0,200.0,0.0);
+    for (x,declaration) in [(214.2,"signal rf003=0;"),(185.8,"signal rf003=-6;")] {
         let mut peer = world.cells[0].clone();
         genomes.push(genome(&original.replace("signal rf003=0;", declaration)));
-        peer.id = world.next_id;
-        world.next_id += 1;
-        peer.genome_id = genomes.len() as u32;
-        peer.memory = Registers::default();
+        peer.id=world.next_id; world.next_id+=1;
+        peer.genome_id=genomes.len() as u32;
         genomes.last().unwrap().program.initialize_message(&mut peer.memory);
-        place(&mut peer, 200.0 + offset[0], 200.0 + offset[1], PI);
+        place(&mut peer,x,200.0,0.0);
         world.cells.push(peer);
     }
     adhesion::advance_contact_phases(&mut world,&genomes,adhesion::MATURE);
-    let sample = |w:&World| { let read=read_bus(w,&genomes,1); (read.available,read.valid,read.count,read.value) };
-    assert_eq!(sample(&world),(true,true,3,2.0)); // Occupied zero contributes; the fourth port is silent.
-    let block = world.environment.add_barrier(207.1,200.0,20.0,10.0,PI*0.5,false);
-    assert!(block>0);
-    assert_eq!(sample(&world),(true,true,2,3.0));
-    assert!(world.environment.remove_barrier(block));
-    let remote = &mut world.cells[3];
-    remote.body.cellular.as_mut().unwrap().assemblies.iter_mut().find(|a|a.recipe.name=="Bus").unwrap().activity=0.0;
-    assert_eq!(sample(&world),(true,true,2,-3.0));
-    world.cells[2].x=140.0;
-    assert_eq!(sample(&world),(true,true,1,0.0));
-    world.cells[1].body.cellular.as_mut().unwrap().assemblies.iter_mut().find(|a|a.recipe.name=="Glue").unwrap().integrity=0.0;
-    assert_eq!(sample(&world),(true,false,0,0.0));
-    world.cells[0].body.cellular.as_mut().unwrap().assemblies.iter_mut().find(|a|a.recipe.name=="Bus").unwrap().activity=0.0;
-    assert_eq!(sample(&world),(false,false,0,0.0));
+    let sample = |w:&World,name:&str| { let s = read_bus(w,&genomes,1,name); (s.valid,s.signal_valid,s.value) };
+    assert_eq!(sample(&world,"Bus"), (true,true,0.0));
+    assert_eq!(sample(&world,"Rear"), (true,true,-6.0));
+    world.cells[1].memory=Registers::default();
+    assert_eq!(sample(&world,"Bus"), (true,false,0.0));
+    world.cells[1].body.cellular.as_mut().unwrap().assemblies.iter_mut().find(|a|a.recipe.name=="Rear").unwrap().activity=0.0;
+    assert_eq!(sample(&world,"Bus"), (false,false,0.0),"active far-side port cannot serve the contact");
+    assert_eq!(sample(&world,"Rear"), (true,true,-6.0));
 }
 
 #[test]
 fn signal_junction_relays_one_frozen_hop_per_tick() {
-    let (mut world,mut genomes)=equipped(&format!("{PORT} rf003=sensed.Bus.value;"));
+    let (mut world,mut genomes)=equipped(&format!("{PORT} rf003=sensed.Rear.value;"));
     let original=genomes[0].source.clone();
-    genomes.push(genome(&original.replace("rf003=sensed.Bus.value;","rf003=8;")));
+    genomes.push(genome(&original.replace("rf003=sensed.Rear.value;","rf003=8;")));
     for i in 0..3 {
         if i>0 { let mut next=world.cells[0].clone();next.id=world.next_id;world.next_id+=1;world.cells.push(next); }
         let cell=&mut world.cells[i];cell.genome_id=if i==0 {2}else{1};
@@ -395,7 +408,7 @@ fn signal_junction_relays_one_frozen_hop_per_tick() {
         genomes[(cell.genome_id-1) as usize].program.initialize_message(&mut cell.memory);
     }
     adhesion::advance_contact_phases(&mut world,&genomes,adhesion::MATURE);
-    for expected in [[8.0,0.0,0.0],[8.0,4.0,0.0],[8.0,4.0,4.0]] {
+    for expected in [[8.0,0.0,0.0],[8.0,8.0,0.0],[8.0,8.0,8.0]] {
         world.step(&mut genomes);
         for (i,value) in expected.iter().enumerate() {
             let cell=world.cells.iter().find(|cell|cell.id==i as u32 + 1).unwrap();
@@ -405,17 +418,16 @@ fn signal_junction_relays_one_frozen_hop_per_tick() {
     }
 }
 
-
 #[test]
 fn touch_reports_only_the_confirmed_bond_to_the_selected_surface() {
-    let (mut world, genomes) = equipped(&format!("{TOUCH}
+    let (mut world, genomes) = equipped(&format!("{TOUCH}{BADGE}
         product GlueMaterial = adhesin(Frame); assembly Glue: adhere() {{ engage_when: peer.message_valid && populated(rf020) && peer.message == rf020; GlueMaterial:0.006; Mount:0.01; Wall:0.01; }}
         publish rf020=41; rb101=sensed.Touch.bonded;"));
     place(&mut world.cells[0],100.0,100.0,0.0);
     genomes[0].program.initialize_message(&mut world.cells[0].memory);
     let mut partner=world.cells[0].clone();
     partner.id=world.next_id; world.next_id+=1;
-    partner.x=114.5; world.cells.push(partner);
+    partner.x=114.5; partner.angle=PI; world.cells.push(partner);
     let first=read_touch(&world,&genomes,1);
     assert!(first.valid && first.message_valid && !first.bonded);
     adhesion::advance_contact_phases(&mut world,&genomes,adhesion::MATURE);
@@ -431,20 +443,17 @@ fn touch_reports_only_the_confirmed_bond_to_the_selected_surface() {
 
 #[test]
 fn installed_piercers_apply_separate_predicates_to_each_reachable_surface() {
-    let (mut world, mut genomes) = equipped(
+    let (mut world, mut genomes) = equipped(&format!("{TOUCH}{}",
         r#"
         product Barb = filament();
         assembly Low: pierce() { Mount:0.01; Barb:0.04; Catalyst:0.01;
             engage_when: !peer.division_interface && peer.signal_valid && peer.signal < 2; }
         assembly High: pierce() { Mount:0.01; Barb:0.04; Catalyst:0.01;
             engage_when: peer.signal_valid && peer.signal >= 2; }
-    "#,
-    );
-    genomes.push(genome("cellular; signal rf010=0;"));
-    genomes.push(genome("cellular; signal rf010=3;"));
+    "#));
     place(&mut world.cells[0], 200.0, 200.0, 0.0);
-    let low = seed(&mut world, &genomes, 2, 214.0, 200.0);
-    let high = seed(&mut world, &genomes, 3, 214.0, 203.0);
+    let low = sender(&mut world, &mut genomes, "signal rf010=0;", 214.0, 200.0, PI);
+    let high = sender(&mut world, &mut genomes, "signal rf010=3;", 214.0, 203.0, (200.0_f64-203.0).atan2(-7.0));
     let caps: Vec<_> = world.cells.iter().map(|cell| cell.body.capacities()).collect();
     let mut ws = PhaseWorkspace::default();
     world.freeze_contact_signals(&genomes, &mut ws.signals);
@@ -465,18 +474,16 @@ fn installed_piercers_apply_separate_predicates_to_each_reachable_surface() {
 
 #[test]
 fn independently_gated_engulfers_contribute_only_their_accepted_capacity() {
-    let (mut world, mut genomes) = equipped(
+    let (mut world, mut genomes) = equipped(&format!("{TOUCH}{}",
         r#"
         assembly Gut: store(food) { Wall:0.20; }
         assembly Small: engulf() { Mount:0.008; Rotor:0.008; Wall:0.009; engage_when: peer.signal_valid; }
         assembly Large: engulf() { Mount:0.03; Rotor:0.03; Wall:0.04; engage_when: peer.signal > 2; }
-    "#,
-    );
-    genomes.push(genome("cellular; signal rf003=1;"));
+    "#));
     world.cells[0].body.area = 2.0;
     let x = world.cells[0].x + world.cells[0].radius() + CELL_RADIUS;
     let y = world.cells[0].y;
-    let target = seed(&mut world, &genomes, 2, x, y);
+    let target = sender(&mut world, &mut genomes, "signal rf003=1;", x, y, PI);
     world.cells[target].body.area = 1.1;
     world.cells[target].integrity = 0.2;
     world.cells[target].organic_carbon = 0.25;
@@ -488,10 +495,10 @@ fn independently_gated_engulfers_contribute_only_their_accepted_capacity() {
     world.freeze_contact_signals(&genomes, &mut ws.signals);
     ws.geometry.rebuild(&world.cells, false, true);
     world.resolve_predation_in(&outputs, &caps, &genomes, &mut ws);
-    assert_eq!(ws.engulf_targets[0].map(|v| v.0), Some(target));
+    assert_eq!(ws.engulf_targets[0], None);
     assert_eq!(world.predations, 0, "only the 0.025-mass surface accepts this partner");
     ws.signals[target].signal = Some(3.0);
     world.resolve_predation_in(&outputs, &caps, &genomes, &mut ws);
-    assert_eq!(world.predations, 1, "both surfaces now supply sufficient engulfing material");
+    assert_eq!(world.predations, 1, "the larger mouth now admits the same target");
 }
 

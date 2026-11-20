@@ -49,7 +49,7 @@ impl World {
                 if assembly.recipe.kind != AssemblyKind::Mechanism(MechanismKind::Pierce) {
                     continue;
                 }
-                let mass = assembly.functional_mass();
+                let mass = assembly.working_mass();
                 let activity = if outputs[attacker].cellular.is_some() {
                     assembly.activity
                 } else {
@@ -59,7 +59,7 @@ impl World {
                 if power <= 0.0 {
                     continue;
                 }
-                let at = cell.angle + assembly.recipe.at;
+                let at = cell.angle + assembly.at();
                 let outward = [at.cos(), at.sin()];
                 let x = wrap(cell.x + cell.radius() * outward[0], self.environment.width);
                 let y = wrap(cell.y + cell.radius() * outward[1], self.environment.height);
@@ -84,7 +84,7 @@ impl World {
                     let gap = dx.hypot(dy) - geometry.radii[victim];
                     if gap > reach
                         || dx * outward[0] + dy * outward[1] < -1e-9
-                        || relative_angle(dy.atan2(dx) - cell.angle - assembly.recipe.direction).abs()
+                        || relative_angle(dy.atan2(dx) - cell.angle - assembly.direction()).abs()
                             > PI * 0.4
                     {
                         continue;
@@ -93,8 +93,7 @@ impl World {
                         if !program.allows_contact(
                             def,
                             &workspace.signals[attacker].registers,
-                            workspace.signals[victim]
-                                .peer(self.division_interface(cell.id, self.cells[victim].id)),
+                            self.peer_at(attacker, victim, [x,y], self.division_interface(cell.id, self.cells[victim].id), &workspace.signals),
                             &mut workspace.contact_scratch,
                         ) {
                             continue;

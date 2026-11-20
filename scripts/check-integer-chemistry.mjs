@@ -106,8 +106,8 @@ async function observe(countChemistry) {
   return {population:finish.population,births:finish.births,deaths:finish.deaths,successfulKills:finish.predations,
     firstObservedKillSeconds:firstKill,firstObservedBirthSeconds:firstBirth,steppingMilliseconds:Math.round(ms)};
 }
-// A lineage must make daughters able to fix and respire carbon, take up
-// minerals and synthesize proteins using the machinery they actually inherit.
+// Record unequal physical inheritance and verify that a light-fed daughter can
+// still reproduce. A mounted copy can go to either half of the cleavage.
 async function checkProducerInheritance(countChemistry) {
   const api = await fresh({seed:42,width:400,height:400,ambientLight:1,initialNutrients:8,countChemistry,
     gases:{mode:'open',initialOxygen:4,initialCarbon:4,exchangeRate:0.8,oxygenEquilibrium:4,carbonEquilibrium:4}});
@@ -116,16 +116,21 @@ async function checkProducerInheritance(countChemistry) {
   const seen = new Set([1]);
   let firstBirth = null;
   let generation = 0;
+  const newborns = [];
   for (let seconds=1; seconds<=300 && generation<2; seconds++) {
     const current = advance(api,30);
     for (const child of current.cells) {
       if (seen.has(child.id)) continue;
       seen.add(child.id);
-      for (const id of [child.id,child.parentId]) {
-        const installed = body(api,id).cellular.assemblies;
-        for (const name of ['Solar','Respiration','Minerals','Translation']) {
-          assert.ok(installed.some(a=>a.name===name && a.complete && a.functionalMass>0), `Cell ${id} lacks working ${name} immediately after fission`);
-        }
+      const parent = current.cells.find(c => c.id === child.parentId);
+      if (parent) {
+        const hardware = [parent, child].map(c => body(api, c.id).cellular.assemblies);
+        const names = ['Solar','Respiration','Minerals','Translation'];
+        const sides = hardware.map(parts => names.filter(name =>
+          parts.some(a => a.name === name && a.complete && a.functionalMass > 0)));
+        assert.ok(names.every(name => sides.some(side => side.includes(name))),
+          'The living pair retains its paid essential machinery across division');
+        newborns.push({child: child.id, parent: parent.id, inherited: sides[1]});
       }
       generation = Math.max(generation,child.generation);
       if (firstBirth===null) {
@@ -137,7 +142,7 @@ async function checkProducerInheritance(countChemistry) {
     }
   }
   assert.ok(generation>=2,'A light-fed daughter must itself reproduce');
-  return {firstBirth,generation};
+  return {firstBirth,generation,newborns};
 }
 report.producerInheritance={continuous:await checkProducerInheritance(false),counts:await checkProducerInheritance(true)};
 report.sameSeed120Seconds={continuous:await observe(false),counts:await observe(true)};

@@ -9,18 +9,11 @@ use std::collections::HashMap;
 #[repr(u8)]
 pub(in crate::simulation) enum BondKind { Feeding = 0, Colony = 1, Contact = 2 }
 
-fn resource_ports(cell: &Cell) -> u8 {
-    let mut mask = 0;
-    for assembly in cell.body.cellular.iter().flat_map(|state| &state.assemblies) {
-        let bit = match assembly.recipe.kind {
-            AssemblyKind::Mechanism(MechanismKind::JunctionEnergy) => 1,
-            AssemblyKind::Mechanism(MechanismKind::JunctionMineral) => 2,
-            AssemblyKind::Mechanism(MechanismKind::JunctionCarbon) => 4,
-            _ => continue,
-        };
-        if assembly.functional_mass() > 0.0 { mask |= bit; }
-    }
-    mask
+fn resource_ports(cell: &Cell, bearing: f64) -> u8 {
+    cell.body.cellular.iter().flat_map(|s| &s.assemblies)
+        .filter(|a| a.working_mass() * a.activity > 0.0 && covers_interface(a.at(), bearing))
+        .filter_map(|a| resource_channel(a.recipe.kind))
+        .fold(0, |mask, k| mask | (1 << k))
 }
 
 /// Cell rows are stable throughout one tick's fission pass (only daughters
@@ -55,24 +48,15 @@ impl World {
             (stage >= MATURE && endpoint.is_none_or(|id| a == id || b == id))
                 .then_some((a, b, stage))
         });
-        let mut ports = HashMap::new();
-        for (a, b, stage) in edges.clone() {
-            if stage == MATURE {
-                ports.insert(a, 0);
-                ports.insert(b, 0);
-            }
-        }
-        if !ports.is_empty() {
-            for cell in &self.cells {
-                if let Some(mask) = ports.get_mut(&cell.id) {
-                    *mask = resource_ports(cell);
-                }
-            }
-        }
+        let rows = edges.clone().any(|(_,_,stage)| stage != CLONAL).then(|| self.cell_rows());
         edges.map(move |(a, b, stage)| {
-            let kind = if stage == CLONAL { BondKind::Colony }
-                else if ports[&a] & ports[&b] != 0 { BondKind::Feeding }
-                else { BondKind::Contact };
+            let kind = if stage == CLONAL { BondKind::Colony } else {
+                let rows = rows.as_ref().expect("nonclonal endpoint index");
+                let (ca,cb) = (&self.cells[rows[&a]], &self.cells[rows[&b]]);
+                let facing = resource_ports(ca, interface_bearing(&self.environment, ca, cb))
+                    & resource_ports(cb, interface_bearing(&self.environment, cb, ca));
+                if facing != 0 { BondKind::Feeding } else { BondKind::Contact }
+            };
             (a, b, kind)
         })
     }
@@ -134,11 +118,8 @@ impl World {
                 let pa = genomes.map(|g| &g[(a.genome_id - 1) as usize].program);
                 let pb = genomes.map(|g| &g[(b.genome_id - 1) as usize].program);
                 let (aa, bb) = (&available[&i], &available[&j]);
-                let ma = aa.0.eligible(pa, &aa.1, &bb.1, stage == CLONAL, &mut scratch);
-                let mb = bb.0.eligible(pb, &bb.1, &aa.1, stage == CLONAL, &mut scratch);
-                if ma == 0 || mb == 0 {
-                    return false;
-                }
+                let Some(ma) = aa.0.eligible(pa, &self.environment, (a,b), &aa.1, &bb.1, stage == CLONAL, &mut scratch) else {return false};
+                let Some(mb) = bb.0.eligible(pb, &self.environment, (b,a), &bb.1, &aa.1, stage == CLONAL, &mut scratch) else {return false};
                 available.get_mut(&i).unwrap().0.claim(ma);
                 available.get_mut(&j).unwrap().0.claim(mb);
                 true
@@ -182,15 +163,15 @@ impl World {
                 let peer = &self.cells[row];
                 let stage = self.contacts[&(cell.id.min(peer.id), cell.id.max(peer.id))];
                 let other = CellSignal::from_cell(peer, &genomes[(peer.genome_id - 1) as usize].program);
-                let mask = stock.eligible(Some(program), &local, &other, stage == CLONAL, &mut scratch);
-                if mask != 0 {
+                let mask = stock.eligible(Some(program), &self.environment, (cell,peer), &local, &other, stage == CLONAL, &mut scratch);
+                if let Some(mask) = mask {
                     stock.claim(mask);
                 }
             }
         }
         let peer = &self.cells[incoming];
         let signal = CellSignal::from_cell(peer, &genomes[(peer.genome_id - 1) as usize].program);
-        stock.eligible(Some(program), &local, &signal, division, &mut scratch) != 0
+        stock.eligible(Some(program), &self.environment, (cell,peer), &local, &signal, division, &mut scratch).is_some()
     }
 
     pub(in crate::simulation) fn can_retain_cleavage(
@@ -248,10 +229,8 @@ impl World {
                 if !working_contact(&self.environment, &self.cells[rows[n]], p, RELEASE_GAP) {
                     continue;
                 }
-                let mask =
-                    stocks[n].eligible(Some(programs[n]), &locals[n], &ps, stage == CLONAL, &mut scratch);
-                if mask != 0
-                    && self.free_site_for(peer, rows[n], Some(parent), stage == CLONAL, genomes, Some(index))
+                let Some(mask) = stocks[n].eligible(Some(programs[n]), &self.environment, (&self.cells[rows[n]],p), &locals[n], &ps, stage == CLONAL, &mut scratch) else { continue };
+                if self.free_site_for(peer, rows[n], Some(parent), stage == CLONAL, genomes, Some(index))
                 {
                     stocks[n].claim(mask);
                     claimed = Some(rows[n]);
@@ -298,7 +277,7 @@ impl World {
 
         let before = self.contacts.len();
         self.prune_contacts(Some(genomes));
-        if self.contacts.len() != before { return Err("Invalid simulation save: incompatible adhesion endpoints".into()); }
+        if version >= 20 && self.contacts.len() != before { return Err("Invalid simulation save: incompatible adhesion endpoints".into()); }
         // Founders persist in the immutable parent chain only while alive.
         // Reject provably distinct origins; a deceased ancestor need not
         // remain as a living endpoint after a legitimate interface handoff.

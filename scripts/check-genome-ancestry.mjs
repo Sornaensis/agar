@@ -7,8 +7,8 @@ import {advance, catalog, compile, error, fresh, restore, save, seed, snapshot, 
 
 const {chromium} = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const {PRESETS} = await catalog();
-const habitat = {width:400,height:400,seed:42,ambientLight:.85,ambientTemperature:.5,
-  initialNutrients:3,mutationRate:1,gases:{mode:'open',exchangeRate:.5}};
+const habitat = {width:400,height:400,seed:42,ambientLight:1,ambientTemperature:.5,countChemistry:true,
+  initialNutrients:8,mutationRate:1,gases:{mode:'open',exchangeRate:.8,initialOxygen:4,initialCarbon:4,oxygenEquilibrium:4,carbonEquilibrium:4}};
 const mutationLabels = ['Root genome','Constant change','Expression change','Reference change',
   'Gene silencing','Gene duplication','Placement change'];
 const independent = '# Spring sample\ncellular; product Mark = enzyme(); gene mark: Mark = 0;';
@@ -28,7 +28,7 @@ function record(api,id,name,genomeNames) {
 
 async function generate() {
   const api=await fresh(habitat);
-  const founder=compile(api,PRESETS.find(p=>p.name==='Crown rosette').source);
+  const founder=compile(api,PRESETS.find(p=>p.name==='Nurse rosette').source);
   seed(api,founder,1);
   const otherRoot=compile(api,independent);
   seed(api,otherRoot,1,350,350);
@@ -54,6 +54,7 @@ async function generate() {
   while(api.genome_count()===initialCount && state.seconds<500) state=advance(api,5);
   assert.ok(api.genome_count()>initialCount && state.ticks-startTick>150);
   const firstNewId=initialCount+1, nextParent=api.genome_parent(firstNewId);
+  assert.ok(state.cells.some(c=>c.genome===firstNewId),'The next mutation has a living carrier for the live-only browser view');
   assert.equal(restore(api,start),1,error(api));
   advance(api,state.ticks-startTick-120);
   assert.equal(api.genome_count(),initialCount,'The saved browser fixture precedes the next genuine mutation');
@@ -62,7 +63,7 @@ async function generate() {
   assert.equal(entries[ancestor-1].living,0);
   assert.ok(entries[grandchild.id-1].living>0);
   const main=record(api,'simulation:ancestry-branch','Branching culture',{
-    [founder]:'Crown lineage',[otherRoot]:'Spring sample',[unused]:'Unseeded control'});
+    [founder]:'Nurse lineage',[otherRoot]:'Spring sample',[unused]:'Unseeded control'});
   const blank=await fresh({...habitat,ambientLight:0,gases:{mode:'sealed',initialOxygen:0,initialCarbon:0}});
   const isolatedRoot=compile(blank,'# Separate culture\ncellular;');seed(blank,isolatedRoot,1);
   assert.equal(blank.set_cell_stores(1,1,3,0),1,error(blank));
@@ -261,7 +262,7 @@ try {
   await open(trial.other);
   await assertTree(trial.independentEntries);
   assert.match(await node(1).innerText(),/Separate founder/);
-  assert.doesNotMatch(await page.locator('#active-genomes').innerText(),/Crown lineage|Spring sample/);
+  assert.doesNotMatch(await page.locator('#active-genomes').innerText(),/Nurse lineage|Spring sample/);
   await tab('player');
   await page.getByRole('button',{name:'Play simulation'}).click();
   await tab('genomes');

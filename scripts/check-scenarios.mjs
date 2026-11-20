@@ -57,6 +57,7 @@ async function run(template, worldSeed) {
   const rememberedSteering = new Set(), grazersReceivingCarbon = new Set();
   let peakGrazerCarbonTransfer = 0, peakGrazerMineralReturn = 0;
   const pulsed = new Set(), rested = new Set(), priorHigh = new Set(), pulsesWhileYoung = new Map();
+  const observedRequestPorts = new Set();
   let firstKill = null, firstBirth = null, pairSamples = 0, observedNursing = false, carbonToYoung = 0;
   const firstPassage = new Map();
   const oldestOffspring = new Map();
@@ -125,7 +126,15 @@ async function run(template, worldSeed) {
           carbonToYoung = Math.max(carbonToYoung, young.colony.carbonNet);
           if (young.colony.carbonNet > 0 && adult.colony.carbonNet < 0
               && activeMass(adult,'Solar') > 3 * activeMass(young,'Solar')
-              && parent.carbonFixationRate > cell.carbonFixationRate && cell.growthRate > 0) observedNursing = true;
+              && parent.carbonFixationRate > cell.carbonFixationRate && cell.growthRate > 0) {
+            const trace = evaluation(api,parent.id);
+            for (const side of ['Left','Right']) {
+              const read = field => trace.signals.find(s => s.name === 'sensed.' + side + 'Bus.' + field)?.value;
+              if (read('valid') === true && read('signal_valid') === true && read('value') > 0.5
+                  && activeMass(adult,side+'Carbon') > 0) observedRequestPorts.add(side);
+            }
+            observedNursing = observedRequestPorts.size > 0;
+          }
         }
       }
       if (id === 'pulse-swimmers' && cell.generation > 0 && cell.age < 40) {
@@ -160,7 +169,7 @@ async function run(template, worldSeed) {
   obs.attacks = state.attacks;
   obs.foodCaptures = state.eaten;
   if (id === 'hunting-ground' || id === 'mixed-ecosystem') {
-    obs.huntersObservedWithTissue = hungryTissue.size;
+    obs.huntersObservedWithStructuralCarbon = hungryTissue.size;
     result.checks.naturalHunt = state.predations > 0 && hungryTissue.size > 0 && obs.alive.Predator > 0;
     result.checks.photosynthesis = state.photosynthesis > 0;
   }
@@ -172,7 +181,7 @@ async function run(template, worldSeed) {
     obs.producerGenerationAtEnd = state.cells.reduce((deepest, cell) =>
       lineage(cell.genome) === 'Phototroph' ? Math.max(deepest, cell.generation) : deepest, 0);
     obs.atFiveMinutes = atFiveMinutes;
-    obs.grazersObservedDigestingProducerFood = grazing.size;
+    obs.grazersObservedDigestingSolubleCarbon = grazing.size;
     obs.grazersReceivingCarbonAtJunctions = grazersReceivingCarbon.size;
     obs.peakCarbonTransferredIntoGrazerPerTick = peakGrazerCarbonTransfer;
     obs.peakMineralTransferredOutOfGrazerPerTick = peakGrazerMineralReturn;
@@ -194,6 +203,7 @@ async function run(template, worldSeed) {
   if (id === 'nurse-rosette') {
     obs.peakObservedCarbonToJuvenile = round(carbonToYoung);
     obs.attachmentSamplesUntilNursing = pairSamples;
+    obs.observedJuvenileRequestPorts = [...observedRequestPorts];
     result.checks.parentFeedsAttachedGrowingDaughter = observedNursing;
   }
   if (crown) {

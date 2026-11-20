@@ -52,9 +52,9 @@ fn count_fixation_and_respiration_fire_integer_stoichiometry() {
     q.oxygen+=oxygen;q.dic+=dic;c.project_counts();
     let mut cap=c.body.capacities();cap.respiration=100.0;cap.basal_respiration=0.0;
     let before=c.counted.clone().unwrap();
-    let (fixed,exuded)=c.count_fix(80,&cap);
+    let fixed=c.count_fix(80,&cap);
     w.count_flux.fixed+=u64::from(fixed);
-    assert_eq!((fixed,exuded),(4,0));
+    assert_eq!(fixed,4);
     let q=c.counted.as_ref().unwrap();
     assert_eq!((q.carbon-before.carbon,before.dic-q.dic,q.oxygen-before.oxygen),(4,4,4));
     w.count_respire(&[cap]);
@@ -69,8 +69,8 @@ fn scarce_capture_keeps_all_carriers_and_attached_energy_in_the_two_inventories(
     let c=&mut e.world.cells[0];
     let mut cap=c.body.capacities();cap.gut_energy=units(145);cap.gut_minerals=1.0;
     let original=CountMeal{carbon:17,mineral:31,extra:25};
-    let mut f=Food{id:1,kind:OrganicKind::Tissue,x:c.x,y:c.y,energy:0.0,nutrients:0.0,extra_energy:0.0,counted:Some(FoodCounts{meal:original,decay_credit:0})};
-    c.count_capture(&mut f,&cap,1.0);
+    let mut f=Food{composition:Composition::pool(1),id:1,kind:OrganicKind::Tissue,x:c.x,y:c.y,energy:0.0,nutrients:0.0,extra_energy:0.0,counted:Some(FoodCounts{meal:original,decay_credit:0})};
+    c.count_capture(&mut f,&cap,1.0,1,0);
     let p=f.counted.unwrap().meal;let g=c.counted.as_ref().unwrap().gut[OrganicKind::Tissue as usize];
     assert!(g.carbon>0&&p.carbon>0);
     assert_eq!((p.carbon+g.carbon,p.mineral+g.mineral,p.extra+g.extra),(17,31,25));
@@ -125,6 +125,7 @@ fn an_indivisible_food_carrier_can_be_taken_after_four_small_work_pulses() {
     let mut cap = c.body.capacities();
     cap.gut_energy = 1.0;
     let mut f = Food {
+        composition: Composition::pool(1),
         id: 1, kind: OrganicKind::Tissue, x: c.x, y: c.y,
         energy: units(20), nutrients: 0.0, extra_energy: 0.0,
         counted: Some(FoodCounts {
@@ -133,7 +134,7 @@ fn an_indivisible_food_carrier_can_be_taken_after_four_small_work_pulses() {
         }),
     };
     for tick in 1..=4 {
-        assert_eq!(c.count_capture(&mut f, &cap, units(5)), units(5));
+        assert_eq!(c.count_capture(&mut f, &cap, units(5),1,tick), units(5));
         assert_eq!(f.counted.unwrap().meal.carbon, u32::from(tick != 4));
     }
     assert_eq!(c.counted.as_ref().unwrap().gut[OrganicKind::Tissue as usize].carbon, 1);
@@ -249,6 +250,18 @@ fn migrated_census_preserves_opening_stocks_without_inventing_history_or_heat() 
     e.world.census.write(&mut appended);
     e.world.energy_loss.write(&mut appended);
     let mut prior = current[..current.len()-appended.0.len()].to_vec();
+    // Reconstruct the v17 single-cell layout, which stored neither keyed
+    // partial bites nor individual mouth cooldowns. The body has no mounts.
+    let mut q = crate::checkpoint::Writer::new();
+    e.world.cells[0].counted.as_ref().unwrap().write(&mut q);
+    let start = prior.windows(q.0.len()).position(|row| row == q.0).unwrap();
+    let end = start + q.0.len();
+    assert_eq!(prior.drain(end-4..end).collect::<Vec<_>>(), [0;4]);
+    let mut env = crate::checkpoint::Writer::new();
+    e.world.environment.write_checkpoint(&mut env);
+    let start = prior.windows(env.0.len()).position(|row| row == env.0).unwrap();
+    let mouth = start + env.0.len() + 4 + 16 + 24 * 8;
+    assert_eq!(prior.drain(mouth..mouth+4).collect::<Vec<_>>(), [0;4]);
     prior[8..12].copy_from_slice(&17_u32.to_le_bytes());
     let size = prior.len() as u32;
     prior[12..16].copy_from_slice(&size.to_le_bytes());
@@ -364,7 +377,7 @@ fn low_atp_with_reserve_fuel_uses_both_inclusive_thresholds() {
 }
 
 #[test]
-fn phototroph_fission_requires_two_working_copies_of_each_essential_machine() {
+fn phototroph_fission_requires_provisioned_machinery_and_mineral_storage() {
     let program = Program::compile(include_str!("../../../examples/phototroph.cell")).unwrap();
     let recipes = &program.cellular().unwrap().assemblies;
     let index = |name| recipes.iter().position(|r| r.name == name).unwrap();
@@ -391,10 +404,62 @@ fn phototroph_fission_requires_two_working_copies_of_each_essential_machine() {
     for (name, mass) in essential {
         input.assemblies[index(name)] = 2.0 * mass;
     }
+    input.assemblies[index("MineralStore")] = 0.04;
+    assert!(!active(&input), "two small compartments do not satisfy the stock provisioning rule");
+    input.assemblies[index("MineralStore")] = 0.06;
     assert!(active(&input));
     for (name, mass) in essential {
         input.assemblies[index(name)] = mass;
         assert!(!active(&input), "a single working {name} cannot feed both halves");
         input.assemblies[index(name)] = 2.0 * mass;
     }
+}
+
+#[test]
+fn mineral_import_below_five_percent_pays_only_for_the_actual_grant() {
+    let mut engine = counted_engine();
+    let world = &mut engine.world;
+    let mut cap = world.cells[0].body.capacities();
+    cap.uptake = 10.0;
+    let q = world.cells[0].counted.as_mut().unwrap();
+    q.atp = 3;
+    q.mineral = 0;
+    world.cells[0].project_counts();
+    world.count_uptake(&[Outputs { absorb: 1.0, ..Default::default() }], &[cap], &mut PhaseWorkspace::default());
+    let q = world.cells[0].counted.as_ref().unwrap();
+    assert_eq!((q.atp, q.mineral), (0, 3));
+}
+
+#[test]
+fn capture_work_stays_at_one_opening_on_one_particle() {
+    let mut engine = counted_engine();
+    let cell = &mut engine.world.cells[0];
+    let mut cap = cell.body.capacities();
+    cap.gut_energy = 1.0;
+    let packet = |id| Food { id, kind:OrganicKind::Waste, x:0.0,y:0.0, energy:units(20),
+        nutrients:0.0, extra_energy:0.0, composition:Composition::SOLUBLE,
+        counted:Some(FoodCounts { meal:CountMeal { carbon:1, ..Default::default() }, decay_credit:0 }) };
+    let mut a = packet(27);
+    let mut b = packet(28);
+    for tick in 0..3 { cell.count_capture(&mut a, &cap, units(5), 1, tick); }
+    cell.count_capture(&mut a, &cap, units(5), 2, 3);
+    cell.count_capture(&mut b, &cap, units(5), 1, 3);
+    assert_eq!(cell.counted.as_ref().unwrap().gut[0].carbon, 0);
+    for tick in 4..7 { cell.count_capture(&mut b, &cap, units(5), 1, tick); }
+    assert_eq!(cell.counted.as_ref().unwrap().gut[0].carbon, 1);
+    assert_eq!(a.counted.unwrap().meal.carbon, 1);
+}
+
+#[test]
+fn harvest_retains_every_fixed_count() {
+    let mut e = counted_engine();
+    let c = &mut e.world.cells[0];
+    let cap = c.body.capacities();
+    let q = c.counted.as_mut().unwrap();
+    q.dic = 250;
+    let before = q.carbon;
+    assert_eq!(c.count_fix(5000, &cap), 250);
+    let q = c.counted.as_ref().unwrap();
+    assert_eq!(q.carbon - before, 250);
+    assert_eq!(q.dic, 0);
 }

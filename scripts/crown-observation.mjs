@@ -1,9 +1,9 @@
 import { body, evaluation, memory } from './organelle-harness.mjs';
 
 // Check topology and enzyme activity in the same snapshot. Identities connect
-// observations in the study; the editable cell program only sees count and mean.
+// observations in the study; the editable cell program reads each named physical port.
 export function crownObservation() {
-  return { maximumAttachedNeighbors:0, maximumSignalPartners:0, peakActiveRimHarvest:0, firstSpecialization:null };
+  return { maximumAttachedNeighbors:0, maximumOccupiedPorts:0, peakActiveRimHarvest:0, firstSpecialization:null };
 }
 
 export function sampleCrown(api, state, observation) {
@@ -13,15 +13,20 @@ export function sampleCrown(api, state, observation) {
     const inventory = body(api,cell.id);
     observation.maximumAttachedNeighbors = Math.max(observation.maximumAttachedNeighbors,inventory.colony.neighbors);
     const trace = evaluation(api,cell.id);
-    const read = field => trace.signals.find(signal => signal.name === 'sensed.Bus.' + field)?.value;
-    const count = read('count');
-    observation.maximumSignalPartners = Math.max(observation.maximumSignalPartners,count ?? 0);
+    const read = name => trace.bindings.find(binding => binding.name === name)?.value;
+    const signal = name => trace.signals.find(item => item.name === name)?.value;
+    const ports = ['LeftBus', 'RightBus'];
+    const occupied = ports.filter(name => signal('sensed.' + name + '.valid') === true);
+    const count = occupied.length;
+    const beacon = occupied.some(name => signal('sensed.' + name + '.signal_valid') === true &&
+      signal('sensed.' + name + '.value') > 0.5);
+    observation.maximumOccupiedPorts = Math.max(observation.maximumOccupiedPorts,count ?? 0);
     const harvest = inventory.cellular.assemblies.filter(a => a.name === 'RimSolar' && a.complete)
       .reduce((sum,a) => sum + a.activity * a.functionalMass,0);
     observation.peakActiveRimHarvest = Math.max(observation.peakActiveRimHarvest,harvest);
-    if (read('valid') && count >= 2 && inventory.colony.neighbors >= 2
+    if (read('center') && count >= 2 && inventory.colony.neighbors >= 2
         && memory(api,cell.id).some(slot => slot.name === 'rf021' && slot.value === 1)) centers.push({cell,count});
-    if (read('valid') && count === 1 && read('value') > 0.5 && inventory.colony.neighbors === 1
+    if (read('rim') && count === 1 && beacon && inventory.colony.neighbors === 1
         && harvest > 0 && cell.carbonFixationRate > 0) rims.push({cell,harvest,peer:inventory.colony.neighborIds[0]});
   }
   if (observation.firstSpecialization) return;
@@ -29,7 +34,7 @@ export function sampleCrown(api, state, observation) {
     const a=center.cell, b=rim.cell;
     if (rim.peer !== a.id) continue;
     observation.firstSpecialization = { second:state.seconds, population:state.population, center:a.id,
-      centerPartners:center.count, rim:b.id, rimGeneration:b.generation, rimHarvesterMass:rim.harvest };
+      occupiedCenterPorts:center.count, rim:b.id, rimGeneration:b.generation, rimHarvesterMass:rim.harvest };
     return;
   }
 }

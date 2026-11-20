@@ -22,3 +22,13 @@ impl World {
         count
     }
 }
+
+impl Cell {
+    /// Place supplied assay material at an actual feeding opening.
+    pub(super) fn inlet_fixture_position(&self) -> (f64, f64) {
+        let angle = self.angle + self.body.cellular.as_ref().and_then(|state| state.assemblies.iter()
+            .find(|a| a.recipe.kind == AssemblyKind::Mechanism(MechanismKind::ParticleCapture) && a.working_mass() > 0.0))
+            .map_or(0.0, |a| self.body.mount_at(a));
+        (wrap(self.x+self.radius()*angle.cos(), WIDTH), wrap(self.y+self.radius()*angle.sin(), HEIGHT))
+    }
+}

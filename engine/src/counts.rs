@@ -73,6 +73,8 @@ pub struct CellCounts {
     pub reserve_extra: u32, pub structural_extra: u32,
     pub gut: [CountMeal; 3],
     pub rate_credit: [u32; 32],
+    /// A partly funded bite belongs to one inlet and its current particle.
+    pub capture_credit: std::collections::BTreeMap<u32, (u64, u64, u32)>,
 }
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub struct FoodCounts { pub meal: CountMeal, pub decay_credit: u32 }
@@ -89,12 +91,23 @@ impl CellCounts {
     pub(crate) fn write(&self,w:&mut Writer) {
         for n in [self.atp,self.mineral,self.carbon,self.oxygen,self.dic,self.reserve_extra,self.structural_extra]{w.u32(n);}
         for p in self.gut{p.write(w);} for n in self.rate_credit{w.u32(n);}
+        w.count(self.capture_credit.len());
+        for (&port, &(particle, tick, credit)) in &self.capture_credit {
+            w.u32(port); w.u64(particle); w.u64(tick); w.u32(credit);
+        }
     }
-    pub(crate) fn read(r:&mut Reader<'_>)->Result<Self>{
+    pub(crate) fn read(r:&mut Reader<'_>, version: u32)->Result<Self>{
         let mut s=Self{atp:r.u32()?,mineral:r.u32()?,carbon:r.u32()?,oxygen:r.u32()?,dic:r.u32()?,
             reserve_extra:r.u32()?,structural_extra:r.u32()?,..Default::default()};
         ensure(s.carbon>0||s.reserve_extra==0,"extra energy without counted reserve carbon")?;
         for p in &mut s.gut{*p=CountMeal::read(r)?;}for n in &mut s.rate_credit{*n=r.u32()?;}
+        if version >= 20 {
+            let n = r.count(r.remaining() / 24)?;
+            for _ in 0..n {
+                let (port, particle, tick, credit) = (r.u32()?, r.u64()?, r.u64()?, r.u32()?);
+                ensure(particle > 0 && credit > 0 && s.capture_credit.insert(port, (particle,tick,credit)).is_none(), "invalid partial inlet capture")?;
+            }
+        }
         ensure(s.rate_credit[10..13].iter().all(|&n|n<100)&&s.rate_credit[14]<25 && s.rate_credit[23]<20
             && s.rate_credit[24..27].iter().all(|&n| n<100) && s.rate_credit[27]<5,"invalid whole-count reaction remainder")?;Ok(s)
     }

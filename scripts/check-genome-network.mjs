@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import ts from 'typescript';
 
 // Use the project's installed compiler, so this check also runs on Node 22
@@ -39,8 +39,8 @@ function compilerGraph(id) {
   assert.ok(pointer);
   return JSON.parse(decode(pointer, api.genome_graph_len()));
 }
-function project(source) {
-  const graph = compilerGraph(compile(source));
+function project(source) { return projectGraph(compilerGraph(compile(source))); }
+function projectGraph(graph) {
   const before = JSON.stringify(graph);
   const network = buildGenomeNetwork(graph);
   assert.equal(JSON.stringify(graph), before, 'Projection does not mutate its compiler graph');
@@ -168,25 +168,54 @@ assertSlice(self, networkSlice(self, 'register:rf001', 1), 1);
 assertSlice(mixed, networkSlice(mixed, null, 0), 0);
 assert.deepEqual(networkSlice(mixed, 'missing'), { nodes: [], edges: [], total: 0, omitted: 0, frontier: [] });
 
-for (const preset of [...PRESETS,...MECHANISM_PRESETS_V6,...CELLULAR_FAMILY_PRESETS,...LEGACY_PRESETS]) {
-  const network = project(preset.source).network;
+function verifyLayout(name, network) {
   const slice = networkSlice(network, null);
   assertSlice(network, slice, 112);
   for (const [areaWidth, areaHeight] of [[1080, 570], [650, 420]]) {
     const layout = layoutNetwork(slice, areaWidth, areaHeight);
-    assert.equal(layout.points.size, slice.nodes.length, `${preset.name}: every displayed node has a position`);
+    assert.equal(layout.points.size, slice.nodes.length, `${name}: every displayed node has a position`);
     assert.ok(Number.isFinite(layout.width) && layout.width > 0 && Number.isFinite(layout.height) && layout.height > 0);
     // Match the renderer's 150×52 node rectangles, including adaptive columns.
     for (const node of slice.nodes) {
       const point = layout.points.get(node.id);
-      assert.ok(point && Number.isFinite(point.x) && Number.isFinite(point.y), `${preset.name}: finite position for ${node.id}`);
+      assert.ok(point && Number.isFinite(point.x) && Number.isFinite(point.y), `${name}: finite position for ${node.id}`);
       assert.ok(point.x >= 0 && point.y >= 0 && point.x + 150 <= layout.width && point.y + 52 <= layout.height,
-        `${preset.name}: ${node.id} stays inside the graph canvas`);
+        `${name}: ${node.id} stays inside the graph canvas`);
     }
     for (const edge of slice.edges) if (!edge.temporal) {
       const from = layout.points.get(edge.from), to = layout.points.get(edge.to);
-      assert.ok(from.x + 150 < to.x, `${preset.name}: ${edge.id} follows strictly left-to-right ranks`);
+      assert.ok(from.x + 150 < to.x, `${name}: ${edge.id} follows strictly left-to-right ranks`);
     }
+  }
+}
+const exampleDirectory = new URL('../examples/',import.meta.url);
+const examples = (await readdir(exampleDirectory)).filter(name => name.endsWith('.cell'));
+for (const file of examples) {
+  verifyLayout(file, project(await readFile(new URL(file,exampleDirectory),'utf8')).network);
+}
+for (const preset of [...PRESETS, ...LEGACY_PRESETS]) verifyLayout(preset.name, project(preset.source).network);
+// Archived editors could author an omnidirectional observation. New cellular
+// compilation rejects those sources; checks below exercise the actual import path.
+for (const preset of [...MECHANISM_PRESETS_V6, ...CELLULAR_FAMILY_PRESETS]) {
+  if (/\b(?:object|light|heat|chemical|flow|contact)\.\w+/.test(preset.source.replace(/#.*$/gm, ''))) {
+    assert.throws(() => compile(preset.source), /named receptor/);
+  } else {
+    verifyLayout(preset.name, project(preset.source).network);
+  }
+}
+let archivedGraphs = 0;
+for (const file of ['environment-v8.bin','contact-migration-v9.bin','signal-migration-v10.bin',
+    'attached-v11.bin','grown-v12.bin','organic-history-v13.bin','family-v14.bin',
+    'incomplete-storage-v15.bin','continuous-culture-v16.bin']) {
+  const bytes = await readFile(new URL('../engine/fixtures/'+file,import.meta.url));
+  const pointer = api.alloc(bytes.length);
+  try {
+    new Uint8Array(api.memory.buffer,pointer,bytes.length).set(bytes);
+    assert.ok(api.restore_state(pointer,bytes.length), file + ': ' + decode(api.error_ptr(),api.error_len()));
+  } finally { api.dealloc(pointer,bytes.length); }
+  for (let id = 1; id <= api.genome_count(); id++) {
+    verifyLayout(file+' #'+id, projectGraph(compilerGraph(id)).network);
+    archivedGraphs++;
   }
 }
 const parent = compile(mixedSource);
@@ -247,4 +276,4 @@ assert.ok(inlineUses.every(value => value.bindings === sharedAliases), 'All uses
 assert.equal([...new Set(inlineUses.map(value => value.bindings))].reduce((sum, aliases) => sum + aliases.length, 0), 6000, 'Stored aliases do not multiply with consumer count');
 assertSlice(fanOutNetwork, networkSlice(fanOutNetwork, null), 112);
 
-console.log(`Genome network checks passed: ${PRESETS.length + MECHANISM_PRESETS_V6.length + CELLULAR_FAMILY_PRESETS.length + LEGACY_PRESETS.length} local-control/mechanism/cellular-family/legacy preset layouts, ${variants} typed variants, builtin/alias projection, all primitive registers, read/write/clear timing, exact ports, literal defaults, 8192-node chains, 10071 roots, linear alias metadata, and bounded bidirectional navigation.`);
+console.log(`Genome network checks passed: ${examples.length} shipped examples, ${PRESETS.length} current presets and ${archivedGraphs} restored historic graphs, ${variants} typed variants, builtin/alias projection, all primitive registers, read/write/clear timing, exact ports, literal defaults, 8192-node chains, 10071 roots, linear alias metadata, and bounded bidirectional navigation.`);

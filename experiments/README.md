@@ -1,6 +1,10 @@
 # Ecosystem measurements
 
+[Local surfaces and food composition](local-surfaces-pond.json) compares the supplied archive and revised Sunlit food web on seeds 42 and 7. Separate seed-42 treatments close the producer’s carbon exporters and assign a uniform composition to every packet of a given origin. A further comparison rotates only the Forager’s constrictor by a quarter turn. Use `--disable-stock-export` or `--flank-forager-division` with `scripts/check-ecosystem.mjs` to repeat those two treatments. The report identifies each engine and founder program by hash and records births, mortality, predation, and all four resource balances.
+
 [Curated ecology](curated-ecology.md) records earlier predator and preset investigations. Older runs below used the catalogs and engines identified in each section.
+
+In the revised stock pond, all three lineages were alive at 300 seconds on both seeds. Seed 42 ended at 900 seconds with 100 Phototrophs, six Predators and no Foragers. Eighteen Foragers depleted their energy and one was killed. Rotating only the Forager constrictor by 90 degrees left 116 Phototrophs, five Foragers and four Predators alive at 900 seconds. The forward mount supported reproduction by the first daughter in the separate finite-food assay. The stock long-run ecosystem assertion and the isolated Predator survival assertions remain unmet.
 
 ## Predator reproduction and ecological accounting
 
