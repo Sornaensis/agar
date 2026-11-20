@@ -164,6 +164,38 @@ for (const mechanism of MECHANISM_CATALOG) {
   assert.deepEqual(actual.receptorFields.map(({name,type})=>({name,type})),(language.CELLULAR_RECEPTOR_FIELDS[mechanism.kind]??[]).map(({name,type})=>({name,type})),`${mechanism.kind} only offers its own typed readings`);
   const symbol=language.CELLULAR_MECHANISMS.find(item=>item.name===mechanism.kind);
   engine.compile('cellular;\n'+language.genomeSymbolDocumentation(symbol).example);
+  // Every control remains parseable. Only offer it when the analyzer says the
+  // entered value can influence this kind of machinery.
+  const example = language.genomeSymbolDocumentation(symbol).example;
+  const fixture = 'cellular;\n' + example.replace(/(?:activity: 1|start_when: true);\n}$/, 'activity: 0.37; at: 0.21; direction: 0.46;\n}');
+  const result = engine.analyze(fixture);
+  assert.equal(result.valid,true,`${mechanism.kind} retains valid typed syntax`);
+  const warned = result.diagnostics.filter(d=>d.severity==='warning').map(d=>fixture.slice(d.from,d.to));
+  const offered = names(complete(`cellular; assembly Machine: ${mechanism.kind} { `));
+  for (const [control,literal] of [['activity','0.37'],['at','0.21'],['direction','0.46']])
+    assert.equal(offered.includes(control), !warned.includes(literal), `${mechanism.kind} ${control} agrees with compiler warnings`);
+  assert.ok(offered.includes('start_when') && offered.includes('recycle'));
+  if (mechanism.constructor === 'store') {
+    assert.doesNotMatch(example,/activity:/);
+    assert.doesNotMatch(complete('cellular; assembly Machine: ').find(item=>item.name===mechanism.kind).insertText,/activity:/);
+  }
+
+}
+for (const name of ['unknown()', 'flagellum']) {
+  const fields = names(complete(`cellular; assembly Machine: ${name} { `));
+  assert.ok(['activity','at','direction'].every(field=>fields.includes(field)));
+}
+assert.ok(!names(complete('cellular; assembly Gut: digest(tissue) { ')).includes('at'));
+// Contact help is runnable in either unit system, with the physical hardware used by each guard.
+for (const countedUnits of [false,true]) {
+  const header = countedUnits ? 'cellular counts;' : 'cellular;';
+  const controls = language.CELLULAR_KEYWORDS.filter(item => ['publish','signal','engage_when'].includes(item.name));
+  for (const item of [...controls,...language.CONTACT_FIELDS]) {
+    const example = language.genomeSymbolDocumentation(item,countedUnits).example;
+    engine.compile(header+'\n'+example);
+    if (item.name === 'publish' || item.name === 'signal') assert.match(example,/assembly Badge: display\(\)/);
+    else if (item.name !== 'peer.division_interface') assert.match(example,/assembly Touch: sense\(contact\)/);
+  }
 }
 const counted = "cellular counts; product Skin=membrane(); assembly Tank:store(energy){ Skin:200; } let available=energy; let material=pool.Skin; let activity_now=built.Tank; ri001=energy;";
 assert.equal(language.isCellularSource(counted),true);
@@ -332,6 +364,84 @@ assert.ok(allowedAliases.includes('have_signal') && !allowedAliases.includes('re
 const ordinaryProgram = contactSource + '\nrb007 = ';
 const normalAliases = names(language.genomeCompletions(ordinaryProgram, ordinaryProgram.length, '', aliases));
 assert.ok(!normalAliases.includes('have_signal') && normalAliases.includes('ready'));
+// Language assistance uses the same typed function results and contact dependencies
+// as the engine, including through calls to previously declared helpers.
+{
+  const draft = `# 🧪 UTF-16 source ranges
+cellular counts;
+product Mount = anchor(); product Detector = receptor(); product Rib = filament(); product Edge = enzyme();
+assembly Hand: sense(contact) {Mount:50; Detector:100; Rib:50;}
+let cutoff = true;
+fn edge_ok(cutoff) = peer.resistance_valid && peer.resistance < cutoff;
+fn match_edge(x) = edge_ok(x);
+fn measured() = sensed.Hand.valid;
+fn twice(v) = v * 2;
+assembly Needle: pierce() {Mount:50; Rib:150; Edge:100; engage_when: match_edge(0.07);}
+rb001 = measured();
+let defined_later = true;`;
+  const checked = engine.analyze(draft);
+  assert.deepEqual(checked.diagnostics,[]);
+  assert.deepEqual(checked.functions.map(f => [f.name,f.type,!!f.perContact,f.contactSafe !== false]),
+    [['edge_ok','boolean',true,true],['match_edge','boolean',true,true],['measured','boolean',false,false],['twice','scalar',false,true]]);
+  for (const fn of checked.functions) assert.equal(draft.slice(fn.from,fn.to),fn.name);
+  const optionsAt = (position,prefix='') => language.genomeCompletions(draft,position,prefix,checked.bindings,checked.functions);
+  const inGuard = draft.indexOf('engage_when: ') + 'engage_when: '.length;
+  assert.ok(names(optionsAt(inGuard)).includes('match_edge'));
+  for (const invalid of ['energy','measured','sensed.Hand.valid','defined_later']) assert.ok(!names(optionsAt(inGuard)).includes(invalid),invalid);
+  const inWrite = draft.indexOf('rb001 = ') + 'rb001 = '.length;
+  assert.ok(names(optionsAt(inWrite)).includes('measured'));
+  for (const invalid of ['match_edge','edge_ok','peer.message','defined_later']) assert.ok(!names(optionsAt(inWrite)).includes(invalid),invalid);
+  const hover = pos => language.symbolAt(draft,pos,checked.bindings,checked.functions)?.symbol;
+  assert.match(hover(draft.lastIndexOf('match_edge(')).signature,/match_edge\(x: number\) → boolean/);
+  assert.equal(hover(draft.indexOf('cutoff;',draft.indexOf('fn edge_ok'))).type,'scalar');
+  assert.equal(hover(draft.indexOf('let cutoff')+5).type,'boolean');
+  const target = 'cellular; assembly Link: junction(signal) {}';
+  assert.equal(language.symbolAt(target,target.indexOf('signal')).symbol.name,'junction(signal)');
+  assert.equal(language.lookupCellularSymbol('gut.tissue.energy',draft).type,'count');
+  assert.equal(language.genomeCompletions(draft,draft.lastIndexOf('match_edge(')+'match_edge('.length,'',checked.bindings,checked.functions)
+    .some(item => item.name==='peer.message_valid'),false,'Function arguments require numeric inputs');
+  const future = 'cellular; let x = later(0); fn later(v) = v;';
+  assert.equal(language.symbolAt(future,future.indexOf('later')),null);
+  const nested = 'cellular; rb001 = if if energy > 2 then true else false ';
+  assert.deepEqual(names(complete(nested)),['then']);
+  assert.deepEqual(names(complete(nested+'then true ')),['else']);
+  assert.deepEqual(names(complete(nested+'then true else false ')),['when']);
+  assert.deepEqual(names(complete('cellular; clear rb001 ')),['when']);
+  const between = 'cellular; assembly Grip: pierce() { activity: 1;  engage_when: true; }';
+  const fields = names(language.genomeCompletions(between,between.indexOf(';  ')+2));
+  assert.ok(fields.includes('recycle') && !fields.includes('activity') && !fields.includes('engage_when'));
+}
+{
+  const base = `cellular counts;
+product Anchor = anchor(); product Wire = filament(); product Sensor = receptor();
+assembly Palm: sense(contact) {Anchor:40; Wire:40; Sensor:80;}
+let stored = energy;
+fn enough(v) = v > 10;`;
+  for (const [line,replacement] of [
+    ['rb001 = enouhg(stored);','enough'],
+    ['rf001 = stord;','stored'],
+    ['rf001 = sensed.Palm.presure;','sensed.Palm.pressure'],
+    ['rf001 = sensed.Pl am.pressure;',null],
+    ['rf001 = sensed.Plam.pressure;','sensed.Palm.pressure'],
+    ['rf001 = sensed.Palm.pigment;',null],
+    ['rf001 = entirley_unrelated;',null],
+    ['rf001 = stoke; let stoker = 1;',null],
+    ['let freed = 2; let greed = 3; rf001 = breed;',null],
+    ['rf001 = sensed.Palm.pressure + ;',null],
+    ['gene make: Anchro = 1;','Anchor'],
+  ]) {
+    const src = base + '\n' + line, info = engine.analyze(src), error = info.diagnostics.find(d => d.severity === 'error');
+    assert.ok(error,line);
+    const fix = language.genomeTypoFix(src,error,info.bindings,info.functions);
+    assert.equal(fix,replacement,line);
+    if (fix) assert.equal(engine.analyze(src.slice(0,error.from)+fix+src.slice(error.to)).valid,true);
+  }
+  const collision = 'cellular; product fuel = enzyme(); let fuel = true; gene produce: fuel = if fuel then 1 else 0;';
+  const checked = engine.analyze(collision);
+  assert.equal(checked.valid,true);
+  for (const [at,type] of [[collision.indexOf('fuel'),'enzyme product'],[collision.indexOf('fuel = if'),'enzyme product'],[collision.indexOf('if fuel')+4,'boolean']])
+    assert.equal(language.symbolAt(collision,at,checked.bindings,checked.functions).symbol.type,type);
+}
 const contactId=engine.compile(contactSource);
 engine.resetEmpty(72,0); engine.seed(contactId,1);
 const founder=engine.snapshot().cells[0].id;

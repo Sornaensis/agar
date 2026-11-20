@@ -7,18 +7,20 @@ import {
   defaultKeymap, history, historyKeymap, isolateHistory, redo as redoCommand, redoDepth,
   undo as undoCommand, undoDepth,
 } from '@codemirror/commands';
-import { HighlightStyle, StreamLanguage, bracketMatching, indentOnInput, indentUnit, syntaxHighlighting } from '@codemirror/language';
+import { HighlightStyle, StreamLanguage, bracketMatching, foldKeymap, indentOnInput, indentUnit, syntaxHighlighting, toggleFold } from '@codemirror/language';
 import {
   autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap, pickedCompletion,
   startCompletion, type Completion, type CompletionContext, type CompletionResult,
 } from '@codemirror/autocomplete';
 import { lintGutter, nextDiagnostic, previousDiagnostic, setDiagnostics, setDiagnosticsEffect } from '@codemirror/lint';
-import { searchKeymap } from '@codemirror/search';
+import { gotoLine, openSearchPanel, searchKeymap } from '@codemirror/search';
+import { ProgramNavigation, type SourceRange } from './program-navigation';
+import { assemblyFolding } from './program-folding';
 import { tags } from '@lezer/highlight';
 import type { Engine, GenomeAnalysis, GenomeBinding, GenomeDiagnostic, GenomeEvaluation } from './engine';
 import {
-  cellularDeclarations, genomeCompletions, genomeSignalCatalog, genomeSymbolDocumentation, isCellularSource, usesCountUnits,
-  lookupProgramSymbol, lookupGenomeSymbol, tokenizeGenome, unwrapGenomeSelection,
+  cellularDeclarations, genomeCompletions, genomeTypoFix, genomeSignalCatalog, genomeSymbolDocumentation, isCellularSource, usesCountUnits,
+  lookupProgramSymbol, lookupGenomeSymbol, symbolAt, tokenizeGenome, unwrapGenomeSelection,
   type GenomeSymbol, type GenomeToken, type GenomeTokenKind,
 } from './genome-language';
 import './program-editor.css';
@@ -159,6 +161,9 @@ export class ProgramEditor {
   private readonly statusElement: HTMLElement;
   private readonly positionElement: HTMLElement;
   private readonly sizeElement: HTMLElement;
+  private navigation?: ProgramNavigation;
+  private readonly navigationPanel: HTMLElement;
+  private readonly commandSelect: HTMLSelectElement;
   private readonly referenceElement: HTMLElement;
   private readonly readSignalSelect: HTMLSelectElement;
   private readonly writeSignalSelect: HTMLSelectElement;
@@ -202,7 +207,14 @@ export class ProgramEditor {
     this.evaluationTimeElement.hidden = true;
     const completionHint = document.createElement('span'); completionHint.className = 'program-completion-hint';
     completionHint.textContent = 'Ctrl Space'; completionHint.title = 'Open contextual autocomplete with Control or Command + Space';
-    referenceBar.append(this.readSignalSelect, this.writeSignalSelect, completionHint, this.evaluationTimeElement);
+    this.commandSelect = this.createCommands();
+    referenceBar.append(this.readSignalSelect, this.writeSignalSelect, this.commandSelect, completionHint, this.evaluationTimeElement);
+    this.navigationPanel = document.createElement('section');
+    this.navigationPanel.className = 'program-navigation'; this.navigationPanel.hidden = true;
+    this.navigationPanel.setAttribute('aria-label', 'Source navigation');
+    this.navigationPanel.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); this.closeNavigation(); this.view.focus(); }
+    });
     this.referenceElement = document.createElement('div'); this.referenceElement.className = 'program-reference-panel'; this.referenceElement.hidden = true;
     const host = document.createElement('div'); host.className = 'program-editor-code';
     this.evaluationElement = document.createElement('div'); this.evaluationElement.className = 'program-evaluation'; this.evaluationElement.hidden = true;
@@ -224,8 +236,8 @@ export class ProgramEditor {
     statusBar.append(this.statusElement, this.sizeElement, this.positionElement);
     const shortcuts = document.createElement('span');
     shortcuts.className = 'program-shortcuts'; shortcuts.id = `${identifier}-shortcuts`;
-    shortcuts.textContent = 'Tab leaves the editor. Control or Command plus Space opens completions, Enter checks the program, S saves, Z undoes, and Shift Z redoes. Control or Command plus bracket indents. F8 goes to the next error.';
-    this.element.append(this.languageElement, referenceBar, this.referenceElement, host, this.evaluationElement, this.helpElement, this.diagnosticsElement, statusBar, shortcuts);
+    shortcuts.textContent = 'Tab leaves the editor. Control or Command plus Space opens completions, Enter checks the program, S saves, Z undoes, and Shift Z redoes. Control or Command plus bracket indents. F8 goes to the next error. Use the gutter to fold an assembly. F12 goes to a definition, Shift F12 lists references, and F2 renames a symbol. Control or Command plus Shift O opens the symbol outline.';
+    this.element.append(this.languageElement, referenceBar, this.navigationPanel, this.referenceElement, host, this.evaluationElement, this.helpElement, this.diagnosticsElement, statusBar, shortcuts);
     options.parent.append(this.element);
     this.view = new EditorView({
       parent: host,
@@ -233,7 +245,7 @@ export class ProgramEditor {
         doc: this.source,
         extensions: [
           genomeLanguage, syntaxHighlighting(genomeHighlight), editorTheme,
-          lineNumbers(), highlightActiveLineGutter(), drawSelection(), dropCursor(), highlightActiveLine(),
+          lineNumbers(), assemblyFolding, highlightActiveLineGutter(), drawSelection(), dropCursor(), highlightActiveLine(),
           history(), indentUnit.of('  '), EditorState.tabSize.of(2), indentOnInput(), bracketMatching(), closeBrackets(), lintGutter(),
           this.readOnlyMode.of(this.readOnlyExtensions()),
           EditorView.contentAttributes.of({
@@ -268,6 +280,9 @@ export class ProgramEditor {
             ? { effects: setDiagnosticsEffect.of([]) } : null),
           EditorView.updateListener.of(update => this.updated(update)),
           keymap.of([
+            { key: 'F12', run: () => this.runCommand('definition'), shift: () => this.runCommand('references'), preventDefault:true },
+            { key: 'F2', run: () => !this.readOnly && this.runCommand('rename'), preventDefault:true },
+            { key: 'Mod-Shift-o', run: () => this.runCommand('outline'), preventDefault:true },
             { key: 'Mod-s', run: () => { if (!this.readOnly) this.options.onSave?.(); return true; }, preventDefault: true },
             { key: 'Mod-Enter', run: () => { void this.check(); return true; }, preventDefault: true },
             { key: 'Mod-Space', run: view => !this.readOnly && startCompletion(view), preventDefault: true },
@@ -279,7 +294,7 @@ export class ProgramEditor {
               run: (view: EditorView) => !this.readOnly && Boolean(binding.run?.(view)),
               shift: binding.shift ? (view: EditorView) => !this.readOnly && Boolean(binding.shift?.(view)) : undefined,
             })),
-            ...searchKeymap, ...defaultKeymap,
+            ...foldKeymap, ...searchKeymap, ...defaultKeymap,
           ]),
         ],
       }),
@@ -326,8 +341,11 @@ export class ProgramEditor {
   setReadOnly(readOnly: boolean): void {
     if (this.destroyed || this.readOnly === readOnly) return;
     this.readOnly = readOnly;
+    this.closeNavigation();
+    this.commandSelect.querySelector<HTMLOptionElement>('[value="rename"]')!.disabled = readOnly;
     this.view.dispatch({ effects: this.readOnlyMode.reconfigure(this.readOnlyExtensions()) });
     this.element.classList.toggle('is-readonly', readOnly);
+    if (this.diagnostics.length) this.applyDiagnostics();
     if (this.referenceSymbol) this.showReference(this.referenceSymbol);
     this.options.onStateChange?.();
   }
@@ -411,6 +429,8 @@ export class ProgramEditor {
   private updated(update: ViewUpdate): void {
     if (this.destroyed) return;
     if (update.docChanged) {
+      this.navigation = undefined;
+      this.closeNavigation();
       this.source = update.state.doc.toString(); this.revision++; this.validationSerial++;
       this.analysis = null; this.diagnostics = []; this.status = 'dirty';
       if (this.evaluation) { this.evaluation = null; this.evaluationUnavailable = 'The source changed. Values are unavailable for this draft.'; }
@@ -420,6 +440,141 @@ export class ProgramEditor {
       this.scheduleCheck(); this.options.onChange?.(this.source); this.options.onStateChange?.();
     }
     if (update.docChanged || update.selectionSet) { this.renderContext(); this.renderEvaluation(); }
+  }
+
+  private createCommands(): HTMLSelectElement {
+    const select = document.createElement('select');
+    select.className = 'program-signal-select program-commands';
+    select.setAttribute('aria-label', 'Editor commands');
+    for (const [value, label] of [
+      ['', 'Editor tools'], ['outline', 'Go to symbol…'], ['definition', 'Go to definition · F12'],
+      ['references', 'Find references · Shift F12'], ['rename', 'Rename symbol · F2'],
+      ['search', 'Find in document…'], ['line', 'Go to line…'], ['fold', 'Fold or unfold assembly'],
+    ]) select.add(new Option(label, value));
+    select.querySelector<HTMLOptionElement>('[value="rename"]')!.disabled = this.readOnly;
+    select.addEventListener('change', () => {
+      const command = select.value;
+      select.value = '';
+      this.runCommand(command);
+    });
+    return select;
+  }
+
+  private closeNavigation(): void {
+    this.navigationPanel.replaceChildren();
+    this.navigationPanel.hidden = true;
+  }
+
+  private jump(range: SourceRange): void {
+    this.view.dispatch({selection: {anchor: range.from, head: range.to}, scrollIntoView: true});
+    this.view.focus();
+  }
+
+  private runCommand(command: string): boolean {
+    this.closeNavigation();
+    if (command === 'search') return openSearchPanel(this.view);
+    if (command === 'line') return gotoLine(this.view);
+    if (command === 'fold') { this.view.focus(); return toggleFold(this.view); }
+    const index = this.navigation ??= new ProgramNavigation(this.source, this.codeTokens);
+    const selected = this.view.state.selection.main;
+    const symbol = index.at(selected.empty ? selected.head : selected.from);
+    if (command === 'definition' && symbol) { this.jump(symbol); return true; }
+
+    const panel = this.navigationPanel;
+    panel.hidden = false;
+    const title = document.createElement('strong');
+    const close = document.createElement('button');
+    close.type = 'button'; close.textContent = 'Close';
+    close.setAttribute('aria-label', 'Close editor tools');
+    close.addEventListener('click', () => { this.closeNavigation(); this.view.focus(); });
+    const head = document.createElement('div');
+    head.className = 'program-nav-heading';
+    head.append(title, close);
+    panel.append(head);
+    if (command === 'outline') {
+      title.textContent = 'Go to symbol';
+      const filter = document.createElement('input');
+      filter.type = 'search'; filter.placeholder = 'Filter names or kinds'; filter.setAttribute('aria-label', 'Filter symbols');
+      const results = document.createElement('div'); results.className = 'program-nav-results';
+      const render = () => {
+        const query = filter.value.trim().toLowerCase();
+        const matches = index.declarations.filter(item => item.kind !== 'parameter' && (item.kind + ' ' + item.name).toLowerCase().includes(query));
+        results.replaceChildren();
+        for (const item of matches) {
+          const label = item.name + ' · ' + item.kind;
+          results.append(this.locationButton(item, label, true));
+        }
+        if (!matches.length) results.textContent = 'No matching declarations.';
+      };
+      filter.addEventListener('input', render);
+      filter.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          results.querySelector('button')?.click();
+        }
+        if (event.key === 'ArrowDown') { event.preventDefault(); results.querySelector('button')?.focus(); }
+      });
+      panel.append(filter, results); render(); filter.focus(); return true;
+    }
+    if (!symbol) {
+      title.textContent = 'Place the cursor on a declared name or one of its uses.';
+      close.focus(); return true;
+    }
+    if (command === 'references') {
+      title.textContent = symbol.name + ' · ' + symbol.references.length + (symbol.references.length === 1 ? ' reference' : ' references');
+      const results = document.createElement('div'); results.className = 'program-nav-results';
+      results.append(this.locationButton(symbol, 'Declaration', false));
+      for (const range of symbol.references) {
+        results.append(this.locationButton(range, this.view.state.doc.lineAt(range.from).text.trim(), false));
+      }
+      panel.append(results); results.querySelector('button')?.focus();
+    }
+    if (command === 'rename') {
+      if (this.readOnly) { this.closeNavigation(); return false; }
+      title.textContent = 'Rename ' + symbol.kind + ' ' + symbol.name;
+      const form = document.createElement('form'); form.className = 'program-rename';
+      const input = document.createElement('input');
+      input.value = symbol.name; input.setAttribute('aria-label', 'New symbol name'); input.autocomplete = 'off';
+      const apply = document.createElement('button'); apply.type = 'submit'; apply.textContent = 'Rename';
+      const status = document.createElement('span'); status.setAttribute('role', 'status');
+      form.append(input, apply, status);
+      const current = () => !this.destroyed && !this.readOnly && panel.contains(form) && this.navigation === index;
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        if (!current() || apply.disabled) return;
+        const name = input.value.trim();
+        if (name === symbol.name) { this.closeNavigation(); this.view.focus(); return; }
+        apply.disabled = true;
+        try {
+          const edits = index.rename(this.source, symbol, name);
+          const candidate = this.view.state.changes(edits).apply(this.view.state.doc).toString();
+          const compiler = await this.options.compiler();
+          if (!current()) return;
+          const analysis = compiler.analyze(candidate);
+          if (!analysis.valid) throw Error(analysis.diagnostics[0]?.message || 'The renamed program could not compile.');
+          this.view.dispatch({changes: edits, annotations: [isolateHistory.of('full'), Transaction.userEvent.of('input.rename')]});
+          this.view.focus();
+        } catch (error) {
+          if (current()) { status.textContent = errorMessage(error); input.focus(); }
+        } finally { apply.disabled = false; }
+      });
+      panel.append(form); input.focus(); input.select();
+    }
+    return true;
+  }
+
+  private locationButton(range: SourceRange, label: string, close: boolean): HTMLButtonElement {
+    const button = document.createElement('button'); button.type = 'button';
+    const line = this.view.state.doc.lineAt(range.from);
+    const location = document.createElement('span');
+    location.textContent = line.number + ':' + (range.from - line.from + 1);
+    const name = document.createElement('span'); name.textContent = label;
+    button.append(location, name);
+    button.addEventListener('click', () => {
+      if (close) this.closeNavigation();
+      this.jump(range);
+    });
+    return button;
   }
 
   private createSignalSelect(direction: 'read' | 'write'): HTMLSelectElement {
@@ -443,7 +598,7 @@ export class ProgramEditor {
     const groups = new Map<string, HTMLOptGroupElement>();
     for (const item of genomeSignalCatalog(direction, this.source)) {
       const groupName = item.category === 'register' || item.name === 'clear' ? 'Memory registers'
-        : item.type === 'contact message' || item.type === 'contact signal' ? 'Public registers'
+        : item.type === 'contact message' || item.type === 'contact signal' ? 'Display and signal registers'
         : item.name.startsWith('peer.') || item.name === 'engage_when' ? 'Physical contact'
         : cellular && direction === 'write' ? item.type === 'mechanism' ? 'Mechanisms' : item.category === 'function' ? 'Product roles' : 'Declarations & placement'
         : /^(pool|concentration|built)\./.test(item.name) ? 'This cell’s products & assemblies'
@@ -464,6 +619,7 @@ export class ProgramEditor {
   private refreshLanguageReference(): void {
     const cellular = isCellularSource(this.source);
     this.languageElement.hidden = !cellular;
+    this.commandSelect.querySelector<HTMLOptionElement>('[value="fold"]')!.hidden = !cellular;
     this.element.classList.toggle('cellular-program', cellular);
     if (cellular) {
       const declarations = cellularDeclarations(this.source);
@@ -656,23 +812,31 @@ export class ProgramEditor {
     if (!token || ['string', 'comment', 'number', 'operator', 'punctuation', 'invalid'].includes(token.kind)) return null;
     const bindings = this.visibleBindings(position, true);
     const local = this.declarations.find(item => item.name === token.text && (item.scopeFrom <= position || item.from === token.from));
-    const symbol = (local ? this.localSymbol(local) : undefined)
-      ?? lookupProgramSymbol(token.text, this.source, bindings);
+    const symbol = symbolAt(this.source, position, bindings, this.analysis?.functions, token)?.symbol
+      ?? (local ? this.localSymbol(local) : undefined);
     return symbol ? { from: token.from, to: token.to, symbol } : null;
   }
 
-  private callAt(position: number): GenomeSymbol | undefined {
-    let depth = 0;
-    for (let index = this.codeTokens.length - 1; index >= 0; index--) {
+  private callAt(position: number): {symbol: GenomeSymbol; argument: number} | undefined {
+    let low = 0, high = this.codeTokens.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (this.codeTokens[middle].from < position) low = middle + 1; else high = middle;
+    }
+    let depth = 0, argument = 0;
+    for (let index = low - 1; index >= 0; index--) {
       const token = this.codeTokens[index];
-      if (token.from >= position || token.kind === 'string') continue;
       if (token.text === ')') { depth++; continue; }
       if (token.text === '(') {
         if (depth) { depth--; continue; }
         const previous = this.codeTokens[index - 1];
-        if (previous?.kind === 'function') return lookupProgramSymbol(previous.text, this.source);
+        if (previous?.kind === 'function' && this.codeTokens[index - 2]?.text !== 'fn') {
+          const symbol = lookupProgramSymbol(previous.text, this.source, [], this.analysis?.functions);
+          if (symbol) return {symbol, argument};
+        }
       }
-      if (token.text === ';' && !depth) break;
+      if (token.text === ',' && !depth) argument++;
+      if (token.text === ';' || token.text === '{' || token.text === '}') break;
     }
     return undefined;
   }
@@ -685,13 +849,24 @@ export class ProgramEditor {
     const token = this.tokenAt(position);
     const left = token?.from === position && (token.kind === 'punctuation' || token.kind === 'operator')
       ? this.symbolNear(Math.max(0, position - 1))?.symbol : undefined;
-    const symbol = this.symbolNear(position)?.symbol ?? left ?? this.callAt(position);
+    const call = this.callAt(position);
+    const symbol = this.symbolNear(position)?.symbol ?? left ?? call?.symbol;
+    const parameters = call?.symbol.signature.match(/\(([^()]*)\)/)?.[1].split(',');
+    const parameter = call && parameters?.[call.argument]?.trim();
+    const argumentHint = call && parameter ? `Argument ${call.argument + 1} of ${call.symbol.name} · ${parameter}` : '';
     this.helpElement.hidden = Boolean(this.evaluation && !symbol);
-    const key = symbol ? `${symbol.signature}\n${symbol.description}` : '';
+    const key = symbol ? `${symbol.signature}\n${symbol.description}\n${argumentHint}` : '';
     if (key === this.helpKey && this.helpElement.childNodes.length) return;
     this.helpKey = key;
-    if (symbol) this.helpElement.replaceChildren(symbolHelp(symbol, true));
-    else {
+    if (symbol) {
+      const help = symbolHelp(symbol, true);
+      if (argumentHint) {
+        const argument = document.createElement('span'); argument.className = 'program-call-argument';
+        argument.textContent = argumentHint;
+        help.append(argument);
+      }
+      this.helpElement.replaceChildren(help);
+    } else {
       const hint = document.createElement('span'); hint.className = 'program-context-empty';
       hint.textContent = 'Place the cursor on a name to see its type or signature.';
       this.helpElement.replaceChildren(hint);
@@ -710,7 +885,7 @@ export class ProgramEditor {
     for (const item of this.declarations) {
       if (item.scopeFrom <= context.pos && !bindings.some(binding => binding.name === item.name)) bindings.push({ ...item, type: 'not checked' });
     }
-    const options: Completion[] = genomeCompletions(this.source, context.pos, prefix, bindings).map(symbol => ({
+    const options: Completion[] = genomeCompletions(this.source, context.pos, prefix, bindings, this.analysis?.functions).map(symbol => ({
       label: symbol.name,
       type: symbol.category === 'binding' || symbol.category === 'register' ? 'variable'
         : symbol.category === 'signal' || symbol.category === 'output' ? 'property' : symbol.category,
@@ -737,11 +912,17 @@ export class ProgramEditor {
   }
 
   private applyDiagnostics(): void {
-    this.view.dispatch(setDiagnostics(this.view.state, this.diagnostics.map(item => ({
-      from: Math.max(0, Math.min(this.source.length, item.from)),
-      to: Math.max(0, Math.min(this.source.length, item.to)), severity: item.severity,
-      message: item.message, source: 'Genome compiler',
-    }))));
+    const source = this.source;
+    const diagnostics = this.diagnostics.map(item => {
+      const from = Math.max(0, Math.min(source.length, item.from)), to = Math.max(from, Math.min(source.length, item.to));
+      const correction = this.readOnly ? null : genomeTypoFix(source,item,this.visibleBindings(from),this.analysis?.functions);
+      return {from,to,severity:item.severity,message:item.message,source:'Genome compiler',
+        ...(correction ? {actions:[{name:`Replace with ${correction}`,apply:(view: EditorView,start:number,end:number) => {
+          if (view.state.readOnly || this.source !== source || view.state.sliceDoc(start,end) !== source.slice(from,to)) return;
+          view.dispatch({changes:{from:start,to:end,insert:correction},annotations:[isolateHistory.of('full'),Transaction.userEvent.of('input.fix')]});
+        }}]} : {})};
+    });
+    this.view.dispatch(setDiagnostics(this.view.state,diagnostics));
     this.renderDiagnostics();
   }
 
@@ -750,11 +931,12 @@ export class ProgramEditor {
     this.diagnosticsElement.hidden = this.diagnostics.length === 0;
     for (const diagnostic of this.diagnostics) {
       const item = document.createElement('li');
+      item.dataset.severity = diagnostic.severity;
       const button = document.createElement('button'); button.type = 'button';
       const location = document.createElement('span'); location.className = 'program-diagnostic-location';
       location.textContent = `${diagnostic.line}:${diagnostic.column}`;
-      const text = document.createElement('span'); text.textContent = diagnostic.message;
-      button.setAttribute('aria-label', `Line ${diagnostic.line}, column ${diagnostic.column}: ${diagnostic.message}`);
+      const text = document.createElement('span'); text.textContent = diagnostic.severity === 'warning' ? `Warning · ${diagnostic.message}` : diagnostic.message;
+      button.setAttribute('aria-label', `${diagnostic.severity === 'warning' ? 'Warning' : 'Error'} at line ${diagnostic.line}, column ${diagnostic.column}. ${diagnostic.message}`);
       button.append(location, text);
       button.addEventListener('click', () => {
         if (this.destroyed) return;
@@ -768,7 +950,8 @@ export class ProgramEditor {
   private renderStatus(): void {
     this.element.dataset.state = this.status;
     this.element.classList.toggle('is-readonly', this.readOnly);
-    this.statusElement.textContent = this.status === 'valid' ? 'Valid program'
+    const warnings = this.diagnostics.filter(item => item.severity === 'warning').length;
+    this.statusElement.textContent = this.status === 'valid' ? (warnings ? `Valid · ${warnings} warning${warnings === 1 ? '' : 's'}` : 'Valid program')
       : this.status === 'checking' ? 'Checking…'
         : this.status === 'error' ? `${this.diagnostics.length} ${this.diagnostics.length === 1 ? 'error' : 'errors'}` : 'Not checked';
     this.sizeElement.textContent = this.analysis?.valid ? `${this.analysis.nodeCount.toLocaleString()} nodes` : '';

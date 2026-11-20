@@ -15,6 +15,7 @@ pub(crate) use contact_guard::PeerContact;
 use contact_guard::PeerField;
 #[cfg(test)]
 mod control_tests;
+mod diagnostics;
 mod execution;
 mod functions;
 mod source;
@@ -2225,6 +2226,7 @@ pub struct Mutation {
 /// Editor metadata is transient; it never enters the executable Program or a checkpoint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GenomeDiagnostic {
+    pub severity: &'static str,
     pub message: String,
     pub line: usize,
     pub column: usize,
@@ -2247,6 +2249,7 @@ pub struct GenomeAnalysis {
     pub valid: bool,
     pub diagnostics: Vec<GenomeDiagnostic>,
     pub bindings: Vec<GenomeBinding>,
+    pub functions: Vec<GenomeBinding>,
     pub node_count: usize,
     pub source_bytes: usize,
 }
@@ -2257,6 +2260,7 @@ impl GenomeAnalysis {
         Self {
             valid: false,
             diagnostics: vec![GenomeDiagnostic {
+                severity: "error",
                 message: message.into(),
                 line: 1,
                 column: 1,
@@ -2264,6 +2268,7 @@ impl GenomeAnalysis {
                 to: 0,
             }],
             bindings: Vec::new(),
+            functions: Vec::new(),
             node_count: 0,
             source_bytes,
         }
@@ -2271,11 +2276,10 @@ impl GenomeAnalysis {
 
     pub fn json(&self) -> String {
         let diagnostics = self.diagnostics.iter().map(|item| format!(
-            "{{\"severity\":\"error\",\"message\":{},\"line\":{},\"column\":{},\"from\":{},\"to\":{}}}",
-            quote(&item.message), item.line, item.column, item.from, item.to,
+            "{{\"severity\":{},\"message\":{},\"line\":{},\"column\":{},\"from\":{},\"to\":{}}}",
+            quote(item.severity), quote(&item.message), item.line, item.column, item.from, item.to,
         )).collect::<Vec<_>>().join(",");
-        let bindings = self
-            .bindings
+        let symbols = |rows: &[GenomeBinding]| rows
             .iter()
             .map(|item| {
                 format!(
@@ -2289,8 +2293,8 @@ impl GenomeAnalysis {
             })
             .collect::<Vec<_>>()
             .join(",");
-        format!("{{\"valid\":{},\"diagnostics\":[{diagnostics}],\"bindings\":[{bindings}],\"nodeCount\":{},\"sourceBytes\":{}}}",
-            self.valid, self.node_count, self.source_bytes)
+        format!("{{\"valid\":{},\"diagnostics\":[{diagnostics}],\"bindings\":[{}],\"functions\":[{}],\"nodeCount\":{},\"sourceBytes\":{}}}",
+            self.valid, symbols(&self.bindings), symbols(&self.functions), self.node_count, self.source_bytes)
     }
 }
 
@@ -2323,6 +2327,7 @@ impl SourceMap {
         let to = self.offsets[error.location.to];
         let line = self.line_starts.partition_point(|start| *start <= from);
         GenomeDiagnostic {
+            severity: "error",
             message: error.message,
             line,
             column: from - self.line_starts[line - 1] + 1,
@@ -2399,16 +2404,20 @@ impl Program {
                     valid: false,
                     diagnostics: vec![map.diagnostic(error)],
                     bindings: Vec::new(),
+                    functions: Vec::new(),
                     node_count: 0,
                     source_bytes: source.len(),
                 }
             }
         };
-        let mut parser = Parser::new(tokens);
-        let parsed = parser.program();
+        let (mut parser, parsed, mut diagnostics) = diagnostics::parse(tokens, &map);
+        let valid = diagnostics.is_empty();
+        if let Some(program) = parsed.as_ref().filter(|_| valid) {
+            diagnostics::check_physical_controls(program, &parser, &map, &mut diagnostics);
+        }
         let (nodes, declarations) = match &parsed {
-            Ok(program) => (&program.nodes, &program.bindings),
-            Err(_) => (&parser.nodes, &parser.binding_order),
+            Some(program) => (&program.nodes, &program.bindings),
+            None => (&parser.nodes, &parser.binding_order),
         };
         let (per_contact, samples_local) = contact_guard::input_dependencies(nodes);
         let bindings = declarations
@@ -2423,16 +2432,18 @@ impl Program {
                 to: map.offsets[location.to],
             })
             .collect();
+        let mut functions = parser.analyzed_functions.take().unwrap_or_default();
+        for function in &mut functions {
+            function.from = map.offsets[function.from];
+            function.to = map.offsets[function.to];
+        }
         GenomeAnalysis {
-            valid: parsed.is_ok(),
+            valid,
+            functions,
             node_count: nodes.len(),
             bindings,
             source_bytes: source.len(),
-            diagnostics: parsed
-                .err()
-                .map(|error| map.diagnostic(error))
-                .into_iter()
-                .collect(),
+            diagnostics,
         }
     }
     pub fn estimated_bytes(&self) -> usize {
@@ -3323,6 +3334,7 @@ struct Parser {
     nodes: Vec<Node>,
     bindings: HashMap<String, usize>,
     binding_order: Vec<Binding>,
+    analyzed_functions: Option<Vec<GenomeBinding>>,
     binding_locations: Vec<Location>,
     node_locations: Vec<source::NodeLocation>,
     write_locations: Vec<Location>,
@@ -3349,6 +3361,7 @@ impl Parser {
             nodes: Vec::new(),
             bindings: HashMap::new(),
             binding_order: Vec::new(),
+            analyzed_functions: None,
             binding_locations: Vec::new(),
             node_locations: Vec::new(),
             write_locations: Vec::new(),

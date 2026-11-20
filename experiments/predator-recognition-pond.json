@@ -1,0 +1,838 @@
+{
+  "scenario": "Sunlit food web",
+  "environment": "Grazing shallows",
+  "environmentConfiguration": {
+    "width": 400,
+    "height": 400,
+    "ambientTemperature": 0.15,
+    "ambientLight": 0.95,
+    "currentStrength": 1,
+    "initialNutrients": 0.9,
+    "barriers": [],
+    "gases": {
+      "initialOxygen": 1,
+      "initialCarbon": 1,
+      "mode": "open",
+      "exchangeRate": 0.2,
+      "oxygenEquilibrium": 1,
+      "carbonEquilibrium": 1
+    },
+    "sources": []
+  },
+  "chemistry": "counted",
+  "founders": {
+    "Phototroph": 48,
+    "Forager": 12,
+    "Predator": 1
+  },
+  "mutationRate": 0.1,
+  "wasmSha256": "39c865e9f18235cd1553382393b1b56cf94d9601bd83daa75bf0bfec329dabba",
+  "otherSourceSha256": {
+    "Phototroph": "da89d6be90cca56d730d3ff352cb25f87f0ae690581726b9214c2cf2465312af",
+    "Forager": "31bd332eb4ea3adf73c9a6a11efeea9e73c0dbd0b69fe198f5d6842569dee753"
+  },
+  "durationSeconds": 600,
+  "sampleSeconds": [
+    0,
+    15,
+    30,
+    60,
+    120,
+    180,
+    300,
+    450,
+    600
+  ],
+  "lineageDefinition": "Every mutant descendant is counted under its founding genome. Both conditions start with the same founders, habitat and mutation rate; only the Predator source changes.",
+  "attribution": "At every census, Predator was the only lineage credited with kills. Total deaths caused by predation matched total credited kills exactly. Each victim lineage therefore identifies an exact cell in the Predator row of the kill matrix. Attacks without a kill and ATP depletion are excluded from that matrix.",
+  "birthTimingMethod": "At each natural Predator fission, the observer samples the retaining parent and new daughter immediately after the split and again after one simulation tick (1/30 second). A patch can present marker 17 when its completed display has positive functional mass and activity and its chosen public register contains 17. A nearby receptor must face that patch to read the marker. The prior genome was observed for the first 300 seconds on each seed.",
+  "accounting": "At every listed census the integer energy balance closed exactly. Mineral, carbon and oxygen discrepancies stayed within the engine tolerances.",
+  "runs": [
+    {
+      "genome": "previous",
+      "seed": 42,
+      "predatorSourceSha256": "e4650b6528bcafb2e5228853f91454c85361ac2f08706008fad933cb5fec9d86",
+      "observations": [
+        {
+          "seconds": 0,
+          "Phototrophs": 48,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 0,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 15,
+          "Phototrophs": 48,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 0,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 30,
+          "Phototrophs": 48,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 0,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 60,
+          "Phototrophs": 46,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 2,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 120,
+          "Phototrophs": 88,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 4,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 180,
+          "Phototrophs": 100,
+          "Foragers": 10,
+          "Predators": 1,
+          "PredatorBirths": 1,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 7,
+            "Forager": 0,
+            "Predator": 1
+          }
+        },
+        {
+          "seconds": 300,
+          "Phototrophs": 118,
+          "Foragers": 3,
+          "Predators": 2,
+          "PredatorBirths": 3,
+          "PredatorATPDeaths": 1,
+          "killsByPredatorLineage": {
+            "Phototroph": 16,
+            "Forager": 1,
+            "Predator": 1
+          }
+        },
+        {
+          "seconds": 450,
+          "Phototrophs": 120,
+          "Foragers": 0,
+          "Predators": 5,
+          "PredatorBirths": 6,
+          "PredatorATPDeaths": 1,
+          "killsByPredatorLineage": {
+            "Phototroph": 32,
+            "Forager": 1,
+            "Predator": 1
+          }
+        },
+        {
+          "seconds": 600,
+          "Phototrophs": 123,
+          "Foragers": 0,
+          "Predators": 6,
+          "PredatorBirths": 10,
+          "PredatorATPDeaths": 3,
+          "killsByPredatorLineage": {
+            "Phototroph": 43,
+            "Forager": 1,
+            "Predator": 2
+          }
+        }
+      ],
+      "birthDisplayTiming": {
+        "birthsInWindow": 3,
+        "daughtersUnavailableOnSplitTick": 1,
+        "observedThroughSeconds": 300,
+        "birthsObserved": 2,
+        "bothHalvesDisplaying17OnSplit": 0,
+        "bothHalvesDisplaying17AfterOneTick": 2,
+        "events": [
+          {
+            "tick": 4532,
+            "parentId": 61,
+            "daughterId": 113,
+            "parentAtSplit": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 1
+            },
+            "daughterAtSplit": {
+              "register": "rf001",
+              "marker": null,
+              "activeDisplayPatches": 1
+            },
+            "parentAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 1
+            },
+            "daughterAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 1
+            }
+          },
+          {
+            "tick": 6192,
+            "parentId": 61,
+            "daughterId": 148,
+            "parentAtSplit": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 1
+            },
+            "daughterAtSplit": {
+              "register": "rf001",
+              "marker": null,
+              "activeDisplayPatches": 1
+            },
+            "parentAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 1
+            },
+            "daughterAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "genome": "previous",
+      "seed": 7,
+      "predatorSourceSha256": "e4650b6528bcafb2e5228853f91454c85361ac2f08706008fad933cb5fec9d86",
+      "observations": [
+        {
+          "seconds": 0,
+          "Phototrophs": 48,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 0,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 15,
+          "Phototrophs": 48,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 0,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 30,
+          "Phototrophs": 48,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 0,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 60,
+          "Phototrophs": 46,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 2,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 120,
+          "Phototrophs": 81,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 6,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 180,
+          "Phototrophs": 93,
+          "Foragers": 12,
+          "Predators": 2,
+          "PredatorBirths": 1,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 10,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 300,
+          "Phototrophs": 110,
+          "Foragers": 6,
+          "Predators": 5,
+          "PredatorBirths": 5,
+          "PredatorATPDeaths": 1,
+          "killsByPredatorLineage": {
+            "Phototroph": 21,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 450,
+          "Phototrophs": 119,
+          "Foragers": 1,
+          "Predators": 3,
+          "PredatorBirths": 7,
+          "PredatorATPDeaths": 5,
+          "killsByPredatorLineage": {
+            "Phototroph": 31,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 600,
+          "Phototrophs": 125,
+          "Foragers": 0,
+          "Predators": 2,
+          "PredatorBirths": 7,
+          "PredatorATPDeaths": 6,
+          "killsByPredatorLineage": {
+            "Phototroph": 32,
+            "Forager": 0,
+            "Predator": 0
+          }
+        }
+      ],
+      "birthDisplayTiming": {
+        "birthsInWindow": 5,
+        "daughtersUnavailableOnSplitTick": 1,
+        "observedThroughSeconds": 300,
+        "birthsObserved": 4,
+        "bothHalvesDisplaying17OnSplit": 0,
+        "bothHalvesDisplaying17AfterOneTick": 4,
+        "events": [
+          {
+            "tick": 4228,
+            "parentId": 61,
+            "daughterId": 104,
+            "parentAtSplit": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 1
+            },
+            "daughterAtSplit": {
+              "register": "rf001",
+              "marker": null,
+              "activeDisplayPatches": 1
+            },
+            "parentAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 1
+            },
+            "daughterAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 1
+            }
+          },
+          {
+            "tick": 5649,
+            "parentId": 61,
+            "daughterId": 137,
+            "parentAtSplit": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 1
+            },
+            "daughterAtSplit": {
+              "register": "rf001",
+              "marker": null,
+              "activeDisplayPatches": 1
+            },
+            "parentAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 1
+            },
+            "daughterAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 1
+            }
+          },
+          {
+            "tick": 7244,
+            "parentId": 104,
+            "daughterId": 168,
+            "parentAtSplit": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 1
+            },
+            "daughterAtSplit": {
+              "register": "rf001",
+              "marker": null,
+              "activeDisplayPatches": 1
+            },
+            "parentAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 1
+            },
+            "daughterAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 1
+            }
+          },
+          {
+            "tick": 8889,
+            "parentId": 61,
+            "daughterId": 198,
+            "parentAtSplit": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 1
+            },
+            "daughterAtSplit": {
+              "register": "rf001",
+              "marker": null,
+              "activeDisplayPatches": 1
+            },
+            "parentAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 1
+            },
+            "daughterAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "genome": "revised",
+      "seed": 42,
+      "predatorSourceSha256": "e95617cd2914be2e056f273397dc17897f0d3af7c33d881e0635df1b20bf4592",
+      "observations": [
+        {
+          "seconds": 0,
+          "Phototrophs": 48,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 0,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 15,
+          "Phototrophs": 48,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 0,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 30,
+          "Phototrophs": 48,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 0,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 60,
+          "Phototrophs": 47,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 1,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 120,
+          "Phototrophs": 90,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 3,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 180,
+          "Phototrophs": 98,
+          "Foragers": 11,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 7,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 300,
+          "Phototrophs": 119,
+          "Foragers": 1,
+          "Predators": 2,
+          "PredatorBirths": 1,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 13,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 450,
+          "Phototrophs": 125,
+          "Foragers": 0,
+          "Predators": 2,
+          "PredatorBirths": 2,
+          "PredatorATPDeaths": 1,
+          "killsByPredatorLineage": {
+            "Phototroph": 23,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 600,
+          "Phototrophs": 135,
+          "Foragers": 0,
+          "Predators": 2,
+          "PredatorBirths": 2,
+          "PredatorATPDeaths": 1,
+          "killsByPredatorLineage": {
+            "Phototroph": 29,
+            "Forager": 0,
+            "Predator": 0
+          }
+        }
+      ],
+      "birthDisplayTiming": {
+        "birthsInWindow": 2,
+        "daughtersUnavailableOnSplitTick": 0,
+        "observedThroughSeconds": 600,
+        "birthsObserved": 2,
+        "bothHalvesDisplaying17OnSplit": 0,
+        "bothHalvesDisplaying17AfterOneTick": 2,
+        "events": [
+          {
+            "tick": 6303,
+            "parentId": 61,
+            "daughterId": 149,
+            "parentAtSplit": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 8
+            },
+            "daughterAtSplit": {
+              "register": "rf001",
+              "marker": null,
+              "activeDisplayPatches": 8
+            },
+            "parentAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 8
+            },
+            "daughterAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 8
+            }
+          },
+          {
+            "tick": 9682,
+            "parentId": 61,
+            "daughterId": 202,
+            "parentAtSplit": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 12
+            },
+            "daughterAtSplit": {
+              "register": "rf001",
+              "marker": null,
+              "activeDisplayPatches": 11
+            },
+            "parentAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 12
+            },
+            "daughterAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 11
+            }
+          }
+        ]
+      }
+    },
+    {
+      "genome": "revised",
+      "seed": 7,
+      "predatorSourceSha256": "e95617cd2914be2e056f273397dc17897f0d3af7c33d881e0635df1b20bf4592",
+      "observations": [
+        {
+          "seconds": 0,
+          "Phototrophs": 48,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 0,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 15,
+          "Phototrophs": 48,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 0,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 30,
+          "Phototrophs": 48,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 0,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 60,
+          "Phototrophs": 46,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 2,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 120,
+          "Phototrophs": 82,
+          "Foragers": 12,
+          "Predators": 1,
+          "PredatorBirths": 0,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 4,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 180,
+          "Phototrophs": 96,
+          "Foragers": 11,
+          "Predators": 2,
+          "PredatorBirths": 1,
+          "PredatorATPDeaths": 0,
+          "killsByPredatorLineage": {
+            "Phototroph": 8,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 300,
+          "Phototrophs": 114,
+          "Foragers": 6,
+          "Predators": 3,
+          "PredatorBirths": 3,
+          "PredatorATPDeaths": 1,
+          "killsByPredatorLineage": {
+            "Phototroph": 13,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 450,
+          "Phototrophs": 134,
+          "Foragers": 0,
+          "Predators": 2,
+          "PredatorBirths": 3,
+          "PredatorATPDeaths": 2,
+          "killsByPredatorLineage": {
+            "Phototroph": 14,
+            "Forager": 0,
+            "Predator": 0
+          }
+        },
+        {
+          "seconds": 600,
+          "Phototrophs": 144,
+          "Foragers": 0,
+          "Predators": 1,
+          "PredatorBirths": 3,
+          "PredatorATPDeaths": 3,
+          "killsByPredatorLineage": {
+            "Phototroph": 15,
+            "Forager": 0,
+            "Predator": 0
+          }
+        }
+      ],
+      "birthDisplayTiming": {
+        "birthsInWindow": 3,
+        "daughtersUnavailableOnSplitTick": 1,
+        "observedThroughSeconds": 600,
+        "birthsObserved": 2,
+        "bothHalvesDisplaying17OnSplit": 0,
+        "bothHalvesDisplaying17AfterOneTick": 2,
+        "events": [
+          {
+            "tick": 4665,
+            "parentId": 61,
+            "daughterId": 111,
+            "parentAtSplit": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 8
+            },
+            "daughterAtSplit": {
+              "register": "rf001",
+              "marker": null,
+              "activeDisplayPatches": 8
+            },
+            "parentAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 8
+            },
+            "daughterAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 8
+            }
+          },
+          {
+            "tick": 5941,
+            "parentId": 61,
+            "daughterId": 138,
+            "parentAtSplit": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 12
+            },
+            "daughterAtSplit": {
+              "register": "rf001",
+              "marker": null,
+              "activeDisplayPatches": 11
+            },
+            "parentAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 12
+            },
+            "daughterAfterOneTick": {
+              "register": "rf001",
+              "marker": 17,
+              "activeDisplayPatches": 11
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

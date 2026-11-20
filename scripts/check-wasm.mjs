@@ -98,5 +98,5 @@ const older=advance(longLived,10800);assert.equal(older.population,1,'A funded, 
 assert.ok(older.cells[0].age>359);assert.equal(older.cells[0].lifespan,0);
 const olderState=save(longLived),olderCopy=await fresh();assert.equal(restore(olderCopy,olderState),1,error(olderCopy));
 assert.deepEqual(save(olderCopy),olderState,'Older organisms remain valid saved state');
-console.log(`WASM organelle integration passed: ABI22, typed schema, five register banks, original-source mutations, genome-grown bodies, closed material, checkpoint20 replay and v3/v4 compatibility, uncapped2,049-organism restore, ${state.births} producer births.`);
+console.log(`WASM organelle integration passed: ABI23, typed schema, five register banks, original-source mutations, genome-grown bodies, closed material, checkpoint20 replay and v3/v4 compatibility, uncapped2,049-organism restore, ${state.births} producer births.`);
 await checkEngineLoader();

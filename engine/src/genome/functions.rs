@@ -88,6 +88,16 @@ impl Parser {
             location: self.peek().location,
         });
         self.expect(Kind::Semicolon, "';' after function expression")?;
+        // Function bodies are type-checked before inlining, even when uncalled.
+        // Keep the checker’s result for the editor before discarding those nodes.
+        if let Some(checked) = &mut self.analyzed_functions {
+            let (per_contact, samples_local) = contact_guard::input_dependencies(&self.nodes);
+            checked.push(GenomeBinding {
+                name: name.clone(), value_type: result_type.label(),
+                per_contact: per_contact[root], contact_safe: !samples_local[root],
+                from: token.location.from, to: token.location.to,
+            });
+        }
         self.nodes.truncate(node_start);
         self.node_locations.truncate(node_start);
         self.bindings = bindings.clone();

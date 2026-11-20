@@ -1,6 +1,29 @@
 # Ecosystem measurements
 
+## Predator recognition
+
+[The paired pond study](predator-recognition-pond.json) compares the current stock Predator with its [previous genome](fixtures/predator-before-recognition.cell). The habitat, mutation rate, Phototrophs, Foragers, and founder counts are identical on both sides. Every kill was credited to the Predator lineage. Each victim’s founding lineage therefore gives the exact number of kin and prey kills, including mutated descendants. The study also records births, deaths from ATP depletion, and whether each fission product has an active display carrying marker 17 immediately after the split and one tick later.
+
+At ten simulated minutes, the previous Predator had killed two kin and 44 other cells on seed 42, and zero kin and 32 other cells on seed 7. The revised Predator killed zero kin on either seed. It killed 29 Phototrophs on seed 42 and 15 on seed 7. Two revised Predators were alive on seed 42 and one on seed 7. Both lineages reproduced.
+
+Every observable revised daughter carried marker 17 after one tick (1/30 second). On each seed the first division left eight active display patches in each half. The next observable division left twelve in the retaining parent and eleven in the daughter. One further daughter was absent from the live snapshot on the split tick. The previous genome also wrote 17 within one tick in all six observable births in its 300-second timing control. Each of those halves had one active patch.
+
+The separate finite-prey stress test, `npm run test:predator-foraging`, still misses its granddaughter target with both the previous and revised stock genome. The continuously fed division regression tests the marker timing independently of that food limitation.
+
+Run either command from the project folder to produce the detailed censuses.
+
+```sh
+node --no-liftoff scripts/check-ecosystem.mjs --seed 42,7 --duration 600 --sample-at 450 --trace-predator-births --output revised-recognition.json
+node --no-liftoff scripts/check-ecosystem.mjs --seed 42,7 --duration 600 --sample-at 450 --trace-predator-births --predator-source experiments/fixtures/predator-before-recognition.cell --output previous-recognition.json
+```
+
+## Earlier pond measurements
+
 [Local surfaces and food composition](local-surfaces-pond.json) compares the supplied archive and revised Sunlit food web on seeds 42 and 7. Separate seed-42 treatments close the producer’s carbon exporters and assign a uniform composition to every packet of a given origin. A further comparison rotates only the Forager’s constrictor by a quarter turn. Use `--disable-stock-export` or `--flank-forager-division` with `scripts/check-ecosystem.mjs` to repeat those two treatments. The report identifies each engine and founder program by hash and records births, mortality, predation, and all four resource balances.
+
+[The 45-minute Sunlit food web runs](extended-local-ecology.json) follow 48 Phototrophs, 12 Foragers, and one Predator per seed with the stock mutation rate of 0.1. At 45 minutes seed 42 had 71 Phototrophs, zero Foragers and two Predators. Seed 7 had 124, zero and two. Of 39 Forager deaths, 38 came from ATP depletion and one from predation. Phototrophs reproduced into the final minute on both seeds. The last Predator births occurred at 21:10 on seed 42 and 7:00 on seed 7. The integer energy balance closed at every census. The report identifies the engine used for the long runs and the editor build that reproduced every recorded measurement through 120 seconds on seed 42.
+
+To repeat the study, run `node --no-liftoff scripts/check-ecosystem.mjs --seed 42,7 --duration 2700 --sample-at 450,750,1200,1500,1800,2100,2400 --predator-source experiments/fixtures/predator-before-recognition.cell --output pond-45min.json`.
 
 [Curated ecology](curated-ecology.md) records earlier predator and preset investigations. Older runs below used the catalogs and engines identified in each section.
 
@@ -153,7 +176,7 @@ These commands use the current bundled WASM and programs. They do not reproduce 
 
 A separate native lifecycle test supplies a stationary scavenger with accounted organic particles in darkness. It captures and digests meals, grows a paid body and produces a daughter; the identical unfed control has no births. This verifies the heterotrophic growth pathway independently of the mixed preset's navigation and food availability.
 
-`--duration` accepts positive whole simulated seconds and defaults to 600. Standard sample times are 0, 15, 30, 60, 120, 180, 300, 600 and 900 seconds, filtered to the requested interval; the requested endpoint is always included. Reports retain complete sources, WASM hash, configuration, lineage diagnostics and conservation checks. `--assert` requires at least 300 simulated seconds and writes its report before reporting failures. With `--assert --births-after 600`, every founding lineage must record a birth after minute ten. The report includes exact lineage events and an independent check of the energy lost to each process in whole-count worlds.
+`--duration` accepts positive whole simulated seconds and defaults to 600. Standard sample times are 0, 15, 30, 60, 120, 180, 300, 600 and 900 seconds, filtered to the requested interval; the requested endpoint is always included. Add census times with `--sample-at` followed by a comma-separated list of whole simulated seconds. Reports retain complete sources, WASM hash, configuration, lineage diagnostics and conservation checks. `--assert` requires at least 300 simulated seconds and writes its report before reporting failures. With `--assert --births-after 600`, every founding lineage must record a birth after minute ten. The report includes exact lineage events and an independent check of the energy lost to each process in whole-count worlds.
 
 ## Historical allocation-model experiments — ABI 4–6
 

@@ -58,7 +58,7 @@ assembly Swimmer: propel() {
 | `start_when` | Boolean permission to start another instance; defaults to true. Existing incomplete instances continue paid installation. |
 | `activity` | Fast 0–1 regulation of existing complete machinery; omission means 1. |
 | `recycle` | Requested 0–1 disassembly effort for physical instances with this recipe name; defaults to zero and needs active recycling machinery. |
-| `at`, `direction` | Body-relative attachment angle and force/viewing direction in radians. |
+| `at`, `direction` | For membrane machinery, `at` sets its mount in body-relative radians. `direction` aims propulsion, piercing and optical sensing. |
 | `let` | A pure expression recomputed from the current snapshot. |
 | `fn name(args) = expression;` | A pure function with up to eight numeric parameters. Calls expand into the bounded expression graph. |
 
@@ -109,7 +109,7 @@ building another enzyme does not grant storage or capture.
 | `shield()` | Protection from damage. |
 | `repair()` | Paid repair of existing structure. |
 | `sense(light)`, `sense(heat)`, `sense(chemical)` | Local measurements of the named physical field. |
-| `sense(contact)` | Relative flow, physical contact and the selected cell’s published scalar. |
+| `sense(contact)` | Measures flow, pressure and resistance at the mount. On contact with an active display it can also read that patch’s marker and payload. |
 | `adhere()` | Installs finished adhesin, membrane and anchors into a surface with finite binding sites. Each contact occupies a site on both cells. |
 | `sense(optical)` | Directional visible-object measurements with occlusion. |
 | `grow()` | Paid envelope growth, limited by existing structural support. |
@@ -136,11 +136,11 @@ gene blanks: Blank = if pool.Blank < 10 then 1 else 0;
 gene finish: Glue = if pool.Glue < 10 then 1 else 0;
 gene mounts: Mount = if pool.Mount < 10 then 1 else 0;
 gene skins: Skin = if pool.Skin < 10 then 1 else 0;
-assembly Coat: adhere() { Mount: 80; Skin: 80; Glue: 40; }
+assembly Coat: adhere() { Mount: 80; Skin: 80; Glue: 40; engage_when: true; }
 ```
 
 Fully active, intact surfaces provide one binding site per 0.0015 installed
-adhesin mass. The example can hold two neighbors when both also have a free site.
+adhesin mass. The example provides two sites at its mount. Each neighbor also needs a free site on a facing adhesive patch whose guard accepts the contact.
 Damage and reduced activity lower capacity. A released site can serve another
 contact. An old saved two-part surface retains its materials but has zero sites.
 
@@ -165,36 +165,47 @@ on the new support machinery and inherit actual storage and translation machines
 
 ## Register memory, contact messages and colonies
 
-Each cell has five private register banks for integers, scalars, booleans, strings and vectors. An occupied slot costs 0.0025 energy per simulated second. Writes and guards read the state from the start of the tick. Writes commit together, and a simultaneous clear wins. For example, an active contact receptor named Touch can copy a neighbor’s publication into local memory.
+Each cell has five private register banks for integers, scalars, booleans, strings and vectors. An occupied slot costs 0.0025 energy per simulated second. Writes and guards read the state from the start of the tick. Writes commit together, and a simultaneous clear wins. In the example below, Badge displays the cell’s marker and payload, and Touch copies a marker from a facing neighbor into local memory.
 
 ```text
+cellular counts;
+product Mount = anchor(); product Skin = membrane();
+product Detector = receptor(); product Hair = filament();
+gene anchors: Mount = if built.Badge < 0.01 || built.Touch < 0.01 then 0.5 else 0;
+gene skins: Skin = if built.Badge < 0.01 then 0.5 else 0;
+gene detectors: Detector = if built.Touch < 0.01 then 0.5 else 0;
+gene hairs: Hair = if built.Touch < 0.01 then 0.5 else 0;
+
 publish rf001;
 signal rf021;
 rf001 = 17;
 rf021 = if energy.fraction < 0.25 then 1 else 0;
 assembly Badge: display() { Mount: 40; Skin: 60; at: 0; activity: 1; }
+assembly Touch: sense(contact) { Mount: 20; Detector: 60; Hair: 20; at: 0; }
 rf002 = sensed.Touch.message when sensed.Touch.message_valid;
 ```
 
-A weapon or adhesive surface can evaluate a boolean expression for each partner it physically reaches. The hunter defines a contact condition once and uses it in its piercing and engulfing recipes.
+A particle inlet, piercing or engulfing assembly, or adhesive patch can evaluate a boolean expression for each candidate it physically reaches. The hunter defines a contact condition once and uses it in its piercing and engulfing recipes.
 
 ```text
-let may_strike = !populated(rf001) || !peer.message_valid || peer.message != rf001;
+let may_strike = peer.resistance_valid && !peer.division_interface
+  && !(peer.message_valid && peer.message == rf001)
+  && !(peer.signal_valid && peer.signal == rf002);
 ```
 
 Both recipes contain `engage_when: may_strike;`.
 
-The first term allows engagement when the hunter has cleared its own marker. The second admits a silent partner. The third compares the two occupied values. A silent partner and a partner publishing zero are distinguishable. Different weapons can use different expressions, even while touching several cells in the same tick.
+The attacking patch needs a physical touch reading. A matching marker or payload closes it. A silent candidate can be attacked. A zero on a facing display is a valid value. The stock Predator also suspends its weapons for the first tick after division while the daughter writes her own registers. A retained adhesive division interface is separately protected.
 
 | Contact operand | Value |
 | --- | --- |
-| `peer.message_valid`, `peer.message` | Occupancy and value of the candidate's first public scalar |
-| `peer.signal_valid`, `peer.signal` | Occupancy and value of its independent second public scalar |
+| `peer.message_valid`, `peer.message` | Marker read by active touch hardware from the candidate's display at this contact |
+| `peer.signal_valid`, `peer.signal` | Independent payload read from that same display by the same touch hardware |
 | `peer.resistance_valid`, `peer.resistance` | Resistance measured by a contact receptor within reach of this opening and candidate |
-| `peer.division_interface` | Whether this contact originated at division, including a retained interface |
+| `peer.division_interface` | True during adhesion checks at cleavage and for an interface retained by adhesion |
 | `rf091`, `populated(rf091)` | Value and occupancy of the acting cell's own register |
 
-Use `activity` for cell-wide effort and `engage_when` for partner-specific eligibility. For example, a cell can spend its current ATP on a weapon when hungry, then use an independent threshold on the partner’s signal.
+Use `activity` to set the operating effort of the named recipe. Use `engage_when` to decide which candidates an individual opening or surface will accept. For example, a cell can spend its current ATP on a weapon when hungry, then use an independent threshold on the partner’s signal.
 
 ```text
 activity: if energy.fraction < 0.4 then 0.8 else 0;
@@ -203,11 +214,13 @@ engage_when: peer.signal_valid && peer.signal > rf007;
 
 Guards can reuse pure functions and local bindings over registers, constants and contact inputs. To remember a physiological observation for future contact decisions, write it to a register on a tick. The guard reads that register from the next tick’s snapshot.
 
-An adhesive surface might open on `peer.signal_valid && peer.signal >= 2` or require `peer.division_interface` for daughter retention. A bond needs physically active surfaces with free binding sites at both ends. Both surface expressions must allow the partner. Ordinary encounters also need 15 consecutive ticks of contact. The default for an omitted condition is open on weapons and closed on adhesion. The Graph view shows the dependencies of each contact condition. Its value is specific to a physical cell pair.
+An adhesive surface might open on `peer.signal_valid && peer.signal >= 2` or require `peer.division_interface` for daughter retention. A bond needs overlapping active adhesive patches with free binding sites at both ends. Both surface expressions must allow the partner. Ordinary encounters also need 15 consecutive ticks of contact. The default for an omitted condition is open on weapons and closed on adhesion. The Graph view shows the dependencies of each contact condition. Its value is specific to a physical cell pair.
 
-Each declaration accepts one scalar address. The recognition marker and signal payload have distinct addresses. Each can be used independently. All other slots are private. A working named contact receptor reports `message_valid` and `message` for its particular contact. Particles, silent cells and missing contacts return false and zero. A cell publishing zero returns true and zero. All cells exchange values from the same start-of-tick snapshot. The same receptor reports an independently valid payload through `signal_valid` and `signal` for that very same contact. New counted genomes write the selected registers using ordinary, mutable expressions. The value becomes externally visible at an active display patch. Restoring a world preserves the actual registers, including a cleared publication.
+Each declaration accepts one scalar address. The recognition marker and signal payload have distinct addresses. Each can be used independently. All other slots are private. A working named contact receptor reports `message_valid` and `message` for its particular contact. Particles, silent cells and missing contacts return false and zero. An active display presenting zero at the receptor returns true and zero. All cells exchange values from the same start-of-tick snapshot. The same receptor reports an independently valid payload through `signal_valid` and `signal` for that very same contact. New counted genomes write the selected registers using ordinary, mutable expressions. The value becomes externally visible at an active display patch. Restoring a world preserves the actual registers, including a cleared publication.
 
-**Predator** uses marker 17 for attack avoidance. Any program can publish that marker. A contact receptor’s boolean `sensed.Touch.bonded` reports whether the particular cell it touches is a direct physical partner. A particle, barrier, unrelated neighbor or missing contact gives false. The marker and payload remain readable from a functioning contact receptor before a bond forms.
+**Predator** writes marker 17 and payload −2.5 every tick. It grows eight display sectors before arming its front piercer and sixteen before division. The old envelope becomes two new surfaces. On the first tick after a split, each half records its inherited equipment and later builds fresh patches at the planned positions for its own division. A daughter can present the marker through inherited hardware as soon as its first register writes commit. Another genome can mimic either displayed value. A bond is optional for display recognition. The separate `sensed.Touch.bonded` reading is true when the cell touching that receptor is already a direct bonded partner.
+
+In the stock tissue-feeding test, a Predator divided at 170.133 seconds and the retained parent divided again at 344.433 seconds. At each cut, the new daughter’s own touch receptor immediately read the parent. On the next tick, 1/30 second later, the parent’s touch receptor read both daughter values at the new seam. The test also put a hungry parent against a silent target on the first two post-division ticks to verify that the weapons reopened after the refresh.
 
 [Colony phototroph](../examples/colony.cell) finishes a scaffold precursor into adhesin and installs it alongside membranes and anchors, and retains daughters. Its two contact receptors check for a direct bonded partner before it builds additional storage. When a bonded cell divides, an existing interface can follow the daughter that remains against the original neighbor, provided both still have compatible, working adhesive surfaces. [Forager](../examples/forager.cell) and [Phototroph](../examples/phototroph.cell) instead permit encounter recruitment with complementary markers 72 and 41. Each cell still supplies its own adhesive surface. Resource transfer requires working junctions on both ends.
 
@@ -235,7 +248,7 @@ The pair needs reciprocal adhesion and a completed, active junction of the same 
 
 The fractional imbalance and the weaker side’s active mass limit the amount on each connection. Each connection uses the throughput of the patches overlapping at its own interface. The exchange uses starting inventories for every pair in the phase. Material received in a tick can travel farther through the colony on a later tick. Closing a junction stops that resource exchange while adhesion and signaling can continue. The Body inspector records each cell’s net change in the last exchange. Separate production, respiration and spending still run for each cell.
 
-**Nurse rosette** and **Pulse swimmer** retain daughters. Their left and right receptors require the measured cell to be a direct bonded partner before a juvenile request or relay pulse can change their behavior. The swimmer’s refractory interval separates successive pulses. Both programs grow their own machinery from the same founding body. [Nurse rosette](../examples/nurse-rosette.cell) · [Pulse swimmer](../examples/pulse-swimmer.cell)
+**Nurse rosette** and **Pulse swimmer** retain daughters. Each checks its left and right signal ports for a connection to a bonded partner, then reads the occupied payload at that port for a juvenile request or relay pulse. The swimmer’s refractory interval separates successive pulses. Both programs grow their own machinery from the same founding body. [Nurse rosette](../examples/nurse-rosette.cell) · [Pulse swimmer](../examples/pulse-swimmer.cell)
 
 A named `junction(signal)` reads one overlapping port on a bonded neighbor. For a port named `LeftBus`, `sensed.LeftBus.valid` identifies a connection, `.signal_valid` identifies an occupied payload, and `.value` reads its value. A payload of zero is valid. Ports read the start-of-tick state, so signals travel one hop per tick.
 
@@ -413,12 +426,12 @@ construction; inherited machinery retains its actual recipe and ingredient
 identities. A same-named recycling request can dismantle that earlier machinery
 without reinterpreting its components.
 
-The current WASM ABI is 22. Checkpoint format 19 stores each bond’s physical
+The current WASM ABI is 23. Checkpoint format 20 records inherited mount positions and food composition. Format 19 introduced each bond’s physical
 origin so a restored genome can distinguish a retained division interface from
 an encounter. Earlier checkpoints retain their machinery, pools, construction
 energy and organic particles on import. The engine translates the old
 genome-wide contact directives into conditions on the affected recipes.
-Language schema 4 describes public registers, the candidate’s contact fields
+Language schema 4 describes the selected marker and payload registers, the candidate’s contact fields
 and the recipe controls that can read those fields. Save/restore replay is
 deterministic within the current engine.
 

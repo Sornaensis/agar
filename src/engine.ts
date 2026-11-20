@@ -153,7 +153,7 @@ export interface EnvironmentSnapshot extends EnvironmentMetadata {
 export interface RegisterEntry { name: string; type: string; value: unknown }
 export type GenomeValueType = 'integer' | 'count' | 'scalar' | 'boolean' | 'string' | 'vec2';
 export interface GenomeDiagnostic {
-  severity: 'error'; message: string;
+  severity: 'error' | 'warning'; message: string;
   /** One-based line and UTF-16 column. */
   line: number; column: number;
   /** UTF-16 offsets; EOF diagnostics may have an empty range. */
@@ -165,7 +165,7 @@ export interface GenomeBinding {
   from: number; to: number;
 }
 export interface GenomeAnalysis {
-  valid: boolean; diagnostics: GenomeDiagnostic[]; bindings: GenomeBinding[];
+  valid: boolean; diagnostics: GenomeDiagnostic[]; bindings: GenomeBinding[]; functions: GenomeBinding[];
   nodeCount: number; sourceBytes: number;
 }
 export type GenomeValue = number | boolean | string | [number, number];
@@ -683,14 +683,19 @@ export class Engine {
       const analysis = value as GenomeAnalysis;
       const range = (from: number, to: number): boolean => Number.isInteger(from) && Number.isInteger(to) && from >= 0 && to >= from && to <= source.length;
       const types = new Set<GenomeValueType>(['integer', 'count', 'scalar', 'boolean', 'string', 'vec2']);
+      const declared = (item: GenomeBinding): boolean => !!item && typeof item.name === 'string' && types.has(item.type)
+        && range(item.from, item.to) && source.slice(item.from, item.to) === item.name
+        && (item.perContact === undefined || item.perContact === true)
+        && (item.contactSafe === undefined || item.contactSafe === false);
       if (typeof analysis.valid !== 'boolean' || analysis.sourceBytes !== bytes.length
         || !Number.isInteger(analysis.nodeCount) || analysis.nodeCount < 0 || analysis.nodeCount > 8192
-        || !Array.isArray(analysis.diagnostics) || analysis.diagnostics.length !== (analysis.valid ? 0 : 1)
-        || !analysis.diagnostics.every(item => item && item.severity === 'error' && typeof item.message === 'string'
+        || !Array.isArray(analysis.diagnostics) || analysis.diagnostics.length > 192
+        || analysis.valid === analysis.diagnostics.some(item => item?.severity === 'error')
+        || !analysis.diagnostics.every(item => item && (item.severity === 'error' || item.severity === 'warning') && typeof item.message === 'string'
           && Number.isInteger(item.line) && item.line >= 1 && Number.isInteger(item.column) && item.column >= 1 && range(item.from, item.to))
         || !Array.isArray(analysis.bindings) || analysis.bindings.length > 8192
-        || !analysis.bindings.every(item => item && typeof item.name === 'string' && types.has(item.type)
-          && range(item.from, item.to) && source.slice(item.from, item.to) === item.name)) {
+        || !analysis.bindings.every(declared) || !Array.isArray(analysis.functions)
+        || analysis.functions.length > 64 || !analysis.functions.every(declared)) {
         throw new Error('The engine returned invalid genome analysis.');
       }
       return analysis;

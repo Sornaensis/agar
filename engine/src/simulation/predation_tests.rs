@@ -448,6 +448,24 @@ assembly Reverse: propel() {
     }
 }
 
+/// Furnish tissue at existing inlets without editing the cells' bodies or reserves.
+fn feed_stock_culture(world: &mut World) {
+    let portions: Vec<_> = world.cells.iter().filter(|cell| {
+        let nearby: f64 = world.food.iter().filter(|food| food.kind == OrganicKind::Tissue
+            && delta(food.x - cell.x, WIDTH).hypot(delta(food.y - cell.y, HEIGHT)) <= cell.radius() + 2.5)
+            .map(|food| food.energy).sum();
+        cell.gut[OrganicKind::Tissue as usize].energy < 30.0 && nearby < 12.0
+    }).map(Cell::inlet_fixture_position).collect();
+    for (x, y) in portions {
+        assert_eq!(world.fixture_exudate(x, y, 1), 1);
+        let food = world.food.last_mut().unwrap();
+        food.kind = OrganicKind::Tissue;
+        food.composition = Composition::pool(1);
+        food.x = x;
+        food.y = y;
+    }
+}
+
 #[test]
 fn shipped_predator_repairs_grows_and_divides_on_accounted_tissue() {
     let source = include_str!("../../../examples/predator.cell");
@@ -467,6 +485,7 @@ fn shipped_predator_repairs_grows_and_divides_on_accounted_tissue() {
         (index, name, definition.parts.iter().map(|(_, mass)| mass).sum::<f64>())
     }).collect();
     let mut inherited = Vec::new();
+    let mut mature = None;
     let mut genomes = vec![Genome::new(source.into(), program, 0, 0)];
     let mut world = World::empty(42);
     world.environment.configure(0.5, 0.0, 0.0);
@@ -494,24 +513,11 @@ fn shipped_predator_repairs_grows_and_divides_on_accounted_tissue() {
         // This is an explicitly fed culture, not the mixed-world scenario.
         // Food enters through the normal accounted import and capture paths;
         // no body, gene controls, or cell reserves are supplied after seeding.
-        let cell = &world.cells[0];
-        if tick % 15 == 0 && cell.gut[OrganicKind::Tissue as usize].energy < 30.0 {
-            let nearby: f64 = world.food.iter().filter(|food|
-                food.kind == OrganicKind::Tissue
-                    && delta(food.x - cell.x, WIDTH).hypot(delta(food.y - cell.y, HEIGHT))
-                        <= cell.radius() + 2.5).map(|food| food.energy).sum();
-            if nearby < 12.0 {
-                let (x, y) = cell.inlet_fixture_position();
-                assert_eq!(world.fixture_exudate(x, y, 1), 1);
-                let food = world.food.last_mut().unwrap();
-                food.kind = OrganicKind::Tissue; food.composition = Composition::pool(1);
-                food.x = x;
-                food.y = y;
-            }
-        }
+        if tick % 15 == 0 { feed_stock_culture(&mut world); }
         // Capture the individual assemblies before a physically possible split.
         // One pole carries the frontal tools and the other carries the tail tools.
         if world.cells[0].body.area >= 1.99 * world.cells[0].birth_area {
+            mature = Some(world.cells[0].clone());
             inherited = world.cells[0].body.cellular.as_ref().unwrap().assemblies.iter()
                 .map(|assembly| (assembly.id, assembly.recipe.name.clone(), assembly.mass())).collect();
         }
@@ -545,6 +551,7 @@ fn shipped_predator_repairs_grows_and_divides_on_accounted_tissue() {
             assert_eq!(inputs.receptors[*index].available, installed, "Inherited receptor {name}");
         }
     }
+    super::contact_tests::mature_target_sweep(&mature.unwrap());
     assert!(!inherited.is_empty());
     for (id, name, before) in inherited {
         let mut owners = world.cells.iter().flat_map(|cell| &cell.body.cellular.as_ref().unwrap().assemblies)
@@ -560,6 +567,25 @@ fn shipped_predator_repairs_grows_and_divides_on_accounted_tissue() {
                 && assembly.working_mass() > 0.0), "Hungry daughter lacks {:?}", alternatives);
         }
     }
+    let before = world.attacks;
+    super::contact_tests::check_newborn_recognition(&mut world, &mut genomes, true);
+    for _ in 1..30 { world.step(&mut genomes); }
+    assert_eq!(world.attacks, before);
+    assert_eq!(world.cells.len(), 2);
+
+    // Separate the first pair after the immediate encounter, then continue the
+    // paid tissue culture. This challenges a body whose original display
+    // patches were already moved by a previous division.
+    world.cells[0].x = 300.0;
+    world.cells[1].x = 900.0;
+    for tick in 0..27000 {
+        if tick % 15 == 0 { feed_stock_culture(&mut world); }
+        world.step(&mut genomes);
+        if world.births > 1 { break; }
+    }
+    assert!(world.births > 1, "A fed descendant must undergo a subsequent cleavage in the assay");
+    super::contact_tests::check_newborn_recognition(&mut world, &mut genomes, false);
+
 }
 
 #[test]

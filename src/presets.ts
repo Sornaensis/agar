@@ -248,6 +248,14 @@ const sharedProduct: Record<string,string> = {
 const tradingContact = 'populated(rf091) && peer.message_valid && peer.message == rf091';
 const daughterContact = 'peer.division_interface';
 
+// Sixteen display sectors encircle a dividing Predator. Positions 0, 4, 8
+// and 12 use the named polar and furrow patches below. Alternating sectors
+// make the initial eight surfaces; the rest are built as the cell grows.
+const predatorBadgeSectors = [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15].map((sector, i) => ({
+  name: `Badge${sector}`, at: Math.PI * sector / 8, early: sector % 2 === 0,
+  baseline: `rf${String(10 + i).padStart(3, '0')}`,
+}));
+
 /** Explicit initiation lets independently regulated recipes share physical stocks. */
 function controlledProgram(recipes: CellularRecipe[], logic: string, regulator = false, duplicationArea = 1.6): string {
   const roles = [...new Set(recipes.flatMap(recipe => recipe.parts.map(([role]) => role)))];
@@ -520,8 +528,8 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
     ] : [{ name:'Chemistry', kind:'sense(chemical)', parts:[['anchor',0.003],['receptor',0.012]] as CellularPart[], ready:options.local ? 'surplus' : movementReady }] : []),
   );
   if (options.predator) recipes.push(
-    { name:'Piercer', kind:'pierce()', engageWhen:hunting ? 'may_strike' : undefined, parts:[['anchor',0.01],['filament',0.03],['enzyme',0.01]], ready:options.local ? 'powered' : 'powered && body.area > 1.2', activity:hunting ? 'if !heat_escape && hunting_budget && firm_contact && meal < 300000 * body.area && (energy.fraction < 0.85 || carbon.organic * 20 < energy.capacity * 0.65 || meal < 20000) then 0.8 else 0' : 'if contact.valid && gut.fraction < 0.5 then 0.8 else 0' },
-    { name:'Engulfment', kind:'engulf()', engageWhen:hunting ? 'may_strike' : undefined, parts:[['anchor',0.005],['motor',0.01],['membrane',0.01]], ready:options.local ? 'surplus && body.area > 1.2' : 'powered && body.area > 1.2', activity:hunting ? 'if hunting_budget && gut.fraction < 0.5 then 1 else 0' : 'if gut.fraction < 0.5 then 1 else 0' },
+    { name:'Piercer', kind:'pierce()', engageWhen:hunting ? 'may_strike' : undefined, parts:[['anchor',0.01],['filament',0.03],['enzyme',0.01]], ready:options.local ? 'powered' : 'powered && body.area > 1.2', activity:hunting ? 'if weapons_ready && !heat_escape && hunting_budget && firm_contact && meal < 300000 * body.area && (energy.fraction < 0.85 || carbon.organic * 20 < energy.capacity * 0.65 || meal < 20000) then 0.8 else 0' : 'if contact.valid && gut.fraction < 0.5 then 0.8 else 0' },
+    { name:'Engulfment', kind:'engulf()', engageWhen:hunting ? 'may_strike' : undefined, parts:[['anchor',0.005],['motor',0.01],['membrane',0.01]], ready:options.local ? 'surplus && body.area > 1.2' : 'powered && body.area > 1.2', activity:hunting ? 'if weapons_ready && hunting_budget && gut.fraction < 0.5 then 1 else 0' : 'if gut.fraction < 0.5 then 1 else 0' },
   );
   // Damage may itself disable developmental prerequisites. Maintenance uses
   // the shared funding guard, so it can complete while those machines recover.
@@ -536,7 +544,7 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
         : nursery ? 'if !nursing && energy > (if developing then 450000 else 900000) && body.area < body.birth_area * 2 then 0.8 else 0' : `if energy > ${quantity(90)} && body.area < ${growthArea} then 0.8 else 0` },
     { name:'Replication', kind:'replicate()', parts:[['scaffold',0.005],['replicase',0.015]], ready:sufficient('Support', 0.12), activity:nursery ? 'if !nursing && energy > (if developing then 500000 else 800000) then 1 else 0' : `if energy > ${quantity(hunting ? 55 : 80)} then 1 else 0` },
     { name:'Division', kind:'constrict()', parts:[['anchor',0.004],['motor',0.008],['constrictor',0.008]], ready:'expanding', at:options.local ? (options.colony ? 0 : String(Math.PI / 2)) : undefined,
-      activity:hunting ? 'if body.area + 0.000001 >= body.birth_area * 2 && enough(built.Envelope,0.04) && enough(built.Translation,0.08) && enough(built.EnergyStore,0.08) && enough(built.MineralStore,0.04) && enough(built.Respiration,0.08) && !crowded && energy > 580000 then 1 else 0'
+      activity:hunting ? 'if body.area + 0.000001 >= body.birth_area * 2 && enough(built.Envelope,0.04) && enough(built.Translation,0.08) && enough(built.EnergyStore,0.08) && enough(built.MineralStore,0.04) && enough(built.Respiration,0.08) && displays_ready && !crowded && energy > 580000 then 1 else 0'
         : `if body.area + 0.000001 >= ${growthArea} && energy > ${quantity(100)} then 1 else 0` },
   );
   if (options.colony) {
@@ -585,6 +593,7 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
       'LeftMotor','RightMotor','Vision','Touch','Piercer','Capture','LeftNose','RightNose','LeftHeat','RightHeat']);
     for (const recipe of recipes) {
       if (recipe.name === 'Division') recipe.at = 0;
+      if (recipe.name === 'Piercer') recipe.ready = 'powered && first_coat';
       if (recipe.name === 'LeftMotor') recipe.at = 0.52;
       if (recipe.name === 'RightMotor') recipe.at = -0.52;
       if (recipe.name === 'Engulfment' || recipe.name === 'Minerals') recipe.at = String(Math.PI);
@@ -592,18 +601,34 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
       if (recipe.name === 'EnergyStore') recipe.ready = 'powered && (energy.capacity < 950000 || surplus)';
       if (singleCopy.has(recipe.name)) recipe.goal = amount(recipe.parts.reduce((mass, [, part]) => mass + part, 0));
     }
-    // Equip the tail before fission. This pole can forage while the daughter
-    // regrows its frontal equipment. The left motor switches the rear drive off.
+    // One matched reader/display pair on either side of the future cut. After
+    // fission, the old furrow edges become the faces looking at one another.
+    const extraContact = 'body.area > 1.3 * body.birth_area || meal > 30000 || built.TailPiercer > 0';
+    for (const patch of predatorBadgeSectors) {
+      recipes.push({name:patch.name, kind:'display()', parts:[['anchor',0.004],['membrane',0.006]],
+        at:String(patch.at), ready:patch.early ? 'true' : 'body.area > 1.3 * body.birth_area',
+        goal:`(if body.area > 1.3 * body.birth_area then ${patch.baseline} + 0.01 else 0.01)`});
+    }
+    for (const [side, at] of [['Left', Math.PI / 2 - 0.025], ['Right', -Math.PI / 2 - 0.025]] as const) {
+      const prefix = side.toLowerCase();
+      recipes.push(
+        {name:side+'Badge', kind:'display()', parts:[['anchor',0.004],['membrane',0.006]],
+          at:String(at), ready:'true', goal:prefix+'_badge_goal'},
+        {name:side+'SeamTouch', kind:'sense(contact)', parts:[['anchor',0.002],['receptor',0.006],['filament',0.002]],
+          at:String(at), ready:extraContact, goal:prefix+'_reader_goal'});
+    }
+    // Keep a reader and display on each hunting pole. Extra rear drive and
+    // feeding hardware are paid for as the parent grows toward division.
     const tail = {at:String(Math.PI),ready:'body.area > 1.3 * body.birth_area'};
     recipes.push(
       {...tail,name:'TailInlet',kind:'import(particle)',parts:[['anchor',0.0055],['motor',0.0105]],goal:'0.016',
         engageWhen:'!peer.resistance_valid || peer.resistance < 0.085',activity:'if gut.fraction < 0.9 then 1 else 0'},
       {...tail,name:'TailMotor',kind:'propel()',parts:[['anchor',0.005],['motor',0.01],['filament',0.01]],goal:'0.025',
         direction:Math.PI,activity:'if built.LeftMotor < 0.02 && gut.fraction < 0.65 then 0.85 else 0'},
-      {...tail,name:'TailTouch',kind:'sense(contact)',parts:[['anchor',0.002],['receptor',0.006],['filament',0.002]],goal:'0.01'},
-      {...tail,name:'TailBadge',kind:'display()',parts:[['anchor',0.004],['membrane',0.006]],goal:'0.01'},
-      {...tail,name:'TailPiercer',kind:'pierce()',parts:[['anchor',0.0055],['filament',0.0145],['enzyme',0.005]],goal:'0.025',
-        engageWhen:'may_strike',activity:'if sensed.TailTouch.valid && sensed.TailTouch.resistance > 0.1 && hunting_budget && meal < 170000 * body.area then 1 else 0'},
+      {...tail,ready:extraContact,name:'TailTouch',kind:'sense(contact)',parts:[['anchor',0.002],['receptor',0.006],['filament',0.002]],goal:'0.01'},
+      {...tail,ready:'true',name:'TailBadge',kind:'display()',parts:[['anchor',0.004],['membrane',0.006]],goal:'0.01'},
+      {...tail,name:'TailPiercer',kind:'pierce()',direction:Math.PI,parts:[['anchor',0.0055],['filament',0.0145],['enzyme',0.005]],goal:'0.025',
+        engageWhen:'may_strike',activity:'if weapons_ready && sensed.TailTouch.valid && sensed.TailTouch.resistance > 0.1 && hunting_budget && meal < 170000 * body.area then 1 else 0'},
     );
   }
   let surplusRule = `let surplus = equipped && energy > 550000${hasGut&&!hasLight?feedingReserve:''};`;
@@ -740,16 +765,55 @@ let steer = if blocked then clamp(escape * 2, -1, 1)
 let move = if blocked || injured || leaving then 0.65 else if meal_fraction > 0.45 then 0
   else if seek && particle then 0.55 else if has_gradient then 0.35 else 0.23;`;
 
-const localHunting = `# Once the badge is built, present this marker to nearby contact receptors.
+const localHunting = `# Independent marker and payload values let kin recognize a single changed tag.
 publish rf001;
+signal rf002;
 rf001 = 17;
-let may_strike = !populated(rf001) || !peer.message_valid || peer.message != rf001;
-let peer = sensed.Touch.message_valid && sensed.Touch.message == rf001;
+rf002 = -2.5;
+# Refresh both display values on the first ordinary evaluation. For that tick,
+# a daughter has empty memory; its parent detects its halved envelope area.
+let tags_ready = populated(rf001) && populated(rf002);
+let just_split = !populated(rf005) || body.area < rf005 * 0.75;
+let weapons_ready = tags_ready && !just_split;
+rf005 = body.area;
+# A seam patch inherited from the previous furrow has moved. Measure that
+# stock once in each half, then pay for a fresh patch on each side of this cut.
+rf006 = built.LeftBadge when just_split;
+rf007 = built.RightBadge when just_split;
+rf008 = built.LeftSeamTouch when just_split;
+rf009 = built.RightSeamTouch when just_split;
+${predatorBadgeSectors.map(patch => `${patch.baseline} = built.${patch.name} when just_split;`).join('\n')}
+let first_coat = enough(built.Badge,0.01) && enough(built.TailBadge,0.01)
+  && enough(built.LeftBadge,0.01) && enough(built.RightBadge,0.01)
+  && ${predatorBadgeSectors.filter(patch=>patch.early).map(patch=>`enough(built.${patch.name},0.01)`).join(' && ')};
+let left_badge_goal = rf006 + 0.01;
+let right_badge_goal = rf007 + 0.01;
+let left_reader_goal = rf008 + 0.01;
+let right_reader_goal = rf009 + 0.01;
+let may_strike = peer.resistance_valid && !peer.division_interface
+  && !(peer.message_valid && peer.message == rf001)
+  && !(peer.signal_valid && peer.signal == rf002);
+let front_peer = (populated(rf001) && sensed.Touch.message_valid && sensed.Touch.message == rf001)
+  || (populated(rf002) && sensed.Touch.signal_valid && sensed.Touch.signal == rf002);
+let tail_peer = (populated(rf001) && sensed.TailTouch.message_valid && sensed.TailTouch.message == rf001)
+  || (populated(rf002) && sensed.TailTouch.signal_valid && sensed.TailTouch.signal == rf002);
+let left_peer = (populated(rf001) && sensed.LeftSeamTouch.message_valid && sensed.LeftSeamTouch.message == rf001)
+  || (populated(rf002) && sensed.LeftSeamTouch.signal_valid && sensed.LeftSeamTouch.signal == rf002);
+let right_peer = (populated(rf001) && sensed.RightSeamTouch.message_valid && sensed.RightSeamTouch.message == rf001)
+  || (populated(rf002) && sensed.RightSeamTouch.signal_valid && sensed.RightSeamTouch.signal == rf002);
+let peer = front_peer || tail_peer || left_peer || right_peer;
+let displays_ready = enough(built.Badge,0.01) && enough(built.TailBadge,0.01)
+  && !missing(built.LeftBadge,left_badge_goal,0.01) && !missing(built.RightBadge,right_badge_goal,0.01)
+  && enough(built.Touch,0.01) && enough(built.TailTouch,0.01)
+  && !missing(built.LeftSeamTouch,left_reader_goal,0.01) && !missing(built.RightSeamTouch,right_reader_goal,0.01)
+  && ${predatorBadgeSectors.map(patch=>`!missing(built.${patch.name},${patch.baseline}+0.01,0.01)`).join('\n  && ')};
 # After a kin encounter, feed when stored fuel is low and leave room for neighbours before dividing.
 rf004 = age when peer;
 let recent_peer = populated(rf004) && age - rf004 < 10;
 let crowded = peer || recent_peer;
-let leave_peer = if angle(sensed.Touch.offset) >= 0 then -0.8 else 0.8;
+let contact_angle = if front_peer then angle(sensed.Touch.offset) else if tail_peer then angle(sensed.TailTouch.offset)
+  else if left_peer then angle(sensed.LeftSeamTouch.offset) else angle(sensed.RightSeamTouch.offset);
+let leave_peer = if abs(contact_angle) > 1.57 then 0 else if contact_angle >= 0 then -0.8 else 0.8;
 let firm_contact = sensed.Touch.valid && sensed.Touch.resistance > 0.1;
 let meal = gut.tissue.energy + gut.exudate.energy;
 let hunting_budget = !recent_peer || energy + carbon.organic * 20 + meal < energy.capacity * 1.05;
@@ -835,7 +899,7 @@ export const PRESETS: Preset[] = [
   { name:'Forager', description:'Scavenges particles and carcasses. After recognizing a compatible producer it can dock and exchange carbon and minerals.', source:cellularOrganism('organic',grazeAndScavenge,{local:true,restOnMeal:true,scavenger:true}) },
   { name:'Rememberer', description:'Store the last chemical turn and its age, then follow it briefly when the gradient disappears.', source:cellularOrganism('organic',rememberGradient,{local:true,memory:true}) },
   { name:'Phototroph', description:'Uses sunlight to fix carbon and respires its reserves at night. Compatible grazers can dock at its exchange surfaces.', source:cellularOrganism('light','# This stationary producer spends no material on locomotion.',{local:true}) },
-  { name:'Predator', description:'Spare cells with a matching contact marker, pierce prey, and follow chemical food cues in darkness.', source:cellularOrganism('organic',localHunting,{local:true,predator:true}) },
+  { name:'Predator', description:'Prepare working displays for both daughters, spare cells showing a matching tag and hunt unmarked prey on contact.', source:cellularOrganism('organic',localHunting,{local:true,predator:true}) },
   { name:'Crown rosette', description:'Attached cells with multiple signaling partners become beacons. Edge cells touching a beacon build extra light harvesters.', source:cellularOrganism('light',crownBehavior,{local:true,colony:true,multicellular:'crown'}) },
   { name:'Nurse rosette', description:'Adult cells with a requesting juvenile build extra harvesters, pause growth and exchange energy, organic carbon and minerals through junctions.', source:cellularOrganism('light',nurseBehavior,{local:true,colony:true,multicellular:'nursery'}) },
   { name:'Pulse swimmer', description:'Attached cells relay brief pulses to their neighbors and activate propulsion. A refractory interval separates each burst.', source:cellularOrganism('light',relayBehavior,{local:true,colony:true,multicellular:'relay'}) },

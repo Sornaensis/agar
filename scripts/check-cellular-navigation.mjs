@@ -23,13 +23,17 @@ async function developed(name, required) {
   const genome = compile(api, PRESETS.find(preset => preset.name === name).source);
   seed(api, genome, 1, 600, 380);
   let state = snapshot(api);
-  // The polar hunter funds its first ATP compartment alongside the front hunting gear.
-  const startupWindow = name === 'Predator' ? 25 : 20;
+  // The hunter also pays to cover its surface before arming its first piercer.
+  const startupWindow = name === 'Predator' ? 30 : 20;
   while (state.seconds < startupWindow && !required.every(name => body(api, 1).cellular.assemblies.some(machine => machine.name === name && machine.complete))) {
     state = advance(api, 5);
     assert.ok(state.cells.some(cell => cell.id === 1), `${name} survives its paid startup`);
   }
   assert.ok(required.every(name => body(api, 1).cellular.assemblies.some(machine => machine.name === name && machine.complete)), `${name} equips its feeding and navigation machinery before needing its first meal`);
+  if (name === 'Predator' && required.includes('Piercer')) {
+    const badges = body(api, 1).cellular.assemblies.filter(part => part.kind === 'display()' && part.complete && part.functionalMass > 0 && part.activity > 0);
+    assert.ok(new Set(badges.map(part => part.name)).size >= 8, 'First hunting gear includes eight paid, active display patches');
+  }
   assert.equal(state.cells[0].area, 1, 'Hunting does not require prior growth');
   assert.ok(state.cells[0].energy > 30, 'Startup retains a maintenance and search reserve');
   assert.equal(state.eaten, 0);
@@ -118,7 +122,7 @@ for (let tick = 0; tick < 1200; tick += 5) {
   if (killed && tissuePeak > 1 && usefulTissue > 1) break;
 }
 const hunted = snapshot(predator.api);
-assert.ok(hunted.attacks > 0 && killed, 'The newborn-built piercer kills a real contacted prey cell');
+assert.ok(hunted.attacks > 0 && hunted.predations === 1 && killed, 'The developed Predator kills a silent prey cell through ordinary contact');
 assert.ok(tissuePeak > 1 && usefulTissue > 1, 'The separate capture/storage/digestion path consumes attack-derived tissue');
 assert.equal(hunted.photosynthesis, 0);
 

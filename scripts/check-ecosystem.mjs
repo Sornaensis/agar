@@ -4,27 +4,36 @@ import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { observePredatorBirths } from './predator-birth-observation.mjs';
 import { bytes, fresh, compile, seed, snapshot, advance, body, save, catalog } from './organelle-harness.mjs';
 
 // Measure the actual shipped mixed scenario, without the supplied-food or
 // stationary-organism shortcuts used by isolated pathway tests.
-const options = { seeds: [42], duration: 600, birthsAfter: null, mutation: undefined, output: null, wasm: null, assert: false, disableExport: false, flankDivision: false };
+const options = { seeds: [42], duration: 600, extraSamples: [], birthsAfter: null, mutation: undefined, output: null, wasm: null, assert: false, disableExport: false, flankDivision: false, predatorSource: null, tracePredatorBirths: false };
 for (let i = 2; i < process.argv.length; i++) {
   const key = process.argv[i];
   if (key === '--flank-forager-division') { options.flankDivision = true; continue; }
   if (key === '--disable-stock-export') { options.disableExport = true; continue; }
+  if (key === '--trace-predator-births') { options.tracePredatorBirths = true; continue; }
   if (key === '--assert') { options.assert = true; continue; }
   const value = process.argv[++i];
-  assert.ok(value && ['--seed', '--duration', '--births-after', '--mutation', '--output', '--wasm'].includes(key), `Unknown or missing argument: ${key}`);
+  assert.ok(value && ['--seed', '--duration', '--sample-at', '--births-after', '--mutation', '--output', '--wasm', '--predator-source'].includes(key), `Unknown or missing argument: ${key}`);
   if (key === '--seed') options.seeds = value.split(',').map(Number);
   if (key === '--duration') options.duration = Number(value);
+  if (key === '--sample-at') {
+    const times = value.split(',');
+    assert.ok(times.every(time => /^\d+$/.test(time)), '--sample-at takes whole simulated seconds separated by commas');
+    options.extraSamples.push(...times.map(Number));
+  }
   if (key === '--births-after') options.birthsAfter = Number(value);
   if (key === '--mutation') options.mutation = Number(value);
   if (key === '--output') options.output = value;
   if (key === '--wasm') options.wasm = value;
+  if (key === '--predator-source') options.predatorSource = value;
 }
 assert.ok(options.seeds.every(n => Number.isInteger(n) && n >= 0 && n <= 0xffffffff));
 assert.ok(Number.isSafeInteger(options.duration) && options.duration > 0);
+assert.ok(options.extraSamples.every(n => Number.isSafeInteger(n) && n <= options.duration), '--sample-at must fall within the run');
 assert.ok(!options.assert || options.duration >= 300, 'Ecological regression checks require at least 300 simulated seconds');
 assert.ok(options.birthsAfter === null || options.assert && Number.isFinite(options.birthsAfter) && options.birthsAfter >= 0 && options.birthsAfter < options.duration,
   '--births-after needs --assert and a time before the end of the run');
@@ -37,6 +46,11 @@ const startSettings = simulationStartSettings();
 options.mutation ??= startSettings.mutationRate;
 assert.ok(options.mutation >= 0 && options.mutation <= 1);
 const populations = template.populations.map(row => ({ ...BUILTIN_GENOMES.find(item => item.id === row.genomeId), ...row }));
+if (options.predatorSource) {
+  // Exported .cell files carry a final newline that the catalog source omits.
+  const source = await readFile(options.predatorSource, 'utf8');
+  populations.find(entry => entry.name === 'Predator').source = source.replace(/\r?\n$/, '');
+}
 // Matched secretion control: retain the outlet, its cost, and every other
 // expression. Close only the stock producer's outlet during this run.
 if (options.disableExport) {
@@ -52,7 +66,7 @@ if (options.flankDivision) {
   forager.source = forager.source.replace(mount, (_, prefix) => prefix + String(Math.PI / 2));
 }
 assert.equal('foodRate' in environment.config,false, 'Habitats cannot provision organic particles');
-const samplesAt = [...new Set([0, 15, 30, 60, 120, 180, 300, 600, 900, options.duration].filter(n => n <= options.duration))].sort((a, b) => a - b);
+const samplesAt = [...new Set([0, 15, 30, 60, 120, 180, 300, 600, 900, ...options.extraSamples, options.duration].filter(n => n <= options.duration))].sort((a, b) => a - b);
 const study = {
   startedAt: new Date().toISOString(), wasmSha256: createHash('sha256').update(binary).digest('hex'), wasmBytes: binary.length,
   template, environment, populations, seeds: options.seeds, mutationRate: options.mutation,
@@ -90,6 +104,9 @@ for (const randomSeed of options.seeds) {
     const name = lineage(parent); names.set(genome, name); return name;
   };
   const result = { seed: randomSeed, wallSeconds: 0, samples: [], observedDescendants: Object.fromEntries(founding.map(name => [name, 0])) };
+  const birthObserver = options.tracePredatorBirths
+    ? observePredatorBirths(api, populations.reduce((sum, row) => sum + row.count, 0), lineage) : null;
+  if (birthObserver) result.predatorBirthDisplays = birthObserver.births;
   study.results.push(result);
   const descendants = new Map(founding.map(name => [name, new Set()]));
   const observeDescendants = state => {
@@ -99,7 +116,10 @@ for (const randomSeed of options.seeds) {
   let ticks = 0;
   for (const seconds of samplesAt) {
     let state;
-    if (options.assert && !api.ecology_snapshot_ptr) {
+    if (birthObserver) {
+      birthObserver.advance(seconds * 30 - ticks); ticks = seconds * 30;
+      state = snapshot(api); observeDescendants(state);
+    } else if (options.assert && !api.ecology_snapshot_ptr) {
       // Observe descendants every second so a birth need not coincide with the
       // sparse diagnostic samples. These remain observed IDs, not an exact
       // lifetime birth counter: an organism could be born and die between reads.

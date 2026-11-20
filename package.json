@@ -13,6 +13,7 @@
     "test:engine": "cargo test --manifest-path engine/Cargo.toml",
     "test:wasm": "node scripts/check-wasm.mjs",
     "test:graph": "node scripts/check-genome-network.mjs",
+    "test:editor-navigation": "node scripts/check-editor-navigation.mjs",
     "test:language": "node scripts/check-genome-language.mjs",
     "test:cellular-ui": "node scripts/check-cellular-ui.mjs",
     "test:inspection": "node scripts/check-program-inspection.mjs",

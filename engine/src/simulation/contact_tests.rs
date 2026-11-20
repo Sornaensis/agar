@@ -286,70 +286,328 @@ publish rf001 = 0; rf001=3;
     assert!(workspace.consumed[prey]);
 }
 
-fn predator_contact_position(degrees: f64) -> (f64, f64) {
-    let angle = degrees.to_radians();
-    (600.0 + 14.05 * angle.cos(), 380.0 + 14.05 * angle.sin())
-}
-
-fn equipped_predator_beside_displaying_peer() -> (World, Vec<Genome>, usize) {
-    // Install only the two paid surface devices needed for this encounter.
-    // Geometry, activity expressions, publication and matching use the shipped
-    // programs. Three unit-radius bodies start clear of all overlaps.
-    let (mut world, _) = equipped(r#"
-product Tail = filament();
-assembly Touch: sense(contact) { Mount:0.002; Detector:0.006; Tail:0.002; }
-assembly Badge: display() { Mount:0.004; Wall:0.006; }
-assembly Piercer: pierce() { Mount:0.01; Tail:0.03; Catalyst:0.01; }
-"#);
-    let genomes = vec![genome(include_str!("../../../examples/predator.cell")),
-        genome(include_str!("../../../examples/forager.cell"))];
-    let predator = &genomes[0].program;
-    predator.evaluate_cell(&Inputs::default(), &mut world.cells[0].memory, &mut EvalScratch::default());
-    let marker = predator.published_message(&world.cells[0].memory);
-    assert!(marker.is_some());
-    assert!(predator.has_contact_guards());
-    place(&mut world.cells[0], 600.0, 380.0, 0.0);
-    let (x, y) = predator_contact_position(20.0);
-    let peer = world.cells.len();
-    let mut sibling = world.cells[0].clone();
-    sibling.body.cellular.as_mut().unwrap().assemblies.retain(|a| a.recipe.name != "Piercer");
-    sibling.id = world.next_id;
-    world.next_id += 1;
-    place(&mut sibling,x,y,(380.0-y).atan2(607.0-x));
-    world.cells.push(sibling);
-    (world, genomes, peer)
-}
-
-#[test]
-fn shipped_predator_spares_a_displaying_peer_and_can_strike_adjacent_unmarked_prey() {
-    let (mut world, mut genomes, peer) = equipped_predator_beside_displaying_peer();
-    let (x, y) = predator_contact_position(-40.0);
-    let prey = seed(&mut world, &genomes, 2, x, y);
-    world.step(&mut genomes);
-    assert_eq!(world.cells[peer].integrity, 1.0, "the marker protects a first-contact peer");
-    assert!(world.cells[prey].integrity < 1.0, "a closer peer must not suppress a reachable prey target");
-    assert_eq!(world.attacks, 1);
-}
-
-#[test]
-fn shipped_predator_rations_prey_after_recognizing_kin_until_fuel_is_needed() {
-    for hungry in [false, true] {
-        let (mut world, mut genomes, peer) = equipped_predator_beside_displaying_peer();
+/// Let the stock founders build their own surface hardware before controlling only
+/// the encounter geometry. Restore the same paid bodies for each angle.
+fn grown_contact_founders(counted: bool) -> (World, Vec<Genome>) {
+    let mut genomes = vec![genome(include_str!("../../../examples/predator.cell")),
+        genome(include_str!("../../../examples/forager.cell")),
+        genome(include_str!("../../../examples/phototroph.cell"))];
+    let mut world = World::empty(201);
+    world.environment.configure(0.45, 0.95, 0.0);
+    world.environment.set_initial_nutrients(2.0);
+    world.reset_empty(201);
+    world.set_count_chemistry(counted).unwrap();
+    world.set_mutation_rate(0.0);
+    for g in 1..=3 {
+        seed(&mut world, &genomes, g, 200.0 * f64::from(g), 380.0);
+    }
+    let ready = |cell: &Cell, name: &str| cell.body.cellular.as_ref().is_some_and(|body|
+        body.assemblies.iter().any(|a| a.recipe.name == name && a.complete() && a.working_mass() > 0.0));
+    for _ in 0..2700 {
         world.step(&mut genomes);
-        assert!(world.cells[0].memory.value("rf004").is_some(), "the previous kin contact was registered");
-        if hungry {
-            world.cells[0].energy = 5.0;
-            world.cells[0].organic_carbon = 0.1;
+        assert_eq!(world.cells.len(), 3, "Founders mature apart before their first encounter");
+        if world.cells.iter().all(|c| ready(c, "Badge"))
+            && ready(&world.cells[0], "Touch") && ready(&world.cells[0], "Piercer") {
+            return (world, genomes);
         }
-        place(&mut world.cells[0], 600.0, 380.0, 0.0);
-        let (x, y) = predator_contact_position(20.0);
-        place(&mut world.cells[peer], x, y, (380.0-y).atan2(607.0-x));
-        let (x, y) = predator_contact_position(-40.0);
-        let prey = seed(&mut world, &genomes, 2, x, y);
+    }
+    panic!("Stock founders must grow a readable display and functional attack apparatus");
+}
+
+fn face_target(world: &mut World, hunter: &Cell, target: &Cell, angle: f64) {
+    let x = 600.0 + hunter.radius() + target.radius();
+    world.cells = vec![hunter.clone(), target.clone()];
+    if world.cells[0].id == world.cells[1].id {
+        world.cells[1].id = world.next_id;
+        world.next_id += 1;
+    }
+    place(&mut world.cells[0], 600.0, 380.0, 0.0);
+    place(&mut world.cells[1], x, 380.0, angle);
+}
+
+/// Sample an inherited physical display with a separate cell's ordinary contact
+/// receptor. Keep the target's body, angle, membrane mounts and memory intact.
+fn external_badge_read(target: &Cell, emitter: &Genome) -> ReceptorInput {
+    let (mut probe, mut genomes) = equipped(TOUCH);
+    let display = target.body.cellular.as_ref().unwrap().assemblies.iter().find(|a|
+        a.recipe.kind == AssemblyKind::Mechanism(MechanismKind::Display)
+            && a.working_mass() * a.activity > 0.0).expect("Each half inherits a working display");
+    let bearing = target.angle + display.at();
+    let distance = target.radius() + probe.cells[0].radius();
+    place(&mut probe.cells[0], target.x + distance * bearing.cos(),
+        target.y + distance * bearing.sin(), bearing + PI);
+    let mut emitter_cell = target.clone();
+    emitter_cell.id = probe.next_id;
+    emitter_cell.genome_id = 2;
+    probe.cells.push(emitter_cell);
+    genomes.push(emitter.clone());
+    let read = read_touch(&probe, &genomes, 1);
+    assert!(read.valid, "The independent probe must physically touch the inherited display");
+    read
+}
+
+/// Run the same 15-degree heading sweep against a naturally grown adult.
+pub(super) fn mature_target_sweep(target: &Cell) {
+    let (mut world, genomes) = grown_contact_founders(target.counted.is_some());
+    let hunter = world.cells[0].clone();
+    let mut visible = 0;
+    let mut injured = 0;
+    for angle in (0..360).step_by(15) {
+        face_target(&mut world, &hunter, target, (angle as f64).to_radians());
+        let seen = read_touch(&world, &genomes, hunter.id);
+        assert!(seen.valid);
+        let presented = seen.message_valid || seen.signal_valid;
+        if presented { visible += 1; }
+        // Resolve a single front-weapon contact on the measured geometry,
+        // without subsequently moving or dividing the mature test target.
+        for a in &mut world.cells[0].body.cellular.as_mut().unwrap().assemblies {
+            if a.recipe.kind == AssemblyKind::Mechanism(MechanismKind::Pierce) { a.activity = 1.0; }
+        }
+        let caps: Vec<_> = world.cells.iter().map(|c| c.body.capacities()).collect();
+        let mut phases = PhaseWorkspace::default();
+        world.freeze_contact_signals(&genomes, &mut phases.signals);
+        phases.geometry.rebuild(&world.cells, false, true);
+        let integrity = world.cells[1].integrity;
+        world.resolve_predation_in(&[Outputs { bite: 1.0, ..Outputs::default() }, Outputs::default()],
+            &caps, &genomes, &mut phases);
+        if world.cells[1].integrity < integrity {
+            assert!(!presented, "A presented badge protects the fully equipped adult");
+            injured += 1;
+        }
+    }
+    assert_eq!(visible, 24, "The mature display ring covers all tested target headings");
+    assert_eq!(injured, 0);
+}
+
+/// Put the parent's inherited weapon directly against its own temporarily
+/// silent daughter. A hungry attacker one tick past the quiet period is the
+/// matched positive control. Keep the victim's own weapons inert in this assay.
+fn post_split_attack_probe(parent: &Cell, newborn: &Cell, stock: &Genome) -> bool {
+    let mut world = World::empty(81);
+    world.reset_empty(81);
+    world.set_mutation_rate(0.0);
+    let mut attacker = parent.clone();
+    let weapon = attacker.body.cellular.as_ref().unwrap().assemblies.iter()
+        .find(|a| a.recipe.kind == AssemblyKind::Mechanism(MechanismKind::Pierce) && a.working_mass() > 0.0)
+        .expect("Parent retained a working piercer");
+    let bearing = attacker.angle + weapon.at();
+    let mut target = newborn.clone();
+    target.memory = Default::default();
+    for a in &mut target.body.cellular.as_mut().unwrap().assemblies {
+        if a.recipe.kind == AssemblyKind::Mechanism(MechanismKind::Pierce) { a.integrity = 0.0; }
+    }
+    let distance = attacker.radius() + target.radius();
+    place(&mut target, attacker.x + distance * bearing.cos(), attacker.y + distance * bearing.sin(), 0.0);
+    attacker.vx = 0.0;
+    attacker.vy = 0.0;
+    attacker.energy = 20.0;
+    attacker.organic_carbon = 0.1;
+    attacker.scale_gut(0.0);
+    world.cells = vec![attacker, target];
+    world.next_id = world.cells.iter().map(|c| c.id).max().unwrap() + 1;
+    let mut genomes = vec![stock.clone()];
+    let before = world.cells[1].integrity;
+    world.step(&mut genomes);
+    let attacked = world.attacks > 0;
+    assert_eq!(world.cells[1].integrity < before, attacked);
+    attacked
+}
+
+/// Sample the actual inherited mounts at the cleavage angle. Isolate the two
+/// cells at tangency so a nearby tissue particle cannot cover either receptor.
+fn seam_displays(parent: &Cell, daughter: &Cell, stock: &Genome) -> [bool; 2] {
+    let mut w = World::empty(81);
+    w.cells = vec![parent.clone(), daughter.clone()];
+    let dx = delta(daughter.x - parent.x, WIDTH);
+    let dy = delta(daughter.y - parent.y, HEIGHT);
+    let bearing = dy.atan2(dx);
+    let distance = parent.radius() + daughter.radius();
+    place(&mut w.cells[1], parent.x + distance * bearing.cos(), parent.y + distance * bearing.sin(), daughter.angle);
+    let registry = std::slice::from_ref(stock);
+    std::array::from_fn(|i| {
+        let inputs = w.sense_program_in_registry(w.cells[i].id, &stock.program, registry).unwrap();
+        stock.program.cellular().unwrap().assemblies.iter().zip(&inputs.receptors)
+            .any(|(a, r)| a.kind == AssemblyKind::Mechanism(MechanismKind::SenseContact)
+                && r.valid && r.message_valid && r.message == 17.0 && r.signal_valid && r.signal == -2.5)
+    })
+}
+
+/// Both products must inherit functioning displays, independently readable as
+/// soon as their own registers hold the tags. Check this on two successive cuts.
+pub(super) fn check_newborn_recognition(world: &mut World, genomes: &mut Vec<Genome>, check_weapons: bool) {
+    let newborn = world.cells.iter().find(|c| c.id == world.next_id - 1).unwrap().clone();
+    let parent_row = world.cells.iter().position(|c| c.id == newborn.parent_id).unwrap();
+    let child_row = world.cells.iter().position(|c| c.id == newborn.id).unwrap();
+    assert!(!world.division_interface(newborn.parent_id, newborn.id), "Stock relatives are unbonded");
+    let attacks_before = world.attacks;
+    for after_commit in [false, true] {
+        if after_commit { world.step(genomes); }
+        let parent = &world.cells[parent_row];
+        let child = &world.cells[child_row];
+        for (cell, readable) in [(parent, true), (child, after_commit)] {
+            let seen = external_badge_read(cell, &genomes[0]);
+            assert_eq!((seen.message_valid, seen.signal_valid), (readable, readable));
+            if readable { assert_eq!((seen.message, seen.signal), (17.0, -2.5)); }
+        }
+        assert_eq!(seam_displays(parent, child, &genomes[0]), [after_commit, true],
+            "Each inherited reader sees its partner as soon as those tags have been written");
+        if check_weapons {
+            assert_eq!(post_split_attack_probe(parent, &newborn, &genomes[0]), after_commit,
+                "At the same weapon and contact, the parent waits precisely through the blank tick");
+        }
+    }
+    assert_eq!(world.attacks, attacks_before);
+}
+
+#[test]
+fn shipped_predator_spares_readable_kin_and_strikes_foreign_or_unmarked_prey() {
+    let (mut world, mut genomes) = grown_contact_founders(true);
+    let founders = world.cells.clone();
+    let mut identified = 0;
+    let mut attacked_headings = 0;
+    for bearing in (0..360).step_by(15) {
+        face_target(&mut world, &founders[0], &founders[0], (bearing as f64).to_radians());
+        let seen = read_touch(&world, &genomes, founders[0].id);
+        assert!(seen.valid, "All angles must produce physical contact");
+        if seen.message_valid {
+            identified += 1;
+            assert_eq!(seen.message, 17.0);
+        }
+        let before = world.attacks;
         world.step(&mut genomes);
-        assert_eq!(world.cells[peer].integrity, 1.0);
-        assert_eq!(world.cells[prey].integrity < 1.0, hungry);
-        assert_eq!(world.attacks, u64::from(hungry));
+        if world.attacks > before { attacked_headings += 1; }
+        if seen.message_valid || seen.signal_valid {
+            assert_eq!(world.attacks, before, "A readable tag must protect kin at {bearing} degrees");
+        }
+    }
+    assert_eq!(identified, 24, "The paid display ring covers each tested target heading");
+    assert_eq!(attacked_headings, 0);
+
+    for prey in &founders[1..] {
+        for angle in [PI, 0.0] {
+            face_target(&mut world, &founders[0], prey, angle);
+            let seen = read_touch(&world, &genomes, founders[0].id);
+            assert_eq!(seen.message_valid, angle == PI);
+            if seen.message_valid {
+                assert_ne!(seen.message, 17.0);
+            }
+            let attacks = world.attacks;
+            let integrity = world.cells[1].integrity;
+            world.step(&mut genomes);
+            assert_eq!(world.attacks - attacks, 1, "Foreign or unreadable prey must remain huntable");
+            assert!(world.cells[1].integrity < integrity);
+        }
+    }
+
+    // Single-register mutations (or deliberate mimics) with either matching tag
+    // still elicit kin recognition from this one physical display.
+    for (marker, signal) in [(29.0, -2.5), (17.0, 3.0)] {
+        face_target(&mut world, &founders[0], &founders[0], PI);
+        let writes = genome(&format!("cellular; rf001 = {marker}; rf002 = {signal};"));
+        writes.program.evaluate_cell(&Inputs::default(), &mut world.cells[1].memory, &mut EvalScratch::default());
+        let seen = read_touch(&world, &genomes, founders[0].id);
+        assert!(seen.message_valid && seen.signal_valid);
+        assert_eq!((seen.message, seen.signal), (marker, signal));
+        let before = world.attacks;
+        world.step(&mut genomes);
+        assert_eq!(world.attacks, before, "Either shared tag protects against a strike");
+        assert!(world.cells[0].memory.value("rf004").is_some(), "The encounter updates kin memory");
+    }
+    // An attacker without its own comparison values waits. A mature hunter can
+    // still attack when the target has a broken display or empty registers.
+    for missing in ["own marker", "own payload", "target display", "target register"] {
+        face_target(&mut world, &founders[0], &founders[1], PI);
+        match missing {
+            "own marker" | "own payload" => {
+                let register = if missing == "own marker" { "rf001" } else { "rf002" };
+                genome(&format!("cellular; clear {register};")).program.evaluate_cell(&Inputs::default(),
+                    &mut world.cells[0].memory, &mut EvalScratch::default());
+            }
+            "target register" => world.cells[1].memory = Default::default(),
+            _ => for a in &mut world.cells[1].body.cellular.as_mut().unwrap().assemblies {
+                if a.recipe.kind == AssemblyKind::Mechanism(MechanismKind::Display) { a.integrity = 0.0; }
+            },
+        }
+        let attacks = world.attacks;
+        world.step(&mut genomes);
+        let damaged = missing.starts_with("target");
+        assert_eq!(world.attacks - attacks, u64::from(damaged), "Missing {missing}");
+    }
+}
+
+#[test]
+fn shipped_predator_rations_identified_prey_after_recognizing_kin_until_fuel_is_needed() {
+    let (mut world, mut genomes) = grown_contact_founders(true);
+    let founders = world.cells.clone();
+    face_target(&mut world, &founders[0], &founders[0], PI);
+    world.step(&mut genomes);
+    assert!(world.cells[0].memory.value("rf004").is_some(), "First contact committed the kin memory");
+    let recognized = world.cells[0].clone();
+    for hungry in [false, true] {
+        face_target(&mut world, &recognized, &founders[1], PI);
+        let cap = world.cells[0].body.capacities().energy;
+        world.set_cell_stores(recognized.id, Some(if hungry { 5.0 } else { cap }), None).unwrap();
+        world.cells[0].counted.as_mut().unwrap().carbon = if hungry { 1000 } else { 20000 };
+        world.cells[0].project_counts();
+        let before = world.attacks;
+        world.step(&mut genomes);
+        assert_eq!(world.attacks - before, u64::from(hungry));
+    }
+}
+
+#[test]
+fn shipped_predator_rear_piercer_and_engulfer_spare_matching_tags_and_accept_silent_prey() {
+    // Isolate both rear effectors with paid, recipe-matched hardware at the
+    // stock angles. Use a large paid gut so every wounded experimental target
+    // is small enough to swallow. Only identity, heading and injury vary.
+    let stock = include_str!("../../../examples/predator.cell");
+    let foreign = include_str!("../../../examples/phototroph.cell");
+    for swallow in [false, true] {
+        for (target_source, angle, clonal_interface, accepts) in [
+            (stock, 0.0, false, false),
+            (stock, PI / 2.0, false, true),
+            (foreign, 0.0, false, true),
+            (foreign, PI / 2.0, false, true),
+            (foreign, 0.0, true, false),
+        ] {
+            let (mut world, _) = equipped(r#"
+product Tail = filament();
+assembly LargeGut:store(food) { Wall:0.2; }
+assembly TailTouch:sense(contact) { Mount:0.002; Detector:0.006; Tail:0.002; at:3.141592653589793; }
+assembly Engulfment:engulf() { Mount:0.005; Rotor:0.01; Wall:0.01; at:3.141592653589793; }
+assembly TailPiercer:pierce() { Mount:0.0055; Tail:0.0145; Catalyst:0.005; at:3.141592653589793; direction:3.141593; }
+"#);
+            let genomes = [genome(stock), genome(target_source)];
+            world.cells[0].body.area = 2.0;
+            place(&mut world.cells[0], 600.0, 380.0, 0.0);
+            let mut target = equipped(BADGE).0.cells.remove(0);
+            target.id = world.next_id;
+            world.next_id += 1;
+            target.genome_id = 2;
+            target.integrity = if swallow { 0.2 } else { 1.0 };
+            target.energy = 5.0;
+            target.organic_carbon = 0.25;
+            let x = 600.0 - world.cells[0].radius() - target.radius();
+            place(&mut target, x, 380.0, angle);
+            world.cells.push(target);
+            for (g, cell) in genomes.iter().zip(&mut world.cells) {
+                g.program.evaluate_cell(&Inputs::default(), &mut cell.memory, &mut EvalScratch::default());
+            }
+            if clonal_interface {
+                world.contacts.insert((world.cells[0].id, world.cells[1].id), adhesion::CLONAL);
+            }
+            let capacities: Vec<_> = world.cells.iter().map(|c| c.body.capacities()).collect();
+            let mut phases = PhaseWorkspace::default();
+            world.freeze_contact_signals(&genomes, &mut phases.signals);
+            phases.geometry.rebuild(&world.cells, false, true);
+            let kin = target_source == stock;
+            let info = format!("engulf {swallow}, kin {kin}, heading {angle}, division interface {clonal_interface}");
+            let controls = [Outputs { engulf: swallow, bite: if swallow { 0.0 } else { 1.0 }, ..Outputs::default() }, Outputs::default()];
+            world.resolve_predation_in(&controls, &capacities, &genomes, &mut phases);
+            assert_eq!(world.attacks > 0, !swallow && accepts, "{info}");
+            assert_eq!(phases.consumed[1], swallow && accepts, "{info}");
+            assert_eq!(world.predations, u64::from(swallow && accepts), "{info}");
+        }
     }
 }
 

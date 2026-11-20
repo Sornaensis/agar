@@ -1,8 +1,12 @@
 # agar engine
 
+## Genome analysis in ABI 23
+
+Analysis returns independent diagnostics with severity, inferred function return types and contact-scope metadata. Consumers use the severity to decide whether edits can be saved. Checkpoint format 20 and the simulation exports retain their layouts.
+
 ## Local sensors, ports and chemistry in checkpoint 20
 
-The public WASM ABI remains 22. Checkpoint 20 stores particle composition, per-inlet capture remainders, inherited attachment positions, and the constriction axis. Readers accept version 19. Older particles take their initial composition from their saved origin. Earlier sources with aggregate sensing can be loaded from checkpoints. Fresh cellular programs use named receptors and ordinary register assignments for published values.
+ABI 22 introduced checkpoint 20, which stores particle composition, per-inlet capture remainders, inherited attachment positions, and the constriction axis. Readers accept version 19. Older particles take their initial composition from their saved origin. Earlier sources with aggregate sensing can be loaded from checkpoints. Fresh cellular programs use named receptors and ordinary register assignments for published values.
 
 `import(particle)` and contact mechanisms can use `peer.resistance_valid` and `peer.resistance` in their guards. A nearby contact receptor must measure the candidate. A physically connected signal junction reports occupancy and payload through its own `sensed.<name>` fields.
 
@@ -256,7 +260,7 @@ The module exports `memory`. Pointers/lengths use bytes, except snapshot lengths
 
 | Exports | Behavior |
 | --- | --- |
-| `abi_version() -> u32` | Returns 22 |
+| `abi_version() -> u32` | Returns 23 |
 | `alloc(len) -> ptr`, `dealloc(ptr, len)` | Allocate/free a zeroed source buffer; above 256 KiB returns null |
 | `compile_genome(ptr, len) -> u32` | UTF-8 source → ID ≥ 1; zero plus readable error on failure |
 | `analyze_genome(ptr, len) -> ptr`, `genome_analysis_len()` | Authoritative compiler analysis as engine-owned UTF-8 JSON; no genome registration or simulation mutation |
@@ -325,20 +329,29 @@ Unannotated integer arguments/counters are `u32`. Mutation probability returns `
 `Engine.analyze(source)` runs the same Rust lexer, parser, and type checker used by compilation. It returns:
 
 ```ts
+interface AnalyzedDeclaration {
+  name: string;
+  type: 'count' | 'integer' | 'scalar' | 'boolean' | 'string' | 'vec2';
+  from: number;
+  to: number;
+  perContact?: true;
+  contactSafe?: false;
+}
 interface GenomeAnalysis {
   valid: boolean;
-  diagnostics: { severity: 'error'; message: string; line: number; column: number; from: number; to: number }[];
-  bindings: { name: string; type: 'integer' | 'scalar' | 'boolean' | 'string' | 'vec2'; from: number; to: number }[];
+  diagnostics: { severity: 'error' | 'warning'; message: string; line: number; column: number; from: number; to: number }[];
+  bindings: AnalyzedDeclaration[];
+  functions: AnalyzedDeclaration[];
   nodeCount: number;
   sourceBytes: number;
 }
 ```
 
-Ranges use zero-based UTF-16 offsets with exclusive ends, suitable for JavaScript strings and editor selections. Diagnostic line/column values are one-based; columns also count UTF-16 code units. Binding ranges cover the declared `let` identifier. Errors identify the real failing token or literal; missing input at EOF uses a zero-width range at the end of the document. Messages omit the legacy `Line ..., column ...:` prefix because coordinates are separate fields.
+Ranges use zero-based UTF-16 offsets with exclusive ends, suitable for JavaScript strings and editor selections. Diagnostic line/column values are one-based; columns also count UTF-16 code units. Binding and function ranges cover the declared identifier. A function’s type is its inferred return type. Errors identify the real failing token or literal; missing input at EOF uses a zero-width range at the end of the document. Messages omit the legacy `Line ..., column ...:` prefix because coordinates are separate fields.
 
-Valid source has no diagnostics. Invalid source returns the first compiler error; completed earlier declarations and the partial node count remain available after parser/type errors. Lexical errors return no bindings and a zero node count because lexing precedes parsing. `sourceBytes` counts the input's UTF-8 bytes, independently of its UTF-16 length. Oversized input is rejected before parsing, with an empty range at the document start.
+Valid source may carry warnings for physically ineffective recipe fields. The first error matches ordinary compilation. For parser and type errors, editor analysis can skip up to 16 failed declarations and recover independent errors and later declarations. It keeps the original source ranges. Recovery never registers or executes a modified program. Lexical errors return no bindings and a zero node count because lexing precedes parsing. `sourceBytes` counts the input's UTF-8 bytes, independently of its UTF-16 length. Oversized input is rejected before parsing, with an empty range at the document start.
 
-Analysis changes only its transient response buffer. It does not consume genome IDs or registry space, change the latest engine error, advance RNGs or cells, or alter checkpoint bytes. It remains available when the genome registry is full. The native ABI accepts a null pointer for empty or oversized input; other nonempty inputs must provide a readable UTF-8 source buffer. Copy the returned JSON before another allocating engine call, and free only the caller's source buffer. The analysis JSON schema is unchanged in ABI 12.
+Analysis changes only its transient response buffer. It does not consume genome IDs or registry space, change the latest engine error, advance RNGs or cells, or alter checkpoint bytes. It remains available when the genome registry is full. The native ABI accepts a null pointer for empty or oversized input; other nonempty inputs must provide a readable UTF-8 source buffer. Copy the returned JSON before another allocating engine call, and free only the caller's source buffer.
 
 ### World snapshot
 
