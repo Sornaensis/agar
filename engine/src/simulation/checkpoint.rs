@@ -163,6 +163,7 @@ impl World {
             w.f64(f.extra_energy);
             w.f64(f.composition.structural);
             w.f64(f.composition.bound);
+            w.f64(f.composition.ligand);
             if let Some(q)=f.counted {q.meal.write(w);w.u32(q.decay_credit);}
         }
         w.count(self.contacts.len());
@@ -266,10 +267,10 @@ impl World {
                     ensure(id != 0 && until <= counts[0].saturating_add(60) && mouth_ready.insert(id,until).is_none(), "invalid engulfing inlet cooldown")?;
                 }
             }
-            let mut gut = [OrganicMatter::default(); 3];
+            let mut gut = [OrganicMatter::default(); 4];
             let synthesis_rate;
             if version >= 4 {
-                for pool in &mut gut {
+                for pool in &mut gut[..if version >= 21 {4} else {3}] {
                     pool.energy = r.range(0.0, 1e12)?;
                     pool.nutrients = r.range(0.0, 1e12)?;
                     pool.extra_energy = read_substrate_enrichment(r, version, pool.energy)?;
@@ -481,8 +482,9 @@ impl World {
             let composition = if version >= 20 {
                 let structural = r.range(0.0, 1.0)?;
                 let bound = r.range(0.0, 1.0)?;
-                ensure(structural + bound <= 1.0 + 1e-15, "particle carbon fractions exceed its contents")?;
-                Composition { structural, bound }
+                let ligand = if version >= 21 {r.range(0.0, 1.0)?} else {0.0};
+                ensure(structural + bound + ligand <= 1.0 + 1e-15, "particle carbon fractions exceed its contents")?;
+                Composition { structural, bound, ligand }
             } else { Composition::pool(kind as usize) };
             let counted=if environment.uses_count_chemistry(){
                 let q=crate::counts::CountMeal::read(r)?;
@@ -689,6 +691,8 @@ mod tests {
             let position = bytes.len() - world.0.len() + offset;
             // v20 stores each cell's mounted mouth cooldowns after its scalar header.
             let cooldowns = position + env.0.len() + 4 + 4 * 4 + 24 * 8;
+            let ligand = cooldowns + 4 + 3 * 24; // v21 added a fourth substrate.
+            assert_eq!(bytes.drain(ligand..ligand+24).collect::<Vec<_>>(), [0; 24]);
             assert_eq!(bytes.drain(cooldowns..cooldowns+4).collect::<Vec<_>>(), [0;4]);
             assert_eq!(bytes.remove(position), 0);
             let mut census = Writer::new();

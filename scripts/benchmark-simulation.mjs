@@ -3,18 +3,19 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { resolve } from 'node:path';
-import { catalog, compile, seed, save, restore, error, snapshot, STRIDE } from './organelle-harness.mjs';
+import { catalog, compile, seed, save, restore, error, snapshot, snapshotStrides } from './organelle-harness.mjs';
 
 // Compare release WASM engines on identical worlds. Timers exclude setup,
 // checkpoint comparison, JS hydration, worker transfers and browser rendering.
 const args = process.argv.slice(2);
-let baselinePath, outputPath, scenarioName, samples = 3, ticks = 60;
+let baselinePath, outputPath, checkpointPath, scenarioName, samples = 3, ticks = 60;
 for (let i = 0; i < args.length; i += 2) {
   const value = args[i + 1];
   assert.ok(value, `Missing value for ${args[i]}`);
   switch (args[i]) {
     case '--baseline': baselinePath = resolve(value); break;
     case '--output': outputPath = resolve(value); break;
+    case '--checkpoint': checkpointPath = resolve(value); break;
     case '--scenario': scenarioName = value; break;
     case '--samples': samples = Number(value); break;
     case '--ticks': ticks = Number(value); break;
@@ -75,7 +76,9 @@ const scenarios = [
 const aliases = { 'particles-20000-default': 'tissue-20000-default', 'particles-100000-large': 'tissue-100000-large' };
 const requested = scenarioName?.split(',').map(name => aliases[name] ?? name);
 if (requested) for (const name of requested) assert.ok(scenarios.some(item => item.name === name), `Unknown scenario ${name}`);
-const chosen = scenarios.filter(item => requested ? requested.includes(item.name) : !item.optional);
+assert.ok(!(checkpointPath && requested), 'Select a saved checkpoint or named scenarios');
+const checkpoint = checkpointPath ? await readFile(checkpointPath) : null;
+const chosen = checkpoint ? [{ name: 'restored-world', warmup: 0 }] : scenarios.filter(item => requested ? requested.includes(item.name) : !item.optional);
 function advance(api, count) {
   for (let left = count; left > 0; left -= 120) {
     if (api.tick(Math.min(left, 120)) !== 1) throw new Error(error(api));
@@ -83,7 +86,11 @@ function advance(api, count) {
 }
 async function create(engine, scenario) {
   const api = (await WebAssembly.instantiate(engine.module, {})).exports;
-  assert.ok([22, 23].includes(api.abi_version()), `${engine.name}: this benchmark requires simulation ABI 22 or 23`);
+  assert.ok([22, 23, 24].includes(api.abi_version()), `${engine.name}: this benchmark requires simulation ABI 22, 23 or 24`);
+  if (checkpoint) {
+    assert.equal(restore(api, checkpoint), 1, error(api));
+    return { api, donorFounders: 0 };
+  }
   const c = scenario.config;
   assert.equal(api.set_world_size(c.width ?? 1200, c.height ?? 760), 1, error(api));
   api.set_environment(c.ambientTemperature, c.ambientLight, c.currentStrength);
@@ -162,24 +169,26 @@ function projection(api, method, ...args) {
   const pointer = api[method](...args), length = api.presentation_len();
   return new Float64Array(api.memory.buffer, pointer, length).slice();
 }
-function expectedRender(api, full) {
+function expectedRender(api, full, signalCount) {
+  const stride = snapshotStrides(api);
   let generation = 0;
-  const values = [full[0], full[1], full[2], full[3], full[4], full[5], full[6], full[7], full[8], full[11], api.mutation_rate(), 0];
+  const values = [full[0], full[1], full[2], full[3], full[4], full[5], full[6], full[7], full[8], signalCount, api.mutation_rate(), 0];
   const offsets = [0, 1, 2, 3, 4, 5, 6, 11, 7, 15, 24, 25, 19, 20, 81, 83, 94, 95, 47, 89, 9];
   for (let i = 0; i < full[2]; i++) {
-    const at = 12 + i * STRIDE;
+    const at = 12 + i * stride.cell;
     for (const offset of offsets) values.push(full[at + offset]);
     generation = Math.max(generation, full[at + 9]);
   }
   values[11] = generation;
-  for (let i = 12 + full[2] * STRIDE; i < full.length; i++) values.push(full[i]);
+  for (let i = 12 + full[2] * stride.cell; i < full.length; i++) values.push(full[i]);
   return new Float64Array(values);
 }
 function expectedMetrics(api, full) {
+  const stride = snapshotStrides(api);
   let generation = 0;
   const trophic = [0, 0, 0, 0], flow = [0, 0, 0], organic = [0, 0, 0], groups = new Map();
   for (let i = 0; i < full[2]; i++) {
-    const at = 12 + i * STRIDE, id = full[at + 1], age = full[at + 9];
+    const at = 12 + i * stride.cell, id = full[at + 1], age = full[at + 9];
     const photo = full[at + 39 + 1 * 6 + 5] > 0, digestive = full[at + 39 + 3 * 6 + 5] > 0;
     if (photo || digestive) trophic[photo && digestive ? 2 : photo ? 0 : 1]++;
     if (full[at + 39 + 8 * 6 + 5] > 0) trophic[3]++;
@@ -188,7 +197,7 @@ function expectedMetrics(api, full) {
     const group = groups.get(id) ?? [0, 0]; group[0]++; group[1] = Math.max(group[1], age); groups.set(id, group);
   }
   let packetEnergy = -0;
-  for (let at = 12 + full[2] * STRIDE; at < full.length; at += 5) {
+  for (let at = 12 + full[2] * stride.cell; at < full.length; at += stride.food) {
     organic[full[at + 4]]++;
     packetEnergy += full[at + 2];
   }
@@ -204,19 +213,26 @@ function expectedMetrics(api, full) {
   ]);
 }
 function validateProjections(api, referenceApi, full, label) {
+  const stride = snapshotStrides(api);
   if (!api.render_snapshot_ptr) return null;
   const render = projection(api, 'render_snapshot_ptr');
-  const geometry = expectedRender(referenceApi, full);
+  const referenceRender = projection(referenceApi, 'render_snapshot_ptr');
+  const signalCount = referenceRender[9];
+  assert.ok(Number.isInteger(signalCount) && signalCount >= 0 && signalCount <= full[2]);
+  const geometry = expectedRender(referenceApi, full, signalCount);
   sameBytes(render.subarray(0, geometry.length), geometry, `${label} compact render`);
   const colony = render.subarray(geometry.length);
-  sameBytes(colony, projection(referenceApi, 'render_snapshot_ptr').subarray(geometry.length), `${label} colony activity`);
-  assert.equal(colony.length % 4, 0);
+  sameBytes(colony, referenceRender.subarray(geometry.length), `${label} signals and bonds`);
+  assert.ok(colony.length >= signalCount * 2 && colony.length % 2 === 0);
   let priorRow = -1;
-  for (let i = 0; i < colony.length; i += 4) {
-    const [row, neighbors, valid, payload] = colony.subarray(i, i + 4);
-    assert.ok(Number.isInteger(row) && row > priorRow && row < full[2] && Number.isInteger(neighbors) && neighbors >= 0);
-    assert.ok((valid === 0 && payload === 0 && neighbors > 0) || (valid === 1 && Number.isFinite(payload)));
+  for (let i = 0; i < signalCount * 2; i += 2) {
+    const [row, payload] = colony.subarray(i, i + 2);
+    assert.ok(Number.isInteger(row) && row > priorRow && row < full[2] && Number.isFinite(payload));
     priorRow = row;
+  }
+  const ids = new Set(Array.from({ length: full[2] }, (_, i) => full[12 + i * stride.cell]));
+  for (let i = signalCount * 2; i < colony.length; i += 2) {
+    assert.ok(ids.has(colony[i]) && ids.has(colony[i + 1]) && colony[i] !== colony[i + 1]);
   }
   const metrics = projection(api, 'metrics_snapshot_ptr'), expected = expectedMetrics(referenceApi, full);
   const genomeBytes = { reference: expected[13], current: metrics[13] };
@@ -226,7 +242,7 @@ function validateProjections(api, referenceApi, full, label) {
   expected[13] = metrics[13];
   sameBytes(metrics, expected, `${label} metrics (genomeBytes accounting normalized)`);
   const selectedId = full[2] ? full[12] : null;
-  if (selectedId !== null) sameBytes(projection(api, 'cell_snapshot_ptr', selectedId), full.slice(12, 12 + STRIDE), `${label} selected cell`);
+  if (selectedId !== null) sameBytes(projection(api, 'cell_snapshot_ptr', selectedId), full.slice(12, 12 + stride.cell), `${label} selected cell`);
   const summary = projection(api, 'summary_snapshot_ptr');
   sameBytes(summary, new Float64Array([full[1], full[2], full[3], full[4], full[5], expected[7],
     full[0]]), `${label} summary`);
@@ -243,7 +259,7 @@ function validateProjections(api, referenceApi, full, label) {
   assert.ok(Math.abs(carbonError) < 1e-7 + metrics[37] * 1e-10, `${label} carbon conservation`);
   assert.ok(Math.abs(oxygenError) < 1e-7 + (metrics[47] + metrics[40]) * 1e-10, `${label} oxygen conservation`);
   return { selectedId, genomeBytes, payloadBytes: { compactRender: render.byteLength, metrics: metrics.byteLength,
-    selectedCell: selectedId === null ? 0 : STRIDE * 8, summary: summary.byteLength, environmentMetadata: metadataBytes } };
+    selectedCell: selectedId === null ? 0 : stride.cell * 8, summary: summary.byteLength, environmentMetadata: metadataBytes } };
 }
 function exportMeasurements(api, selectedId) {
   const operations = {
@@ -269,7 +285,7 @@ function exportMeasurements(api, selectedId) {
 }
 const report = {
   runtime: process.version, runtimeFlags: process.execArgv, platform: process.platform, architecture: process.arch,
-  abi: contract.abi, resourceArithmetic: 'whole counts', seed: 42, measuredTicks: ticks, samples, scratchWarmTicks: 5, warmupCheckInterval: 120, exportCallsPerSample: 30,
+  abi: contract.abi, resourceArithmetic: checkpoint ? 'restored' : 'whole counts', seed: checkpoint ? null : 42, measuredTicks: ticks, samples, scratchWarmTicks: 5, warmupCheckInterval: 120, exportCallsPerSample: 30,
   note: 'Release WASM in Node/V8. Tick and Rust export timings exclude JS hydration/copies, worker transfer/scheduling, main-thread rendering and setup. Medians of identical trajectories with alternating engine order.',
   tissuePreparation: 'Scattered ordinary founders start in anoxic water with a sealed surface. Their ATP is withdrawn to one ATP count before one upkeep tick per cohort. The scenario surface boundary is restored before seeding resident populations and warming the world.',
   equivalence: 'Canonical checkpoints and legacy world/environment buffers must match exactly. Compact projections match those legacy values; only metrics header[13] (genomeBytes) is normalized because derived execution-plan storage is now counted.',
@@ -279,7 +295,13 @@ for (const scenario of chosen) {
   console.log(`Preparing ${scenario.name}...`);
   const setups = await Promise.all(engines.map(engine => create(engine, scenario)));
   const apis = setups.map(setup => setup.api);
-  const initialParticles = projection(apis[0], 'summary_snapshot_ptr')[2];
+  if (apis.length === 2) {
+    const versions = apis.map(api => api.abi_version());
+    assert.equal(versions[0] < 24, versions[1] < 24,
+      'Exact state comparison requires matching chemistry and checkpoint layouts. Benchmark ABI 24 and historical engines separately.');
+  }
+  const initial = projection(apis[0], 'summary_snapshot_ptr');
+  const initialParticles = initial[2];
   for (let left = scenario.warmup; left > 0; left -= 120) {
     for (const api of apis) advance(api, Math.min(left, 120));
     if (apis.length === 2) sameBytes(save(apis[0]), save(apis[1]), `${scenario.name} warmup ${scenario.warmup - Math.max(0, left - 120)}`);
@@ -288,7 +310,7 @@ for (const scenario of chosen) {
   // Warm branches in the measured trajectory; --no-liftoff avoids tier changes.
   for (const api of apis) advance(api, 5 + ticks);
   if (apis.length === 2) sameBytes(save(apis[0]), save(apis[1]), `${scenario.name} trial`);
-  const timings = engines.map(() => []), exportTimings = engines.map(() => []);
+  const timings = engines.map(() => []), cpuTimings = engines.map(() => []), exportTimings = engines.map(() => []);
   const payloads = [], accounting = [];
   let finalState, finalCheckpoint, finalRaw, timedStartParticles;
   for (let sample = 0; sample < samples; sample++) {
@@ -300,9 +322,12 @@ for (const scenario of chosen) {
       assert.equal(restore(api, starting[index]), 1, error(api));
       advance(api, 5);
       timedStartParticles = projection(api, 'summary_snapshot_ptr')[2];
+      const cpuStart = process.cpuUsage();
       const start = performance.now();
       advance(api, ticks);
       timings[index].push((performance.now() - start) / ticks);
+      const cpu = process.cpuUsage(cpuStart);
+      cpuTimings[index].push((cpu.user + cpu.system) / (1000 * ticks));
       states[index] = save(api);
       snapshots[index] = rawSnapshot(api);
       exportTimings[index].push(exportMeasurements(api, snapshots[index].world[2] ? snapshots[index].world[12] : null));
@@ -324,7 +349,9 @@ for (const scenario of chosen) {
     }
   }
   const result = {
-    name: scenario.name, width: scenario.config.width ?? 1200, height: scenario.config.height ?? 760,
+    name: scenario.name, width: finalRaw.world[7], height: finalRaw.world[8],
+    initialPopulation: initial[1], startingTick: initial[6],
+    ...(checkpoint && { startingCheckpointSha256: sha256(checkpoint) }),
     synthetic: scenario.optional ?? false, warmupTicks: scenario.warmup, initialPopulations: scenario.populations, initialParticles,
     tissueTarget: scenario.tissueTarget ?? 0, donorFounders: setups[0].donorFounders, timedStartParticles,
     finalPopulation: finalState.population, finalParticles: finalState.food.length,
@@ -334,7 +361,7 @@ for (const scenario of chosen) {
     legacyWorldSha256: sha256(bytesOf(finalRaw.world)), environmentSha256: sha256(bytesOf(finalRaw.environment)),
     measurements: engines.map((engine, i) => {
       const exports = Object.fromEntries(Object.keys(exportTimings[i][0]).map(name => [name, median(exportTimings[i].map(sample => sample[name]))]));
-      return { engine: engine.name, tickMs: median(timings[i]), tickSamplesMs: timings[i], snapshotExportMs: exports.legacyCombined, exportMs: exports, exportSamplesMs: exportTimings[i], payloadBytes: payloads[i], genomeBytes: accounting[i].current, wasmMemoryBytes: apis[i].memory.buffer.byteLength };
+      return { engine: engine.name, tickMs: median(timings[i]), tickSamplesMs: timings[i], cpuTickMs: median(cpuTimings[i]), cpuTickSamplesMs: cpuTimings[i], snapshotExportMs: exports.legacyCombined, exportMs: exports, exportSamplesMs: exportTimings[i], payloadBytes: payloads[i], genomeBytes: accounting[i].current, wasmMemoryBytes: apis[i].memory.buffer.byteLength };
     }),
   };
   if (engines.length === 2) {

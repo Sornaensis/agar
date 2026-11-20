@@ -19,6 +19,9 @@ struct ParsedSource {
     initializers: [Option<Location>; 4],
     genes: Vec<cellular::GeneLocation>,
     geometry: Vec<cellular::GeometryLocation>,
+    ingredients: Vec<Location>,
+    targets: Vec<Option<Location>>,
+    lifetimes: Vec<Location>,
 }
 
 impl ParsedSource {
@@ -37,6 +40,9 @@ impl ParsedSource {
             initializers: parser.initializer_locations,
             genes: parser.gene_locations,
             geometry: parser.geometry_locations,
+            ingredients: parser.ingredient_locations,
+            targets: parser.target_locations,
+            lifetimes: parser.lifetime_locations,
         })
     }
 }
@@ -110,6 +116,21 @@ fn expression_changes(program: &Program, index: usize) -> Vec<ExpressionChange> 
     options
 }
 
+// Only swap the substrate of the same operation. Keep installation roles
+// identical so a binding-site change cannot add an unrelated organelle.
+fn specificity_options(recipe: &AssemblyDef) -> impl Iterator<Item = &'static str> {
+    let current = match recipe.kind {
+        AssemblyKind::Mechanism(kind) => Some(kind),
+        _ => None,
+    };
+    crate::cellular::MechanismKind::ALL.into_iter().filter_map(move |candidate| {
+        let existing = current?;
+        (candidate != existing && candidate.constructor() == existing.constructor()
+            && candidate.required_roles() == existing.required_roles())
+            .then(|| candidate.target()).flatten()
+    })
+}
+
 impl Program {
     /// Patch one typed source node in the inherited program. Comments, names,
     /// statement order and every byte outside that node are retained verbatim.
@@ -166,6 +187,19 @@ impl Program {
                     candidates.push((index, MutationKind::GeneDuplicate));
                 }
             }
+            if matches!(requested, MutationKind::Any | MutationKind::Turnover) {
+                candidates.extend((0..parsed.lifetimes.len()).map(|i| (i, MutationKind::Turnover)));
+            }
+            if matches!(requested, MutationKind::Any | MutationKind::Ingredient) {
+                candidates.extend((0..parsed.ingredients.len()).map(|i| (i, MutationKind::Ingredient)));
+            }
+            if matches!(requested, MutationKind::Any | MutationKind::Specificity) {
+                for (i, target) in parsed.targets.iter().enumerate() {
+                    if target.is_some() && specificity_options(&cellular.definition.assemblies[i]).next().is_some() {
+                        candidates.push((i, MutationKind::Specificity));
+                    }
+                }
+            }
             if matches!(requested, MutationKind::Any | MutationKind::Geometry) {
                 for (index, assembly) in cellular.definition.assemblies.iter().enumerate() {
                     if assembly.kind.surface_footprint() > 0.0 {
@@ -191,6 +225,9 @@ impl Program {
             let mut patched = source.to_string();
             patched.replace_range(literal.from..literal.to, &magnitude.to_string());
             return Some(Mutation { program: Self::compile_stored(&patched).ok()?, source: patched, kind });
+        }
+        if matches!(kind, MutationKind::Ingredient | MutationKind::Specificity | MutationKind::Turnover) {
+            return Self::mutate_recipe(source, &parsed, index, kind, &mut rng);
         }
         if kind == MutationKind::Geometry {
             return Self::mutate_geometry(source, &parsed, index, &mut rng);
@@ -300,7 +337,10 @@ impl Program {
             MutationKind::Any
             | MutationKind::GeneSilence
             | MutationKind::GeneDuplicate
-            | MutationKind::Geometry => {
+            | MutationKind::Geometry
+            | MutationKind::Ingredient
+            | MutationKind::Specificity
+            | MutationKind::Turnover => {
                 unreachable!()
             }
         };
@@ -340,6 +380,62 @@ impl Program {
             source: patched,
             kind,
         })
+    }
+
+    fn mutate_recipe(
+        source: &str, parsed: &ParsedSource, index: usize,
+        kind: MutationKind, rng: &mut MutationRng,
+    ) -> Option<Mutation> {
+        let (span, alternatives) = if kind == MutationKind::Turnover {
+            let product = &parsed.program.cellular()?.products[index];
+            let span = parsed.lifetimes[index];
+            let old = product.half_life;
+            let changed = if old == 0.0 {
+                (30 + rng.index(271)) as f64
+            } else if product.kind != ProductKind::Regulator && rng.index(12) == 0 {
+                0.0
+            } else {
+                let factor = 1.0 + (1 + rng.index(25)) as f64 / 100.0;
+                let increase = old <= 0.001 || (old < 1.0e6 && rng.index(2) == 0);
+                (if increase { old * factor } else { old / factor }).clamp(0.001, 1.0e6)
+            };
+            if source[span.from..span.to].contains('#') { return None; }
+            let prefix = if span.from == span.to && product.kind == ProductKind::Adhesin { ", " } else { "" };
+            (span, vec![format!("{prefix}{changed}")])
+        } else if kind == MutationKind::Ingredient {
+            let span = parsed.ingredients[index];
+            let old = source[span.from..span.to].parse::<f64>().ok()?;
+            let fraction = (1 + rng.index(25)) as f64 / 100.0;
+            let step = if parsed.program.uses_count_units() {
+                (old * fraction).round().max(1.0)
+            } else {
+                old * fraction
+            };
+            let sign = if rng.index(2) == 0 { 1.0 } else { -1.0 };
+            let options = [old + sign * step, old - sign * step].into_iter()
+                .filter(|v| v.is_finite() && *v > 0.0 && *v != old)
+                .map(|v| v.to_string()).collect::<Vec<_>>();
+            (span, options)
+        } else {
+            let recipe = &parsed.program.cellular()?.assemblies[index];
+            let mut options: Vec<_> = specificity_options(recipe).map(str::to_owned).collect();
+            let start = rng.index(options.len());
+            options.rotate_left(start);
+            (parsed.targets[index]?, options)
+        };
+        for replacement in alternatives {
+            if source.len() - (span.to - span.from) + replacement.len() > MAX_SOURCE_BYTES {
+                continue;
+            }
+            let mut patched = source.to_owned();
+            patched.replace_range(span.from..span.to, &replacement);
+            // Try the opposite dose or another target when physical validation
+            // or a typed, target-specific receptor read rejects the first edit.
+            if let Ok(program) = Self::compile_stored(&patched) {
+                return Some(Mutation { program, source: patched, kind });
+            }
+        }
+        None
     }
 
     fn mutate_geometry(
@@ -706,6 +802,67 @@ impl Program {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn composition_mutates_one_ingredient_in_either_unit_system() {
+        for (header, dose) in [("cellular counts;", "800"), ("cellular;", "0.08")] {
+            let source = format!("{header} product E=enzyme(); product S=scaffold();\r\nassembly Gut:digest(soluble){{ E:# dose\r\n{dose}; S:{dose}; }}");
+            let original = Program::compile(&source).unwrap();
+            let parent = &original.cellular().unwrap().assemblies[0];
+            for seed in 0..24 {
+                let mutation = Program::mutate_source(&source, seed, MutationKind::Ingredient).unwrap();
+                let updated = &mutation.program.cellular().unwrap().assemblies[0];
+                let changes: Vec<_> = parent.parts.iter().zip(&updated.parts).filter(|(a,b)| a != b).collect();
+                assert_eq!(changes.len(), 1);
+                assert_eq!(parent.kind, updated.kind);
+                assert!(mutation.source.contains("# dose\r\n"));
+                assert_eq!(mutation.source, Program::mutate_source(&source, seed, MutationKind::Ingredient).unwrap().source);
+                let count = changes[0].1.1 * crate::counts::SCALE as f64;
+                if original.uses_count_units() { assert!((count - count.round()).abs() < 1e-8); }
+            }
+        }
+    }
+
+    #[test]
+    fn turnover_changes_one_product_and_preserves_its_precursor_and_comments() {
+        let source = "cellular counts; product F = scaffold(# frame\n); product G=adhesin(F # glue\n); product E=enzyme(90); product R=regulator(2);";
+        let parent = Program::compile(source).unwrap();
+        let definition = parent.cellular().unwrap();
+        let mut seen = HashSet::new();
+        for seed in 0..128 {
+            let m = Program::mutate_source(source, seed, MutationKind::Turnover).unwrap();
+            let updated = m.program.cellular().unwrap();
+            let changes: Vec<_> = updated.products.iter().zip(&definition.products)
+                .filter(|(a,b)| a.half_life != b.half_life).collect();
+            assert_eq!(changes.len(), 1);
+            assert_eq!(updated.precursors, definition.precursors);
+            assert!(m.source.contains("# frame\n") && m.source.contains("# glue\n"));
+            assert!(updated.products.iter().all(|p| p.half_life >= 0.0));
+            seen.insert(changes[0].0.name.clone());
+        }
+        assert_eq!(seen.len(), 4);
+        assert!(Program::compile("cellular; product E=enzyme(-2);").is_err());
+        assert!(Program::compile("cellular; product R=regulator(0);").is_err());
+        // The new inventory has a qualified name so a preexisting declaration
+        // named ligand and an actual inventory read can coexist.
+        let old_name = "cellular counts; product ligand=enzyme(); gene make:ligand=if carbon.ligand > 0 then 1 else 0;";
+        assert!(Program::compile(old_name).is_ok());
+    }
+
+    #[test]
+    fn specificity_changes_only_one_substrate_and_can_arise_at_division() {
+        let source = "cellular counts; product E=enzyme(); assembly Gut:digest( # binding site\r\nsoluble ){ E: 800; }";
+        let replacement = Program::mutate_source(source, 12, MutationKind::Specificity).unwrap();
+        let target = replacement.program.cellular().unwrap().assemblies[0].kind.name();
+        assert!(matches!(target, "digest(structural)" | "digest(bound)"));
+        let argument = target.strip_prefix("digest(").unwrap().trim_end_matches(')');
+        assert_eq!(replacement.source, source.replace("soluble", argument));
+        let variants: Vec<_> = (0..64).filter_map(|seed| Program::mutate_source(source, seed, MutationKind::Any)).collect();
+        for kind in [MutationKind::Ingredient, MutationKind::Specificity] {
+            assert!(variants.iter().any(|m| m.kind == kind));
+        }
+        assert!(Program::mutate_source("cellular; product E=enzyme(); assembly R:repair(){ E:0.1; }", 1, MutationKind::Specificity).is_none());
+    }
     use super::*;
 
     const SOURCE: &str = "# café 🌱 — keep this layout\r\nlet reserve = energy * 0.25;  # useful name\r\nlet heading = sin(age + id);\r\nri001 = ri001 + 1 when !rb001;\r\nclear rb001 when age > 12;\r\nthrust = clamp(reserve, 0, 1);\r\nturn = heading;\r\ndivide = energy > 100 && chemical.valid; # end\r\n";

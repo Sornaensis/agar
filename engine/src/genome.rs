@@ -269,6 +269,7 @@ pub struct Inputs {
     pub organic_carbon: f64,
     pub internal_inorganic_carbon: f64,
     pub internal_oxygen: f64,
+    pub ligand: f64,
     pub respiration_rate: f64,
     pub carbon_fixation_rate: f64,
     pub energy: f64,
@@ -828,10 +829,10 @@ pub(crate) enum Sensor {
     ProteinChemoreceptor,
     ProteinMechanoreceptor,
     ProteinOptical,
-    OrganicCarbon, InorganicCarbon, Oxygen, RespirationRate, CarbonFixationRate,
+    OrganicCarbon, InorganicCarbon, Oxygen, RespirationRate, CarbonFixationRate, Ligand,
 }
 impl Sensor {
-    const ALL: [Self; 174] = [
+    const ALL: [Self; 175] = [
         Self::Energy,
         Self::EnergyFraction,
         Self::EnergyCapacity,
@@ -1001,11 +1002,12 @@ impl Sensor {
         Self::ProteinChemoreceptor,
         Self::ProteinMechanoreceptor,
         Self::ProteinOptical,
-        Self::OrganicCarbon, Self::InorganicCarbon, Self::Oxygen, Self::RespirationRate, Self::CarbonFixationRate,
+        Self::OrganicCarbon, Self::InorganicCarbon, Self::Oxygen, Self::RespirationRate, Self::CarbonFixationRate, Self::Ligand,
     ];
     fn name(self) -> &'static str {
         match self {
             Self::OrganicCarbon => "carbon.organic",
+            Self::Ligand => "carbon.ligand",
             Self::InorganicCarbon => "carbon.inorganic",
             Self::Oxygen => "oxygen",
             Self::RespirationRate => "respiration.rate",
@@ -1223,7 +1225,7 @@ impl Sensor {
         matches!(self, Self::Energy | Self::EnergyCapacity | Self::NutrientStored | Self::NutrientCapacity
             | Self::GutEnergy | Self::GutCapacity | Self::GutExudateEnergy | Self::GutExudateNutrients
             | Self::GutTissueEnergy | Self::GutTissueNutrients | Self::GutWasteEnergy | Self::GutWasteNutrients
-            | Self::OrganicCarbon | Self::InorganicCarbon | Self::Oxygen)
+            | Self::OrganicCarbon | Self::InorganicCarbon | Self::Oxygen | Self::Ligand)
     }
     fn program_type(self, counts: bool) -> Type {
         if counts && self.is_resource_amount() { Type::Count } else { self.ty() }
@@ -1252,6 +1254,7 @@ impl Sensor {
     fn read(self, i: &Inputs) -> Value {
         match self {
             Self::OrganicCarbon => Value::Scalar(finite(i.organic_carbon)),
+            Self::Ligand => Value::Scalar(finite(i.ligand)),
             Self::InorganicCarbon => Value::Scalar(finite(i.internal_inorganic_carbon)),
             Self::Oxygen => Value::Scalar(finite(i.internal_oxygen)),
             Self::RespirationRate => Value::Scalar(finite(i.respiration_rate)),
@@ -2215,6 +2218,9 @@ pub enum MutationKind {
     GeneSilence = 4,
     GeneDuplicate = 5,
     Geometry = 6,
+    Ingredient = 7,
+    Specificity = 8,
+    Turnover = 9,
 }
 #[derive(Debug, Clone)]
 pub struct Mutation {
@@ -3348,6 +3354,9 @@ struct Parser {
     assembly_names: HashMap<String, usize>,
     gene_locations: Vec<cellular::GeneLocation>,
     geometry_locations: Vec<cellular::GeometryLocation>,
+    ingredient_locations: Vec<Location>,
+    target_locations: Vec<Option<Location>>,
+    lifetime_locations: Vec<Location>,
     receptor_references: Vec<(usize, ReceptorField, Location)>,
     functions: HashMap<String, functions::UserFunction>,
     function_scope: Option<usize>,
@@ -3375,6 +3384,9 @@ impl Parser {
             assembly_names: HashMap::new(),
             gene_locations: Vec::new(),
             geometry_locations: Vec::new(),
+            ingredient_locations: Vec::new(),
+            target_locations: Vec::new(),
+            lifetime_locations: Vec::new(),
             receptor_references: Vec::new(),
             functions: HashMap::new(),
             function_scope: None,
@@ -4156,7 +4168,7 @@ mod tests {
             ))
             .is_err());
         }
-        assert_eq!(Sensor::ALL.len(), 174);
+        assert_eq!(Sensor::ALL.len(), 175);
         assert_eq!(
             Sensor::OrganelleFlagellumCount.read(&inputs),
             Value::Integer(7)

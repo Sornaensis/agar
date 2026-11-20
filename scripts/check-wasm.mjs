@@ -14,15 +14,28 @@ const stable=save(api);
 for(const source_ of ['thrust=true;turn=0;divide=false;','thrust=food.angle;turn=0;divide=false;',idle+'target.flagellum.count=.5;',idle+'scan.target=5;']){
   const b=new TextEncoder().encode(source_),p=api.alloc(b.length);new Uint8Array(api.memory.buffer,p,b.length).set(b);assert.equal(api.compile_genome(p,b.length),0);assert.ok(error(api));api.dealloc(p,b.length);assert.deepEqual(save(api),stable);
 }
-const schema=json(api,'language_schema_ptr','language_schema_len');assert.equal(schema.version,4);assert.equal(schema.signals.length,174);assert.equal(schema.outputs.length,81);
+const schema=json(api,'language_schema_ptr','language_schema_len');assert.equal(schema.version,4);assert.equal(schema.signals.length,175);assert.equal(schema.outputs.length,81);
 const cell=snapshot(api).cells[0];const b=body(api,cell.id);assert.ok(b.organs.length>0);assert.equal(b.requested.length,16);
-assert.equal(evaluation(api,cell.id).signals.length,174);assert.equal(evaluation(api,cell.id).outputs.length,81);assert.deepEqual(save(api),stable,'Inspection does not advance or commit');
+assert.equal(evaluation(api,cell.id).signals.length,175);assert.equal(evaluation(api,cell.id).outputs.length,81);assert.deepEqual(save(api),stable,'Inspection does not advance or commit');
 const empty=await fresh();const idleId=compile(empty,idle);seed(empty,idleId,1);
 const blank=snapshot(empty).cells[0];assert.equal(blank.organs.photosynthetic.count,0);assert.equal(blank.organs.flagellum.count,0);
 const noSensors=evaluation(empty,blank.id);for(const name of ['light.available','heat.available','chemical.available','flow.available','contact.available','object.available'])assert.equal(noSensors.signals.find(s=>s.name===name).value,false,name);
 const controls=compile(empty,idle+'target.flagellum.count=2;target.flagellum.size=.05;build.flagellum=0;');seed(empty,controls,1);advance(empty,120);
 assert.ok(snapshot(empty).cells.every(c=>c.organs.flagellum.count===0),'Targets alone supply no hardware');
 
+// Physical mutations act on heritable recipes; all three lineage types survive a checkpoint.
+const physical = 'cellular counts; product E=enzyme(60); assembly Gut:digest(soluble){E:800;}';
+const parentRecipe = compile(empty,physical);
+for (const kind of [7,8,9]) {
+  const changed = empty.mutate_genome(parentRecipe, 17, kind);
+  assert.ok(changed > 0 && changed !== parentRecipe);
+  assert.equal(empty.genome_mutation_kind(changed),kind);
+  assert.equal(empty.genome_parent(changed),parentRecipe);
+  const saved=save(empty);
+  assert.equal(restore(empty,saved),1,error(empty));
+  assert.deepEqual(save(empty),saved);
+  assert.equal(empty.mutate_genome(parentRecipe,17,kind),changed);
+}
 // Source-based mutations edit the inherited source, preserve comments, and
 // recompile every generated variant against the new mixed output types.
 const mutationSource='# retain this comment\nlet target = 2;\nri001 = ri001 + 1;\n'+idle+'target.flagellum.count=target;target.flagellum.size=.05;build.flagellum=.5;scan.target=rs001;';
@@ -53,7 +66,7 @@ const previous=await fresh();
 const previousSave=new Uint8Array(await readFile(new URL('../engine/fixtures/organelle-v3.bin',import.meta.url)));
 
 assert.equal(restore(previous,previousSave),1,error(previous));
-const migrated=save(previous);assert.equal(new DataView(migrated.buffer,migrated.byteOffset,migrated.byteLength).getUint32(8,true),20);
+const migrated=save(previous);assert.equal(new DataView(migrated.buffer,migrated.byteOffset,migrated.byteLength).getUint32(8,true),21);
 assert.equal(source(previous,1),JSON.parse(await readFile(new URL('../engine/fixtures/organelle-v3.json',import.meta.url),'utf8')).source);
 const priorCell=snapshot(previous).cells[0];
 assert.ok(priorCell.organs.photosynthetic.mass>0 && priorCell.organs.digestive.mass>0,'Restoring an existing cell never reconstructs it from the minimal founder');
@@ -98,5 +111,5 @@ const older=advance(longLived,10800);assert.equal(older.population,1,'A funded, 
 assert.ok(older.cells[0].age>359);assert.equal(older.cells[0].lifespan,0);
 const olderState=save(longLived),olderCopy=await fresh();assert.equal(restore(olderCopy,olderState),1,error(olderCopy));
 assert.deepEqual(save(olderCopy),olderState,'Older organisms remain valid saved state');
-console.log(`WASM organelle integration passed: ABI23, typed schema, five register banks, original-source mutations, genome-grown bodies, closed material, checkpoint20 replay and v3/v4 compatibility, uncapped2,049-organism restore, ${state.births} producer births.`);
+console.log(`WASM organelle integration passed: ABI24, typed schema, five register banks, original-source mutations, genome-grown bodies, closed material, checkpoint21 replay and v3/v4 compatibility, uncapped2,049-organism restore, ${state.births} producer births.`);
 await checkEngineLoader();

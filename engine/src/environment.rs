@@ -500,8 +500,8 @@ impl Environment {
     }
 
     pub fn patch_index(&self, x: f64, y: f64) -> usize {
-        let col = (x.rem_euclid(self.width) / self.width * self.columns as f64) as usize;
-        let row = (y.rem_euclid(self.height) / self.height * self.rows as f64) as usize;
+        let col = (wrapped(x, self.width) / self.width * self.columns as f64) as usize;
+        let row = (wrapped(y, self.height) / self.height * self.rows as f64) as usize;
         row.min(self.rows - 1) * self.columns + col.min(self.columns - 1)
     }
 
@@ -603,7 +603,7 @@ impl Environment {
                 .sources
                 .iter()
                 .any(|s| matches!(s.kind, 2 | 5 | 6 | 7) && s.strength != 0.0);
-        if has_flow {
+        if has_flow && (self.current_strength != 0.0 || self.scratch.face_flow.len() != self.patch_count()) {
             self.scratch
                 .face_flow
                 .resize(self.patch_count(), (0.0, 0.0));
@@ -813,8 +813,17 @@ fn bounded(value: f64, lo: f64, hi: f64, default: f64) -> f64 {
         default
     }
 }
-fn delta(value: f64, size: f64) -> f64 {
-    (value + size * 0.5).rem_euclid(size) - size * 0.5
+/// Positions already inside the torus are common. Skipping the remainder
+/// preserves even signed zero. Larger displacements still use Euclidean wrap.
+#[inline]
+pub(crate) fn wrapped(value: f64, size: f64) -> f64 {
+    if value >= 0.0 && value < size { value } else { value.rem_euclid(size) }
+}
+
+#[inline]
+pub(crate) fn delta(value: f64, size: f64) -> f64 {
+    // Retain both rounding operations around the half-world offset.
+    wrapped(value + size * 0.5, size) - size * 0.5
 }
 
 impl Environment {

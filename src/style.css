@@ -119,7 +119,8 @@ input:disabled, select:disabled, textarea:disabled { opacity: .55; cursor: defau
 /* Library cards have one opener, with independent contextual actions. */
 .catalog-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .genome-grid, .catalog-grid:has(> .genome-card) { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.environment-grid, .simulation-grid, .preset-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.environment-grid, .simulation-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.preset-grid { grid-template-columns: minmax(0, 1fr); }
 .catalog-card { position: relative; display: flex; flex-direction: column; min-width: 0; border: 1px solid #2c3539; border-radius: 12px; background: #1a2023; transition: background .16s, border-color .16s; }
 .catalog-card:hover { border-color: #495a57; background: #1e2729; }
 .card-open { display: flex; align-items: flex-start; flex-direction: column; flex: 1; width: 100%; min-height: 152px; padding: 22px; border: 0; border-radius: inherit; text-align: left; }
@@ -158,7 +159,7 @@ input:disabled, select:disabled, textarea:disabled { opacity: .55; cursor: defau
 .preset-card .card-open { flex-direction: row; align-items: center; gap: 14px; min-height: 110px; padding: 20px; }
 .preset-card .card-copy { flex: 1; }
 .preset-card .card-title { padding-right: 0; font-size: 14px; }
-.preset-card .card-description { font-size: 11px; margin-top: 4px; }
+.preset-card .card-description { max-width: 82ch; margin-top: 4px; }
 .preset-founders { display: block; margin-top: 9px; color: #b5c3bb; font-size: 11px; }
 .preset-card .card-identity { width: 35px; height: 35px; border-radius: 9px; }
 .preset-card .card-identity .icon { width: 19px; height: 19px; }
@@ -435,8 +436,6 @@ kbd { padding: 2px 5px; border: 1px solid #505455; border-radius: 4px; font-size
   .environment-editor { grid-template-columns: minmax(0, 1fr) 250px; gap: 20px; }
   .preset-grid { grid-template-columns: minmax(0, 1fr); gap: 9px; }
   .preset-card .card-open { min-height: 83px; padding: 17px 20px; }
-  .preset-card .card-copy { display: flex; align-items: center; gap: 22px; }
-  .preset-card .card-title { flex: 0 0 145px; }
   .preset-card .card-description { margin: 0; }
   .genome-card .card-open { gap: 12px; padding-left: 17px; }
   .card-description { font-size: 11px; }

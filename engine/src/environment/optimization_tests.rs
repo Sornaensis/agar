@@ -417,3 +417,27 @@ fn patch_helpers_and_metadata_preserve_canonical_state_and_full_snapshot_records
     assert_eq!(&metadata[21..], &full[21 + patches.patch_count() * 7..]);
     assert_eq!(state(&patches), before);
 }
+
+#[test]
+fn reusable_face_velocities_follow_source_edits_ambient_changes_and_resize() {
+    let mut env = Environment::default();
+    env.configure(0.5, 0.7, 0.0);
+    let port = env.add_source(2, 80.0, 80.0, 0.65, 120.0);
+    for stage in 0..6 {
+        match stage {
+            1 => assert!(env.update_source(port, 6, 30.0, 210.0, 0.7, 80.0, 0.6, 300.0)),
+            2 => env.configure(0.5, 0.7, 8.0),
+            3 => env.configure(0.5, 0.7, 0.0),
+            4 => assert!(env.set_size(880.0, 520.0)),
+            5 => assert!(env.add_barrier(4.0, 8.0, 80.0, 16.0, 0.4, true) > 0),
+            _ => {}
+        }
+        for t in [0.0, 8.0] {
+            assert!(env.prepare_transport_flow(t));
+            for i in 0..env.patch_count() {
+                let expected = (env.grid_flow(i, 1, t).0, env.grid_flow(i, 2, t).1);
+                assert_eq!(bits(env.scratch.face_flow[i]), bits(expected));
+            }
+        }
+    }
+}

@@ -65,6 +65,27 @@ async function engineClass(assetUrl, contract) {
   return (await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`)).Engine;
 }
 
+// Preserve the original ABI's golden byte hashes, and validate every newly
+// appended value while projecting an imported, ligand-free world.
+function historicalSnapshotBytes(api) {
+  const pointer = api.snapshot_ptr();
+  const data = new Float64Array(api.memory.buffer, pointer, api.snapshot_len());
+  const [, , cells, particles] = data;
+  assert.equal(data.length, 12 + 166 * cells + 6 * particles);
+  const historical = new Float64Array(12 + 163 * cells + 5 * particles);
+  historical.set(data.subarray(0,12));
+  let input = 12, output = 12;
+  for (let i=0; i<cells; i++, input+=166, output+=163) {
+    historical.set(data.subarray(input,input+163),output);
+    assert.deepEqual(Array.from(data.subarray(input+163,input+166)),[0,0,0]);
+  }
+  for (let i=0; i<particles; i++, input+=6, output+=5) {
+    historical.set(data.subarray(input,input+5),output);
+    assert.equal(data[input+5],0);
+  }
+  return new Uint8Array(historical.buffer);
+}
+
 export async function checkEngineLoader() {
   const artifact = await validateEngineArtifact();
   const contract = JSON.parse(await readFile(new URL('../src/engine-contract.json', import.meta.url), 'utf8'));
@@ -168,8 +189,7 @@ export async function checkEngineLoader() {
     assert.equal(organicHistory.readUInt32LE(8), 13);
     organicProbe.restoreState(organicHistory);
     const api = organicProbe.wasm;
-    const packetStart = api.snapshot_ptr() + 12 * 8;
-    const packets = new Uint8Array(api.memory.buffer, packetStart, (api.snapshot_len() - 12) * 8);
+    const packets = historicalSnapshotBytes(api).subarray(12*8);
     assert.equal(createHash('sha256').update(packets).digest('hex'), 'cdbd87b3d8d4751a4adce408cb22361dc47cffd06c98cb384d1849703b4f540e');
     const organicSaved = organicProbe.saveState();
     const organicTotals = organicProbe.metricsSnapshot();
@@ -183,7 +203,7 @@ export async function checkEngineLoader() {
     organicProbe.restoreState(organicSaved); organicProbe.tick(300);
     assert.deepEqual(organicProbe.saveState(), future);
     const current=editorA.saveState();
-    assert.equal(new DataView(current.buffer,current.byteOffset,current.byteLength).getUint32(8,true),20);
+    assert.equal(new DataView(current.buffer,current.byteOffset,current.byteLength).getUint32(8,true),21);
     for (const filename of ['trophic-v1.bin','trophic-v2.bin']) {
       const legacy=new Uint8Array(await readFile(new URL('../engine/fixtures/'+filename,import.meta.url)));
       assert.throws(()=>editorA.restoreState(legacy),/Unsupported simulation version.*preserved/);
@@ -215,7 +235,7 @@ export async function checkEngineLoader() {
     const migrated = await Engine.load();
     migrated.restoreState(historical);
     const upgraded = migrated.saveState();
-    assert.equal(new DataView(upgraded.buffer, upgraded.byteOffset, upgraded.byteLength).getUint32(8,true), 20);
+    assert.equal(new DataView(upgraded.buffer, upgraded.byteOffset, upgraded.byteLength).getUint32(8,true), 21);
     // Recorded on the shipped ABI19 engine using this authentic v9 founder.
     // Compare biology independently of the current genome registry's memory budget.
     function physicalStateHash(instance) {
@@ -230,7 +250,7 @@ export async function checkEngineLoader() {
           assert.equal(new DataView(bytes.buffer,bytes.byteOffset).getFloat64(13 * width,true),5543+12+4);
           hash.update(bytes.subarray(0, 13 * width));
           hash.update(bytes.subarray(14 * width));
-        } else hash.update(bytes);
+        } else hash.update(read === 'snapshot_ptr' ? historicalSnapshotBytes(api) : bytes);
       }
       return hash.digest('hex');
     }
@@ -260,7 +280,8 @@ export async function checkEngineLoader() {
       ['environment_snapshot_ptr','environment_snapshot_len',4,'f10db2a8b3fe4c5ba8f271ce188d31c17778b03427b676d2ae8596267c559d39'],
     ]) {
       const api = markerOnly.wasm, ptr = api[read]();
-      assert.equal(createHash('sha256').update(new Uint8Array(api.memory.buffer,ptr,api[len]()*width)).digest('hex'),expected);
+      const bytes = read === 'snapshot_ptr' ? historicalSnapshotBytes(api) : new Uint8Array(api.memory.buffer,ptr,api[len]()*width);
+      assert.equal(createHash('sha256').update(bytes).digest('hex'),expected);
     }
     replay.restoreState(markerOnly.saveState());
     markerOnly.tick(60); replay.tick(60);
@@ -269,7 +290,7 @@ export async function checkEngineLoader() {
 
     const body=editorA.cellBody(editorA.snapshot().cells[0].id);
     assert.ok(body.organs.length>0);assert.ok(body.spaceUsed<=body.spaceCapacity);
-    const schema=editorA.languageSchema();assert.equal(schema.signals.length,174);assert.equal(schema.outputs.length,81);
+    const schema=editorA.languageSchema();assert.equal(schema.signals.length,175);assert.equal(schema.outputs.length,81);
     assert.deepEqual(editorA.saveState(),current,'Schema and body inspection do not alter saved state');
     await Engine.load();
     assert.equal(requests.length, requestsBefore + 1, 'Later loads reuse compiled code');
@@ -277,7 +298,7 @@ export async function checkEngineLoader() {
   } finally {
     globalThis.fetch = originalFetch; WebAssembly.compile = originalCompile;
   }
-  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, version20 body/product/substrate/mechanism/control/environment/gas continuation and explicit atomic rejection of pre-organelle checkpoints.');
+  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, version21 body/product/substrate/mechanism/control/environment/gas continuation and explicit atomic rejection of pre-organelle checkpoints.');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await checkEngineLoader();

@@ -100,8 +100,13 @@ async function tabTo(surface,selector) {
 
 try {
   await page.goto(process.env.UI_TEST_URL || 'http://127.0.0.1:4173/');
-  await page.locator('[data-id="builtin:simulation:nurse-rosette"][data-action="start-template"]').click();
+  await page.locator('[data-action="new-simulation"]').click();
+  await page.locator('#simulation-environment').selectOption('builtin:environment:colony-pool');
   assert.equal(await page.locator('#resource-arithmetic').inputValue(),'counts');
+  while (await page.locator('[data-remove-population]').count() > 1) {
+    await page.locator('[data-remove-population]').last().click();
+  }
+  await page.locator('[data-population="0"]').selectOption('builtin:genome:nurse-rosette');
   await page.locator('[data-count="0"]').fill('0');
   await page.getByRole('button',{name:/Start simulation/}).click();
   await page.getByRole('button',{name:'Pause simulation'}).click();

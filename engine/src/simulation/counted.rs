@@ -381,11 +381,10 @@ impl Cell {
         let extra=proportional(q.reserve_extra,carbon,q.carbon);q.reserve_extra-=extra;q.carbon-=carbon;
         if carbon>0||mineral>0 {out.push(CountMeal{carbon,mineral,extra}.emission(OrganicKind::Exudate,self.x,self.y));}
         let mut available=u64::from(floor(cap.gut_energy));let mut minerals=floor(cap.gut_minerals);
-        for kind in OrganicKind::ALL {
-            let p=&mut q.gut[kind as usize];
+        for (index, p) in q.gut.iter_mut().enumerate() {
             let n=p.fitting(p.carbon,available,minerals);
             let kept=p.take(n);
-            if p.carbon!=0 {out.push(p.emission(OrganicKind::Waste,self.x,self.y).material(Composition::pool(kind as usize)));}
+            if p.carbon!=0 {out.push(p.emission(OrganicKind::Waste,self.x,self.y).material(Composition::pool(index)));}
             *p=kept;available-=kept.energy();minerals-=kept.mineral;
         }
         self.project_counts();
@@ -438,8 +437,9 @@ impl World {
                 let stock=&mut f.counted.as_mut().unwrap().meal;
                 let part=batch.take(limit.saturating_sub(stock.energy()),u32::MAX-stock.mineral,false);
                 if part.carbon==0 {continue;}
-                let incoming = emission.composition.portion(batch.c + u64::from(part.carbon), batch.c);
-                f.composition = f.composition.mix(f64::from(stock.carbon), incoming, f64::from(part.carbon));
+                let incoming = emission.composition.taken(batch.c + u64::from(part.carbon), batch.c);
+                let held = f.composition.counts(u64::from(stock.carbon));
+                f.composition = Composition::from_counts(std::array::from_fn(|i| held[i] + incoming[i]));
                 stock.join(part);f.project_counts();
                 if let Some(envelope)=emission.outside {
                     if delta(f.x-envelope.0,self.environment.width).hypot(delta(f.y-envelope.1,self.environment.height))<envelope.2 {

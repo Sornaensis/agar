@@ -33,7 +33,8 @@ let surplus = equipped && energy > 550000;
 publish rf090;
 rf090 = 41;
 rf091 = 72;
-# This stationary producer spends no material on locomotion.
+# Read a grazer display at the same surface as the carbon junction.
+let grazer_present = sensed.DockReader.message_valid && sensed.DockReader.message == rf091;
 
 let need_Respiration = funded && (true) && missing(built.Respiration, (if preparing_daughters then 0.08 else 0.04), 0.04);
 let need_Solar = funded && (true) && missing(built.Solar, (if preparing_daughters then 0.24 else 0.12), 0.12);
@@ -43,7 +44,7 @@ let need_MineralPort = funded && (powered) && missing(built.MineralPort, (if exp
 let need_Badge = funded && (powered) && missing(built.Badge, 0.01, 0.01);
 let need_DockReader = funded && (powered) && missing(built.DockReader, 0.01, 0.01);
 let need_Outlet = funded && (powered) && missing(built.Outlet, (if expanding then 0.06 else 0.03), 0.03);
-let need_FarOutlet = funded && (powered) && missing(built.FarOutlet, 0.03, 0.03);
+let need_FarOutlet = funded && (powered) && missing(built.FarOutlet, 0.036, 0.036);
 let need_Translation = funded && (powered) && missing(built.Translation, (if preparing_daughters then 0.08 else 0.04), 0.04);
 let need_Minerals = funded && (powered || nutrient.stored < 1300) && missing(built.Minerals, (if preparing_daughters then 0.05 else 0.025), 0.025);
 let need_EnergyStore = funded && (powered) && missing(built.EnergyStore, (if expanding || energy.capacity <= 1000000 then 0.08 else 0.04), 0.04);
@@ -57,7 +58,7 @@ let need_Division = funded && (expanding) && missing(built.Division, (if expandi
 gene supply_CoatPrecursor: CoatPrecursor = if (need_Dock) && pool.Glue < 10 && pool.CoatPrecursor < 10 then 1 else 0;
 gene supply_Catalyst: Catalyst = if pool.Catalyst < 10 then (if need_Respiration then 1 else 0) + (if need_Solar then 0.25 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0) else 0;
 gene supply_Wall: Wall = if pool.Wall < 10 then (if need_Respiration then 0.6 else 0) + (if need_Dock then 1 else 0) + (if need_CarbonPort then 1 else 0) + (if need_MineralPort then 1 else 0) + (if need_Badge then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0) else 0;
-gene supply_Mount: Mount = if pool.Mount < 10 then (if need_Solar then 0.25 else 0) + (if need_Dock then 1 else 0) + (if need_Badge then 0.666667 else 0) + (if need_DockReader then 0.333333 else 0) + (if need_Outlet then 0.25 else 0) + (if need_FarOutlet then 0.25 else 0) + (if need_Minerals then 0.25 else 0) + (if need_Division then 0.5 else 0) else 0;
+gene supply_Mount: Mount = if pool.Mount < 10 then (if need_Solar then 0.25 else 0) + (if need_Dock then 1 else 0) + (if need_Badge then 0.666667 else 0) + (if need_DockReader then 0.333333 else 0) + (if need_Outlet then 0.25 else 0) + (if need_FarOutlet then 0.176471 else 0) + (if need_Minerals then 0.25 else 0) + (if need_Division then 0.5 else 0) else 0;
 gene supply_Pigment: Pigment = if pool.Pigment < 10 then (if need_Solar then 1 else 0) else 0;
 gene supply_Glue: Glue = if pool.Glue < 10 then (if need_Dock then 0.5 else 0) else 0;
 gene supply_Carrier: Carrier = if pool.Carrier < 10 then (if need_CarbonPort then 1 else 0) + (if need_MineralPort then 1 else 0) + (if need_Outlet then 1 else 0) + (if need_FarOutlet then 1 else 0) + (if need_Minerals then 1 else 0) else 0;
@@ -96,7 +97,7 @@ assembly CarbonPort: junction(carbon) {
   Wall: 250;
   Carrier: 250;
   start_when: need_CarbonPort;
-  activity: if carbon.organic > 4500 * body.area && energy > 240000 then 1 else 0;
+  activity: if carbon.organic > (if grazer_present then 2500 else 4500) * body.area && energy > 240000 then 1 else 0;
 }
 
 assembly MineralPort: junction(mineral) {
@@ -125,14 +126,14 @@ assembly Outlet: export(carbon) {
   Mount: 60;
   Carrier: 240;
   start_when: need_Outlet;
-  activity: if carbon.organic > 1500 * body.area && energy.fraction > 0.12 then 1 else 0;
+  activity: if carbon.organic > 1500 * body.area && energy.fraction > 0.12 then (if grazer_present then 0.25 else 1) else 0;
 }
 
 assembly FarOutlet: export(carbon) {
-  Mount: 60;
-  Carrier: 240;
+  Mount: 54;
+  Carrier: 306;
   start_when: need_FarOutlet;
-  activity: if carbon.organic > 3500 * body.area && energy.fraction > 0.25 then 1 else 0;
+  activity: if carbon.organic > 3500 * body.area && energy.fraction > 0.25 then (if nutrient.fraction < 0.6 || carbon.organic > 10000 * body.area then 1 else 0.84) else 0;
   at: 3.141592653589793;
 }
 

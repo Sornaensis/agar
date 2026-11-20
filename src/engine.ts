@@ -11,7 +11,7 @@ export const MECHANISM_KINDS = [
   'import(mineral)', 'import(particle)', 'engulf()', 'digest(soluble)', 'digest(structural)', 'digest(bound)',
   'propel()', 'pierce()', 'shield()', 'repair()', 'sense(light)', 'sense(heat)', 'sense(chemical)',
   'sense(contact)', 'sense(optical)', 'grow()', 'replicate()', 'constrict()', 'recycle()',
-  'respire(oxygen)', 'adhere()', 'junction(energy)', 'junction(mineral)', 'junction(carbon)', 'junction(signal)', 'display()', 'export(carbon)',
+  'respire(oxygen)', 'adhere()', 'junction(energy)', 'junction(mineral)', 'junction(carbon)', 'junction(signal)', 'display()', 'export(carbon)', 'isomerize(ligand)', 'isomerize(carbon)', 'export(ligand)',
 ] as const;
 export type MechanismKind = typeof MECHANISM_KINDS[number];
 export type CellularAssemblyKind = OrganelleKind | 'membrane' | 'replicator' | 'constrictor' | MechanismKind;
@@ -115,11 +115,11 @@ export interface Cell {
   gutExudateEnergy:number; gutTissueEnergy:number; gutWasteEnergy:number;
   gutExudateNutrients:number; gutTissueNutrients:number; gutWasteNutrients:number; expressionRate:number;
   bodyUpkeep:number; spaceUsed:number; spaceCapacity:number; surfaceUsed:number; surfaceCapacity:number; divisionReady:boolean; opticalRange:number;
-  organicCarbon:number; internalOxygen:number; internalInorganicCarbon:number; respirationRate:number; carbonFixationRate:number;
+  organicCarbon:number; ligandCarbon:number; gutLigandEnergy:number; gutLigandNutrients:number; internalOxygen:number; internalInorganicCarbon:number; respirationRate:number; carbonFixationRate:number;
   organelles:OrganelleSummary[];
 }
 export type OrganicKind = 0 | 1 | 2;
-export interface Food { x: number; y: number; energy: number; nutrients: number; kind:OrganicKind }
+export interface Food { x: number; y: number; energy: number; nutrients: number; kind:OrganicKind; ligandFraction:number }
 export type SourceKind = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
 export interface GasExchangeConfig {
   mode: 'sealed' | 'open'; exchangeRate: number; oxygenEquilibrium: number; carbonEquilibrium: number;
@@ -342,11 +342,18 @@ export function validateGenomeGraph(value: unknown): GenomeGraph {
 }
 export const MAX_PROGRAM_BYTES = 262_144;
 export const MAX_STATE_BYTES = 128 * 1024 * 1024;
-const READ_SIGNAL_COUNT = 174;
+const READ_SIGNAL_COUNT = 175;
 const WRITE_SIGNAL_COUNT = 81;
-const CELL_STRIDE = 163;
-const FOOD_STRIDE = 5;
-export type MutationKind = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+const CELL_STRIDE = 166;
+const FOOD_STRIDE = 6;
+function decodeFood(data: Float64Array, offset: number): Food {
+  const kind = data[offset + 4], ligandFraction = data[offset + 5];
+  if ((kind !== 0 && kind !== 1 && kind !== 2) || !(ligandFraction >= 0 && ligandFraction <= 1)) {
+    throw new Error('The particle snapshot has an invalid origin or ligand fraction.');
+  }
+  return { x:data[offset], y:data[offset+1], energy:data[offset+2], nutrients:data[offset+3], kind, ligandFraction };
+}
+export type MutationKind = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 export interface GenomeLineageEntry { id: number; parentId: number; mutationKind: MutationKind }
 export interface GenomeRecord { source: string; parentId: number; mutationKind: MutationKind }
 export interface MutationResult { id: number; changed: boolean; reason: string }
@@ -488,9 +495,7 @@ export function decodeRenderSnapshot(data: Float64Array): RenderSnapshot {
   const start = RENDER_HEADER + cells.length * RENDER_CELL_STRIDE;
   for (let i = 0; i < data[3]; i++) {
     const n = start + i * FOOD_STRIDE;
-    const kind = data[n+4];
-    if (kind !== 0 && kind !== 1 && kind !== 2) throw new Error('The render snapshot has an invalid organic material kind.');
-    food.push({x:data[n],y:data[n+1],energy:data[n+2],nutrients:data[n+3],kind});
+    food.push(decodeFood(data,n));
   }
   let previous = -1;
   for (let n = baseLength; n < bondsStart; n += 2) {
@@ -1018,8 +1023,7 @@ export class Engine {
     }
     for (let i = 0; i < data[3]; i++) {
       const n = 12 + cells.length * CELL_STRIDE + i * FOOD_STRIDE;
-      if (![0,1,2].includes(data[n+4])) throw new Error('The world snapshot has an invalid organic material kind.');
-      food.push({ x:data[n], y:data[n+1], energy:data[n+2], nutrients:data[n+3], kind:data[n+4] as OrganicKind });
+      food.push(decodeFood(data,n));
     }
     // Copy every snapshot value before further calls: Rust may grow its memory.
     const state = { tick:data[0], time:data[1], cells, food, births:data[4], deaths:data[5], eaten:data[6],
@@ -1044,5 +1048,5 @@ function decodeCell(data: Float64Array, n: number): Cell {
     bodyArea:data[n+12],bodyMass:data[n+13],birthArea:data[n+14],energyCapacity:data[n+15],basalMetabolism:data[n+16],memoryUsed:data[n+17],memoryCost:data[n+18],integrity:data[n+19],photosynthesisRate:data[n+20],
     nutrientStored:data[n+21],nutrientCapacity:data[n+22],nutrientUptakeRate:data[n+23],gutEnergy:data[n+24],gutCapacity:data[n+25],gutNutrients:data[n+26],digestionRate:data[n+27],growthRate:data[n+28],maturity:data[n+29],exudationRate:data[n+31],bodyUpkeep:data[n+32],spaceUsed:data[n+33],spaceCapacity:data[n+34],surfaceUsed:data[n+35],surfaceCapacity:data[n+36],divisionReady:data[n+37]!==0,opticalRange:data[n+38],
     gutExudateEnergy:data[n+135],gutTissueEnergy:data[n+136],gutWasteEnergy:data[n+137],gutExudateNutrients:data[n+138],gutTissueNutrients:data[n+139],gutWasteNutrients:data[n+140],expressionRate:data[n+157],
-    organicCarbon:data[n+158],internalOxygen:data[n+159],internalInorganicCarbon:data[n+160],respirationRate:data[n+161],carbonFixationRate:data[n+162],organelles};
+    organicCarbon:data[n+158],internalOxygen:data[n+159],internalInorganicCarbon:data[n+160],respirationRate:data[n+161],carbonFixationRate:data[n+162],ligandCarbon:data[n+163],gutLigandEnergy:data[n+164],gutLigandNutrients:data[n+165],organelles};
 }

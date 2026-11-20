@@ -1,3 +1,4 @@
+import { scenarioFixtures } from './scenario-fixtures.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFile, writeFile} from 'node:fs/promises';
@@ -31,7 +32,7 @@ assert.equal(old.count_audit_ptr(),0); assert.equal(old.energy_loss_ptr(),0);
 const original=save(old);assert.equal(old.set_count_chemistry(1),0);assert.deepEqual(save(old),original);
 assert.equal(restore(old,original),1,error(old));assert.deepEqual(save(old),original);
 
-const {BUILTIN_ENVIRONMENTS,BUILTIN_SIMULATIONS,BUILTIN_GENOMES}=await catalog();
+const {BUILTIN_ENVIRONMENTS,BUILTIN_GENOMES}=await catalog();
 const dark=await fresh(zero);
 const staged=`cellular counts;
 product Frame=scaffold(); product Glue=adhesin(Frame); product Anchor=anchor(); product Skin=membrane();
@@ -69,7 +70,7 @@ assert.equal(same.uses_count_chemistry(),1);assert.deepEqual(save(same),checkpoi
 // Identical genome source, setup, seed and launch order isolate the effects
 // of counted chemistry. Measure only engine stepping; audit and IO are outside.
 async function observe(countChemistry) {
-  const template=BUILTIN_SIMULATIONS.find(v=>v.id.endsWith(':hunting-ground'));
+  const template=scenarioFixtures.find(v=>v.id.endsWith(':hunting-ground'));
   const env=BUILTIN_ENVIRONMENTS.find(v=>v.id===template.environmentId);
   const api=await fresh({...env.config,countChemistry,mutationRate:.1,seed:42});
   for(const row of template.populations) {

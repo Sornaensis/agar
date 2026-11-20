@@ -1,0 +1,1560 @@
+{
+  "nativePhysicalPhases": {
+    "seed": 42,
+    "setup": "Native Rust optimized test build (-C opt-level=3), one pinned core; identical 120-step trajectories after ten warmup ticks, alternating run order. First pair discarded. Timings exclude setup and checkpoint hashing.",
+    "cases": [
+      {
+        "phase": "transport",
+        "beforeMedianMs": 1.40641,
+        "afterMedianMs": 1.14456,
+        "speedup": 1.2287778709722512,
+        "checkpointFingerprintFNV1a": "d5fb954ffa62a781",
+        "samplesMs": {
+          "before": [
+            1.61726,
+            1.51616,
+            1.41187,
+            2.31772,
+            1.39082,
+            1.39637,
+            1.40095,
+            1.39829,
+            1.39723,
+            1.39762,
+            1.51622,
+            1.42576
+          ],
+          "after": [
+            1.26434,
+            1.10764,
+            1.19332,
+            1.12026,
+            1.37484,
+            1.15231,
+            1.13681,
+            1.16338,
+            1.13074,
+            1.12036,
+            1.15525,
+            1.08854
+          ]
+        },
+        "workload": "1600 \u00d7 1000; 4,000 patches; ambient current, vortex, heater, nutrient inlet and sink, three walls (two floating), integer dissolved transport."
+      },
+      {
+        "phase": "collision",
+        "beforeMedianMs": 2.271795,
+        "afterMedianMs": 1.721425,
+        "speedup": 1.3197176757628128,
+        "checkpointFingerprintFNV1a": "7e7e5ddccbf8924b",
+        "samplesMs": {
+          "before": [
+            3.40521,
+            2.16926,
+            3.12394,
+            2.69374,
+            2.23068,
+            3.47551,
+            2.25735,
+            2.27832,
+            2.34433,
+            2.16217,
+            2.26527,
+            2.21854
+          ],
+          "after": [
+            1.93669,
+            1.71435,
+            1.96445,
+            1.64787,
+            1.64305,
+            1.64166,
+            1.69423,
+            3.00139,
+            1.77877,
+            1.7285,
+            3.08427,
+            1.61539
+          ]
+        },
+        "workload": "1,536 seeded scavenger bodies in the same geography; repeated contact solver passes. The bodies move under contact resolution only during this isolated benchmark."
+      }
+    ]
+  },
+  "wasmWholeTicks": {
+    "runtime": "v24.22.3",
+    "runtimeFlags": [
+      "--no-liftoff"
+    ],
+    "platform": "linux",
+    "architecture": "x64",
+    "abi": 23,
+    "resourceArithmetic": "whole counts",
+    "seed": 42,
+    "measuredTicks": 40,
+    "samples": 7,
+    "scratchWarmTicks": 5,
+    "warmupCheckInterval": 120,
+    "exportCallsPerSample": 30,
+    "note": "Release WASM in Node/V8. Tick and Rust export timings exclude JS hydration/copies, worker transfer/scheduling, main-thread rendering and setup. Medians of identical trajectories with alternating engine order. The paired engines differ only in the physical optimizations. ABI 23 isolates them from the later chemistry and habitat changes.",
+    "tissuePreparation": "Scattered ordinary founders start in anoxic water with a sealed surface. Their ATP is withdrawn to one ATP count before one upkeep tick per cohort. The scenario surface boundary is restored before seeding resident populations and warming the world.",
+    "equivalence": "Canonical checkpoints and legacy world/environment buffers must match exactly. Compact projections match those legacy values; only metrics header[13] (genomeBytes) is normalized because derived execution-plan storage is now counted.",
+    "engines": [
+      {
+        "name": "baseline",
+        "sha256": "39c865e9f18235cd1553382393b1b56cf94d9601bd83daa75bf0bfec329dabba"
+      },
+      {
+        "name": "optimized",
+        "sha256": "0fb70b19174d1df1be972c7ed464b8af5c4f10c704a7853978d5167ef5a2d30c"
+      }
+    ],
+    "scenarios": [
+      {
+        "name": "maximum-fields-current8-floating3",
+        "width": 4800,
+        "height": 3040,
+        "synthetic": false,
+        "warmupTicks": 30,
+        "initialPopulations": [],
+        "initialParticles": 0,
+        "tissueTarget": 0,
+        "donorFounders": 0,
+        "timedStartParticles": 0,
+        "finalPopulation": 0,
+        "finalParticles": 0,
+        "births": 0,
+        "deaths": 0,
+        "mutations": 0,
+        "checkpointIdentical": true,
+        "legacyBuffersIdentical": true,
+        "compactProjectionsValidated": true,
+        "checkpointBytes": 4524749,
+        "checkpointSha256": "f390db6fcb088799885c9cb94fa8efde06afbb46f4e4cbcfabc4a20628390135",
+        "legacyWorldSha256": "9a9a86233a25aa2d0f0fb8a51f96a0794a35577cb46344c995f3dfdeddeaa2f4",
+        "environmentSha256": "2f67ca082394913fb8097996f40697a62e4fa434ab82e122e215e7a3df59cbd6",
+        "measurements": [
+          {
+            "engine": "baseline",
+            "tickMs": 13.0379453,
+            "tickSamplesMs": [
+              12.516610675000015,
+              13.0379453,
+              18.135555049999972,
+              17.426204700000017,
+              12.781740450000006,
+              13.240191049999975,
+              12.601988574999996
+            ],
+            "snapshotExportMs": 1.5698239333333428,
+            "exportMs": {
+              "legacyCombined": 1.5698239333333428,
+              "legacyWorld": 9.980000001329851e-05,
+              "environment": 1.4667872666666881,
+              "compactRender": 0.00010833333332508725,
+              "metrics": 0.06358073333334081,
+              "summary": 8.456666667674047e-05,
+              "environmentMetadata": 0.00019453333334240597
+            },
+            "exportSamplesMs": [
+              {
+                "legacyCombined": 1.6465170333333239,
+                "legacyWorld": 0.0004100000000107684,
+                "environment": 1.4657658666666673,
+                "compactRender": 0.000602700000005522,
+                "metrics": 0.0763338999999784,
+                "summary": 0.00021353333331717295,
+                "environmentMetadata": 0.0008598999999776425
+              },
+              {
+                "legacyCombined": 1.5336806666666538,
+                "legacyWorld": 9.120000001227406e-05,
+                "environment": 1.5201841666666647,
+                "compactRender": 9.926666665099522e-05,
+                "metrics": 0.0629223000000214,
+                "summary": 8.299999999508145e-05,
+                "environmentMetadata": 0.0001954666666885411
+              },
+              {
+                "legacyCombined": 1.4515375999999984,
+                "legacyWorld": 0.00010296666666060143,
+                "environment": 1.568481499999992,
+                "compactRender": 0.00011816666665254161,
+                "metrics": 0.09039503333333414,
+                "summary": 8.679999997790825e-05,
+                "environmentMetadata": 0.0001926666666501357
+              },
+              {
+                "legacyCombined": 1.6033292666666967,
+                "legacyWorld": 9.163333331040728e-05,
+                "environment": 1.4667872666666881,
+                "compactRender": 0.00010896666663029464,
+                "metrics": 0.059726300000026336,
+                "summary": 8.156666663126089e-05,
+                "environmentMetadata": 0.00019453333334240597
+              },
+              {
+                "legacyCombined": 1.9585023333333689,
+                "legacyWorld": 9.980000001329851e-05,
+                "environment": 1.4665340999999898,
+                "compactRender": 0.00010593333330083018,
+                "metrics": 0.06242683333336269,
+                "summary": 8.269999998447019e-05,
+                "environmentMetadata": 0.0001896333333813042
+              },
+              {
+                "legacyCombined": 1.5260286000000027,
+                "legacyWorld": 8.846666666310436e-05,
+                "environment": 1.5322116999999706,
+                "compactRender": 0.00010309999997843988,
+                "metrics": 0.06358073333334081,
+                "summary": 8.456666667674047e-05,
+                "environmentMetadata": 0.00019913333338384594
+              },
+              {
+                "legacyCombined": 1.5698239333333428,
+                "legacyWorld": 0.00010123333334680259,
+                "environment": 1.443484899999991,
+                "compactRender": 0.00010833333332508725,
+                "metrics": 0.06979336666663585,
+                "summary": 8.683333332252612e-05,
+                "environmentMetadata": 0.0001914000000397209
+              }
+            ],
+            "payloadBytes": {
+              "legacyWorld": 96,
+              "environment": 1021868,
+              "compactRender": 96,
+              "metrics": 432,
+              "selectedCell": 0,
+              "summary": 56,
+              "environmentMetadata": 428
+            },
+            "genomeBytes": 0,
+            "wasmMemoryBytes": 58851328
+          },
+          {
+            "engine": "optimized",
+            "tickMs": 11.654590675000009,
+            "tickSamplesMs": [
+              16.662212024999985,
+              11.654590675000009,
+              11.140252624999993,
+              10.544733599999972,
+              10.860835325000016,
+              15.120147850000013,
+              14.27203485
+            ],
+            "snapshotExportMs": 1.554055066666721,
+            "exportMs": {
+              "legacyCombined": 1.554055066666721,
+              "legacyWorld": 9.590000002693463e-05,
+              "environment": 1.5093909999999595,
+              "compactRender": 9.95333333473051e-05,
+              "metrics": 0.06796023333329988,
+              "summary": 8.549999996224264e-05,
+              "environmentMetadata": 0.0001915000000129415
+            },
+            "exportSamplesMs": [
+              {
+                "legacyCombined": 1.72078153333332,
+                "legacyWorld": 9.766666665503484e-05,
+                "environment": 1.4764154333333257,
+                "compactRender": 0.0002436666666653764,
+                "metrics": 0.07728876666663685,
+                "summary": 0.00010570000000977112,
+                "environmentMetadata": 0.003091133333327889
+              },
+              {
+                "legacyCombined": 1.537156033333334,
+                "legacyWorld": 9.590000002693463e-05,
+                "environment": 1.6256367000000258,
+                "compactRender": 9.95333333473051e-05,
+                "metrics": 0.06465809999999692,
+                "summary": 9.086666668736142e-05,
+                "environmentMetadata": 0.00019140000000940441
+              },
+              {
+                "legacyCombined": 1.5554874000000078,
+                "legacyWorld": 9.079999999812571e-05,
+                "environment": 1.9713395333332906,
+                "compactRender": 0.00010113333331294901,
+                "metrics": 0.06796023333329988,
+                "summary": 8.549999996224264e-05,
+                "environmentMetadata": 0.0001887666666637718
+              },
+              {
+                "legacyCombined": 1.563611200000014,
+                "legacyWorld": 9.33666666848391e-05,
+                "environment": 1.4655983333332794,
+                "compactRender": 0.00010259999999107094,
+                "metrics": 0.06871803333330415,
+                "summary": 8.743333334374863e-05,
+                "environmentMetadata": 0.0001949333333565543
+              },
+              {
+                "legacyCombined": 1.5387526333333275,
+                "legacyWorld": 9.846666665301503e-05,
+                "environment": 1.4859318000000106,
+                "compactRender": 9.820000001733812e-05,
+                "metrics": 0.06618146666666386,
+                "summary": 8.306666665400067e-05,
+                "environmentMetadata": 0.00019479999997808287
+              },
+              {
+                "legacyCombined": 1.482340933333277,
+                "legacyWorld": 9.98999999865191e-05,
+                "environment": 1.5093909999999595,
+                "compactRender": 9.466666670050472e-05,
+                "metrics": 0.0757440000000012,
+                "summary": 8.510000000872727e-05,
+                "environmentMetadata": 0.00018723333335704713
+              },
+              {
+                "legacyCombined": 1.554055066666721,
+                "legacyWorld": 9.343333337407482e-05,
+                "environment": 1.5152982999999949,
+                "compactRender": 9.68000000284519e-05,
+                "metrics": 0.059598299999985706,
+                "summary": 8.403333334475368e-05,
+                "environmentMetadata": 0.0001915000000129415
+              }
+            ],
+            "payloadBytes": {
+              "legacyWorld": 96,
+              "environment": 1021868,
+              "compactRender": 96,
+              "metrics": 432,
+              "selectedCell": 0,
+              "summary": 56,
+              "environmentMetadata": 428
+            },
+            "genomeBytes": 0,
+            "wasmMemoryBytes": 58851328
+          }
+        ],
+        "speedup": 1.118696114138731,
+        "tickTimeReductionPercent": 10.610219579614222
+      },
+      {
+        "name": "mixed-floating-barriers",
+        "width": 1200,
+        "height": 760,
+        "synthetic": false,
+        "warmupTicks": 600,
+        "initialPopulations": [
+          [
+            "Phototroph",
+            72
+          ],
+          [
+            "Forager",
+            6
+          ],
+          [
+            "Mixotroph",
+            4
+          ],
+          [
+            "Predator",
+            2
+          ]
+        ],
+        "initialParticles": 0,
+        "tissueTarget": 0,
+        "donorFounders": 0,
+        "timedStartParticles": 6,
+        "finalPopulation": 84,
+        "finalParticles": 6,
+        "births": 0,
+        "deaths": 0,
+        "mutations": 0,
+        "checkpointIdentical": true,
+        "legacyBuffersIdentical": true,
+        "compactProjectionsValidated": true,
+        "checkpointBytes": 884576,
+        "checkpointSha256": "d42bd81ef2ec4c7d3be49c738e6eace4fda0e730d899846431771e0473d8e384",
+        "legacyWorldSha256": "f708e16af82e95d44562ec984119ae845c603c6a1596713598986f01b3e97e12",
+        "environmentSha256": "7b86f47d0b2dfaee5d232152d18027d07b1cfb8448c22810d7533ff63eef4615",
+        "measurements": [
+          {
+            "engine": "baseline",
+            "tickMs": 5.126596824999979,
+            "tickSamplesMs": [
+              5.126596824999979,
+              5.002562549999993,
+              5.061003600000004,
+              5.1534375000000185,
+              5.0629915500000156,
+              5.141874125000004,
+              5.252960849999999
+            ],
+            "snapshotExportMs": 0.30771276666667596,
+            "exportMs": {
+              "legacyCombined": 0.30771276666667596,
+              "legacyWorld": 0.15209286666668048,
+              "environment": 0.09269733333336869,
+              "compactRender": 0.052885433333297746,
+              "metrics": 0.04276336666662246,
+              "summary": 0.00014920000000226234,
+              "selectedCell": 0.001721899999999247,
+              "environmentMetadata": 0.00017109999995833884
+            },
+            "exportSamplesMs": [
+              {
+                "legacyCombined": 0.30771276666667596,
+                "legacyWorld": 0.17127276666663724,
+                "environment": 0.0891048999999839,
+                "compactRender": 0.05562156666668064,
+                "metrics": 0.0815292666666816,
+                "summary": 0.0003299666666862322,
+                "selectedCell": 0.002272333333348797,
+                "environmentMetadata": 0.000668266666677179
+              },
+              {
+                "legacyCombined": 0.26724930000000313,
+                "legacyWorld": 0.13548710000001543,
+                "environment": 0.09269733333336869,
+                "compactRender": 0.05716103333331072,
+                "metrics": 0.04276336666662246,
+                "summary": 0.00014920000000226234,
+                "selectedCell": 0.001721899999999247,
+                "environmentMetadata": 0.00017869999998462542
+              },
+              {
+                "legacyCombined": 0.26736670000003265,
+                "legacyWorld": 0.15209286666668048,
+                "environment": 0.09976580000002286,
+                "compactRender": 0.06366993333334298,
+                "metrics": 0.042857833333315894,
+                "summary": 0.00014519999998204489,
+                "selectedCell": 0.001696999999997691,
+                "environmentMetadata": 0.00016619999999723707
+              },
+              {
+                "legacyCombined": 0.25099243333334015,
+                "legacyWorld": 0.14061259999998582,
+                "environment": 0.0881003666666705,
+                "compactRender": 0.04935779999996157,
+                "metrics": 0.044742699999975835,
+                "summary": 0.000137666666705627,
+                "selectedCell": 0.0017135333333499147,
+                "environmentMetadata": 0.00017109999995833884
+              },
+              {
+                "legacyCombined": 0.321916533333327,
+                "legacyWorld": 0.18746626666664573,
+                "environment": 0.09340753333332638,
+                "compactRender": 0.04910286666666555,
+                "metrics": 0.042321233333314015,
+                "summary": 0.0001560333333448701,
+                "selectedCell": 0.002422633333299018,
+                "environmentMetadata": 0.00017796666664556446
+              },
+              {
+                "legacyCombined": 0.7170542333333894,
+                "legacyWorld": 0.19462880000003982,
+                "environment": 0.09304036666665828,
+                "compactRender": 0.052885433333297746,
+                "metrics": 0.03956423333335503,
+                "summary": 0.00015203333332465264,
+                "selectedCell": 0.004885766666666314,
+                "environmentMetadata": 0.0001510999999785175
+              },
+              {
+                "legacyCombined": 0.6146033333333738,
+                "legacyWorld": 0.11081206666670672,
+                "environment": 0.05280113333331731,
+                "compactRender": 0.03664243333332706,
+                "metrics": 0.02608166666668694,
+                "summary": 9.666666664998047e-05,
+                "selectedCell": 0.0009038666667038342,
+                "environmentMetadata": 0.00010460000000117967
+              }
+            ],
+            "payloadBytes": {
+              "legacyWorld": 109872,
+              "environment": 64172,
+              "compactRender": 14480,
+              "metrics": 528,
+              "selectedCell": 1304,
+              "summary": 56,
+              "environmentMetadata": 332
+            },
+            "genomeBytes": 455995,
+            "wasmMemoryBytes": 11468800
+          },
+          {
+            "engine": "optimized",
+            "tickMs": 4.75314492499997,
+            "tickSamplesMs": [
+              4.64872527499997,
+              4.846722425000007,
+              6.620531949999986,
+              4.743626300000005,
+              4.869615599999998,
+              4.75314492499997,
+              3.2127987750000555
+            ],
+            "snapshotExportMs": 0.254807099999986,
+            "exportMs": {
+              "legacyCombined": 0.254807099999986,
+              "legacyWorld": 0.15280636666666397,
+              "environment": 0.09682593333333595,
+              "compactRender": 0.05524693333336472,
+              "metrics": 0.043958366666629445,
+              "summary": 0.0001591333333029373,
+              "selectedCell": 0.0017692999999781023,
+              "environmentMetadata": 0.00017313333331306542
+            },
+            "exportSamplesMs": [
+              {
+                "legacyCombined": 0.24641743333334792,
+                "legacyWorld": 0.1516927999999704,
+                "environment": 0.10505493333336441,
+                "compactRender": 0.05340239999998933,
+                "metrics": 0.043958366666629445,
+                "summary": 0.00048506666668496714,
+                "selectedCell": 0.001941399999971812,
+                "environmentMetadata": 0.00031279999996816816
+              },
+              {
+                "legacyCombined": 0.254807099999986,
+                "legacyWorld": 0.16271649999998772,
+                "environment": 0.09682593333333595,
+                "compactRender": 0.06078249999997449,
+                "metrics": 0.05386926666663688,
+                "summary": 0.0001575333333676099,
+                "selectedCell": 0.0017655333333095769,
+                "environmentMetadata": 0.0001792333333166122
+              },
+              {
+                "legacyCombined": 0.5687992333333265,
+                "legacyWorld": 0.7079407333333317,
+                "environment": 0.15321936666665958,
+                "compactRender": 0.08083420000002661,
+                "metrics": 0.05401763333332686,
+                "summary": 0.0001591333333029373,
+                "selectedCell": 0.002101300000019061,
+                "environmentMetadata": 0.00017313333331306542
+              },
+              {
+                "legacyCombined": 0.23435553333335216,
+                "legacyWorld": 0.15041660000000168,
+                "environment": 0.08880720000003445,
+                "compactRender": 0.05441043333333558,
+                "metrics": 0.03944960000001932,
+                "summary": 0.00015149999999266583,
+                "selectedCell": 0.0017692999999781023,
+                "environmentMetadata": 0.00015733333336053572
+              },
+              {
+                "legacyCombined": 0.25559036666666846,
+                "legacyWorld": 0.15280636666666397,
+                "environment": 0.08651186666666036,
+                "compactRender": 0.05524693333336472,
+                "metrics": 0.05047306666668495,
+                "summary": 0.00016210000000379903,
+                "selectedCell": 0.0017487666666662941,
+                "environmentMetadata": 0.00018373333332419862
+              },
+              {
+                "legacyCombined": 0.3490567666667024,
+                "legacyWorld": 0.16955093333332721,
+                "environment": 0.10546356666667028,
+                "compactRender": 0.06800536666663295,
+                "metrics": 0.04228359999997337,
+                "summary": 0.00015353333334739244,
+                "selectedCell": 0.0044342333333285446,
+                "environmentMetadata": 0.00016526666665110193
+              },
+              {
+                "legacyCombined": 0.19393423333325094,
+                "legacyWorld": 0.07961070000007263,
+                "environment": 0.05478666666664746,
+                "compactRender": 0.02581073333324942,
+                "metrics": 0.021549299999969664,
+                "summary": 0.002385766666702693,
+                "selectedCell": 0.0009027333333506248,
+                "environmentMetadata": 9.983333341854935e-05
+              }
+            ],
+            "payloadBytes": {
+              "legacyWorld": 109872,
+              "environment": 64172,
+              "compactRender": 14480,
+              "metrics": 528,
+              "selectedCell": 1304,
+              "summary": 56,
+              "environmentMetadata": 332
+            },
+            "genomeBytes": 455995,
+            "wasmMemoryBytes": 11468800
+          }
+        ],
+        "speedup": 1.0785694326372788,
+        "tickTimeReductionPercent": 7.284596638824048
+      },
+      {
+        "name": "springwater-basin-120s",
+        "width": 800,
+        "height": 520,
+        "initialPopulation": 178,
+        "startingTick": 3600,
+        "startingCheckpointSha256": "5770e8605bc29f3b69e9193b447a008f4bc95a060e77e3942cfc933b2b67a132",
+        "synthetic": false,
+        "warmupTicks": 0,
+        "initialParticles": 1632,
+        "tissueTarget": 0,
+        "donorFounders": 0,
+        "timedStartParticles": 1635,
+        "finalPopulation": 178,
+        "finalParticles": 1653,
+        "births": 82,
+        "deaths": 12,
+        "mutations": 5,
+        "checkpointIdentical": true,
+        "legacyBuffersIdentical": true,
+        "compactProjectionsValidated": true,
+        "checkpointBytes": 1808660,
+        "checkpointSha256": "cb7fc0292cf0d7ccfc451d61bab968d5bef3bc0b4aa5e9ba2803a7ec960aa892",
+        "legacyWorldSha256": "bf426b68926c8f4edfa622099eb0bb4db44c03f7470f8d600d2d846ec1c4e0be",
+        "environmentSha256": "d8db9dd7cb42ce812a89e50735463b15f0ca74d500274a2a737cd63adf51698a",
+        "measurements": [
+          {
+            "engine": "baseline",
+            "tickMs": 21.145985950000068,
+            "tickSamplesMs": [
+              62.29016204999998,
+              20.556808075000028,
+              20.780764400000045,
+              20.71217660000002,
+              34.13107749999999,
+              27.954707450000022,
+              21.145985950000068
+            ],
+            "snapshotExportMs": 0.7696125333333232,
+            "exportMs": {
+              "legacyCombined": 0.7696125333333232,
+              "legacyWorld": 0.6841593666666692,
+              "environment": 0.04817753333336441,
+              "compactRender": 0.30206626666670977,
+              "metrics": 0.2593833666665887,
+              "summary": 0.00023193333327071742,
+              "selectedCell": 0.0022828666666706945,
+              "environmentMetadata": 0.00019830000019283034
+            },
+            "exportSamplesMs": [
+              {
+                "legacyCombined": 2.649537233333346,
+                "legacyWorld": 2.5381874333333445,
+                "environment": 0.05227506666669797,
+                "compactRender": 0.7854291666667753,
+                "metrics": 0.7606218333333042,
+                "summary": 0.0023496666666081487,
+                "selectedCell": 0.00298470000003969,
+                "environmentMetadata": 0.0007025666667080562
+              },
+              {
+                "legacyCombined": 0.7696125333333232,
+                "legacyWorld": 0.8083753000000191,
+                "environment": 0.04376040000000406,
+                "compactRender": 0.30206626666670977,
+                "metrics": 0.19426073333330957,
+                "summary": 0.00023193333327071742,
+                "selectedCell": 0.0024987333332925723,
+                "environmentMetadata": 0.0002265333333828797
+              },
+              {
+                "legacyCombined": 0.9183352000000014,
+                "legacyWorld": 0.6841593666666692,
+                "environment": 0.04674636666665417,
+                "compactRender": 0.26989853333337427,
+                "metrics": 0.1846327333332738,
+                "summary": 0.00022746666666838186,
+                "selectedCell": 0.0022828666666706945,
+                "environmentMetadata": 0.00020039999993362774
+              },
+              {
+                "legacyCombined": 0.6378684333333998,
+                "legacyWorld": 0.6131285999999818,
+                "environment": 0.04495526666675384,
+                "compactRender": 0.27245746666667403,
+                "metrics": 0.3390286000000439,
+                "summary": 0.00022489999998166846,
+                "selectedCell": 0.002181899999898936,
+                "environmentMetadata": 0.0001961000000543815
+              },
+              {
+                "legacyCombined": 1.6045271333333706,
+                "legacyWorld": 1.6121233666666133,
+                "environment": 0.18593056666662353,
+                "compactRender": 0.7601905666666425,
+                "metrics": 0.5296917666666558,
+                "summary": 0.00021246666668351584,
+                "selectedCell": 0.0021510666666775553,
+                "environmentMetadata": 0.00018360000006699314
+              },
+              {
+                "legacyCombined": 0.6283835000002,
+                "legacyWorld": 0.6564441333333283,
+                "environment": 0.06509819999992032,
+                "compactRender": 0.30122443333336074,
+                "metrics": 0.2593833666665887,
+                "summary": 0.0002565000000079939,
+                "selectedCell": 0.002283799999956197,
+                "environmentMetadata": 0.00019113333328277804
+              },
+              {
+                "legacyCombined": 0.7337231666667018,
+                "legacyWorld": 0.6787413000000622,
+                "environment": 0.04817753333336441,
+                "compactRender": 0.6300510666665408,
+                "metrics": 0.24119110000004487,
+                "summary": 0.0002448000001701682,
+                "selectedCell": 0.002081433333417711,
+                "environmentMetadata": 0.00019830000019283034
+              }
+            ],
+            "payloadBytes": {
+              "legacyWorld": 298328,
+              "environment": 29580,
+              "compactRender": 96504,
+              "metrics": 744,
+              "selectedCell": 1304,
+              "summary": 56,
+              "environmentMetadata": 460
+            },
+            "genomeBytes": 1093468,
+            "wasmMemoryBytes": 21626880
+          },
+          {
+            "engine": "optimized",
+            "tickMs": 22.494993249999972,
+            "tickSamplesMs": [
+              56.677722825000004,
+              39.84918790000002,
+              19.70431227499994,
+              20.293789125000057,
+              19.618700675000035,
+              22.494993249999972,
+              22.945020149999984
+            ],
+            "snapshotExportMs": 0.8084072000000257,
+            "exportMs": {
+              "legacyCombined": 0.8084072000000257,
+              "legacyWorld": 0.9978648999999374,
+              "environment": 0.04747599999997571,
+              "compactRender": 0.3088426333333094,
+              "metrics": 0.5861932666666689,
+              "summary": 0.00023143333334398145,
+              "selectedCell": 0.0022974999999860303,
+              "environmentMetadata": 0.00021296666673151777
+            },
+            "exportSamplesMs": [
+              {
+                "legacyCombined": 2.0504134333333544,
+                "legacyWorld": 1.6439782666665754,
+                "environment": 0.0482063333332917,
+                "compactRender": 0.8589155333333717,
+                "metrics": 0.5861932666666689,
+                "summary": 0.00023290000002210338,
+                "selectedCell": 0.002376633333309049,
+                "environmentMetadata": 0.0003676333333714865
+              },
+              {
+                "legacyCombined": 1.6087178666666053,
+                "legacyWorld": 1.6695077333332544,
+                "environment": 0.044542066666690514,
+                "compactRender": 0.5772358333333008,
+                "metrics": 0.6063807333333292,
+                "summary": 0.000222833333342957,
+                "selectedCell": 0.0024514666667528216,
+                "environmentMetadata": 0.0002030666666541947
+              },
+              {
+                "legacyCombined": 0.7543531999999686,
+                "legacyWorld": 0.628662333333341,
+                "environment": 0.04609439999997752,
+                "compactRender": 0.2669685333334201,
+                "metrics": 0.7377924999999474,
+                "summary": 0.0002371333333333799,
+                "selectedCell": 0.0022974999999860303,
+                "environmentMetadata": 0.00021296666673151777
+              },
+              {
+                "legacyCombined": 0.7717744666667082,
+                "legacyWorld": 0.6269172333333699,
+                "environment": 0.04154996666657098,
+                "compactRender": 0.2734773666667024,
+                "metrics": 0.5889673333333728,
+                "summary": 0.00023143333334398145,
+                "selectedCell": 0.0021505666667508195,
+                "environmentMetadata": 0.00018753333327670892
+              },
+              {
+                "legacyCombined": 0.8084072000000257,
+                "legacyWorld": 0.8317129333333771,
+                "environment": 0.04747599999997571,
+                "compactRender": 0.25418489999998806,
+                "metrics": 0.2238493333332978,
+                "summary": 0.00020453333333231665,
+                "selectedCell": 0.0058502666666754525,
+                "environmentMetadata": 0.000781733333375693
+              },
+              {
+                "legacyCombined": 1.4045553333333374,
+                "legacyWorld": 1.681248700000045,
+                "environment": 0.3337046999999681,
+                "compactRender": 0.5035917666666744,
+                "metrics": 0.31218413333335776,
+                "summary": 0.0009747000000061235,
+                "selectedCell": 0.00182960000007976,
+                "environmentMetadata": 0.00015853333340298074
+              },
+              {
+                "legacyCombined": 0.6940408333333229,
+                "legacyWorld": 0.9978648999999374,
+                "environment": 0.049413033333500306,
+                "compactRender": 0.3088426333333094,
+                "metrics": 0.20421206666651415,
+                "summary": 0.00021493333333637564,
+                "selectedCell": 0.002224933333491208,
+                "environmentMetadata": 0.000213399999969018
+              }
+            ],
+            "payloadBytes": {
+              "legacyWorld": 298328,
+              "environment": 29580,
+              "compactRender": 96504,
+              "metrics": 744,
+              "selectedCell": 1304,
+              "summary": 56,
+              "environmentMetadata": 460
+            },
+            "genomeBytes": 1093468,
+            "wasmMemoryBytes": 21626880
+          }
+        ],
+        "speedup": 0.9400307755149068,
+        "tickTimeReductionPercent": -6.379495868339502
+      },
+      {
+        "name": "springwater-basin-180s",
+        "width": 800,
+        "height": 520,
+        "initialPopulation": 225,
+        "startingTick": 5400,
+        "startingCheckpointSha256": "9faedde626421fedb761b45668c1c61ff43b1a0cd4cbc54ebd459eff049e75ff",
+        "synthetic": false,
+        "warmupTicks": 0,
+        "initialParticles": 2662,
+        "tissueTarget": 0,
+        "donorFounders": 0,
+        "timedStartParticles": 2664,
+        "finalPopulation": 224,
+        "finalParticles": 2700,
+        "births": 165,
+        "deaths": 49,
+        "mutations": 9,
+        "checkpointIdentical": true,
+        "legacyBuffersIdentical": true,
+        "compactProjectionsValidated": true,
+        "checkpointBytes": 2307575,
+        "checkpointSha256": "c0229cc93931e927428b2a2264edfce1cc9c3eaf5b942ba4b10ad5135e31fe2a",
+        "legacyWorldSha256": "6e1e1b3e216ab8f6a3a0e2d02452d4aaaea6c88efebaf7723dddd74ec41436c6",
+        "environmentSha256": "73515b10e5f0ab4303e11076c5295f4c5b514fb03c6194c7b29d0333d8412a4a",
+        "measurements": [
+          {
+            "engine": "baseline",
+            "tickMs": 75.3452149249999,
+            "tickSamplesMs": [
+              165.53265972500003,
+              77.70451307500007,
+              73.66251907500009,
+              75.3452149249999,
+              75.45822907500005,
+              60.67107137499988,
+              36.34671562500007
+            ],
+            "cpuTickMs": 31.494225,
+            "cpuTickSamplesMs": [
+              35.428225,
+              31.494225,
+              30.422,
+              37.287225,
+              32.18525,
+              31.049975,
+              29.571225
+            ],
+            "snapshotExportMs": 2.4729384666667706,
+            "exportMs": {
+              "legacyCombined": 2.4729384666667706,
+              "legacyWorld": 1.7401624999998604,
+              "environment": 0.05321533333287031,
+              "compactRender": 0.5204777666663479,
+              "metrics": 0.5497736666666848,
+              "summary": 0.00025666666673108317,
+              "selectedCell": 0.0034684333334250067,
+              "environmentMetadata": 0.00021529999988464019
+            },
+            "exportSamplesMs": [
+              {
+                "legacyCombined": 4.541198366666504,
+                "legacyWorld": 1.727806799999962,
+                "environment": 0.055846199999844734,
+                "compactRender": 0.39796660000016953,
+                "metrics": 0.5557660666665469,
+                "summary": 0.0004694666667395116,
+                "selectedCell": 0.0034747666667196125,
+                "environmentMetadata": 0.0037873666668019725
+              },
+              {
+                "legacyCombined": 3.0106129666666677,
+                "legacyWorld": 2.3997052333334676,
+                "environment": 0.32050606666646975,
+                "compactRender": 0.62124026666667,
+                "metrics": 0.5497736666666848,
+                "summary": 0.0002677999999529372,
+                "selectedCell": 0.003450199999982336,
+                "environmentMetadata": 0.00021529999988464019
+              },
+              {
+                "legacyCombined": 2.4729384666667706,
+                "legacyWorld": 1.7401624999998604,
+                "environment": 0.048001166666654174,
+                "compactRender": 1.1430906333332436,
+                "metrics": 0.9347232000000076,
+                "summary": 0.00025666666673108317,
+                "selectedCell": 0.0034684333334250067,
+                "environmentMetadata": 0.0002181333334495624
+              },
+              {
+                "legacyCombined": 2.231356566666606,
+                "legacyWorld": 2.835572799999985,
+                "environment": 0.05321533333287031,
+                "compactRender": 1.330405599999843,
+                "metrics": 0.6245936000001772,
+                "summary": 0.00025593333314949027,
+                "selectedCell": 0.004646266666532029,
+                "environmentMetadata": 0.00019346666667843237
+              },
+              {
+                "legacyCombined": 2.4806561333335897,
+                "legacyWorld": 1.1638547333335736,
+                "environment": 0.05017136666623022,
+                "compactRender": 0.38714356666702465,
+                "metrics": 0.3729464333334666,
+                "summary": 0.00025186666656130306,
+                "selectedCell": 0.0031211666665816058,
+                "environmentMetadata": 0.00021586666650061186
+              },
+              {
+                "legacyCombined": 1.2806426999998317,
+                "legacyWorld": 1.9041919000000538,
+                "environment": 0.156657033333128,
+                "compactRender": 0.5204777666663479,
+                "metrics": 0.32852653333344883,
+                "summary": 0.00023813333342938373,
+                "selectedCell": 0.0033078666664854003,
+                "environmentMetadata": 0.00020653333340305834
+              },
+              {
+                "legacyCombined": 1.0909596666669434,
+                "legacyWorld": 0.923225533333607,
+                "environment": 0.0458065000003747,
+                "compactRender": 0.32120160000001,
+                "metrics": 0.2593677666664007,
+                "summary": 0.0002635999999862785,
+                "selectedCell": 0.004722266666552362,
+                "environmentMetadata": 0.00021436666672040397
+              }
+            ],
+            "payloadBytes": {
+              "legacyWorld": 400192,
+              "environment": 29580,
+              "compactRender": 146432,
+              "metrics": 840,
+              "selectedCell": 1304,
+              "summary": 56,
+              "environmentMetadata": 460
+            },
+            "genomeBytes": 1341606,
+            "wasmMemoryBytes": 29425664
+          },
+          {
+            "engine": "optimized",
+            "tickMs": 64.26786947500004,
+            "tickSamplesMs": [
+              109.26082382500007,
+              75.29508409999998,
+              68.10885719999987,
+              64.26786947500004,
+              48.80703447500018,
+              52.73447175000001,
+              31.386997475000317
+            ],
+            "cpuTickMs": 28.4603,
+            "cpuTickSamplesMs": [
+              31.68905,
+              29.896325,
+              28.4603,
+              27.929475,
+              29.3155,
+              27.399425,
+              26.649775
+            ],
+            "snapshotExportMs": 2.504293700000077,
+            "exportMs": {
+              "legacyCombined": 2.504293700000077,
+              "legacyWorld": 2.2339201333333523,
+              "environment": 0.050122133333449406,
+              "compactRender": 0.8889938000000257,
+              "metrics": 0.5635888333332938,
+              "summary": 0.00027693333322531544,
+              "selectedCell": 0.003304299999823949,
+              "environmentMetadata": 0.0002086000000417698
+            },
+            "exportSamplesMs": [
+              {
+                "legacyCombined": 7.116788899999907,
+                "legacyWorld": 4.626514999999927,
+                "environment": 0.7485094000000875,
+                "compactRender": 1.7093372333334023,
+                "metrics": 0.8364603333335253,
+                "summary": 0.00028399999985898223,
+                "selectedCell": 0.0037074666666740085,
+                "environmentMetadata": 0.00039376666657820657
+              },
+              {
+                "legacyCombined": 2.629204800000055,
+                "legacyWorld": 1.7866158333332958,
+                "environment": 0.18957016666657486,
+                "compactRender": 1.0019176666666074,
+                "metrics": 0.5635888333332938,
+                "summary": 0.00025713333331320125,
+                "selectedCell": 0.003326066666825985,
+                "environmentMetadata": 0.00021806666676032666
+              },
+              {
+                "legacyCombined": 1.9846737666664316,
+                "legacyWorld": 2.2339201333333523,
+                "environment": 0.04723593333328609,
+                "compactRender": 0.8889938000000257,
+                "metrics": 0.5511692333333486,
+                "summary": 0.00026103333317829917,
+                "selectedCell": 0.0031785333332663866,
+                "environmentMetadata": 0.0002086000000417698
+              },
+              {
+                "legacyCombined": 2.5012441666665834,
+                "legacyWorld": 2.7492338999999144,
+                "environment": 0.13927973333338742,
+                "compactRender": 0.7478154666666038,
+                "metrics": 0.5672333666666721,
+                "summary": 0.00027693333322531544,
+                "selectedCell": 0.0031883000000865044,
+                "environmentMetadata": 0.00018819999992653418
+              },
+              {
+                "legacyCombined": 2.15067316666682,
+                "legacyWorld": 2.5441522666665453,
+                "environment": 0.050122133333449406,
+                "compactRender": 0.754356366667101,
+                "metrics": 0.7743851999999606,
+                "summary": 0.00024369999979777883,
+                "selectedCell": 0.003304299999823949,
+                "environmentMetadata": 0.0002004333330357137
+              },
+              {
+                "legacyCombined": 2.7601471333332785,
+                "legacyWorld": 2.218263566666671,
+                "environment": 0.04677660000015749,
+                "compactRender": 1.1351998666665168,
+                "metrics": 0.5344356333332446,
+                "summary": 0.0016281333334821587,
+                "selectedCell": 0.003184500000012728,
+                "environmentMetadata": 0.0002164000000144976
+              },
+              {
+                "legacyCombined": 2.504293700000077,
+                "legacyWorld": 1.0426554666667167,
+                "environment": 0.04772323333309032,
+                "compactRender": 0.8006348000000192,
+                "metrics": 0.38055739999981597,
+                "summary": 0.0004327333333397595,
+                "selectedCell": 0.004310299999876103,
+                "environmentMetadata": 0.00018856666623226677
+              }
+            ],
+            "payloadBytes": {
+              "legacyWorld": 400192,
+              "environment": 29580,
+              "compactRender": 146432,
+              "metrics": 840,
+              "selectedCell": 1304,
+              "summary": 56,
+              "environmentMetadata": 460
+            },
+            "genomeBytes": 1341606,
+            "wasmMemoryBytes": 29425664
+          }
+        ],
+        "speedup": 1.1723621078540483,
+        "tickTimeReductionPercent": 14.702122040565502
+      },
+      {
+        "name": "springwater-basin-300s",
+        "width": 800,
+        "height": 520,
+        "initialPopulation": 285,
+        "startingTick": 9000,
+        "startingCheckpointSha256": "eb3da66730e54b83b7e8efd8275d2c2f46bedde21feb12c3025a397109f31a9b",
+        "synthetic": false,
+        "warmupTicks": 0,
+        "initialParticles": 4362,
+        "tissueTarget": 0,
+        "donorFounders": 0,
+        "timedStartParticles": 4363,
+        "finalPopulation": 283,
+        "finalParticles": 4384,
+        "births": 324,
+        "deaths": 149,
+        "mutations": 28,
+        "checkpointIdentical": true,
+        "legacyBuffersIdentical": true,
+        "compactProjectionsValidated": true,
+        "checkpointBytes": 3144291,
+        "checkpointSha256": "8e2d65949cb05cd5c4d80da1fb2e83f85021902438167aaae3f3ced42539a19b",
+        "legacyWorldSha256": "17d3b2a1a03971b0692f0684d893256a193bd94de68f9a17ed23d44c9ab4762b",
+        "environmentSha256": "417ab8fe12e2c95cc7eeae47552746f883abc4d33934b559cf10ab149795914f",
+        "measurements": [
+          {
+            "engine": "baseline",
+            "tickMs": 43.373726024999996,
+            "tickSamplesMs": [
+              63.97055829999999,
+              36.585336300000016,
+              43.373726024999996,
+              35.51520327500002,
+              50.80006807499994,
+              49.23896189999996,
+              40.001319899999906
+            ],
+            "cpuTickMs": 43.2421,
+            "cpuTickSamplesMs": [
+              47.6992,
+              33.043775,
+              43.2421,
+              35.477575,
+              50.6171,
+              47.2781,
+              39.346625
+            ],
+            "snapshotExportMs": 0.7690194333333541,
+            "exportMs": {
+              "legacyCombined": 0.7690194333333541,
+              "legacyWorld": 0.7968628333333375,
+              "environment": 0.04882710000007743,
+              "compactRender": 0.41221490000001115,
+              "metrics": 0.3388489333333079,
+              "summary": 0.0003052666666917503,
+              "selectedCell": 0.0020566333332681097,
+              "environmentMetadata": 0.00020486666665722926
+            },
+            "exportSamplesMs": [
+              {
+                "legacyCombined": 1.0499885333333319,
+                "legacyWorld": 1.0217127999999625,
+                "environment": 0.049638199999996385,
+                "compactRender": 0.4213713666666687,
+                "metrics": 0.3810164999999567,
+                "summary": 0.0005033000000063718,
+                "selectedCell": 0.0026644000000184557,
+                "environmentMetadata": 0.0008045666666172716
+              },
+              {
+                "legacyCombined": 0.6199259333333127,
+                "legacyWorld": 0.6433320333332327,
+                "environment": 0.025028199999966697,
+                "compactRender": 0.23383420000003147,
+                "metrics": 0.22215773333336983,
+                "summary": 0.0002562333333723169,
+                "selectedCell": 0.0011978333333293753,
+                "environmentMetadata": 0.00012639999998403557
+              },
+              {
+                "legacyCombined": 1.0281429666666857,
+                "legacyWorld": 1.0562462333333922,
+                "environment": 0.050325966666666014,
+                "compactRender": 0.45855039999999764,
+                "metrics": 0.8530635000000378,
+                "summary": 0.0003052666666917503,
+                "selectedCell": 0.002212300000004082,
+                "environmentMetadata": 0.00021033333335556865
+              },
+              {
+                "legacyCombined": 0.6779888666666617,
+                "legacyWorld": 0.7968628333333375,
+                "environment": 0.04882710000007743,
+                "compactRender": 0.41221490000001115,
+                "metrics": 0.3476877000000968,
+                "summary": 0.0003341666666528909,
+                "selectedCell": 0.0021615000000262323,
+                "environmentMetadata": 0.00020750000003317838
+              },
+              {
+                "legacyCombined": 0.7690194333333541,
+                "legacyWorld": 0.6735467333333266,
+                "environment": 0.02492883333325153,
+                "compactRender": 0.2286639666666209,
+                "metrics": 0.18933093333325815,
+                "summary": 0.00023989999996653448,
+                "selectedCell": 0.0011556999999205195,
+                "environmentMetadata": 0.00012110000000878548
+              },
+              {
+                "legacyCombined": 1.0512325999998817,
+                "legacyWorld": 1.3602467000001828,
+                "environment": 0.04998223333338198,
+                "compactRender": 0.4752931999998206,
+                "metrics": 0.3388489333333079,
+                "summary": 0.00030760000008740463,
+                "selectedCell": 0.002030666666784479,
+                "environmentMetadata": 0.00020486666665722926
+              },
+              {
+                "legacyCombined": 0.6225306999998187,
+                "legacyWorld": 0.7608698333334663,
+                "environment": 0.04369263333355775,
+                "compactRender": 0.409782166666749,
+                "metrics": 0.33295819999984816,
+                "summary": 0.0003038333333582462,
+                "selectedCell": 0.0020566333332681097,
+                "environmentMetadata": 0.00018976666663850968
+              }
+            ],
+            "payloadBytes": {
+              "legacyWorld": 544488,
+              "environment": 29580,
+              "compactRender": 223928,
+              "metrics": 984,
+              "selectedCell": 1304,
+              "summary": 56,
+              "environmentMetadata": 460
+            },
+            "genomeBytes": 2422004,
+            "wasmMemoryBytes": 34013184
+          },
+          {
+            "engine": "optimized",
+            "tickMs": 43.041774024999995,
+            "tickSamplesMs": [
+              43.041774024999995,
+              47.429010500000004,
+              49.661735800000045,
+              47.354797149999925,
+              25.416387000000032,
+              35.273166800000034,
+              28.83883662499993
+            ],
+            "cpuTickMs": 42.18135,
+            "cpuTickSamplesMs": [
+              42.46105,
+              42.18135,
+              49.210125,
+              43.405225,
+              25.019925,
+              35.1441,
+              28.794225
+            ],
+            "snapshotExportMs": 1.1270214999999248,
+            "exportMs": {
+              "legacyCombined": 1.1270214999999248,
+              "legacyWorld": 0.9962182000000515,
+              "environment": 0.046900366666523044,
+              "compactRender": 0.42325003333329125,
+              "metrics": 0.33471953333331234,
+              "summary": 0.00031750000004346173,
+              "selectedCell": 0.002145833333270275,
+              "environmentMetadata": 0.00020043333352077753
+            },
+            "exportSamplesMs": [
+              {
+                "legacyCombined": 1.1270214999999248,
+                "legacyWorld": 0.9962182000000515,
+                "environment": 0.049925466666657786,
+                "compactRender": 0.42325003333329125,
+                "metrics": 0.3835087666666368,
+                "summary": 0.0003391666666478462,
+                "selectedCell": 0.0023044333333624915,
+                "environmentMetadata": 0.0003263666666801631
+              },
+              {
+                "legacyCombined": 1.460510899999887,
+                "legacyWorld": 1.0612993333333482,
+                "environment": 0.047660499999983584,
+                "compactRender": 0.44605423333341604,
+                "metrics": 0.33471953333331234,
+                "summary": 0.000301700000030299,
+                "selectedCell": 0.002145833333270275,
+                "environmentMetadata": 0.0002198333332974774
+              },
+              {
+                "legacyCombined": 2.3523387333333328,
+                "legacyWorld": 1.0402935999999803,
+                "environment": 0.0484930999999051,
+                "compactRender": 0.4776859333332444,
+                "metrics": 0.34472156666670345,
+                "summary": 0.00032853333323146217,
+                "selectedCell": 0.0021715000000161427,
+                "environmentMetadata": 0.00020189999995636753
+              },
+              {
+                "legacyCombined": 0.7518318999998883,
+                "legacyWorld": 0.7277738333332915,
+                "environment": 0.045588833333385995,
+                "compactRender": 0.2964918666667169,
+                "metrics": 0.23407686666675243,
+                "summary": 0.00032629999999092736,
+                "selectedCell": 0.0018276000000090184,
+                "environmentMetadata": 0.00019533333337070266
+              },
+              {
+                "legacyCombined": 0.7271632333334613,
+                "legacyWorld": 0.812811633333331,
+                "environment": 0.027371100000164007,
+                "compactRender": 0.24522450000004029,
+                "metrics": 0.19237100000003313,
+                "summary": 0.0002492333333066199,
+                "selectedCell": 0.0011652999998962817,
+                "environmentMetadata": 0.00013430000011188287
+              },
+              {
+                "legacyCombined": 1.1532272666666055,
+                "legacyWorld": 0.9965599666664882,
+                "environment": 0.046900366666523044,
+                "compactRender": 0.48327823333335496,
+                "metrics": 0.36052499999980986,
+                "summary": 0.00031750000004346173,
+                "selectedCell": 0.002150599999974171,
+                "environmentMetadata": 0.00020043333352077753
+              },
+              {
+                "legacyCombined": 0.8362014666667771,
+                "legacyWorld": 0.819488866666749,
+                "environment": 0.0404653666667097,
+                "compactRender": 0.2694545000000896,
+                "metrics": 0.23500796666679283,
+                "summary": 0.0002869999999044618,
+                "selectedCell": 0.0019498000001476612,
+                "environmentMetadata": 0.0001751999998911439
+              }
+            ],
+            "payloadBytes": {
+              "legacyWorld": 544488,
+              "environment": 29580,
+              "compactRender": 223928,
+              "metrics": 984,
+              "selectedCell": 1304,
+              "summary": 56,
+              "environmentMetadata": 460
+            },
+            "genomeBytes": 2422004,
+            "wasmMemoryBytes": 34013184
+          }
+        ],
+        "speedup": 1.0077123215183277,
+        "tickTimeReductionPercent": 0.7653296832480283
+      }
+    ]
+  },
+  "integratedAbi24Smoke": {
+    "runtime": "v24.22.3",
+    "runtimeFlags": [
+      "--no-liftoff"
+    ],
+    "platform": "linux",
+    "architecture": "x64",
+    "abi": 24,
+    "resourceArithmetic": "whole counts",
+    "seed": 42,
+    "measuredTicks": 10,
+    "samples": 1,
+    "scratchWarmTicks": 5,
+    "warmupCheckInterval": 120,
+    "exportCallsPerSample": 30,
+    "note": "Release WASM in Node/V8. Tick and Rust export timings exclude JS hydration/copies, worker transfer/scheduling, main-thread rendering and setup. Medians of identical trajectories with alternating engine order.",
+    "tissuePreparation": "Scattered ordinary founders start in anoxic water with a sealed surface. Their ATP is withdrawn to one ATP count before one upkeep tick per cohort. The scenario surface boundary is restored before seeding resident populations and warming the world.",
+    "equivalence": "Canonical checkpoints and legacy world/environment buffers must match exactly. Compact projections match those legacy values; only metrics header[13] (genomeBytes) is normalized because derived execution-plan storage is now counted.",
+    "engines": [
+      {
+        "name": "current",
+        "sha256": "f3d2178ed74606b269461f7173d936a787b5dae24426ae5bf991f762546da91c"
+      }
+    ],
+    "scenarios": [
+      {
+        "name": "mixed-floating-barriers",
+        "width": 1200,
+        "height": 760,
+        "initialPopulation": 84,
+        "startingTick": 0,
+        "synthetic": false,
+        "warmupTicks": 600,
+        "initialPopulations": [
+          [
+            "Phototroph",
+            72
+          ],
+          [
+            "Forager",
+            6
+          ],
+          [
+            "Mixotroph",
+            4
+          ],
+          [
+            "Predator",
+            2
+          ]
+        ],
+        "initialParticles": 0,
+        "tissueTarget": 0,
+        "donorFounders": 0,
+        "timedStartParticles": 6,
+        "finalPopulation": 84,
+        "finalParticles": 6,
+        "births": 0,
+        "deaths": 0,
+        "mutations": 0,
+        "checkpointIdentical": false,
+        "legacyBuffersIdentical": false,
+        "compactProjectionsValidated": true,
+        "checkpointBytes": 889459,
+        "checkpointSha256": "ffcd7fc7907bef64164a29c7bb01cca2c4418ac236decf10351e665b92ff3cde",
+        "legacyWorldSha256": "b27b898b3d2b774caaa0e9cd8c3ccd8bb42113713a58cc761fdf248dd1530a83",
+        "environmentSha256": "9a544590801658a44230a55ad10bf94a2d706a29ce6f0a22cfb0cf65a45a6de3",
+        "measurements": [
+          {
+            "engine": "current",
+            "tickMs": 4.38348130000004,
+            "tickSamplesMs": [
+              4.38348130000004
+            ],
+            "cpuTickMs": 4.396,
+            "cpuTickSamplesMs": [
+              4.396
+            ],
+            "snapshotExportMs": 0.2731853333333371,
+            "exportMs": {
+              "legacyCombined": 0.2731853333333371,
+              "legacyWorld": 0.14635463333333973,
+              "environment": 0.09383353333332707,
+              "compactRender": 0.04744136666668055,
+              "metrics": 0.044875566666663265,
+              "summary": 0.0003055333333274272,
+              "selectedCell": 0.0022969666666540433,
+              "environmentMetadata": 0.0005737000000105278
+            },
+            "exportSamplesMs": [
+              {
+                "legacyCombined": 0.2731853333333371,
+                "legacyWorld": 0.14635463333333973,
+                "environment": 0.09383353333332707,
+                "compactRender": 0.04744136666668055,
+                "metrics": 0.044875566666663265,
+                "summary": 0.0003055333333274272,
+                "selectedCell": 0.0022969666666540433,
+                "environmentMetadata": 0.0005737000000105278
+              }
+            ],
+            "payloadBytes": {
+              "legacyWorld": 111936,
+              "environment": 64172,
+              "compactRender": 14528,
+              "metrics": 528,
+              "selectedCell": 1328,
+              "summary": 56,
+              "environmentMetadata": 332
+            },
+            "genomeBytes": 457093,
+            "wasmMemoryBytes": 9240576
+          }
+        ]
+      },
+      {
+        "name": "maximum-fields-current8-floating3",
+        "width": 4800,
+        "height": 3040,
+        "initialPopulation": 0,
+        "startingTick": 0,
+        "synthetic": false,
+        "warmupTicks": 30,
+        "initialPopulations": [],
+        "initialParticles": 0,
+        "tissueTarget": 0,
+        "donorFounders": 0,
+        "timedStartParticles": 0,
+        "finalPopulation": 0,
+        "finalParticles": 0,
+        "births": 0,
+        "deaths": 0,
+        "mutations": 0,
+        "checkpointIdentical": false,
+        "legacyBuffersIdentical": false,
+        "compactProjectionsValidated": true,
+        "checkpointBytes": 4524749,
+        "checkpointSha256": "4ce38cd2c2d400cb0b46ca0a0c5adf02692129cd9e6c207d2ade960033f2544e",
+        "legacyWorldSha256": "50b999019b9765d151f59911e6f9408e5d6efdf16e65d00c9bccfdbae1185d0b",
+        "environmentSha256": "892f4085ccdf0025383447b9eae8a668ad3d7bac4f42bbaea308a9a7d8922dd3",
+        "measurements": [
+          {
+            "engine": "current",
+            "tickMs": 13.723659899999983,
+            "tickSamplesMs": [
+              13.723659899999983
+            ],
+            "cpuTickMs": 11.1149,
+            "cpuTickSamplesMs": [
+              11.1149
+            ],
+            "snapshotExportMs": 1.89378266666666,
+            "exportMs": {
+              "legacyCombined": 1.89378266666666,
+              "legacyWorld": 9.613333334831016e-05,
+              "environment": 2.403821266666667,
+              "compactRender": 0.0001014999999824795,
+              "metrics": 0.07505360000001625,
+              "summary": 8.42666666964457e-05,
+              "environmentMetadata": 0.00018560000001646888
+            },
+            "exportSamplesMs": [
+              {
+                "legacyCombined": 1.89378266666666,
+                "legacyWorld": 9.613333334831016e-05,
+                "environment": 2.403821266666667,
+                "compactRender": 0.0001014999999824795,
+                "metrics": 0.07505360000001625,
+                "summary": 8.42666666964457e-05,
+                "environmentMetadata": 0.00018560000001646888
+              }
+            ],
+            "payloadBytes": {
+              "legacyWorld": 96,
+              "environment": 1021868,
+              "compactRender": 96,
+              "metrics": 432,
+              "selectedCell": 0,
+              "summary": 56,
+              "environmentMetadata": 428
+            },
+            "genomeBytes": 0,
+            "wasmMemoryBytes": 45350912
+          }
+        ]
+      }
+    ]
+  }
+}

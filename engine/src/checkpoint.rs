@@ -8,7 +8,7 @@ use crate::{
 
 pub(crate) const MAX_STATE_BYTES: usize = 128 * 1024 * 1024;
 const MAGIC: &[u8; 8] = b"CELLAR01";
-pub(crate) const VERSION: u32 = 20;
+pub(crate) const VERSION: u32 = 21;
 pub(crate) type Result<T> = std::result::Result<T, String>;
 
 pub(crate) fn ensure(ok: bool, message: &str) -> Result<()> {
@@ -224,7 +224,7 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
         let kind = r.u32()?;
         ensure(
             parent as usize <= index
-                && kind <= if version >= 7 { 6 } else if version >= 5 { 5 } else { 3 }
+                && kind <= if version >= 21 { 9 } else if version >= 7 { 6 } else if version >= 5 { 5 } else { 3 }
                 && ((parent == 0) == (kind == 0)),
             "invalid genome lineage",
         )?;

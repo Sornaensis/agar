@@ -6,32 +6,35 @@ use super::*;
 pub(super) struct Composition {
     pub structural: f64,
     pub bound: f64,
+    pub ligand: f64,
 }
 
 impl Composition {
-    pub const SOLUBLE: Self = Self { structural: 0.0, bound: 0.0 };
+    pub const SOLUBLE: Self = Self { structural: 0.0, bound: 0.0, ligand: 0.0 };
     pub fn pool(index: usize) -> Self {
-        Self { structural: f64::from(index == 1), bound: f64::from(index == 2) }
+        Self { structural: f64::from(index == 1), bound: f64::from(index == 2), ligand: f64::from(index == LIGAND) }
     }
-    pub fn fractions(self) -> [f64; 3] {
-        [(1.0 - self.structural - self.bound).max(0.0), self.structural, self.bound]
+    pub fn fractions(self) -> [f64; 4] {
+        [(1.0 - self.structural - self.bound - self.ligand).max(0.0), self.structural, self.bound, self.ligand]
     }
     pub fn from_body(structural: f64, reserve: f64) -> Self {
-        Self { structural: if structural + reserve > 0.0 { structural / (structural + reserve) } else { 0.0 }, bound: 0.0 }
+        Self { structural: if structural + reserve > 0.0 { structural / (structural + reserve) } else { 0.0 }, bound: 0.0, ligand: 0.0 }
     }
     pub fn mix(self, held: f64, incoming: Self, received: f64) -> Self {
         if received <= 0.0 { return self; }
         let fraction = received / (held + received);
         let bound = self.bound + fraction * (incoming.bound - self.bound);
         let structural = self.structural + fraction * (incoming.structural - self.structural);
-        Self { bound: bound.clamp(0.0, 1.0), structural: structural.clamp(0.0, (1.0 - bound).max(0.0)) }
+        let ligand = (self.ligand + fraction * (incoming.ligand - self.ligand)).clamp(0.0, 1.0);
+        let bound = bound.clamp(0.0, 1.0 - ligand);
+        Self { ligand, bound, structural: structural.clamp(0.0, (1.0 - ligand - bound).max(0.0)) }
     }
     // Hydrolysis leaves some unprocessed original carrier plus less accessible
     // residue. The different hydrolases thus make different mixtures of waste.
     pub fn residue(pool: usize) -> Self {
         match pool {
-            0 => Self { structural: 0.0, bound: 0.82 },
-            1 => Self { structural: 0.28, bound: 0.72 },
+            0 => Self { structural: 0.0, bound: 0.82, ligand: 0.0 },
+            1 => Self { structural: 0.28, bound: 0.72, ligand: 0.0 },
             _ => Self::pool(2),
         }
     }
@@ -42,23 +45,29 @@ impl Composition {
     }
     /// Nested rounding is monotone in the total number of carriers. Removing a
     /// one-count bite therefore never removes negative counts from any pool.
-    fn counts(self, total: u64) -> [u64; 3] {
-        let bound = (self.bound * total as f64).round() as u64;
+    pub(super) fn counts(self, total: u64) -> [u64; 4] {
+        let ligand = ((self.ligand * total as f64).round() as u64).min(total);
+        let total = total - ligand;
+        let bound_fraction = if self.ligand < 1.0 { self.bound / (1.0 - self.ligand) } else { 0.0 };
+        let bound = (bound_fraction.clamp(0.0, 1.0) * total as f64).round() as u64;
         let free = total - bound.min(total);
-        let fraction = if self.bound < 1.0 { self.structural / (1.0 - self.bound) } else { 0.0 };
+        let fraction = if self.bound + self.ligand < 1.0 { self.structural / (1.0 - self.ligand - self.bound) } else { 0.0 };
         let structural = (fraction.clamp(0.0, 1.0) * free as f64).round() as u64;
-        [free - structural, structural, total - free]
+        [free - structural, structural, total - free, ligand]
     }
-    pub fn taken(self, before: u64, after: u64) -> [u64; 3] {
+    pub fn taken(self, before: u64, after: u64) -> [u64; 4] {
         let initial = self.counts(before);
         let retained = self.counts(after);
         std::array::from_fn(|i| initial[i] - retained[i])
     }
+    pub(super) fn from_counts(parts: [u64; 4]) -> Self {
+        let total = parts.iter().sum::<u64>() as f64;
+        if total == 0.0 { return Self::default(); }
+        Self { structural: parts[1] as f64 / total, bound: parts[2] as f64 / total, ligand: parts[3] as f64 / total }
+    }
+
     pub fn portion(self, before: u64, after: u64) -> Self {
-        let n = (before - after) as f64;
-        if n == 0.0 { return Self::default(); }
-        let parts = self.taken(before, after);
-        Self { structural: parts[1] as f64 / n, bound: parts[2] as f64 / n }
+        Self::from_counts(self.taken(before, after))
     }
 }
 
@@ -94,33 +103,48 @@ impl World {
             let radius = cell.radius();
             let mut transferred = 0.0;
             for assembly in &state.assemblies {
-                if assembly.recipe.kind != AssemblyKind::Mechanism(MechanismKind::CarbonExport) { continue; }
+                let ligand = match assembly.recipe.kind {
+                    AssemblyKind::Mechanism(MechanismKind::CarbonExport) => false,
+                    AssemblyKind::Mechanism(MechanismKind::LigandExport) => true,
+                    _ => continue,
+                };
                 let request = assembly.working_mass() * assembly.activity * DT;
                 if request <= 0.0 { continue; }
                 let at = cell.angle + cell.body.mount_at(assembly);
                 let outlet = (cell.x + (radius + 2.5) * at.cos(), cell.y + (radius + 2.5) * at.sin());
                 if self.environment.segment_blocked((cell.x,cell.y), outlet) { continue; }
-                let (carbon, extra) = if let Some(q) = &mut cell.counted {
-                    use crate::counts::{proportional, rate, units};
-                    let n = rate(&mut q.rate_credit[28], request).min(q.carbon).min(q.atp);
-                    let extra = proportional(q.reserve_extra, n, q.carbon);
-                    q.carbon -= n;
-                    q.atp -= n;
-                    q.reserve_extra -= extra;
-                    self.energy_loss.work += u64::from(n);
-                    (units(n), units(extra))
+                let (energy, minerals, extra) = if let Some(q) = &mut cell.counted {
+                    use crate::counts::{proportional, rate, units, wide_units, CountMeal};
+                    let credit = if ligand { 31 } else { 28 };
+                    let extent = rate(&mut q.rate_credit[credit], request).min(q.atp);
+                    let meal = if ligand {
+                        q.gut[LIGAND].take(extent)
+                    } else {
+                        let n = extent.min(q.carbon);
+                        let extra = proportional(q.reserve_extra, n, q.carbon);
+                        q.carbon -= n;
+                        q.reserve_extra -= extra;
+                        CountMeal {carbon:n, mineral:0, extra}
+                    };
+                    q.atp -= meal.carbon;
+                    self.energy_loss.work += u64::from(meal.carbon);
+                    (wide_units(meal.energy()), units(meal.mineral), units(meal.extra))
+                } else if ligand {
+                    let part = cell.gut[LIGAND].take_carbon(request.min(cell.energy));
+                    cell.energy -= (part.energy - part.extra_energy) / CHEMICAL_ENERGY_PER_CARBON;
+                    (part.energy, part.nutrients, part.extra_energy)
                 } else {
                     let n = request.min(cell.organic_carbon).min(cell.energy);
                     let extra = cell.reserve_extra_for(n);
                     cell.organic_carbon -= n;
                     cell.energy -= n;
                     cell.reserve_enrichment -= extra;
-                    (n, extra)
+                    (n * CHEMICAL_ENERGY_PER_CARBON + extra, 0.0, extra)
                 };
-                if carbon <= 0.0 { continue; }
-                let energy = CHEMICAL_ENERGY_PER_CARBON * carbon + extra;
+                if energy <= 0.0 { continue; }
                 let mut emission = OrganicEmission::new(OrganicKind::Exudate,
-                    outlet.0, outlet.1, energy, 0.0).enriched(extra);
+                    outlet.0, outlet.1, energy, minerals).enriched(extra);
+                if ligand { emission.composition = Composition::pool(LIGAND); }
                 emission.merge_radius = 5.0; // One local packet diameter.
                 emission.outside = Some((cell.x, cell.y, radius));
                 workspace.emissions.push(emission);
@@ -129,6 +153,7 @@ impl World {
             if transferred > 0.0 {
                 cell.exudation_rate = transferred / DT;
                 cell.project_counts();
+                if cell.counted.is_none() { cell.refresh_gut_totals(); }
             }
         }
         self.emit_organic_pending(workspace);
@@ -179,7 +204,7 @@ mod tests {
         w.emit_organic_pending(&mut ws);
         assert_eq!(w.food.len(), 1);
         let f = &mut w.food[0];
-        assert_eq!(f.composition.fractions(), [0.5,0.5,0.0]);
+        assert_eq!(f.composition.fractions(), [0.5,0.5,0.0,0.0]);
         let traits = f.traits();
         let decay = f.composition.decay_fraction();
         f.kind = OrganicKind::Exudate;
@@ -191,9 +216,9 @@ mod tests {
     }
 
     #[test]
-    fn single_count_bites_preserve_all_three_component_totals() {
-        let mix = Composition { structural:0.37, bound:0.42 };
-        let mut sum = [0u64;3];
+    fn single_count_bites_preserve_all_four_component_totals() {
+        let mix = Composition { structural:0.37, bound:0.32, ligand:0.10 };
+        let mut sum = [0u64;4];
         for before in (1..=997).rev() {
             let removed = mix.taken(before, before-1);
             assert_eq!(removed.iter().sum::<u64>(), 1);

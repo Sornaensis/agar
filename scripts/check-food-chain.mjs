@@ -1,3 +1,4 @@
+import { scenarioFixtures } from './scenario-fixtures.mjs';
 import {prepareBloom,placeByTissue} from './feeding-culture.mjs';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
@@ -12,7 +13,7 @@ for(let i=0;i<args.length;i++){
   if(name==='--duration'){duration=Number(value);assert.ok(Number.isSafeInteger(duration)&&duration>0&&Number.isSafeInteger(duration*30),'Duration must be a positive whole number of simulated seconds.');}
 }
 assert.ok(measure||args.length===0);
-const {LEGACY_PRESETS:PRESETS,BUILTIN_ENVIRONMENTS,BUILTIN_GENOMES,BUILTIN_SIMULATIONS}=await catalog();
+const {LEGACY_PRESETS:PRESETS,BUILTIN_ENVIRONMENTS,BUILTIN_GENOMES}=await catalog();
 const organelleModule=await moduleUrl('../src/organelles.ts');
 const {tokenizeGenome}=await import(await moduleUrl('../src/genome-language.ts',{'./organelles':organelleModule}));
 const hasLegacyReference=source=>tokenizeGenome(source).some(token=>
@@ -123,7 +124,7 @@ async function lifecycle(name,fed){
 const producerCycle=await lifecycle('Phototroph',false),consumerCycle=await lifecycle('Forager',true);
 console.log(`Organelle food-chain checks passed: ${PRESETS.length} genomes share one minimal newborn; paid light/organic/mixed development; unchanged Phototroph/Forager programs divide in ${producerCycle.seconds.toFixed(1)}/${consumerCycle.seconds.toFixed(1)} s; physical organelle inheritance and conserved resources.`);
 if(measure){
-  const template=BUILTIN_SIMULATIONS.find(s=>s.id==='builtin:simulation:mixed-ecosystem'),env=BUILTIN_ENVIRONMENTS.find(e=>e.id===template.environmentId);
+  const template=scenarioFixtures.find(s=>s.id==='builtin:simulation:mixed-ecosystem'),env=BUILTIN_ENVIRONMENTS.find(e=>e.id===template.environmentId);
   const populations=template.populations.map(row=>({...BUILTIN_GENOMES.find(g=>g.id===row.genomeId),...row}));
   const checkpoint = save(producerLight.api);
   const checkpointVersion = new DataView(checkpoint.buffer, checkpoint.byteOffset, checkpoint.byteLength).getUint32(8,true);

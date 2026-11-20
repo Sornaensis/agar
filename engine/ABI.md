@@ -1,5 +1,12 @@
 # agar engine
 
+## ABI 24 and checkpoint 21
+
+The full cell record has 166 doubles. Offsets 163–165 hold ligand carbon, its gross food energy and its associated minerals. Full and render particle records append the ligand fraction at offset 5, for six doubles per particle. The origin tag keeps its existing values. Ligand is included in aggregate gut, material and energy totals. The compact render cell keeps its 21 doubles.
+
+Checkpoint 21 retains the fourth food fraction and the reaction state needed for deterministic continuation. Earlier saves begin with zero ligand. The last genome signal is `carbon.ligand` (count in `cellular counts;`, scalar otherwise). Mechanism tags 33–35 are `isomerize(ligand)`, `isomerize(carbon)` and `export(ligand)`. Registry mutation kinds 7–9 are ingredient dosage, mechanism specificity and free-product turnover. An existing machine keeps its installed recipe when the genome mutates.
+
+
 ## Genome analysis in ABI 23
 
 Analysis returns independent diagnostics with severity, inferred function return types and contact-scope metadata. Consumers use the severity to decide whether edits can be saved. Checkpoint format 20 and the simulation exports retain their layouts.
@@ -240,7 +247,7 @@ The previous `size`, `invest.*`, `food.*`, `prey.*`, `threat.*`, `neighbor.*`, f
 
 Limits are **8,192 expression nodes**, **65,536 tokens**, **256 KiB UTF-8 source**, and **64 nested expression levels**, for both authored and generated programs. References, constants, operators, calls, and guards contribute nodes; comments and whitespace do not. Invalid compilation leaves the world unchanged.
 
-Mutation kinds are any (0), constant (1), expression (2), reference (3), cellular gene silence (4), cellular gene duplication (5), and cellular placement (6). Regulatory mutations parse the exact inherited source, select one reachable node, and patch only its source location. Constants retain their primitive types and bounds. Expression mutations replace one compatible operator/function token or insert/remove one typed unary operation. Binary operator replacement preserves precedence, so unparenthesized neighboring operands do not regroup. References use compatible sensors, same-type register addresses, or earlier visible bindings. Mutations cannot introduce forward references, cycles, ill-typed guards, or illegal addresses. Register write destinations and omitted outputs remain unchanged, including omitted `grow`.
+Mutation kinds are any (0), constant (1), expression (2), reference (3), cellular gene silence (4), gene duplication (5), placement (6), ingredient dosage (7), specificity (8) and stock turnover (9). Regulatory mutations parse the exact inherited source, select one reachable node, and patch only its source location. Constants retain their primitive types and bounds. Expression mutations replace one compatible operator/function token or insert/remove one typed unary operation. Binary operator replacement preserves precedence, so unparenthesized neighboring operands do not regroup. References use compatible sensors, same-type register addresses, or earlier visible bindings. Mutations cannot introduce forward references, cycles, ill-typed guards, or illegal addresses. Register write destinations and omitted outputs remain unchanged, including omitted `grow`.
 
 Placement changes patch or add a body-relative `at` or `direction` constant for future machinery. Inherited instances keep their original geometry and ingredients; an unmatched active instance has no current activity control, while a same-named recycling selector can recover it.
 
@@ -285,7 +292,7 @@ The module exports `memory`. Pointers/lengths use bytes, except snapshot lengths
 | `render_snapshot_ptr()` | Compact geometry/appearance snapshot; read `presentation_len()` immediately afterwards |
 | `render_links_snapshot_ptr()` | Compact render snapshot with a relationship kind for each established bond. Read `presentation_len()` immediately afterwards. |
 | `metrics_snapshot_ptr()` | Aggregate metrics and per-genome population groups; read `presentation_len()` |
-| `cell_snapshot_ptr(cell_id)` | Exactly one living cell in the 163-value layout; missing cell returns null with zero presentation length |
+| `cell_snapshot_ptr(cell_id)` | Exactly one living cell in the 166-value layout; missing cell returns null with zero presentation length |
 | `summary_snapshot_ptr()` | Seven values describing the current checkpoint summary and exact tick; read `presentation_len()` |
 | `presentation_len()` | Element count for the most recent render, metrics, selected-cell or summary projection |
 | `language_schema_ptr()`, `language_schema_len()` | Authoritative language-version-3 read/write signal names, types, defaults, and limits as UTF-8 JSON |
@@ -355,7 +362,7 @@ Analysis changes only its transient response buffer. It does not consume genome 
 
 ### World snapshot
 
-Layout: `12 + cells × 163 + food × 5` floats. The first 39 floats of each cell are physical/rendering state; the following 16 groups of six floats summarize organelle families in the order above. The world snapshot uses float64 values and a JavaScript `Float64Array`, preserving the entire u32 cell-ID range. Persistent state uses complete checkpoints.
+Layout: `12 + cells × 166 + food × 6` floats. The first 39 floats of each cell are physical/rendering state; the following 16 groups of six floats summarize organelle families in the order above. The world snapshot uses float64 values and a JavaScript `Float64Array`, preserving the entire u32 cell-ID range. Persistent state uses complete checkpoints.
 
 ```text
 Header (12): tick, time, cell_count, food_count, total_births,
@@ -408,7 +415,7 @@ Each food (5): x, y, energy, nutrients, kind (0 exudate, 1 tissue, 2 waste)
 
 For family index `k`, offsets `39 + 6k` through `44 + 6k` are **count, mass, capacity, damaged mass, building mass, functional mass**. All summaries describe actual structures. `division_ready` is 0/1. Basal metabolism includes body upkeep and current thermal scaling, excluding action/register/construction costs. Digestive rate reports assimilated substrate chemical potential per second; usable energy is generated by respiration. Photosynthesis reports the light energy stored by actual carbon fixation. `optical_range` is built hardware reach, not a free genome signal.
 
-Cell offsets 135–137 contain gut energies for exudate/tissue/waste; 138–140 contain their mineral masses; 141–156 contain protein stock mass in family order; 157 is actual synthesis mass per second. The old aggregate gut fields equal the sums of their three compartments. Cell offsets 158–162 append organic-carbon reserve, internal O2, internal DIC, aerobic respiration rate (carbon/s), and carbon-fixation rate (carbon/s).
+Cell offsets 135–137 contain gut energies for exudate/tissue/waste; 138–140 contain their mineral masses; 141–156 contain protein stock mass in family order; 157 is actual synthesis mass per second. The aggregate gut fields include all four compartments. Cell offsets 158–162 append organic-carbon reserve, internal O2, internal DIC, aerobic respiration rate (carbon/s), and carbon-fixation rate (carbon/s). Cell offsets 163–165 append ligand carbon, gross ligand energy and ligand minerals.
 
 The reserved header field and `max_food` are zero; neither is a population or particle limit. Float64 world identifiers preserve all u32 cell IDs exactly; counters are exact through 2⁵³, with u64 counters retained internally. The environment rendering buffer remains float32.
 
@@ -416,7 +423,7 @@ The reserved header field and `max_food` are zero; neither is a population or pa
 
 The presentation exports retain their ownership rules. ABI 12 extended full cell and aggregate-metric layouts; ABI 13 appends the exact tick to the summary and adds an environment metadata projection. Render, metrics, selected-cell and summary projections share one engine-owned `Float64Array` buffer. Read `presentation_len()` and copy before calling another projection or any allocating engine operation. These exports do not advance time, change observations or memory, or modify checkpoint state.
 
-`render_snapshot_ptr()` begins with `12 + cell_count × 21 + food_count × 5` values. ABI 19 appends the public signals, each encoded as a zero-based cell row followed by its value. The remaining pairs are established bond endpoints encoded by cell ID, in ascending order within each pair. Pending recruitment is private simulation state. A frame with neither signals nor bonds ends after the particle records. It omits organelle inspection arrays, resource totals and environmental grid samples. Particle layout remains unchanged.
+`render_snapshot_ptr()` begins with `12 + cell_count × 21 + food_count × 6` values. The next records are public signals, each encoded as a zero-based cell row followed by its value. Each remaining three-value record contains the two bonded cell IDs in ascending order and the bond kind. Pending recruitment is private simulation state. A frame with neither signals nor bonds ends after the particle records. It omits organelle inspection arrays, resource totals and environmental grid samples. Each particle carries x, y, gross energy, minerals, origin and ligand fraction.
 
 `render_links_snapshot_ptr()` uses the same header, cell, particle and signal records. Its bond records are triples of first cell ID, second cell ID and kind. Kind `0` indicates recruited partners with compatible resource junctions, `1` indicates a bond retained at division, and `2` indicates another recruited contact. An inherited external feeding partner keeps its recruited relationship. Current transfer rates are available separately in the cell inspector. The inspector’s `colony` object partitions its `neighborIds` into `feedingNeighborIds`, `colonyNeighborIds` and `contactNeighborIds`.
 
@@ -433,7 +440,7 @@ The presentation exports retain their ownership rules. ABI 12 extended full cell
 | 14–17 | flagellum count, flagellum capacity, cortex mass, cortex capacity |
 | 18–20 | photosynthetic capacity, piercer capacity, generation |
 
-The visual family capacities retain their existing meaning: functional mass divided by the family's minimum mass. They are not action throughput values. `cell_snapshot_ptr(id)` supplies the full 163-value cell record when inspection needs it, without packing the rest of the world. A missing cell clears the presentation buffer; it does not replace the latest simulation error.
+The visual family capacities retain their existing meaning: functional mass divided by the family's minimum mass. They are not action throughput values. `cell_snapshot_ptr(id)` supplies the full 166-value cell record when inspection needs it, without packing the rest of the world. A missing cell clears the presentation buffer; it does not replace the latest simulation error.
 
 `metrics_snapshot_ptr()` returns a 54-value header followed by three values for each living genome group. Groups are sorted by genome ID; each is `[genome_id, population, maximum_generation]`. Registry counts include all registered genomes, whereas groups contain only genomes with living cells.
 

@@ -3,8 +3,11 @@ use crate::{checkpoint, Engine};
 use crate::counts::{CellCounts, CountMeal, FoodCounts, units};
 
 fn counted_engine() -> Engine {
+    counted_engine_with("cellular; product Blank=scaffold(); gene make: Blank=1;")
+}
+fn counted_engine_with(source: &str) -> Engine {
     let mut e=Engine::new();
-    let id=e.compile("cellular; product Blank=scaffold(); gene make: Blank=1;");
+    let id=e.compile(source);
     assert_eq!(id,1);
     e.world.environment.set_initial_nutrients(1.0);
     e.world.environment.set_initial_gases(2.0,2.0);
@@ -83,11 +86,15 @@ fn odd_store_partitions_and_fractional_work_are_not_duplicated() {
     let q=c.counted.as_mut().unwrap();
     *q=CellCounts{atp:209,mineral:13,carbon:15,oxygen:7,dic:9,reserve_extra:13,structural_extra:15,..Default::default()};
     q.gut[1]=CountMeal{carbon:7,mineral:11,extra:9};q.rate_credit[0]=37;
+    q.gut[LIGAND] = CountMeal {carbon:13, mineral:17, extra:5};
     c.count_partition(&mut daughter,units(7));
     let (a,b)=(c.counted.as_ref().unwrap(),daughter.counted.as_ref().unwrap());
     assert_eq!((a.atp+b.atp,a.carbon+b.carbon,a.mineral+b.mineral,a.oxygen+b.oxygen,a.dic+b.dic),(202,15,13,7,9));
     assert_eq!((a.reserve_extra+b.reserve_extra,a.structural_extra+b.structural_extra),(13,15));
     assert_eq!((a.gut[1].carbon+b.gut[1].carbon,a.gut[1].mineral+b.gut[1].mineral,a.gut[1].extra+b.gut[1].extra),(7,11,9));
+    let mut ligand = a.gut[LIGAND];
+    ligand.join(b.gut[LIGAND]);
+    assert_eq!(ligand, CountMeal {carbon:13, mineral:17, extra:5});
     assert_eq!(a.rate_credit[0]+b.rate_credit[0],37);
 }
 
@@ -257,10 +264,14 @@ fn migrated_census_preserves_opening_stocks_without_inventing_history_or_heat() 
     let start = prior.windows(q.0.len()).position(|row| row == q.0).unwrap();
     let end = start + q.0.len();
     assert_eq!(prior.drain(end-4..end).collect::<Vec<_>>(), [0;4]);
+    let fourth_meal = start + 7 * 4 + 3 * 12;
+    assert_eq!(prior.drain(fourth_meal..fourth_meal+12).collect::<Vec<_>>(), [0; 12]);
     let mut env = crate::checkpoint::Writer::new();
     e.world.environment.write_checkpoint(&mut env);
     let start = prior.windows(env.0.len()).position(|row| row == env.0).unwrap();
     let mouth = start + env.0.len() + 4 + 16 + 24 * 8;
+    let fourth_projection = mouth + 4 + 3 * 24;
+    assert_eq!(prior.drain(fourth_projection..fourth_projection+24).collect::<Vec<_>>(), [0; 24]);
     assert_eq!(prior.drain(mouth..mouth+4).collect::<Vec<_>>(), [0;4]);
     prior[8..12].copy_from_slice(&17_u32.to_le_bytes());
     let size = prior.len() as u32;
@@ -462,4 +473,55 @@ fn harvest_retains_every_fixed_count() {
     let q = c.counted.as_ref().unwrap();
     assert_eq!(q.carbon - before, 250);
     assert_eq!(q.dic, 0);
+}
+
+#[test]
+fn counted_ligand_retains_carbon_enrichment_minerals_and_work_through_capture_conversion_and_lysis() {
+    let mut e = counted_engine_with("cellular;product Wall=membrane();gene supply:Wall=1;
+        assembly Gut:store(food){Wall:0.04;start_when:built.Gut < 0.039;}");
+    for _ in 0..900 {
+        if e.world.cells[0].body.capacities().gut_energy >= 30.0 { break; }
+        e.world.step(&mut e.genomes);
+    }
+    let mut cap = e.world.cells[0].body.capacities();
+    assert!(cap.gut_energy >= 30.0);
+    cap.isomerization = [0.3, 0.0];
+    let q = e.world.cells[0].counted.as_mut().unwrap();
+    // Move already funded resources into the reserve's enrichment and then the packet.
+    let bonus = q.atp / 8;
+    q.atp -= bonus;
+    q.reserve_extra += bonus;
+    e.world.cells[0].project_counts();
+    e.world.isomerize_in(&[cap]);
+    let q = e.world.cells[0].counted.as_mut().unwrap();
+    let moved = q.gut[LIGAND].carbon;
+    assert!(moved >= 99 && q.gut[LIGAND].extra > 0);
+    q.mineral -= 3;
+    q.gut[LIGAND].mineral += 3;
+    let packet = q.gut[LIGAND].take(moved);
+    e.world.cells[0].project_counts();
+    let (x,y) = (e.world.cells[0].x,e.world.cells[0].y);
+    let mut ws = PhaseWorkspace::default();
+    ws.emissions.push(packet.emission(OrganicKind::Tissue,x,y).material(Composition::pool(LIGAND)));
+    e.world.emit_organic_pending(&mut ws);
+    balanced(&e.world);
+    let cell = &mut e.world.cells[0];
+    cell.count_capture(&mut e.world.food[0], &cap, 1e6, 0, 1);
+    assert_eq!(cell.counted.as_ref().unwrap().gut[LIGAND], packet);
+    e.world.food.retain(|f| f.energy > 0.0);
+    balanced(&e.world);
+    cap.isomerization = [0.0, 0.12];
+    e.world.isomerize_in(&[cap]);
+    let remaining = e.world.cells[0].counted.as_ref().unwrap().gut[LIGAND];
+    assert!(remaining.carbon > 0 && remaining.carbon < moved);
+    balanced(&e.world);
+    let saved = checkpoint::save(&e).unwrap();
+    let restored = checkpoint::restore(&saved).unwrap();
+    assert_eq!(checkpoint::save(&restored).unwrap(), saved);
+    let cell = &mut e.world.cells[0];
+    cell.integrity = 0.0;
+    e.world.remove_dead_in(&mut ws, None);
+    let released = e.world.food.iter().map(|f|f.composition.counts(u64::from(f.counted.unwrap().meal.carbon))[LIGAND]).sum::<u64>();
+    assert_eq!(released, u64::from(remaining.carbon));
+    balanced(&e.world);
 }

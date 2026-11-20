@@ -4,14 +4,16 @@ import ts from 'typescript';
 export const bytes=await readFile(new URL('../engine/pkg/agar_engine.wasm',import.meta.url));
 export const module=await WebAssembly.compile(bytes);
 export const kinds=['core','photosynthetic','metabolic','digestive','reserve','transporter','phagocyte','flagellum','piercer','cortex','repair','photoreceptor','thermoreceptor','chemoreceptor','mechanoreceptor','optical'];
-export const STRIDE=163;
+export function snapshotStrides(api) {
+  return api.abi_version() >= 24 ? {cell:166,food:6} : {cell:163,food:5};
+}
 export const error=api=>new TextDecoder().decode(new Uint8Array(api.memory.buffer,api.error_ptr(),api.error_len()));
 export async function fresh(config={},compiledModule=module){
   const api=(await WebAssembly.instantiate(compiledModule,{})).exports;
   // Explicit comparisons may use the current ABI or an earlier one with the same setup
   // commands and the full cell/particle snapshot format used by this harness.
-  if (compiledModule === module) assert.equal(api.abi_version(),23);
-  else assert.ok([16,17,18,19,20,21,22,23].includes(api.abi_version()),'Expected a compatible comparison engine');
+  if (compiledModule === module) assert.equal(api.abi_version(),24);
+  else assert.ok([16,17,18,19,20,21,22,23,24].includes(api.abi_version()),'Expected a compatible comparison engine');
   assert.equal(api.set_world_size(config.width??1200,config.height??760),1,error(api));
   api.set_environment(config.ambientTemperature??.5,config.ambientLight??0,config.currentStrength??0);
   api.set_initial_nutrients(config.initialNutrients??.3);api.set_mutation_rate(config.mutationRate??0);
@@ -51,17 +53,18 @@ export function legacyEnvironmentProjection(api){
   return Float32Array.from(values);
 }
 export function snapshot(api){
+  const { cell:STRIDE, food:foodStride } = snapshotStrides(api);
   const p=api.snapshot_ptr(),v=new Float64Array(api.memory.buffer,p,api.snapshot_len()).slice();
-  assert.ok(v.every(Number.isFinite));assert.equal(v.length,12+v[2]*STRIDE+v[3]*5);assert.equal(v[9],0);assert.equal(v[10],0);
+  assert.ok(v.every(Number.isFinite));assert.equal(v.length,12+v[2]*STRIDE+v[3]*foodStride);assert.equal(v[9],0);assert.equal(v[10],0);
   const cells=Array.from({length:v[2]},(_,i)=>{
     const n=12+i*STRIDE;
     const c={id:v[n],genome:v[n+1],x:v[n+2],y:v[n+3],vx:v[n+4],vy:v[n+5],angle:v[n+6],energy:v[n+7],age:v[n+8],generation:v[n+9],parentId:v[n+10],radius:v[n+11],
       area:v[n+12],mass:v[n+13],birthArea:v[n+14],capacity:v[n+15],metabolism:v[n+16],memoryUsed:v[n+17],memoryCost:v[n+18],integrity:v[n+19],photosynthesisRate:v[n+20],
       nutrients:v[n+21],mineralCapacity:v[n+22],uptakeRate:v[n+23],gutEnergy:v[n+24],gutCapacity:v[n+25],gutNutrients:v[n+26],digestionRate:v[n+27],growthRate:v[n+28],maturity:v[n+29],lifespan:v[n+30],exudationRate:v[n+31],upkeep:v[n+32],
       spaceUsed:v[n+33],spaceCapacity:v[n+34],surfaceUsed:v[n+35],surfaceCapacity:v[n+36],divisionReady:v[n+37]!==0,opticalRange:v[n+38],
-      gutEnergyByKind:Array.from(v.slice(n+135,n+138)),gutMineralsByKind:Array.from(v.slice(n+138,n+141)),
+      gutEnergyByKind:[...v.slice(n+135,n+138),STRIDE===166?v[n+164]:0],gutMineralsByKind:[...v.slice(n+138,n+141),STRIDE===166?v[n+165]:0],
       proteins:Object.fromEntries(kinds.map((kind,k)=>[kind,v[n+141+k]])),expressionRate:v[n+157],
-      organicCarbon:v[n+158],internalOxygen:v[n+159],internalInorganicCarbon:v[n+160],respirationRate:v[n+161],carbonFixationRate:v[n+162],
+      organicCarbon:v[n+158],internalOxygen:v[n+159],internalInorganicCarbon:v[n+160],respirationRate:v[n+161],carbonFixationRate:v[n+162],ligandCarbon:STRIDE===166?v[n+163]:0,
       organs:Object.fromEntries(kinds.map((kind,k)=>{const at=n+39+k*6;return[kind,{count:v[at],mass:v[at+1],capacity:v[at+2],damaged:v[at+3],building:v[at+4],functionalMass:v[at+5]}];}))};
     assert.ok(Number.isInteger(c.id)&&c.id>0);assert.ok(c.x>=0&&c.x<v[7]&&c.y>=0&&c.y<v[8]);
     assert.ok(c.energy>0&&c.energy<=c.capacity+1e-8);assert.ok(c.area>=.25&&c.area<185&&Math.abs(c.radius-7*Math.sqrt(c.area))<1e-9);
@@ -72,7 +75,7 @@ export function snapshot(api){
     assert.ok(Math.abs(c.gutMineralsByKind.reduce((a,b)=>a+b,0)-c.gutNutrients)<1e-8);
     return c;
   });
-  const food=Array.from({length:v[3]},(_,i)=>{const n=12+v[2]*STRIDE+i*5;return{x:v[n],y:v[n+1],energy:v[n+2],minerals:v[n+3],kind:v[n+4]};});
+  const food=Array.from({length:v[3]},(_,i)=>{const n=12+v[2]*STRIDE+i*foodStride;return{x:v[n],y:v[n+1],energy:v[n+2],minerals:v[n+3],kind:v[n+4],ligandFraction:foodStride>=6?v[n+5]:0};});
   return{ticks:v[0],seconds:v[1],population:v[2],births:v[4],deaths:v[5],eaten:v[6],cells,food,
     material:api.nutrient_total(),materialIntroduced:api.nutrient_input_total(),energy:api.energy_total(),energyIntroduced:api.energy_input_total(),
     photosynthesis:api.photosynthesis_total(),attacks:api.attack_count(),predations:api.predation_count(),mutations:api.mutation_count(),genomes:api.genome_count()};

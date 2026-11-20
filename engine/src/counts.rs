@@ -71,7 +71,7 @@ impl CountMeal {
 pub struct CellCounts {
     pub atp: u32, pub mineral: u32, pub carbon: u32, pub oxygen: u32, pub dic: u32,
     pub reserve_extra: u32, pub structural_extra: u32,
-    pub gut: [CountMeal; 3],
+    pub gut: [CountMeal; 4],
     pub rate_credit: [u32; 32],
     /// A partly funded bite belongs to one inlet and its current particle.
     pub capture_credit: std::collections::BTreeMap<u32, (u64, u64, u32)>,
@@ -100,7 +100,7 @@ impl CellCounts {
         let mut s=Self{atp:r.u32()?,mineral:r.u32()?,carbon:r.u32()?,oxygen:r.u32()?,dic:r.u32()?,
             reserve_extra:r.u32()?,structural_extra:r.u32()?,..Default::default()};
         ensure(s.carbon>0||s.reserve_extra==0,"extra energy without counted reserve carbon")?;
-        for p in &mut s.gut{*p=CountMeal::read(r)?;}for n in &mut s.rate_credit{*n=r.u32()?;}
+        for p in &mut s.gut[..if version >= 21 {4} else {3}]{*p=CountMeal::read(r)?;}for n in &mut s.rate_credit{*n=r.u32()?;}
         if version >= 20 {
             let n = r.count(r.remaining() / 24)?;
             for _ in 0..n {

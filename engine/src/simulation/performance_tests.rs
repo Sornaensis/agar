@@ -153,3 +153,45 @@ fn eligible_capture_index_preserves_empty_exhausted_wrapped_and_mineral_cases() 
         assert_eq!(state(&optimized), state(&reference), "capture scenario {scenario}");
     }
 }
+
+/// Isolated release-mode timings. Construction, checkpoint hashing and all UI
+/// work are outside the timed loops. Repeat on identical builds and hardware.
+#[test]
+#[ignore = "manual physical-phase benchmark"]
+fn benchmark_field_transport_and_cell_collisions() {
+    use std::time::Instant;
+    let fingerprint = |bytes: Vec<u8>| bytes.iter().fold(0xcbf29ce484222325u64, |h, b|
+        (h ^ u64::from(*b)).wrapping_mul(0x100000001b3));
+    for &collisions in &[false, true] {
+        let mut world = World::empty(42);
+        let env = &mut world.environment;
+        assert!(env.set_size(1600.0, 1000.0));
+        env.configure(0.5, 0.6, 8.0);
+        env.add_source(2, 1050.0, 760.0, 0.5, 180.0);
+        env.add_source(1, 420.0, 480.0, 0.65, 200.0);
+        env.add_source(3, 410.0, 230.0, 0.5, 120.0);
+        env.add_source(4, 1350.0, 780.0, 0.4, 140.0);
+        assert!(env.add_barrier(12.0, 500.0, 180.0, 28.0, 0.4, true) > 0);
+        assert!(env.add_barrier(800.0, 500.0, 230.0, 24.0, 1.1, false) > 0);
+        assert!(env.add_barrier(1110.0, 150.0, 240.0, 30.0, 0.7, true) > 0);
+        if collisions {
+            world.try_seed_fixture(1, 1536, -1.0, -1.0, BodyFixture::Scavenger).unwrap();
+        } else {
+            env.set_count_chemistry(true);
+        }
+        let mut phases = PhaseWorkspace::default();
+        let mut solve = |tick| {
+            if collisions {
+                world.resolve_collisions_in(&mut phases);
+            } else {
+                world.environment.step(f64::from(tick) * DT);
+            }
+        };
+        for tick in 0..10 { solve(tick); }
+        let start = Instant::now();
+        for tick in 10..130 { solve(tick); }
+        let ms = start.elapsed().as_secs_f64() * 1000.0 / 120.0;
+        let name = if collisions { "collision" } else { "transport" };
+        println!("{name} {ms:.5} ms/step checkpoint {:016x}", fingerprint(state(&world)));
+    }
+}

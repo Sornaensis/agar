@@ -269,6 +269,7 @@ pub struct BodyCapacities {
     /// Maximum aerobic usable-energy production per second.
     pub respiration: f64,
     pub basal_respiration: f64,
+    pub isomerization: [f64; 2],
     pub digestion: f64,
     pub uptake: f64,
     pub thrust: f64,
@@ -836,6 +837,7 @@ impl Body {
             metabolism: 20.0 * core + 60.0 * mass[Metabolic as usize],
             respiration: 20.0 * core + 60.0 * mass[Metabolic as usize],
             basal_respiration: 20.0 * core,
+            isomerization: [0.0; 2],
             digestion: 65.0 * digestive,
             uptake: 0.8 * mass[Transporter as usize],
             thrust: 100.0 * flagellum,

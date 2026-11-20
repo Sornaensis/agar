@@ -12,7 +12,7 @@ function reserve(key: string, label: string): string {
 const details = [
   ['area','Envelope area'], ['mass','Body mass'], ['growth','Area gained / s'], ['upkeep','Energy upkeep / s'],
   ['digestion','Substrate digested / s'], ['fixation','Carbon fixed / s'], ['respiration','Carbon respired / s'],
-  ['carbon','Organic carbon reserve'], ['oxygen','Internal oxygen'], ['inorganic','Internal inorganic carbon'],
+  ['carbon','Organic carbon reserve'], ['ligand','Inhibitory ligand carbon'], ['oxygen','Internal oxygen'], ['inorganic','Internal inorganic carbon'],
   ['exudate','Soluble gut energy'], ['tissue','Structural gut energy'], ['waste','Bound gut energy'],
 ] as const;
 
@@ -61,7 +61,7 @@ export function updateOrganismOverview(root: HTMLElement, cell: Cell, visible?: 
     signal: visible?.contactSignal === undefined ? '' : precise(visible.contactSignal),
     area: precise(cell.bodyArea), mass: precise(cell.bodyMass), growth: precise(cell.growthRate), upkeep: flux(cell.basalMetabolism+cell.memoryCost),
     digestion: flux(cell.digestionRate), fixation: flux(cell.carbonFixationRate), respiration: flux(cell.respirationRate),
-    carbon: quantity(cell.organicCarbon), oxygen: quantity(cell.internalOxygen), inorganic: quantity(cell.internalInorganicCarbon),
+    carbon: quantity(cell.organicCarbon), ligand: quantity(cell.ligandCarbon), oxygen: quantity(cell.internalOxygen), inorganic: quantity(cell.internalInorganicCarbon),
     exudate: quantity(cell.gutExudateEnergy), tissue: quantity(cell.gutTissueEnergy), waste: quantity(cell.gutWasteEnergy),
   };
   const stores: Record<string, [number,number]> = {

@@ -1,0 +1,2457 @@
+{
+  "title": "Springwater basin food web",
+  "stock": {"arm": "feeding116","seed": 7},
+  "lineageOrder": ["Phototroph","Ligand producer","Forager","Mixotroph","Rememberer","Nurse rosette","Crown rosette","Pulse swimmer","Predator"],
+  "configuration": {
+    "width": 800,
+    "height": 520,
+    "ambientTemperature": 0.2,
+    "ambientLight": 0.76,
+    "currentStrength": 1,
+    "initialNutrients": 1,
+    "barriers": [
+      {"x": 272,"y": 225,"length": 140,"width": 18,"angle": 0.2,"floating": false},
+      {"x": 524,"y": 300,"length": 156,"width": 18,"angle": -0.25,"floating": false},
+      {"x": 340,"y": 405,"length": 62,"width": 14,"angle": 0.45,"floating": true}
+    ],
+    "gases": {"initialOxygen": 1,"initialCarbon": 1,"mode": "open","exchangeRate": 0.2,"oxygenEquilibrium": 1,"carbonEquilibrium": 1},
+    "sources": [
+      {"angle": 0,"length": 600,"kind": 0,"x": 210,"y": 125,"strength": 0.32,"radius": 205},
+      {"angle": 0,"length": 600,"kind": 0,"x": 560,"y": 355,"strength": 0.38,"radius": 185},
+      {"angle": 0,"length": 600,"kind": 3,"x": 138,"y": 155,"strength": 0.34,"radius": 94},
+      {"angle": 0,"length": 600,"kind": 3,"x": 656,"y": 378,"strength": 0.24,"radius": 82},
+      {"angle": 0,"length": 600,"kind": 4,"x": 717,"y": 182,"strength": 0.36,"radius": 102},
+      {"angle": 0,"length": 740,"kind": 6,"x": 400,"y": 157,"strength": 0.25,"radius": 76},
+      {"angle": 0,"length": 700,"kind": 6,"x": 400,"y": 373,"strength": -0.19,"radius": 88},
+      {"angle": 0,"length": 600,"kind": 2,"x": 640,"y": 246,"strength": 0.13,"radius": 105}
+    ]
+  },
+  "settings": {
+    "ticksPerSecond": 30,
+    "countChemistry": true,
+    "mutationRate": 0.1,
+    "founderPlacement": "Seeded uniform scatter in cohort order. No subsequent introductions."
+  },
+  "engines": {
+    "native": {
+      "abi": 24,
+      "sha256": "5e35a7cf9af9ca8b817bab110fb9b858b337578d50adf478fb4c75a7b639e243",
+      "build": "Pre-repair Rust release, linux x86_64, optimized for the host CPU."
+    },
+    "wasmPrevious": {"abi": 24,"sha256": "f3d2178ed74606b269461f7173d936a787b5dae24426ae5bf991f762546da91c"},
+    "wasmShipped": {"abi": 24,"sha256": "c3d496d7c9ef7ed3c33c24d7a8a5a303f47be16a86a9cceb27125cb7f58c30f2"},
+    "revision": "The WASM repair preserves carrier carbon during near-complete continuous digestion. All mixed basin studies here use counted chemistry.",
+    "sameCountedLaunch": {
+      "seed": 7,
+      "original": "f3d2178ed74606b269461f7173d936a787b5dae24426ae5bf991f762546da91c",
+      "updated": "c3d496d7c9ef7ed3c33c24d7a8a5a303f47be16a86a9cceb27125cb7f58c30f2",
+      "observations": [
+        {"seconds": 0,"population": 116,"births": 0,"sha256": "729a1d41ae95007d145fb71023557f215ed50661bf844005d07af4df74372805"},
+        {"seconds": 30,"population": 116,"births": 0,"sha256": "7a73b143bbe7e5fc0ad51dd0192ccc66918feab77166d18e4976761fcafeef60"},
+        {"seconds": 60,"population": 114,"births": 0,"sha256": "bb128fd47b49238a9b1fa74a5d2fa64f988e6febdf7c5dbbb222d795c1cd0009"},
+        {"seconds": 90,"population": 174,"births": 60,"sha256": "4719796ae99c4ccefc8ccb606725d35e55ba92a6e1e00f8b5b0ed91c7699a7ee"},
+        {"seconds": 120,"population": 198,"births": 86,"sha256": "43190b329b99382d72e5d26d3a3ab345831757ab147ea85bcb5e7151dade6a9d"}
+      ],
+      "arm": "revised116"
+    },
+    "countedCheckpointReplays": {
+      "original": "f3d2178ed74606b269461f7173d936a787b5dae24426ae5bf991f762546da91c",
+      "updated": "c3d496d7c9ef7ed3c33c24d7a8a5a303f47be16a86a9cceb27125cb7f58c30f2",
+      "observations": [
+        {"name": "basin-42","fromTick": 18000,"tick": 18120,"sha256": "30a3868262fbc5df7c68116fabea331a709894dcfc336140f03f7836aa5f6d11"},
+        {"name": "basin-42","fromTick": 18000,"tick": 18240,"sha256": "97f431cc1c1c8a3b7959b31e5bdc0455cc14ad82b7bcff0a0040be0c299cd17e"},
+        {"name": "basin-42","fromTick": 18000,"tick": 18360,"sha256": "be6f3128150163330a4b7855209d3fb504eb06c92696364e61de2fd7c6a14058"},
+        {"name": "basin-7","fromTick": 18000,"tick": 18120,"sha256": "7a0541a4a2b54ac9f0ded563d2fa35ee0a6f69ccdca564d573cd05bee255c6e1"},
+        {"name": "basin-7","fromTick": 18000,"tick": 18240,"sha256": "200a06be634ba542c85089a522db4b699b9436d00c3d1d9715b8f7836c3b32da"},
+        {"name": "basin-7","fromTick": 18000,"tick": 18360,"sha256": "1e4cbc2f206748b559e71c9d52d12afdfed72b5e3a6537257e9e85f75b378e93"},
+        {"name": "basin-2026","fromTick": 18000,"tick": 18120,"sha256": "3b85dbb8e0d518542048a0801a6cf1e3d0ee092e9e4f39705dc6a7f52f504438"},
+        {"name": "basin-2026","fromTick": 18000,"tick": 18240,"sha256": "6a1d377c80b3b96e2ac8828d3d4f083a94f53e5bf5e7f543fd2322a4f9db1901"},
+        {"name": "basin-2026","fromTick": 18000,"tick": 18360,"sha256": "1664a1eed8e255c7aa6655a95a909cb1625913254216e6b53ca2fc9bc4338df9"},
+        {"name": "basin-17","fromTick": 18000,"tick": 18120,"sha256": "ccc098ab9f76130974468552ded3e9ced9712b5c6d95a8bbcc58e9db00bc0210"},
+        {"name": "basin-17","fromTick": 18000,"tick": 18240,"sha256": "193b20735be1f1a4b5c7193b3f0ee8444d7ba9aca2c4b96ffadff1d495302228"},
+        {"name": "basin-17","fromTick": 18000,"tick": 18360,"sha256": "5d6bcc028c9045aca1ddf2740721c330a505a736cbec81bea108f65241ad07c0"}
+      ],
+      "arm": "revised116"
+    }
+  },
+  "arms": {
+    "previous108": {
+      "totalFounders": 108,
+      "founderCounts": [68,4,12,8,4,3,3,3,3],
+      "sourceSha256": [
+        "da89d6be90cca56d730d3ff352cb25f87f0ae690581726b9214c2cf2465312af",
+        "b924e5ef8dfc5ca2e85a957d83f2889a0df87082d50aba90c1303fbefa3512ea",
+        "080c3594086eac49cb7ea070c717154686b29cdca35d4b345dea8db54cfcbe28",
+        "d1d2d98093348f7dfc72c70e6d504aee31af3fda58ed0b62ee8811350bec6e32",
+        "1ad996a70c229b26845b6a2be4e1241b410b2f69bbc5892888483c248f32f74b",
+        "1e056112b7273a4a950b5e075da92342f4150ee5987bef6b2b048b94c883b1bb",
+        "381f2db1a08d9afac5f6c888058190a1d421db6f87b50f596b7ffbbe35095699",
+        "e04aecd94cc7a9d7ee52804e483100578289666a0d1982ed83200dd6998243ad",
+        "e95617cd2914be2e056f273397dc17897f0d3af7c33d881e0635df1b20bf4592"
+      ]
+    },
+    "revised108": {
+      "totalFounders": 108,
+      "founderCounts": [68,4,12,8,4,3,3,3,3],
+      "sourceSha256": [
+        "c4241dd3a4c344dd5c216a9b281e482d6c0212101242f9891a772bc8ec3d2d2c",
+        "bb515a76023bfe99e5ddcb457d7e355624d3c127f335564439a58b6d4b478e42",
+        "98e6b0a809cff0875da1edf1c526652c712420b27f0d7673763cc9e0904fe480",
+        "9394d75e27ca4112ff732422e0e4b55da680dceac2a0f9fcf1adb70b392a4080",
+        "1ed8f7c39f00ef2daabc1206c1c1a55d406a81bd8c2ad19af24451e24f7e228c",
+        "1e056112b7273a4a950b5e075da92342f4150ee5987bef6b2b048b94c883b1bb",
+        "8f497c2fb6d8a23fdc7dea832fc3a5691c91939994481996a5ec0e7f97af009b",
+        "e04aecd94cc7a9d7ee52804e483100578289666a0d1982ed83200dd6998243ad",
+        "e95617cd2914be2e056f273397dc17897f0d3af7c33d881e0635df1b20bf4592"
+      ]
+    },
+    "revised116": {
+      "totalFounders": 116,
+      "founderCounts": [68,4,12,8,6,5,5,5,3],
+      "sourceSha256": [
+        "c4241dd3a4c344dd5c216a9b281e482d6c0212101242f9891a772bc8ec3d2d2c",
+        "bb515a76023bfe99e5ddcb457d7e355624d3c127f335564439a58b6d4b478e42",
+        "98e6b0a809cff0875da1edf1c526652c712420b27f0d7673763cc9e0904fe480",
+        "9394d75e27ca4112ff732422e0e4b55da680dceac2a0f9fcf1adb70b392a4080",
+        "1ed8f7c39f00ef2daabc1206c1c1a55d406a81bd8c2ad19af24451e24f7e228c",
+        "1e056112b7273a4a950b5e075da92342f4150ee5987bef6b2b048b94c883b1bb",
+        "8f497c2fb6d8a23fdc7dea832fc3a5691c91939994481996a5ec0e7f97af009b",
+        "e04aecd94cc7a9d7ee52804e483100578289666a0d1982ed83200dd6998243ad",
+        "e95617cd2914be2e056f273397dc17897f0d3af7c33d881e0635df1b20bf4592"
+      ]
+    },
+    "feeding116": {
+      "totalFounders": 116,
+      "founderCounts": [68,4,12,8,6,5,5,5,3],
+      "sourceSha256": [
+        "c4241dd3a4c344dd5c216a9b281e482d6c0212101242f9891a772bc8ec3d2d2c",
+        "bb515a76023bfe99e5ddcb457d7e355624d3c127f335564439a58b6d4b478e42",
+        "88ba5fbd774f3ad4aceda51b770c5a2df5123b394c50c64ca80884a73db89abc",
+        "9394d75e27ca4112ff732422e0e4b55da680dceac2a0f9fcf1adb70b392a4080",
+        "1ed8f7c39f00ef2daabc1206c1c1a55d406a81bd8c2ad19af24451e24f7e228c",
+        "1e056112b7273a4a950b5e075da92342f4150ee5987bef6b2b048b94c883b1bb",
+        "8f497c2fb6d8a23fdc7dea832fc3a5691c91939994481996a5ec0e7f97af009b",
+        "e04aecd94cc7a9d7ee52804e483100578289666a0d1982ed83200dd6998243ad",
+        "e95617cd2914be2e056f273397dc17897f0d3af7c33d881e0635df1b20bf4592"
+      ]
+    },
+    "moreForagers128": {
+      "totalFounders": 128,
+      "founderCounts": [68,4,24,8,6,5,5,5,3],
+      "sourceSha256": [
+        "c4241dd3a4c344dd5c216a9b281e482d6c0212101242f9891a772bc8ec3d2d2c",
+        "bb515a76023bfe99e5ddcb457d7e355624d3c127f335564439a58b6d4b478e42",
+        "88ba5fbd774f3ad4aceda51b770c5a2df5123b394c50c64ca80884a73db89abc",
+        "9394d75e27ca4112ff732422e0e4b55da680dceac2a0f9fcf1adb70b392a4080",
+        "1ed8f7c39f00ef2daabc1206c1c1a55d406a81bd8c2ad19af24451e24f7e228c",
+        "1e056112b7273a4a950b5e075da92342f4150ee5987bef6b2b048b94c883b1bb",
+        "8f497c2fb6d8a23fdc7dea832fc3a5691c91939994481996a5ec0e7f97af009b",
+        "e04aecd94cc7a9d7ee52804e483100578289666a0d1982ed83200dd6998243ad",
+        "e95617cd2914be2e056f273397dc17897f0d3af7c33d881e0635df1b20bf4592"
+      ]
+    }
+  },
+  "methods": {
+    "readArrays": "Native census, endpoint and observation arrays, together with each arm’s counts and hashes, follow lineageOrder. Registered genomes includes all variants the engine has compiled.",
+    "arms": "previous108 uses the preceding archive. revised108 changes six genomes. revised116 adds two each of Rememberer, Nurse rosette, Crown rosette and Pulse swimmer. feeding116 changes only the Forager from revised116. All four arms use the same habitat and mutation rate.",
+    "sources": "Use the genome text from sourceRevisions keyed by the cohort SHA-256. A file reference is relative to the project root. Remove its single terminal newline before hashing or compiling.",
+    "nativeCensus": "Per census, values follow lineageOrder. Living and cumulative births include mutated descendants. The end ledger separates predation, energy depletion and other deaths. Max generation describes living cells. A last birth of -1 means none during observation.",
+    "nativeChecks": "All four counted budgets (mineral, carbon, oxygen and total usable plus dissipated energy) were checked every four simulated seconds. All retained checkpoints passed. The 12-second activity counts are cell observations. A cell can be counted repeatedly.",
+    "wasm": "The shipped scenario harness samples every two simulated seconds, verifies budgets and saves then restores the endpoint. Digestion, fixation, and secretion in lineageActivity count distinct observed cells. Each run records both its own engine and the conditions its scenario checks actually met.",
+    "lateBirths": "The final 300-second window is bounded by actual censuses. When an observation stops before 300 seconds the window starts at zero.",
+    "timing": "Elapsed durations and rates are simulation time except where otherwise indicated.",
+    "optionalDensity": "moreForagers128 is the same feeding116 genome set and habitat with 24 Foragers at launch instead of 12. It is an exploratory founder-count treatment.",
+    "directTransfers": {
+      "engine": "native release, ABI 24, using shipped engine sources",
+      "mutationRate": 0.1,
+      "tickSeconds": 0.03333333333333333,
+      "sampleSeconds": 4,
+      "root": "Descendants follow genome_parent recursively to their seeded genome.",
+      "twoCellTrade": "Both cells have one another as their only bonded peer. The Forager has a feeding junction, both transfer balances are nonzero and add to zero.",
+      "nurseDelivery": "A Nurse younger than 50 simulated seconds with one physical link, to another Nurse, has a positive signed transfer.",
+      "rimSecretion": "A Crown cell shows positive active exporter emission, with rim, incoming and partners confirmed in its gene evaluator at the first observed tick.",
+      "pulseMotor": "Bonded Pulse cell has a complete PulseMotor with positive activity.",
+      "peakLinks": "Maximum number of simultaneous pair links by lineage.",
+      "observedTransfers": "Peaks are native body-inspector resource units per 1/30s tick.",
+      "crownPeakRelease": "Gross food energy per simulated second."
+    }
+  },
+  "nativeRuns": [
+    {
+      "arm": "previous108",
+      "engine": "native",
+      "seed": 42,
+      "observedSeconds": 720,
+      "censuses": [
+        {"seconds": 0,"living": [68,4,12,8,4,3,3,3,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 0},
+        {"seconds": 60,"living": [67,4,12,8,4,3,3,2,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 697},
+        {"seconds": 120,"living": [123,8,11,15,4,6,6,4,3],"births": [62,4,0,8,0,3,3,2,0],"particles": 1474},
+        {"seconds": 180,"living": [147,12,11,22,3,8,12,7,4],"births": [112,8,0,16,0,9,9,6,1],"particles": 2482},
+        {"seconds": 240,"living": [169,16,10,25,3,9,17,7,4],"births": [168,12,2,26,0,10,14,6,2],"particles": 3590},
+        {"seconds": 300,"living": [183,20,5,30,4,9,20,8,5],"births": [211,16,5,33,1,13,17,8,3],"particles": 4467},
+        {"seconds": 360,"living": [193,28,5,38,4,15,24,8,4],"births": [250,24,6,43,1,19,21,8,4],"particles": 5107},
+        {"seconds": 420,"living": [199,34,2,42,5,14,24,9,5],"births": [282,30,6,51,2,19,21,10,5],"particles": 5424},
+        {"seconds": 480,"living": [199,40,1,49,5,15,26,9,4],"births": [303,36,6,61,2,22,23,10,5],"particles": 5429},
+        {"seconds": 540,"living": [200,48,1,54,5,18,27,10,3],"births": [328,44,6,67,2,26,24,11,6],"particles": 5268},
+        {"seconds": 600,"living": [200,53,1,58,5,21,28,11,2],"births": [348,49,6,71,2,30,25,12,6],"particles": 5173},
+        {"seconds": 660,"living": [203,63,1,63,3,22,30,12,2],"births": [374,59,6,76,2,31,27,13,6],"particles": 5186},
+        {"seconds": 720,"living": [203,70,1,67,3,26,30,14,2],"births": [385,66,6,81,2,35,27,15,6],"particles": 5279}
+      ],
+      "terminal": {
+        "deaths": [250,0,17,22,3,12,0,4,7],
+        "killed": [29,0,0,4,1,3,0,2,0],
+        "depleted": [221,0,17,18,2,9,0,2,7],
+        "other": [0,0,0,0,0,0,0,0,0],
+        "kills": [0,0,0,0,0,0,0,0,39],
+        "lastBirth": [715.93,716.17,339.97,709.77,413.9,705.2,637.5,696.13,497.83],
+        "maxGeneration": [2,6,0,3,1,4,3,1,1],
+        "registeredGenomes": 70
+      },
+      "lateBirthWindowSeconds": [420,720],
+      "birthsInLateWindow": [103,36,0,30,0,16,6,5,1],
+      "positiveCellObservations": {"export": [10046,315,0,0,0,0,0,0,0],"digest": [0,0,173,0,98,0,0,0,47],"fix": [10124,1814,0,2120,0,754,1183,484,0],"ligand": [0,335,52,0,62,0,0,0,20]}
+    },
+    {
+      "arm": "previous108",
+      "engine": "native",
+      "seed": 2026,
+      "observedSeconds": 660,
+      "censuses": [
+        {"seconds": 0,"living": [68,4,12,8,4,3,3,3,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 0},
+        {"seconds": 60,"living": [65,4,12,8,4,3,3,3,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 694},
+        {"seconds": 120,"living": [119,8,10,16,3,6,6,6,3],"births": [62,4,0,8,0,3,3,3,0],"particles": 1635},
+        {"seconds": 180,"living": [135,12,10,21,3,9,13,12,5],"births": [113,8,1,15,0,8,11,9,2],"particles": 2650},
+        {"seconds": 240,"living": [153,18,5,19,3,12,13,12,7],"births": [160,15,1,21,1,11,14,12,4],"particles": 3687},
+        {"seconds": 300,"living": [178,18,5,17,3,11,16,13,8],"births": [219,17,3,23,1,13,17,14,5],"particles": 4561},
+        {"seconds": 360,"living": [184,24,4,21,3,19,17,14,6],"births": [250,23,4,29,2,21,18,16,7],"particles": 5080},
+        {"seconds": 420,"living": [187,29,2,23,1,24,18,16,6],"births": [279,28,4,31,2,26,19,18,8],"particles": 5344},
+        {"seconds": 480,"living": [190,37,2,25,1,27,19,18,6],"births": [308,36,4,35,2,29,20,20,8],"particles": 5397},
+        {"seconds": 540,"living": [190,43,2,25,1,28,19,20,4],"births": [332,42,4,36,2,31,21,22,8],"particles": 5524},
+        {"seconds": 600,"living": [192,49,2,27,1,30,20,22,3],"births": [359,48,4,39,2,34,22,24,8],"particles": 5545},
+        {"seconds": 660,"living": [196,56,2,28,0,32,20,22,3],"births": [386,55,4,42,2,37,22,25,8],"particles": 5554}
+      ],
+      "terminal": {
+        "deaths": [258,3,14,22,6,8,5,6,8],
+        "killed": [34,3,2,5,2,1,4,2,0],
+        "depleted": [224,0,12,17,4,7,1,4,8],
+        "other": [0,0,0,0,0,0,0,0,0],
+        "kills": [0,0,0,0,0,0,0,0,53],
+        "lastBirth": [659.9,640.43,336.93,650.57,316.23,645.77,593.07,645.5,383.03],
+        "maxGeneration": [2,6,0,2,0,5,3,2,1],
+        "registeredGenomes": 59
+      },
+      "lateBirthWindowSeconds": [360,660],
+      "birthsInLateWindow": [136,32,0,13,0,16,4,9,1],
+      "positiveCellObservations": {"export": [8572,323,0,0,0,0,0,0,0],"digest": [0,0,137,0,34,0,0,0,71],"fix": [8657,1257,0,1053,0,904,754,745,0],"ligand": [0,325,49,0,3,0,0,0,100]}
+    },
+    {
+      "arm": "previous108",
+      "engine": "native",
+      "seed": 7,
+      "observedSeconds": 600,
+      "censuses": [
+        {"seconds": 0,"living": [68,4,12,8,4,3,3,3,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 0},
+        {"seconds": 28,"living": [68,4,12,8,4,3,3,3,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 173},
+        {"seconds": 60,"living": [66,4,12,7,3,3,3,3,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 697},
+        {"seconds": 120,"living": [124,5,12,14,3,6,6,6,3],"births": [62,3,0,7,0,3,3,3,0],"particles": 1508},
+        {"seconds": 180,"living": [147,6,9,21,3,6,12,12,4],"births": [106,6,0,14,0,5,10,10,1],"particles": 2621},
+        {"seconds": 240,"living": [170,11,10,21,3,8,13,13,4],"births": [165,11,2,18,0,7,13,13,1],"particles": 3777},
+        {"seconds": 300,"living": [185,13,4,23,4,8,13,15,5],"births": [213,14,3,24,1,9,14,16,2],"particles": 4781},
+        {"seconds": 600,"living": [194,36,1,36,1,11,15,25,4],"births": [346,39,5,49,1,14,17,27,3],"particles": 5115}
+      ],
+      "terminal": {"deaths": [220,7,16,21,4,6,5,5,2],"kills": [0,0,0,0,0,0,0,0,70]},
+      "lateBirthWindowSeconds": [300,600],
+      "birthsInLateWindow": [133,25,2,25,0,5,3,11,1]
+    },
+    {
+      "arm": "revised108",
+      "engine": "native",
+      "seed": 42,
+      "observedSeconds": 600,
+      "censuses": [
+        {"seconds": 0,"living": [68,4,12,8,4,3,3,3,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 0},
+        {"seconds": 60,"living": [65,4,12,8,4,3,3,2,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 717},
+        {"seconds": 120,"living": [127,8,11,14,4,6,1,4,3],"births": [63,4,0,7,0,3,1,2,0],"particles": 1593},
+        {"seconds": 180,"living": [142,15,12,14,4,9,0,8,5],"births": [107,11,1,15,1,7,1,6,2],"particles": 2614},
+        {"seconds": 240,"living": [160,24,11,16,4,11,0,7,6],"births": [156,20,3,23,2,9,1,8,4],"particles": 3543},
+        {"seconds": 300,"living": [175,31,11,24,0,11,0,7,8],"births": [200,28,6,31,2,11,1,8,6],"particles": 4141},
+        {"seconds": 360,"living": [184,45,5,28,0,16,0,8,7],"births": [236,45,7,36,2,17,1,9,6],"particles": 4776},
+        {"seconds": 420,"living": [200,57,5,32,0,18,0,8,7],"births": [268,59,10,43,2,19,1,9,8],"particles": 5013},
+        {"seconds": 480,"living": [210,68,3,37,0,20,0,9,6],"births": [287,73,10,49,2,21,1,10,8],"particles": 5377},
+        {"seconds": 540,"living": [219,85,3,42,0,22,0,8,3],"births": [303,91,10,55,2,23,1,10,8],"particles": 5682},
+        {"seconds": 600,"living": [232,97,2,46,0,24,0,8,3],"births": [325,105,10,60,2,25,1,11,8],"particles": 6106}
+      ],
+      "terminal": {
+        "deaths": [161,12,20,22,6,4,4,6,8],
+        "killed": [27,3,1,3,4,1,4,4,0],
+        "depleted": [134,9,19,19,2,3,0,2,8],
+        "other": [0,0,0,0,0,0,0,0,0],
+        "kills": [0,0,0,0,0,0,0,0,47],
+        "lastBirth": [597.0,596.63,390.8,589.83,190.07,578.53,80.57,580.97,380.97],
+        "maxGeneration": [6,6,0,2,0,4,0,2,1],
+        "registeredGenomes": 55
+      },
+      "lateBirthWindowSeconds": [300,600],
+      "birthsInLateWindow": [125,77,4,29,0,14,0,3,2],
+      "positiveCellObservations": {"export": [8083,274,0,0,0,0,0,0,0],"digest": [0,0,211,18,38,0,0,0,75],"fix": [8204,1973,0,1204,0,640,25,340,0],"ligand": [0,217,38,10,0,0,0,0,87]}
+    },
+    {
+      "arm": "revised116",
+      "engine": "native",
+      "seed": 7,
+      "observedSeconds": 900,
+      "censuses": [
+        {"seconds": 0,"living": [68,4,12,8,6,5,5,5,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 0},
+        {"seconds": 60,"living": [68,4,12,7,6,4,5,5,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 728},
+        {"seconds": 120,"living": [127,8,12,14,6,8,10,10,3],"births": [61,4,0,7,0,4,5,5,0],"particles": 1610},
+        {"seconds": 180,"living": [143,16,10,14,7,12,18,20,3],"births": [97,12,0,13,1,10,16,16,0],"particles": 2665},
+        {"seconds": 240,"living": [163,27,9,14,7,14,22,21,4],"births": [141,23,1,19,2,13,21,20,1],"particles": 3318},
+        {"seconds": 300,"living": [167,36,9,13,8,17,27,25,5],"births": [171,35,5,22,5,17,26,25,3],"particles": 3988},
+        {"seconds": 360,"living": [182,42,7,16,8,20,26,28,6],"births": [213,42,6,27,8,24,27,28,4],"particles": 4347},
+        {"seconds": 420,"living": [189,57,4,16,7,23,27,33,6],"births": [234,59,7,28,8,27,29,33,5],"particles": 4729},
+        {"seconds": 480,"living": [202,70,4,19,6,25,27,37,5],"births": [264,73,8,31,8,31,30,37,5],"particles": 5134},
+        {"seconds": 540,"living": [211,77,2,20,6,27,27,39,5],"births": [292,82,8,33,10,34,31,39,5],"particles": 5478},
+        {"seconds": 600,"living": [214,88,2,21,6,27,28,42,4],"births": [307,96,8,35,10,36,32,43,5],"particles": 5810},
+        {"seconds": 660,"living": [217,101,2,23,6,29,28,45,4],"births": [322,112,8,37,10,38,33,47,5],"particles": 6102},
+        {"seconds": 720,"living": [221,104,2,24,6,29,29,47,4],"births": [335,123,8,39,10,40,34,50,5],"particles": 6092},
+        {"seconds": 780,"living": [230,121,2,25,6,31,28,47,4],"births": [349,141,8,41,10,42,34,52,5],"particles": 6156},
+        {"seconds": 840,"living": [231,126,2,25,5,33,29,50,4],"births": [357,151,8,41,10,44,35,57,5],"particles": 6235},
+        {"seconds": 900,"living": [234,139,2,26,5,35,30,53,4],"births": [365,167,8,42,10,47,36,61,5],"particles": 6406}
+      ],
+      "terminal": {
+        "deaths": [199,32,18,24,11,17,11,13,4],
+        "killed": [39,8,0,3,2,5,6,2,0],
+        "depleted": [160,24,18,21,9,12,5,11,4],
+        "other": [0,0,0,0,0,0,0,0,0],
+        "kills": [0,0,0,0,0,0,0,0,65],
+        "lastBirth": [895.73,893.2,460.73,859.47,538.6,897.87,855.77,894.33,419.8],
+        "maxGeneration": [8,9,1,2,1,4,3,2,1],
+        "registeredGenomes": 71
+      },
+      "lateBirthWindowSeconds": [600,900],
+      "birthsInLateWindow": [58,71,0,7,0,11,4,18,0],
+      "positiveCellObservations": {
+        "export": [13172,538,0,0,0,0,15,0,0],
+        "digest": [0,0,200,39,344,0,0,0,133],
+        "fix": [13572,4746,0,1303,0,1554,1725,2365,0],
+        "ligand": [0,687,95,264,264,0,0,0,169]
+      }
+    },
+    {
+      "arm": "revised116",
+      "engine": "native",
+      "seed": 17,
+      "observedSeconds": 900,
+      "censuses": [
+        {"seconds": 0,"living": [68,4,12,8,6,5,5,5,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 0},
+        {"seconds": 60,"living": [67,4,12,7,6,4,5,5,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 662},
+        {"seconds": 120,"living": [122,8,12,14,5,8,10,9,3],"births": [59,4,0,7,0,4,5,5,0],"particles": 1632},
+        {"seconds": 180,"living": [133,15,10,14,5,12,21,18,6],"births": [92,11,0,14,0,9,16,15,3],"particles": 2734},
+        {"seconds": 240,"living": [149,21,13,12,8,12,29,19,5],"births": [149,18,3,18,4,11,24,20,4],"particles": 3708},
+        {"seconds": 300,"living": [156,29,5,15,5,15,34,21,5],"births": [177,27,5,23,6,16,30,24,4],"particles": 4517},
+        {"seconds": 360,"living": [172,35,2,16,5,16,33,25,4],"births": [211,38,6,25,6,17,31,28,4],"particles": 5047},
+        {"seconds": 420,"living": [186,39,2,18,5,22,34,28,4],"births": [247,46,7,29,6,23,32,31,4],"particles": 5460},
+        {"seconds": 480,"living": [198,52,1,20,5,22,34,30,4],"births": [278,60,7,31,7,24,34,34,4],"particles": 5572},
+        {"seconds": 540,"living": [203,55,1,21,5,24,36,34,4],"births": [301,64,7,34,7,26,36,40,4],"particles": 5818},
+        {"seconds": 600,"living": [210,68,1,21,5,26,37,35,4],"births": [326,79,7,34,7,28,37,41,4],"particles": 6163},
+        {"seconds": 660,"living": [220,74,1,21,4,26,38,37,4],"births": [347,88,7,34,7,30,38,44,4],"particles": 6408},
+        {"seconds": 720,"living": [228,79,1,23,4,27,38,39,4],"births": [366,95,7,36,7,31,39,47,4],"particles": 6534},
+        {"seconds": 780,"living": [234,88,1,24,5,29,38,42,4],"births": [390,104,7,37,8,33,39,51,4],"particles": 6541},
+        {"seconds": 840,"living": [237,97,1,23,4,31,39,43,4],"births": [401,114,7,38,8,35,40,55,4],"particles": 6659},
+        {"seconds": 900,"living": [244,102,1,25,4,31,38,45,4],"births": [421,122,7,41,8,35,40,58,4],"particles": 6724}
+      ],
+      "terminal": {
+        "deaths": [245,24,18,24,10,9,7,18,3],
+        "killed": [54,7,0,5,2,1,2,3,0],
+        "depleted": [191,17,18,19,8,8,5,15,3],
+        "other": [0,0,0,0,0,0,0,0,0],
+        "kills": [0,0,0,0,0,0,0,0,74],
+        "lastBirth": [898.0,899.6,364.8,876.23,732.07,824.47,809.47,888.6,233.33],
+        "maxGeneration": [7,8,0,2,0,4,3,5,1],
+        "registeredGenomes": 93
+      },
+      "lateBirthWindowSeconds": [600,900],
+      "birthsInLateWindow": [95,43,0,7,1,7,3,17,0],
+      "positiveCellObservations": {
+        "export": [12824,384,0,0,0,0,26,0,0],
+        "digest": [0,0,177,16,280,0,0,0,125],
+        "fix": [13347,3523,0,1283,0,1461,2209,2079,0],
+        "ligand": [0,378,60,59,228,0,0,0,110]
+      }
+    },
+    {
+      "arm": "revised116",
+      "engine": "native",
+      "seed": 42,
+      "observedSeconds": 900,
+      "censuses": [
+        {"seconds": 0,"living": [68,4,12,8,6,5,5,5,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 0},
+        {"seconds": 60,"living": [65,4,12,8,6,5,5,5,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 688},
+        {"seconds": 120,"living": [114,8,12,16,5,10,10,8,3],"births": [54,4,0,8,0,5,5,4,0],"particles": 1357},
+        {"seconds": 180,"living": [131,16,11,16,3,15,20,16,6],"births": [92,12,1,15,0,11,15,12,3],"particles": 2328},
+        {"seconds": 240,"living": [151,22,9,19,2,14,23,16,6],"births": [139,19,4,26,0,14,18,14,3],"particles": 3372},
+        {"seconds": 300,"living": [165,27,5,25,3,17,30,16,6],"births": [171,25,5,33,1,18,25,17,5],"particles": 4084},
+        {"seconds": 360,"living": [176,35,5,29,4,16,33,19,7],"births": [204,35,6,39,3,22,28,20,7],"particles": 4567},
+        {"seconds": 420,"living": [182,47,1,32,3,18,33,19,4],"births": [225,48,8,48,4,24,28,21,7],"particles": 4985},
+        {"seconds": 480,"living": [194,56,0,34,3,17,37,22,3],"births": [249,57,8,51,4,25,32,24,7],"particles": 5204},
+        {"seconds": 540,"living": [203,63,0,38,2,17,40,23,3],"births": [269,65,8,55,4,25,36,25,7],"particles": 5507},
+        {"seconds": 600,"living": [209,78,0,43,2,19,40,25,3],"births": [284,82,8,60,4,27,36,27,7],"particles": 5697},
+        {"seconds": 660,"living": [219,90,0,46,2,20,43,27,3],"births": [298,96,8,64,4,28,40,29,7],"particles": 5793},
+        {"seconds": 720,"living": [224,107,0,50,2,22,44,27,3],"births": [314,115,8,69,4,30,42,30,7],"particles": 5894},
+        {"seconds": 780,"living": [223,118,0,51,2,23,44,28,3],"births": [316,128,8,70,4,32,43,31,7],"particles": 5889},
+        {"seconds": 840,"living": [227,127,0,55,2,23,49,29,3],"births": [324,142,8,74,4,32,48,32,7],"particles": 5797},
+        {"seconds": 900,"living": [229,139,0,58,2,24,49,30,3],"births": [327,156,8,77,4,33,48,33,7],"particles": 5965}
+      ],
+      "terminal": {
+        "deaths": [166,21,20,27,8,14,4,8,7],
+        "killed": [37,5,0,5,4,4,1,3,0],
+        "depleted": [129,16,20,22,4,10,3,5,7],
+        "other": [0,0,0,0,0,0,0,0,0],
+        "kills": [0,0,0,0,0,0,0,0,59],
+        "lastBirth": [874.3,892.2,375.97,870.97,361.03,871.47,838.43,868.6,350.57],
+        "maxGeneration": [7,8,0,4,0,4,4,2,1],
+        "registeredGenomes": 74
+      },
+      "lateBirthWindowSeconds": [600,900],
+      "birthsInLateWindow": [43,74,0,17,0,6,12,6,0],
+      "positiveCellObservations": {
+        "export": [12819,447,0,0,0,0,15,0,0],
+        "digest": [0,0,144,20,127,0,0,0,85],
+        "fix": [13186,4386,0,2422,0,1230,2406,1490,0],
+        "ligand": [0,288,0,156,138,0,0,0,132]
+      }
+    },
+    {
+      "arm": "revised116",
+      "engine": "native",
+      "seed": 2026,
+      "observedSeconds": 900,
+      "censuses": [
+        {"seconds": 0,"living": [68,4,12,8,6,5,5,5,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 0},
+        {"seconds": 60,"living": [66,3,12,7,6,5,5,5,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 673},
+        {"seconds": 120,"living": [121,6,11,13,6,10,10,10,3],"births": [61,3,0,7,0,5,5,5,0],"particles": 1427},
+        {"seconds": 180,"living": [138,12,10,13,4,15,21,20,4],"births": [104,9,0,14,0,13,16,15,1],"particles": 2421},
+        {"seconds": 240,"living": [157,23,11,14,2,19,25,20,6],"births": [157,20,2,20,0,18,21,19,3],"particles": 3369},
+        {"seconds": 300,"living": [166,30,9,15,3,21,32,24,7],"births": [194,30,4,23,2,23,28,23,5],"particles": 4168},
+        {"seconds": 360,"living": [175,35,7,20,2,27,32,25,6],"births": [224,37,7,28,2,30,31,24,6],"particles": 4732},
+        {"seconds": 420,"living": [191,48,4,24,2,31,34,29,5],"births": [261,54,8,33,2,36,34,28,6],"particles": 5038},
+        {"seconds": 480,"living": [200,55,0,26,1,34,34,33,4],"births": [277,63,8,36,2,39,35,32,7],"particles": 5274},
+        {"seconds": 540,"living": [215,66,0,29,1,35,35,34,3],"births": [308,74,8,39,2,41,37,34,7],"particles": 5535},
+        {"seconds": 600,"living": [216,75,0,29,1,37,37,37,3],"births": [324,85,8,40,2,44,39,37,7],"particles": 5834},
+        {"seconds": 660,"living": [223,84,0,31,1,38,38,37,3],"births": [342,96,8,42,2,45,40,38,7],"particles": 5966},
+        {"seconds": 720,"living": [230,89,0,32,1,41,38,40,3],"births": [359,103,8,43,2,48,40,41,7],"particles": 6177},
+        {"seconds": 780,"living": [237,97,0,34,1,41,38,41,3],"births": [373,113,8,45,2,50,40,42,7],"particles": 6315},
+        {"seconds": 840,"living": [242,102,0,33,1,42,39,40,3],"births": [388,121,8,45,2,51,41,44,7],"particles": 6358},
+        {"seconds": 900,"living": [245,111,0,35,1,41,39,42,3],"births": [400,133,8,47,2,52,42,46,7],"particles": 6390}
+      ],
+      "terminal": {
+        "deaths": [223,26,20,20,7,16,8,9,7],
+        "killed": [37,11,2,3,5,5,1,1,0],
+        "depleted": [186,15,18,17,2,11,7,8,7],
+        "other": [0,0,0,0,0,0,0,0,0],
+        "kills": [0,0,0,0,0,0,0,0,65],
+        "lastBirth": [895.8,896.83,384.13,894.23,279.93,874.17,845.73,893.9,435.67],
+        "maxGeneration": [8,9,0,2,0,5,4,2,1],
+        "registeredGenomes": 82
+      },
+      "lateBirthWindowSeconds": [600,900],
+      "birthsInLateWindow": [76,48,0,7,0,8,3,9,0],
+      "positiveCellObservations": {
+        "export": [13076,398,0,0,0,0,48,0,0],
+        "digest": [0,0,149,53,80,0,0,0,110],
+        "fix": [13644,3936,0,1693,0,2068,2198,2108,0],
+        "ligand": [0,722,5,187,15,0,0,0,177]
+      }
+    },
+    {
+      "arm": "feeding116",
+      "engine": "native",
+      "seed": 7,
+      "observedSeconds": 900,
+      "censuses": [
+        {"seconds": 0,"living": [68,4,12,8,6,5,5,5,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 0},
+        {"seconds": 60,"living": [68,4,12,7,6,4,5,5,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 728},
+        {"seconds": 120,"living": [127,8,12,14,6,8,10,10,3],"births": [61,4,0,7,0,4,5,5,0],"particles": 1610},
+        {"seconds": 180,"living": [143,16,10,14,7,12,18,20,3],"births": [97,12,0,13,1,10,16,16,0],"particles": 2661},
+        {"seconds": 240,"living": [164,27,9,15,8,14,22,21,4],"births": [141,23,1,19,3,13,21,20,1],"particles": 3355},
+        {"seconds": 300,"living": [170,36,11,13,6,16,27,25,4],"births": [169,36,4,22,4,17,26,25,1],"particles": 4080},
+        {"seconds": 360,"living": [181,38,10,16,8,20,27,29,6],"births": [212,40,8,27,9,24,27,29,3],"particles": 4778},
+        {"seconds": 420,"living": [190,59,4,17,6,19,28,33,5],"births": [239,61,8,28,9,25,29,33,3],"particles": 5128},
+        {"seconds": 480,"living": [207,67,4,20,5,20,29,34,6],"births": [269,72,9,31,9,29,31,36,5],"particles": 5605},
+        {"seconds": 540,"living": [212,79,2,22,3,22,29,36,6],"births": [288,86,9,34,10,32,32,38,6],"particles": 5930},
+        {"seconds": 600,"living": [219,98,2,23,3,21,30,39,5],"births": [301,107,9,36,10,33,34,41,6],"particles": 6114},
+        {"seconds": 660,"living": [230,104,2,23,3,21,31,42,5],"births": [321,118,9,37,10,34,36,45,6],"particles": 6201},
+        {"seconds": 720,"living": [237,120,2,27,3,22,32,43,4],"births": [334,136,9,42,10,36,37,46,6],"particles": 6239},
+        {"seconds": 780,"living": [239,132,2,28,3,22,32,45,4],"births": [342,152,9,43,10,36,37,49,6],"particles": 6371},
+        {"seconds": 840,"living": [241,148,1,28,3,23,33,47,3],"births": [350,169,9,44,10,37,39,51,6],"particles": 6440},
+        {"seconds": 900,"living": [246,160,1,28,3,24,32,50,3],"births": [356,184,9,45,10,38,39,54,6],"particles": 6516}
+      ],
+      "terminal": {
+        "deaths": [178,28,20,25,13,19,12,9,6],
+        "killed": [32,9,0,1,2,9,5,2,0],
+        "depleted": [146,19,20,24,11,10,7,7,6],
+        "other": [0,0,0,0,0,0,0,0,0],
+        "kills": [0,0,0,0,0,0,0,0,60],
+        "lastBirth": [889.53,894.47,441.87,856.57,485.5,844.53,791.57,890.07,510.6],
+        "maxGeneration": [8,9,0,2,0,4,3,2,1],
+        "registeredGenomes": 85
+      },
+      "lateBirthWindowSeconds": [600,900],
+      "birthsInLateWindow": [55,77,0,9,0,5,5,13,0],
+      "positiveCellObservations": {
+        "export": [13516,581,0,0,0,0,20,0,0],
+        "digest": [0,0,217,41,254,0,0,0,135],
+        "fix": [13961,5129,0,1386,0,1274,1850,2280,0],
+        "ligand": [0,650,45,268,201,0,0,0,244]
+      }
+    },
+    {
+      "arm": "feeding116",
+      "engine": "native",
+      "seed": 42,
+      "observedSeconds": 900,
+      "censuses": [
+        {"seconds": 0,"living": [68,4,12,8,6,5,5,5,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 0},
+        {"seconds": 60,"living": [65,4,12,8,6,5,5,5,3],"births": [0,0,0,0,0,0,0,0,0],"particles": 686},
+        {"seconds": 120,"living": [114,8,12,16,4,10,10,8,3],"births": [54,4,0,8,0,5,5,4,0],"particles": 1451},
+        {"seconds": 180,"living": [134,16,13,14,4,15,20,16,6],"births": [97,12,1,14,0,13,15,12,3],"particles": 2487},
+        {"seconds": 240,"living": [141,26,13,17,5,17,23,16,4],"births": [130,22,3,24,2,15,18,15,3],"particles": 3251},
+        {"seconds": 300,"living": [159,33,14,20,6,19,31,18,4],"births": [174,30,7,28,5,20,26,18,4],"particles": 3787},
+        {"seconds": 360,"living": [171,41,7,25,6,24,33,20,3],"births": [205,41,7,35,5,27,28,20,4],"particles": 4353},
+        {"seconds": 420,"living": [179,52,5,29,5,25,35,23,3],"births": [232,54,10,40,6,28,30,23,4],"particles": 4576},
+        {"seconds": 480,"living": [189,58,2,32,5,27,37,25,3],"births": [257,61,10,45,7,32,33,25,4],"particles": 4887},
+        {"seconds": 540,"living": [197,74,2,35,5,29,38,26,3],"births": [277,77,10,49,7,35,34,26,4],"particles": 5233},
+        {"seconds": 600,"living": [206,87,2,38,5,30,40,25,3],"births": [293,91,11,52,7,37,37,27,4],"particles": 5455},
+        {"seconds": 660,"living": [208,102,2,42,5,32,40,25,3],"births": [305,108,11,57,7,39,37,28,4],"particles": 5676},
+        {"seconds": 720,"living": [215,118,2,45,4,34,42,28,3],"births": [315,128,11,60,7,41,39,31,4],"particles": 5696},
+        {"seconds": 780,"living": [220,127,2,45,4,37,42,28,3],"births": [325,141,11,61,7,44,39,32,4],"particles": 5792},
+        {"seconds": 840,"living": [225,142,0,50,4,38,43,29,3],"births": [332,159,11,66,7,45,41,33,4],"particles": 5911},
+        {"seconds": 900,"living": [229,151,0,51,3,39,43,31,3],"births": [338,170,11,67,7,47,41,35,4],"particles": 6051}
+      ],
+      "terminal": {
+        "deaths": [177,23,23,24,10,13,3,9,4],
+        "killed": [33,5,0,4,3,3,0,4,0],
+        "depleted": [144,18,23,20,7,10,3,5,4],
+        "other": [0,0,0,0,0,0,0,0,0],
+        "kills": [0,0,0,0,0,0,0,0,52],
+        "lastBirth": [890.7,896.87,542.3,867.8,424.63,862.27,804.67,898.4,240.5],
+        "maxGeneration": [9,8,0,2,0,4,3,2,1],
+        "registeredGenomes": 81
+      },
+      "lateBirthWindowSeconds": [600,900],
+      "birthsInLateWindow": [45,79,0,15,0,10,4,8,0],
+      "positiveCellObservations": {
+        "export": [12490,516,0,0,0,0,29,0,0],
+        "digest": [0,0,199,27,202,0,0,0,48],
+        "fix": [12907,4855,0,2181,0,1803,2350,1534,0],
+        "ligand": [0,456,14,82,94,0,0,0,93]
+      }
+    }
+  ],
+  "wasmRuns": [
+    {
+      "arm": "revised116",
+      "engine": "wasmPrevious",
+      "observedSeconds": 600,
+      "seed": 7,
+      "observations": {
+        "alive": {
+          "Phototroph": 223,
+          "Ligand producer": 102,
+          "Forager": 1,
+          "Mixotroph": 20,
+          "Rememberer": 4,
+          "Nurse rosette": 26,
+          "Crown rosette": 32,
+          "Pulse swimmer": 35,
+          "Predator": 3
+        },
+        "observedDescendants": {
+          "Phototroph": 181,
+          "Ligand producer": 107,
+          "Forager": 4,
+          "Mixotroph": 18,
+          "Rememberer": 5,
+          "Nurse rosette": 32,
+          "Crown rosette": 32,
+          "Pulse swimmer": 32,
+          "Predator": 3
+        },
+        "firstObservedBirth": 82,
+        "firstObservedKill": 44,
+        "kills": 35,
+        "attacks": 16227,
+        "foodCaptures": 33600,
+        "lineageActivity": {
+          "Phototroph": {
+            "fixing": 249,
+            "digesting": 0,
+            "secreting": 242,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 307,
+            "predationDeaths": 25,
+            "depletedDeaths": 127,
+            "kills": 0,
+            "birthsAfterMidpoint": 137
+          },
+          "Ligand producer": {
+            "fixing": 111,
+            "digesting": 0,
+            "secreting": 34,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 108,
+            "predationDeaths": 0,
+            "depletedDeaths": 10,
+            "kills": 0,
+            "birthsAfterMidpoint": 72
+          },
+          "Forager": {
+            "fixing": 0,
+            "digesting": 12,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 5,
+            "predationDeaths": 0,
+            "depletedDeaths": 16,
+            "kills": 0,
+            "birthsAfterMidpoint": 0
+          },
+          "Mixotroph": {
+            "fixing": 26,
+            "digesting": 14,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 14,
+            "cellsSeenFixingWhileDigesting": 14,
+            "births": 31,
+            "predationDeaths": 2,
+            "depletedDeaths": 17,
+            "kills": 0,
+            "birthsAfterMidpoint": 11
+          },
+          "Rememberer": {
+            "fixing": 0,
+            "digesting": 10,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 8,
+            "predationDeaths": 2,
+            "depletedDeaths": 8,
+            "kills": 0,
+            "birthsAfterMidpoint": 4
+          },
+          "Nurse rosette": {
+            "fixing": 37,
+            "digesting": 0,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 32,
+            "predationDeaths": 2,
+            "depletedDeaths": 9,
+            "kills": 0,
+            "birthsAfterMidpoint": 17
+          },
+          "Crown rosette": {
+            "fixing": 37,
+            "digesting": 0,
+            "secreting": 5,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 33,
+            "predationDeaths": 2,
+            "depletedDeaths": 4,
+            "kills": 0,
+            "birthsAfterMidpoint": 6
+          },
+          "Pulse swimmer": {
+            "fixing": 37,
+            "digesting": 0,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 36,
+            "predationDeaths": 2,
+            "depletedDeaths": 4,
+            "kills": 0,
+            "birthsAfterMidpoint": 13
+          },
+          "Predator": {
+            "fixing": 0,
+            "digesting": 6,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 5,
+            "predationDeaths": 0,
+            "depletedDeaths": 5,
+            "kills": 35,
+            "birthsAfterMidpoint": 2
+          }
+        },
+        "firstObservedLigandRelease": 32,
+        "firstObservedLigandUptake": 52,
+        "lineagesWithInternalLigand": ["Forager","Rememberer","Predator","Mixotroph"],
+        "firstObservedRecoveryEnzyme": 52,
+        "mineralsEmitted": 521.5076,
+        "mineralsAbsorbed": 307.1223,
+        "huntersObservedWithStructuralCarbon": 6
+      },
+      "checks": {
+        "producerExports": true,
+        "consumersDigest": true,
+        "consumersRenew": false,
+        "mineralExchange": true,
+        "ligandReleasedAndCaptured": true,
+        "grazerBuiltRecoveryEnzyme": true,
+        "naturalHunt": true,
+        "photosynthesis": true,
+        "exactResourceBudgets": true,
+        "endpointSaveRestore": true
+      },
+      "passed": false
+    },
+    {
+      "arm": "revised116",
+      "engine": "wasmShipped",
+      "observedSeconds": 600,
+      "seed": 17,
+      "observations": {
+        "alive": {
+          "Phototroph": 217,
+          "Ligand producer": 82,
+          "Forager": 1,
+          "Mixotroph": 27,
+          "Rememberer": 5,
+          "Nurse rosette": 28,
+          "Crown rosette": 37,
+          "Pulse swimmer": 36,
+          "Predator": 3
+        },
+        "observedDescendants": {
+          "Phototroph": 175,
+          "Ligand producer": 89,
+          "Forager": 9,
+          "Mixotroph": 23,
+          "Rememberer": 4,
+          "Nurse rosette": 29,
+          "Crown rosette": 36,
+          "Pulse swimmer": 34,
+          "Predator": 3
+        },
+        "firstObservedBirth": 82,
+        "firstObservedKill": 42,
+        "kills": 32,
+        "attacks": 14246,
+        "foodCaptures": 39247,
+        "lineageActivity": {
+          "Phototroph": {
+            "fixing": 243,
+            "digesting": 0,
+            "secreting": 239,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 320,
+            "predationDeaths": 24,
+            "depletedDeaths": 147,
+            "kills": 0,
+            "birthsAfterMidpoint": 141
+          },
+          "Ligand producer": {
+            "fixing": 93,
+            "digesting": 0,
+            "secreting": 28,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 89,
+            "predationDeaths": 1,
+            "depletedDeaths": 10,
+            "kills": 0,
+            "birthsAfterMidpoint": 65
+          },
+          "Forager": {
+            "fixing": 0,
+            "digesting": 12,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 9,
+            "predationDeaths": 0,
+            "depletedDeaths": 20,
+            "kills": 0,
+            "birthsAfterMidpoint": 2
+          },
+          "Mixotroph": {
+            "fixing": 31,
+            "digesting": 16,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 16,
+            "cellsSeenFixingWhileDigesting": 16,
+            "births": 38,
+            "predationDeaths": 1,
+            "depletedDeaths": 18,
+            "kills": 0,
+            "birthsAfterMidpoint": 13
+          },
+          "Rememberer": {
+            "fixing": 0,
+            "digesting": 10,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 8,
+            "predationDeaths": 1,
+            "depletedDeaths": 8,
+            "kills": 0,
+            "birthsAfterMidpoint": 3
+          },
+          "Nurse rosette": {
+            "fixing": 34,
+            "digesting": 0,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 29,
+            "predationDeaths": 1,
+            "depletedDeaths": 5,
+            "kills": 0,
+            "birthsAfterMidpoint": 12
+          },
+          "Crown rosette": {
+            "fixing": 41,
+            "digesting": 0,
+            "secreting": 7,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 36,
+            "predationDeaths": 1,
+            "depletedDeaths": 3,
+            "kills": 0,
+            "birthsAfterMidpoint": 7
+          },
+          "Pulse swimmer": {
+            "fixing": 39,
+            "digesting": 0,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 41,
+            "predationDeaths": 3,
+            "depletedDeaths": 7,
+            "kills": 0,
+            "birthsAfterMidpoint": 19
+          },
+          "Predator": {
+            "fixing": 0,
+            "digesting": 6,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 3,
+            "predationDeaths": 0,
+            "depletedDeaths": 3,
+            "kills": 32,
+            "birthsAfterMidpoint": 0
+          }
+        },
+        "firstObservedLigandRelease": 32,
+        "firstObservedLigandUptake": 42,
+        "lineagesWithInternalLigand": ["Rememberer","Predator","Forager"],
+        "firstObservedRecoveryEnzyme": 232,
+        "mineralsEmitted": 521.5076,
+        "mineralsAbsorbed": 319.2277,
+        "huntersObservedWithStructuralCarbon": 6
+      },
+      "checks": {
+        "producerExports": true,
+        "consumersDigest": true,
+        "consumersRenew": true,
+        "mineralExchange": true,
+        "ligandReleasedAndCaptured": true,
+        "grazerBuiltRecoveryEnzyme": true,
+        "naturalHunt": true,
+        "photosynthesis": true,
+        "exactResourceBudgets": true,
+        "endpointSaveRestore": true
+      },
+      "passed": true
+    },
+    {
+      "arm": "revised116",
+      "engine": "wasmPrevious",
+      "observedSeconds": 600,
+      "seed": 42,
+      "observations": {
+        "alive": {
+          "Phototroph": 227,
+          "Ligand producer": 74,
+          "Forager": 0,
+          "Mixotroph": 40,
+          "Rememberer": 4,
+          "Nurse rosette": 32,
+          "Crown rosette": 40,
+          "Pulse swimmer": 26,
+          "Predator": 3
+        },
+        "observedDescendants": {
+          "Phototroph": 182,
+          "Ligand producer": 81,
+          "Forager": 9,
+          "Mixotroph": 36,
+          "Rememberer": 3,
+          "Nurse rosette": 36,
+          "Crown rosette": 36,
+          "Pulse swimmer": 22,
+          "Predator": 3
+        },
+        "firstObservedBirth": 82,
+        "firstObservedKill": 48,
+        "kills": 35,
+        "attacks": 13181,
+        "foodCaptures": 33647,
+        "lineageActivity": {
+          "Phototroph": {
+            "fixing": 250,
+            "digesting": 0,
+            "secreting": 240,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 295,
+            "predationDeaths": 22,
+            "depletedDeaths": 114,
+            "kills": 0,
+            "birthsAfterMidpoint": 116
+          },
+          "Ligand producer": {
+            "fixing": 83,
+            "digesting": 0,
+            "secreting": 22,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 81,
+            "predationDeaths": 2,
+            "depletedDeaths": 9,
+            "kills": 0,
+            "birthsAfterMidpoint": 53
+          },
+          "Forager": {
+            "fixing": 0,
+            "digesting": 12,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 10,
+            "predationDeaths": 1,
+            "depletedDeaths": 21,
+            "kills": 0,
+            "birthsAfterMidpoint": 3
+          },
+          "Mixotroph": {
+            "fixing": 44,
+            "digesting": 13,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 13,
+            "cellsSeenFixingWhileDigesting": 13,
+            "births": 56,
+            "predationDeaths": 3,
+            "depletedDeaths": 21,
+            "kills": 0,
+            "birthsAfterMidpoint": 24
+          },
+          "Rememberer": {
+            "fixing": 0,
+            "digesting": 9,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 6,
+            "predationDeaths": 3,
+            "depletedDeaths": 5,
+            "kills": 0,
+            "birthsAfterMidpoint": 3
+          },
+          "Nurse rosette": {
+            "fixing": 41,
+            "digesting": 0,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 37,
+            "predationDeaths": 2,
+            "depletedDeaths": 8,
+            "kills": 0,
+            "birthsAfterMidpoint": 18
+          },
+          "Crown rosette": {
+            "fixing": 41,
+            "digesting": 0,
+            "secreting": 2,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 36,
+            "predationDeaths": 1,
+            "depletedDeaths": 0,
+            "kills": 0,
+            "birthsAfterMidpoint": 11
+          },
+          "Pulse swimmer": {
+            "fixing": 27,
+            "digesting": 0,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 26,
+            "predationDeaths": 1,
+            "depletedDeaths": 4,
+            "kills": 0,
+            "birthsAfterMidpoint": 10
+          },
+          "Predator": {
+            "fixing": 0,
+            "digesting": 6,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 4,
+            "predationDeaths": 0,
+            "depletedDeaths": 4,
+            "kills": 35,
+            "birthsAfterMidpoint": 0
+          }
+        },
+        "firstObservedLigandRelease": 32,
+        "firstObservedLigandUptake": 94,
+        "lineagesWithInternalLigand": ["Rememberer","Predator","Forager"],
+        "firstObservedRecoveryEnzyme": 264,
+        "mineralsEmitted": 521.5076,
+        "mineralsAbsorbed": 319.1013,
+        "huntersObservedWithStructuralCarbon": 6
+      },
+      "checks": {
+        "producerExports": true,
+        "consumersDigest": true,
+        "consumersRenew": false,
+        "mineralExchange": true,
+        "ligandReleasedAndCaptured": true,
+        "grazerBuiltRecoveryEnzyme": true,
+        "naturalHunt": true,
+        "photosynthesis": true,
+        "exactResourceBudgets": true,
+        "endpointSaveRestore": true
+      },
+      "passed": false
+    },
+    {
+      "arm": "revised116",
+      "engine": "wasmPrevious",
+      "observedSeconds": 600,
+      "seed": 2026,
+      "observations": {
+        "alive": {
+          "Phototroph": 224,
+          "Ligand producer": 72,
+          "Forager": 4,
+          "Mixotroph": 11,
+          "Rememberer": 4,
+          "Nurse rosette": 45,
+          "Crown rosette": 34,
+          "Pulse swimmer": 33,
+          "Predator": 3
+        },
+        "observedDescendants": {
+          "Phototroph": 188,
+          "Ligand producer": 83,
+          "Forager": 4,
+          "Mixotroph": 13,
+          "Rememberer": 4,
+          "Nurse rosette": 50,
+          "Crown rosette": 36,
+          "Pulse swimmer": 32,
+          "Predator": 5
+        },
+        "firstObservedBirth": 82,
+        "firstObservedKill": 40,
+        "kills": 54,
+        "attacks": 20277,
+        "foodCaptures": 31666,
+        "lineageActivity": {
+          "Phototroph": {
+            "fixing": 255,
+            "digesting": 0,
+            "secreting": 251,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 326,
+            "predationDeaths": 26,
+            "depletedDeaths": 144,
+            "kills": 0,
+            "birthsAfterMidpoint": 134
+          },
+          "Ligand producer": {
+            "fixing": 87,
+            "digesting": 0,
+            "secreting": 40,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 83,
+            "predationDeaths": 8,
+            "depletedDeaths": 7,
+            "kills": 0,
+            "birthsAfterMidpoint": 52
+          },
+          "Forager": {
+            "fixing": 0,
+            "digesting": 12,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 4,
+            "predationDeaths": 1,
+            "depletedDeaths": 11,
+            "kills": 0,
+            "birthsAfterMidpoint": 3
+          },
+          "Mixotroph": {
+            "fixing": 21,
+            "digesting": 8,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 8,
+            "cellsSeenFixingWhileDigesting": 8,
+            "births": 27,
+            "predationDeaths": 8,
+            "depletedDeaths": 16,
+            "kills": 0,
+            "birthsAfterMidpoint": 7
+          },
+          "Rememberer": {
+            "fixing": 0,
+            "digesting": 9,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 6,
+            "predationDeaths": 3,
+            "depletedDeaths": 5,
+            "kills": 0,
+            "birthsAfterMidpoint": 3
+          },
+          "Nurse rosette": {
+            "fixing": 55,
+            "digesting": 0,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 50,
+            "predationDeaths": 1,
+            "depletedDeaths": 9,
+            "kills": 0,
+            "birthsAfterMidpoint": 26
+          },
+          "Crown rosette": {
+            "fixing": 41,
+            "digesting": 0,
+            "secreting": 7,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 36,
+            "predationDeaths": 3,
+            "depletedDeaths": 4,
+            "kills": 0,
+            "birthsAfterMidpoint": 11
+          },
+          "Pulse swimmer": {
+            "fixing": 37,
+            "digesting": 0,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 37,
+            "predationDeaths": 4,
+            "depletedDeaths": 5,
+            "kills": 0,
+            "birthsAfterMidpoint": 15
+          },
+          "Predator": {
+            "fixing": 0,
+            "digesting": 8,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 6,
+            "predationDeaths": 0,
+            "depletedDeaths": 6,
+            "kills": 54,
+            "birthsAfterMidpoint": 2
+          }
+        },
+        "firstObservedLigandRelease": 32,
+        "firstObservedLigandUptake": 60,
+        "lineagesWithInternalLigand": ["Predator","Forager","Rememberer","Mixotroph"],
+        "firstObservedRecoveryEnzyme": 204,
+        "mineralsEmitted": 521.5076,
+        "mineralsAbsorbed": 308.5795,
+        "huntersObservedWithStructuralCarbon": 8
+      },
+      "checks": {
+        "producerExports": true,
+        "consumersDigest": true,
+        "consumersRenew": true,
+        "mineralExchange": true,
+        "ligandReleasedAndCaptured": true,
+        "grazerBuiltRecoveryEnzyme": true,
+        "naturalHunt": true,
+        "photosynthesis": true,
+        "exactResourceBudgets": true,
+        "endpointSaveRestore": true
+      },
+      "passed": true
+    },
+    {
+      "arm": "feeding116",
+      "engine": "wasmShipped",
+      "observedSeconds": 600,
+      "seed": 7,
+      "observations": {
+        "alive": {
+          "Phototroph": 216,
+          "Ligand producer": 97,
+          "Forager": 1,
+          "Mixotroph": 20,
+          "Rememberer": 4,
+          "Nurse rosette": 25,
+          "Crown rosette": 32,
+          "Pulse swimmer": 35,
+          "Predator": 2
+        },
+        "observedDescendants": {
+          "Phototroph": 171,
+          "Ligand producer": 102,
+          "Forager": 6,
+          "Mixotroph": 18,
+          "Rememberer": 3,
+          "Nurse rosette": 31,
+          "Crown rosette": 33,
+          "Pulse swimmer": 32,
+          "Predator": 3
+        },
+        "firstObservedBirth": 82,
+        "firstObservedKill": 44,
+        "kills": 30,
+        "attacks": 13865,
+        "foodCaptures": 35866,
+        "lineageActivity": {
+          "Phototroph": {
+            "fixing": 239,
+            "digesting": 0,
+            "secreting": 233,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 290,
+            "predationDeaths": 18,
+            "depletedDeaths": 124,
+            "kills": 0,
+            "birthsAfterMidpoint": 117
+          },
+          "Ligand producer": {
+            "fixing": 106,
+            "digesting": 0,
+            "secreting": 27,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 102,
+            "predationDeaths": 0,
+            "depletedDeaths": 9,
+            "kills": 0,
+            "birthsAfterMidpoint": 66
+          },
+          "Forager": {
+            "fixing": 0,
+            "digesting": 12,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 6,
+            "predationDeaths": 0,
+            "depletedDeaths": 17,
+            "kills": 0,
+            "birthsAfterMidpoint": 1
+          },
+          "Mixotroph": {
+            "fixing": 26,
+            "digesting": 15,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 15,
+            "cellsSeenFixingWhileDigesting": 15,
+            "births": 33,
+            "predationDeaths": 2,
+            "depletedDeaths": 19,
+            "kills": 0,
+            "birthsAfterMidpoint": 14
+          },
+          "Rememberer": {
+            "fixing": 0,
+            "digesting": 8,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 5,
+            "predationDeaths": 3,
+            "depletedDeaths": 4,
+            "kills": 0,
+            "birthsAfterMidpoint": 3
+          },
+          "Nurse rosette": {
+            "fixing": 36,
+            "digesting": 0,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 31,
+            "predationDeaths": 2,
+            "depletedDeaths": 9,
+            "kills": 0,
+            "birthsAfterMidpoint": 16
+          },
+          "Crown rosette": {
+            "fixing": 38,
+            "digesting": 0,
+            "secreting": 5,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 35,
+            "predationDeaths": 3,
+            "depletedDeaths": 5,
+            "kills": 0,
+            "birthsAfterMidpoint": 8
+          },
+          "Pulse swimmer": {
+            "fixing": 37,
+            "digesting": 0,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 36,
+            "predationDeaths": 2,
+            "depletedDeaths": 4,
+            "kills": 0,
+            "birthsAfterMidpoint": 13
+          },
+          "Predator": {
+            "fixing": 0,
+            "digesting": 6,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 5,
+            "predationDeaths": 0,
+            "depletedDeaths": 6,
+            "kills": 30,
+            "birthsAfterMidpoint": 2
+          }
+        },
+        "firstObservedLigandRelease": 32,
+        "firstObservedLigandUptake": 52,
+        "lineagesWithInternalLigand": ["Forager","Rememberer","Predator","Mixotroph"],
+        "firstObservedRecoveryEnzyme": 52,
+        "mineralsEmitted": 521.5076,
+        "mineralsAbsorbed": 313.1176,
+        "huntersObservedWithStructuralCarbon": 5
+      },
+      "checks": {
+        "producerExports": true,
+        "consumersDigest": true,
+        "consumersRenew": true,
+        "mineralExchange": true,
+        "ligandReleasedAndCaptured": true,
+        "grazerBuiltRecoveryEnzyme": true,
+        "naturalHunt": true,
+        "photosynthesis": true,
+        "exactResourceBudgets": true,
+        "endpointSaveRestore": true
+      },
+      "passed": true
+    },
+    {
+      "arm": "feeding116",
+      "engine": "wasmShipped",
+      "observedSeconds": 600,
+      "seed": 17,
+      "observations": {
+        "alive": {
+          "Phototroph": 212,
+          "Ligand producer": 75,
+          "Forager": 1,
+          "Mixotroph": 33,
+          "Rememberer": 5,
+          "Nurse rosette": 9,
+          "Crown rosette": 43,
+          "Pulse swimmer": 37,
+          "Predator": 3
+        },
+        "observedDescendants": {
+          "Phototroph": 179,
+          "Ligand producer": 87,
+          "Forager": 10,
+          "Mixotroph": 28,
+          "Rememberer": 5,
+          "Nurse rosette": 15,
+          "Crown rosette": 43,
+          "Pulse swimmer": 35,
+          "Predator": 5
+        },
+        "firstObservedBirth": 82,
+        "firstObservedKill": 42,
+        "kills": 53,
+        "attacks": 21833,
+        "foodCaptures": 38736,
+        "lineageActivity": {
+          "Phototroph": {
+            "fixing": 247,
+            "digesting": 0,
+            "secreting": 239,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 311,
+            "predationDeaths": 33,
+            "depletedDeaths": 134,
+            "kills": 0,
+            "birthsAfterMidpoint": 126
+          },
+          "Ligand producer": {
+            "fixing": 91,
+            "digesting": 0,
+            "secreting": 27,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 87,
+            "predationDeaths": 6,
+            "depletedDeaths": 10,
+            "kills": 0,
+            "birthsAfterMidpoint": 59
+          },
+          "Forager": {
+            "fixing": 0,
+            "digesting": 13,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 10,
+            "predationDeaths": 0,
+            "depletedDeaths": 21,
+            "kills": 0,
+            "birthsAfterMidpoint": 4
+          },
+          "Mixotroph": {
+            "fixing": 36,
+            "digesting": 18,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 18,
+            "cellsSeenFixingWhileDigesting": 18,
+            "births": 43,
+            "predationDeaths": 2,
+            "depletedDeaths": 16,
+            "kills": 0,
+            "birthsAfterMidpoint": 20
+          },
+          "Rememberer": {
+            "fixing": 0,
+            "digesting": 11,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 9,
+            "predationDeaths": 1,
+            "depletedDeaths": 9,
+            "kills": 0,
+            "birthsAfterMidpoint": 5
+          },
+          "Nurse rosette": {
+            "fixing": 20,
+            "digesting": 0,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 15,
+            "predationDeaths": 7,
+            "depletedDeaths": 4,
+            "kills": 0,
+            "birthsAfterMidpoint": 5
+          },
+          "Crown rosette": {
+            "fixing": 48,
+            "digesting": 0,
+            "secreting": 6,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 45,
+            "predationDeaths": 1,
+            "depletedDeaths": 6,
+            "kills": 0,
+            "birthsAfterMidpoint": 15
+          },
+          "Pulse swimmer": {
+            "fixing": 40,
+            "digesting": 0,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 43,
+            "predationDeaths": 3,
+            "depletedDeaths": 8,
+            "kills": 0,
+            "birthsAfterMidpoint": 19
+          },
+          "Predator": {
+            "fixing": 0,
+            "digesting": 8,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 8,
+            "predationDeaths": 0,
+            "depletedDeaths": 8,
+            "kills": 53,
+            "birthsAfterMidpoint": 2
+          }
+        },
+        "firstObservedLigandRelease": 32,
+        "firstObservedLigandUptake": 42,
+        "lineagesWithInternalLigand": ["Rememberer","Forager","Predator","Mixotroph"],
+        "firstObservedRecoveryEnzyme": 146,
+        "mineralsEmitted": 521.5076,
+        "mineralsAbsorbed": 312.9656,
+        "huntersObservedWithStructuralCarbon": 8
+      },
+      "checks": {
+        "producerExports": true,
+        "consumersDigest": true,
+        "consumersRenew": true,
+        "mineralExchange": true,
+        "ligandReleasedAndCaptured": true,
+        "grazerBuiltRecoveryEnzyme": true,
+        "naturalHunt": true,
+        "photosynthesis": true,
+        "exactResourceBudgets": true,
+        "endpointSaveRestore": true
+      },
+      "passed": true
+    },
+    {
+      "arm": "feeding116",
+      "engine": "wasmShipped",
+      "observedSeconds": 600,
+      "seed": 42,
+      "observations": {
+        "alive": {
+          "Phototroph": 206,
+          "Ligand producer": 79,
+          "Forager": 1,
+          "Mixotroph": 43,
+          "Rememberer": 4,
+          "Nurse rosette": 27,
+          "Crown rosette": 39,
+          "Pulse swimmer": 24,
+          "Predator": 3
+        },
+        "observedDescendants": {
+          "Phototroph": 172,
+          "Ligand producer": 85,
+          "Forager": 9,
+          "Mixotroph": 37,
+          "Rememberer": 4,
+          "Nurse rosette": 36,
+          "Crown rosette": 38,
+          "Pulse swimmer": 21,
+          "Predator": 4
+        },
+        "firstObservedBirth": 82,
+        "firstObservedKill": 48,
+        "kills": 48,
+        "attacks": 17754,
+        "foodCaptures": 33414,
+        "lineageActivity": {
+          "Phototroph": {
+            "fixing": 240,
+            "digesting": 0,
+            "secreting": 231,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 302,
+            "predationDeaths": 33,
+            "depletedDeaths": 131,
+            "kills": 0,
+            "birthsAfterMidpoint": 121
+          },
+          "Ligand producer": {
+            "fixing": 89,
+            "digesting": 0,
+            "secreting": 29,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 85,
+            "predationDeaths": 2,
+            "depletedDeaths": 8,
+            "kills": 0,
+            "birthsAfterMidpoint": 56
+          },
+          "Forager": {
+            "fixing": 0,
+            "digesting": 12,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 10,
+            "predationDeaths": 2,
+            "depletedDeaths": 19,
+            "kills": 0,
+            "birthsAfterMidpoint": 2
+          },
+          "Mixotroph": {
+            "fixing": 45,
+            "digesting": 16,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 16,
+            "cellsSeenFixingWhileDigesting": 15,
+            "births": 57,
+            "predationDeaths": 1,
+            "depletedDeaths": 21,
+            "kills": 0,
+            "birthsAfterMidpoint": 27
+          },
+          "Rememberer": {
+            "fixing": 0,
+            "digesting": 10,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 8,
+            "predationDeaths": 2,
+            "depletedDeaths": 8,
+            "kills": 0,
+            "birthsAfterMidpoint": 5
+          },
+          "Nurse rosette": {
+            "fixing": 41,
+            "digesting": 0,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 38,
+            "predationDeaths": 3,
+            "depletedDeaths": 13,
+            "kills": 0,
+            "birthsAfterMidpoint": 18
+          },
+          "Crown rosette": {
+            "fixing": 43,
+            "digesting": 0,
+            "secreting": 2,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 39,
+            "predationDeaths": 3,
+            "depletedDeaths": 2,
+            "kills": 0,
+            "birthsAfterMidpoint": 12
+          },
+          "Pulse swimmer": {
+            "fixing": 26,
+            "digesting": 0,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 25,
+            "predationDeaths": 2,
+            "depletedDeaths": 4,
+            "kills": 0,
+            "birthsAfterMidpoint": 7
+          },
+          "Predator": {
+            "fixing": 0,
+            "digesting": 7,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 6,
+            "predationDeaths": 0,
+            "depletedDeaths": 6,
+            "kills": 48,
+            "birthsAfterMidpoint": 1
+          }
+        },
+        "firstObservedLigandRelease": 32,
+        "firstObservedLigandUptake": 80,
+        "lineagesWithInternalLigand": ["Rememberer","Forager","Predator","Mixotroph"],
+        "firstObservedRecoveryEnzyme": 96,
+        "mineralsEmitted": 521.5076,
+        "mineralsAbsorbed": 316.4577,
+        "huntersObservedWithStructuralCarbon": 7
+      },
+      "checks": {
+        "producerExports": true,
+        "consumersDigest": true,
+        "consumersRenew": true,
+        "mineralExchange": true,
+        "ligandReleasedAndCaptured": true,
+        "grazerBuiltRecoveryEnzyme": true,
+        "naturalHunt": true,
+        "photosynthesis": true,
+        "exactResourceBudgets": true,
+        "endpointSaveRestore": true
+      },
+      "passed": true
+    },
+    {
+      "arm": "feeding116",
+      "engine": "wasmShipped",
+      "observedSeconds": 600,
+      "seed": 2026,
+      "observations": {
+        "alive": {
+          "Phototroph": 200,
+          "Ligand producer": 94,
+          "Forager": 0,
+          "Mixotroph": 30,
+          "Rememberer": 1,
+          "Nurse rosette": 48,
+          "Crown rosette": 36,
+          "Pulse swimmer": 37,
+          "Predator": 3
+        },
+        "observedDescendants": {
+          "Phototroph": 176,
+          "Ligand producer": 98,
+          "Forager": 5,
+          "Mixotroph": 28,
+          "Rememberer": 1,
+          "Nurse rosette": 52,
+          "Crown rosette": 40,
+          "Pulse swimmer": 35,
+          "Predator": 5
+        },
+        "firstObservedBirth": 82,
+        "firstObservedKill": 40,
+        "kills": 58,
+        "attacks": 23945,
+        "foodCaptures": 25689,
+        "lineageActivity": {
+          "Phototroph": {
+            "fixing": 242,
+            "digesting": 0,
+            "secreting": 241,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 304,
+            "predationDeaths": 35,
+            "depletedDeaths": 137,
+            "kills": 0,
+            "birthsAfterMidpoint": 113
+          },
+          "Ligand producer": {
+            "fixing": 102,
+            "digesting": 0,
+            "secreting": 38,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 98,
+            "predationDeaths": 2,
+            "depletedDeaths": 6,
+            "kills": 0,
+            "birthsAfterMidpoint": 68
+          },
+          "Forager": {
+            "fixing": 0,
+            "digesting": 12,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 5,
+            "predationDeaths": 4,
+            "depletedDeaths": 13,
+            "kills": 0,
+            "birthsAfterMidpoint": 3
+          },
+          "Mixotroph": {
+            "fixing": 36,
+            "digesting": 21,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 21,
+            "cellsSeenFixingWhileDigesting": 21,
+            "births": 42,
+            "predationDeaths": 4,
+            "depletedDeaths": 16,
+            "kills": 0,
+            "birthsAfterMidpoint": 17
+          },
+          "Rememberer": {
+            "fixing": 0,
+            "digesting": 7,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 2,
+            "predationDeaths": 3,
+            "depletedDeaths": 4,
+            "kills": 0,
+            "birthsAfterMidpoint": 1
+          },
+          "Nurse rosette": {
+            "fixing": 57,
+            "digesting": 0,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 53,
+            "predationDeaths": 2,
+            "depletedDeaths": 8,
+            "kills": 0,
+            "birthsAfterMidpoint": 28
+          },
+          "Crown rosette": {
+            "fixing": 45,
+            "digesting": 0,
+            "secreting": 7,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 41,
+            "predationDeaths": 5,
+            "depletedDeaths": 5,
+            "kills": 0,
+            "birthsAfterMidpoint": 13
+          },
+          "Pulse swimmer": {
+            "fixing": 40,
+            "digesting": 0,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 41,
+            "predationDeaths": 3,
+            "depletedDeaths": 6,
+            "kills": 0,
+            "birthsAfterMidpoint": 18
+          },
+          "Predator": {
+            "fixing": 0,
+            "digesting": 8,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 8,
+            "predationDeaths": 0,
+            "depletedDeaths": 8,
+            "kills": 58,
+            "birthsAfterMidpoint": 2
+          }
+        },
+        "firstObservedLigandRelease": 32,
+        "firstObservedLigandUptake": 60,
+        "lineagesWithInternalLigand": ["Predator","Forager","Rememberer","Mixotroph"],
+        "firstObservedRecoveryEnzyme": 208,
+        "mineralsEmitted": 521.5076,
+        "mineralsAbsorbed": 313.0009,
+        "huntersObservedWithStructuralCarbon": 8
+      },
+      "checks": {
+        "producerExports": true,
+        "consumersDigest": true,
+        "consumersRenew": false,
+        "mineralExchange": true,
+        "ligandReleasedAndCaptured": true,
+        "grazerBuiltRecoveryEnzyme": true,
+        "naturalHunt": true,
+        "photosynthesis": true,
+        "exactResourceBudgets": true,
+        "endpointSaveRestore": true
+      },
+      "passed": false
+    },
+    {
+      "arm": "moreForagers128",
+      "engine": "wasmShipped",
+      "observedSeconds": 600,
+      "seed": 7,
+      "observations": {
+        "alive": {
+          "Phototroph": 232,
+          "Ligand producer": 74,
+          "Forager": 0,
+          "Mixotroph": 25,
+          "Rememberer": 5,
+          "Nurse rosette": 37,
+          "Crown rosette": 43,
+          "Pulse swimmer": 25,
+          "Predator": 4
+        },
+        "observedDescendants": {
+          "Phototroph": 197,
+          "Ligand producer": 88,
+          "Forager": 15,
+          "Mixotroph": 24,
+          "Rememberer": 5,
+          "Nurse rosette": 48,
+          "Crown rosette": 42,
+          "Pulse swimmer": 28,
+          "Predator": 4
+        },
+        "firstObservedBirth": 82,
+        "firstObservedKill": 40,
+        "kills": 58,
+        "attacks": 20126,
+        "foodCaptures": 54655,
+        "lineageActivity": {
+          "Phototroph": {
+            "fixing": 265,
+            "digesting": 0,
+            "secreting": 256,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 308,
+            "predationDeaths": 29,
+            "depletedDeaths": 115,
+            "kills": 0,
+            "birthsAfterMidpoint": 134
+          },
+          "Ligand producer": {
+            "fixing": 92,
+            "digesting": 0,
+            "secreting": 33,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 88,
+            "predationDeaths": 7,
+            "depletedDeaths": 11,
+            "kills": 0,
+            "birthsAfterMidpoint": 59
+          },
+          "Forager": {
+            "fixing": 0,
+            "digesting": 24,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 17,
+            "predationDeaths": 5,
+            "depletedDeaths": 36,
+            "kills": 0,
+            "birthsAfterMidpoint": 10
+          },
+          "Mixotroph": {
+            "fixing": 32,
+            "digesting": 17,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 17,
+            "cellsSeenFixingWhileDigesting": 17,
+            "births": 40,
+            "predationDeaths": 4,
+            "depletedDeaths": 19,
+            "kills": 0,
+            "birthsAfterMidpoint": 15
+          },
+          "Rememberer": {
+            "fixing": 0,
+            "digesting": 10,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 10,
+            "predationDeaths": 1,
+            "depletedDeaths": 10,
+            "kills": 0,
+            "birthsAfterMidpoint": 9
+          },
+          "Nurse rosette": {
+            "fixing": 53,
+            "digesting": 0,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 50,
+            "predationDeaths": 3,
+            "depletedDeaths": 15,
+            "kills": 0,
+            "birthsAfterMidpoint": 28
+          },
+          "Crown rosette": {
+            "fixing": 47,
+            "digesting": 0,
+            "secreting": 7,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 43,
+            "predationDeaths": 1,
+            "depletedDeaths": 4,
+            "kills": 0,
+            "birthsAfterMidpoint": 16
+          },
+          "Pulse swimmer": {
+            "fixing": 33,
+            "digesting": 0,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 35,
+            "predationDeaths": 8,
+            "depletedDeaths": 7,
+            "kills": 0,
+            "birthsAfterMidpoint": 12
+          },
+          "Predator": {
+            "fixing": 0,
+            "digesting": 7,
+            "secreting": 0,
+            "cellsSeenFixingAndDigesting": 0,
+            "cellsSeenFixingWhileDigesting": 0,
+            "births": 4,
+            "predationDeaths": 0,
+            "depletedDeaths": 3,
+            "kills": 58,
+            "birthsAfterMidpoint": 0
+          }
+        },
+        "firstObservedLigandRelease": 32,
+        "firstObservedLigandUptake": 98,
+        "lineagesWithInternalLigand": ["Forager","Predator","Rememberer"],
+        "firstObservedRecoveryEnzyme": 98,
+        "mineralsEmitted": 521.5076,
+        "mineralsAbsorbed": 298.5497,
+        "huntersObservedWithStructuralCarbon": 7
+      },
+      "checks": {
+        "producerExports": true,
+        "consumersDigest": true,
+        "consumersRenew": false,
+        "mineralExchange": true,
+        "ligandReleasedAndCaptured": true,
+        "grazerBuiltRecoveryEnzyme": true,
+        "naturalHunt": true,
+        "photosynthesis": true,
+        "exactResourceBudgets": true,
+        "endpointSaveRestore": true
+      },
+      "passed": false
+    }
+  ],
+  "observedInteractions": [
+    {
+      "arm": "revised116",
+      "engine": "native",
+      "seed": 7,
+      "seconds": 240,
+      "stepSeconds": 4,
+      "first": {
+        "Forager / Phototroph": 36,
+        "Forager receives carbon": 40,
+        "forager carbonNet": 40,
+        "Crown rosette / Crown rosette": 84,
+        "Pulse swimmer / Pulse swimmer": 84,
+        "nurse energyNet": 88,
+        "nurse carbonNet": 88,
+        "nurse mineralNet": 88,
+        "Nurse rosette / Nurse rosette": 88,
+        "juvenile receives carbon": 96,
+        "juvenile receives energy": 100,
+        "juvenile receives mineral": 116,
+        "crown secretion": 128,
+        "bonded pulse motor": 148
+      },
+      "peakLinks": {"Forager / Phototroph": 5,"Crown rosette / Crown rosette": 9,"Pulse swimmer / Pulse swimmer": 12,"Nurse rosette / Nurse rosette": 5},
+      "observedTransfers": {
+        "Forager receives carbon": 0.0068,
+        "forager carbonNet": 0.0068,
+        "energyNet": 0.0474,
+        "carbonNet": 0.003,
+        "mineralNet": 0.0003,
+        "juvenile receives carbon": 0.003,
+        "juvenile receives energy": 0.0474,
+        "juvenile receives mineral": 0.0003
+      },
+      "cellObservations": {
+        "Forager receives carbon": 44,
+        "forager carbonNet": 44,
+        "nurse energyNet": 205,
+        "nurse carbonNet": 191,
+        "nurse mineralNet": 74,
+        "juvenile receives carbon": 30,
+        "juvenile receives energy": 62,
+        "juvenile receives mineral": 12,
+        "crown secretion": 31,
+        "bonded pulse motor": 38
+      },
+      "crownPeakRelease": 0.3,
+      "firstRim": {"rim": true,"incoming": true,"partners": 1,"id": 121,"seconds": 128},
+      "firstTransfers": {
+        "Forager receives carbon": {"s": 40,"cell": 75,"peer": 60,"peerRoot": "Phototroph","delta": 0.0035,"peerDelta": -0.0035},
+        "juvenile receives carbon": {"s": 96,"cell": 133,"peer": 101,"peerRoot": "Nurse rosette","age": 11.6,"delta": 0.0005},
+        "juvenile receives energy": {"s": 100,"cell": 131,"peer": 99,"peerRoot": "Nurse rosette","age": 15.6,"delta": 0.0006},
+        "juvenile receives mineral": {"s": 116,"cell": 133,"peer": 101,"peerRoot": "Nurse rosette","age": 31.6,"delta": 0.0001}
+      }
+    },
+    {
+      "arm": "revised116",
+      "engine": "native",
+      "seed": 17,
+      "seconds": 240,
+      "stepSeconds": 4,
+      "first": {
+        "Forager receives carbon": 32,
+        "forager carbonNet": 32,
+        "Forager / Phototroph": 32,
+        "Crown rosette / Crown rosette": 84,
+        "Pulse swimmer / Pulse swimmer": 84,
+        "nurse energyNet": 88,
+        "nurse carbonNet": 88,
+        "nurse mineralNet": 88,
+        "Nurse rosette / Nurse rosette": 88,
+        "juvenile receives carbon": 100,
+        "juvenile receives energy": 104,
+        "juvenile receives mineral": 112,
+        "crown secretion": 128,
+        "bonded pulse motor": 148
+      },
+      "peakLinks": {"Forager / Phototroph": 4,"Crown rosette / Crown rosette": 11,"Pulse swimmer / Pulse swimmer": 8,"Nurse rosette / Nurse rosette": 4},
+      "observedTransfers": {
+        "Forager receives carbon": 0.0054,
+        "forager carbonNet": 0.0054,
+        "energyNet": 0.0514,
+        "carbonNet": 0.003,
+        "mineralNet": 0.0005,
+        "juvenile receives carbon": 0.003,
+        "juvenile receives energy": 0.0514,
+        "juvenile receives mineral": 0.0003
+      },
+      "cellObservations": {
+        "Forager receives carbon": 36,
+        "forager carbonNet": 36,
+        "nurse energyNet": 172,
+        "nurse carbonNet": 160,
+        "nurse mineralNet": 96,
+        "juvenile receives carbon": 26,
+        "juvenile receives energy": 48,
+        "juvenile receives mineral": 10,
+        "crown secretion": 36,
+        "bonded pulse motor": 15
+      },
+      "crownPeakRelease": 0.3,
+      "firstRim": {"rim": true,"incoming": true,"partners": 1,"id": 117,"seconds": 128},
+      "firstTransfers": {
+        "Forager receives carbon": {"s": 32,"cell": 82,"peer": 13,"peerRoot": "Phototroph","delta": 0.0043,"peerDelta": -0.0043},
+        "juvenile receives carbon": {"s": 100,"cell": 131,"peer": 99,"peerRoot": "Nurse rosette","age": 15.6,"delta": 0.0004},
+        "juvenile receives energy": {"s": 104,"cell": 131,"peer": 99,"peerRoot": "Nurse rosette","age": 19.6,"delta": 0.002},
+        "juvenile receives mineral": {"s": 112,"cell": 131,"peer": 99,"peerRoot": "Nurse rosette","age": 27.6,"delta": 0.0001}
+      }
+    },
+    {
+      "arm": "revised116",
+      "engine": "native",
+      "seed": 42,
+      "seconds": 240,
+      "stepSeconds": 4,
+      "first": {
+        "Forager receives carbon": 36,
+        "forager carbonNet": 36,
+        "Forager / Phototroph": 36,
+        "Crown rosette / Crown rosette": 84,
+        "Pulse swimmer / Pulse swimmer": 84,
+        "nurse energyNet": 88,
+        "nurse carbonNet": 88,
+        "nurse mineralNet": 88,
+        "Nurse rosette / Nurse rosette": 88,
+        "juvenile receives carbon": 96,
+        "juvenile receives energy": 104,
+        "juvenile receives mineral": 112,
+        "crown secretion": 128,
+        "bonded pulse motor": 128
+      },
+      "peakLinks": {"Forager / Phototroph": 2,"Crown rosette / Crown rosette": 6,"Pulse swimmer / Pulse swimmer": 5,"Nurse rosette / Nurse rosette": 9},
+      "observedTransfers": {
+        "Forager receives carbon": 0.0046,
+        "forager carbonNet": 0.0046,
+        "energyNet": 0.0538,
+        "carbonNet": 0.003,
+        "mineralNet": 0.0003,
+        "juvenile receives carbon": 0.003,
+        "juvenile receives energy": 0.0538,
+        "juvenile receives mineral": 0.0003
+      },
+      "cellObservations": {
+        "Forager receives carbon": 22,
+        "forager carbonNet": 22,
+        "nurse energyNet": 280,
+        "nurse carbonNet": 280,
+        "nurse mineralNet": 80,
+        "juvenile receives carbon": 46,
+        "juvenile receives energy": 65,
+        "juvenile receives mineral": 14,
+        "crown secretion": 13,
+        "bonded pulse motor": 10
+      },
+      "crownPeakRelease": 0.3,
+      "firstRim": {"rim": true,"incoming": true,"partners": 1,"id": 119,"seconds": 128},
+      "firstTransfers": {
+        "Forager receives carbon": {"s": 36,"cell": 76,"peer": 4,"peerRoot": "Phototroph","delta": 0.0046,"peerDelta": -0.0046},
+        "juvenile receives carbon": {"s": 96,"cell": 130,"peer": 99,"peerRoot": "Nurse rosette","age": 11.6,"delta": 0.0002},
+        "juvenile receives energy": {"s": 104,"cell": 130,"peer": 99,"peerRoot": "Nurse rosette","age": 19.6,"delta": 0.002},
+        "juvenile receives mineral": {"s": 112,"cell": 133,"peer": 102,"peerRoot": "Nurse rosette","age": 27.6,"delta": 0.0001}
+      }
+    },
+    {
+      "arm": "revised116",
+      "engine": "native",
+      "seed": 2026,
+      "seconds": 180,
+      "stepSeconds": 4,
+      "first": {
+        "Forager receives carbon": 60,
+        "forager carbonNet": 60,
+        "Forager / Phototroph": 60,
+        "Crown rosette / Crown rosette": 84,
+        "Pulse swimmer / Pulse swimmer": 84,
+        "nurse energyNet": 88,
+        "nurse carbonNet": 88,
+        "nurse mineralNet": 88,
+        "Nurse rosette / Nurse rosette": 88,
+        "juvenile receives carbon": 96,
+        "juvenile receives energy": 104,
+        "juvenile receives mineral": 116,
+        "crown secretion": 128,
+        "bonded pulse motor": 148
+      },
+      "peakLinks": {"Forager / Phototroph": 3,"Crown rosette / Crown rosette": 13,"Pulse swimmer / Pulse swimmer": 9,"Nurse rosette / Nurse rosette": 5},
+      "observedTransfers": {
+        "Forager receives carbon": 0.0085,
+        "forager carbonNet": 0.0085,
+        "energyNet": 0.0475,
+        "carbonNet": 0.0029,
+        "mineralNet": 0.0003,
+        "juvenile receives carbon": 0.0029,
+        "juvenile receives energy": 0.0475,
+        "juvenile receives mineral": 0.0003
+      },
+      "cellObservations": {
+        "Forager receives carbon": 12,
+        "forager carbonNet": 12,
+        "nurse energyNet": 156,
+        "nurse carbonNet": 152,
+        "nurse mineralNet": 70,
+        "juvenile receives carbon": 29,
+        "juvenile receives energy": 45,
+        "juvenile receives mineral": 12,
+        "crown secretion": 38,
+        "bonded pulse motor": 14
+      },
+      "crownPeakRelease": 0.3,
+      "firstRim": {"rim": true,"incoming": true,"partners": 1,"id": 117,"seconds": 128},
+      "firstTransfers": {
+        "Forager receives carbon": {"s": 60,"cell": 82,"peer": 60,"peerRoot": "Phototroph","delta": 0.0085,"peerDelta": -0.0085},
+        "juvenile receives carbon": {"s": 96,"cell": 130,"peer": 99,"peerRoot": "Nurse rosette","age": 11.6,"delta": 0.0001},
+        "juvenile receives energy": {"s": 104,"cell": 130,"peer": 99,"peerRoot": "Nurse rosette","age": 19.6,"delta": 0.002},
+        "juvenile receives mineral": {"s": 116,"cell": 130,"peer": 99,"peerRoot": "Nurse rosette","age": 31.6,"delta": 0.0001}
+      }
+    },
+    {
+      "arm": "feeding116",
+      "engine": "native",
+      "seed": 7,
+      "seconds": 180,
+      "stepSeconds": 4,
+      "first": {
+        "Forager / Phototroph": 36,
+        "Forager receives carbon": 40,
+        "forager carbonNet": 40,
+        "Crown rosette / Crown rosette": 84,
+        "Pulse swimmer / Pulse swimmer": 84,
+        "nurse energyNet": 88,
+        "nurse carbonNet": 88,
+        "nurse mineralNet": 88,
+        "Nurse rosette / Nurse rosette": 88,
+        "juvenile receives carbon": 96,
+        "juvenile receives energy": 100,
+        "juvenile receives mineral": 116,
+        "crown secretion": 128,
+        "bonded pulse motor": 148
+      },
+      "peakLinks": {"Forager / Phototroph": 5,"Crown rosette / Crown rosette": 7,"Pulse swimmer / Pulse swimmer": 12,"Nurse rosette / Nurse rosette": 5},
+      "observedTransfers": {
+        "Forager receives carbon": 0.0068,
+        "forager carbonNet": 0.0068,
+        "energyNet": 0.0474,
+        "carbonNet": 0.003,
+        "mineralNet": 0.0003,
+        "juvenile receives carbon": 0.003,
+        "juvenile receives energy": 0.0474,
+        "juvenile receives mineral": 0.0003
+      },
+      "cellObservations": {
+        "Forager receives carbon": 44,
+        "forager carbonNet": 44,
+        "nurse energyNet": 141,
+        "nurse carbonNet": 135,
+        "nurse mineralNet": 74,
+        "juvenile receives carbon": 27,
+        "juvenile receives energy": 39,
+        "juvenile receives mineral": 12,
+        "crown secretion": 16,
+        "bonded pulse motor": 21
+      },
+      "crownPeakRelease": 0.3,
+      "firstRim": {"rim": true,"incoming": true,"partners": 1,"id": 121,"seconds": 128},
+      "firstTransfers": {
+        "Forager receives carbon": {"s": 40,"cell": 75,"peer": 60,"peerRoot": "Phototroph","delta": 0.0035,"peerDelta": -0.0035},
+        "juvenile receives carbon": {"s": 96,"cell": 133,"peer": 101,"peerRoot": "Nurse rosette","age": 11.6,"delta": 0.0005},
+        "juvenile receives energy": {"s": 100,"cell": 131,"peer": 99,"peerRoot": "Nurse rosette","age": 15.6,"delta": 0.0006},
+        "juvenile receives mineral": {"s": 116,"cell": 133,"peer": 101,"peerRoot": "Nurse rosette","age": 31.6,"delta": 0.0001}
+      }
+    }
+  ],
+  "controlledAssays": {
+    "producerExport": {
+      "setting": "Counted, one founder in 0.85 light for 180 s, with its descendants. Sampled exudation per living-cell-second, in food-energy units.",
+      "previous": 1.1173076923076934,
+      "revised": 1.2528387096774194,
+      "firstReleaseSeconds": [24,24]
+    },
+    "mixotroph": {
+      "setting": "Counted, one paid, lysed donor near a 45 s Mixotroph at light 0.80. Values sampled each second for 25 s.",
+      "fixedCarbonPreviousAndRevised": [3.3,3.3],
+      "assimilatedFoodEnergyPreviousAndRevised": [0,15.444],
+      "simultaneousFixationAndDigestionSamplesPreviousAndRevised": [0,4]
+    },
+    "ligandProducer": {
+      "modes": ["counted","continuous"],
+      "setting": "Single founder with an observed secretion. Controlled heat injury, repair, and nine further simulated seconds. In a separate lit fission culture both daughters survived, retained ATP capacity, and the first daughter reproduced.",
+      "activityIntactInjuredRecovered": [0.32,1,0.32],
+      "firstSplitSecondsCountedContinuous": [87.57,89.33],
+      "firstGranddaughterSecondsCountedContinuous": [145,148]
+    },
+    "foragerReproductionAndTrade": [
+      {
+        "arm": "revised116",
+        "fission": {
+          "setting": "Counted finite-bloom reproductive fixture. Observed every second. Gut and ATP arrays list parent then daughter. Machine counts are totals across both halves.",
+          "gutAssemblies": 3,
+          "translationAssemblies": 4,
+          "firstDivisionSeconds": 61,
+          "firstGranddaughterSeconds": 129,
+          "gutCapacities": [72,36],
+          "freeAtpRounded": [66.4,40.0]
+        },
+        "producerGrazerExchange": {
+          "setting": "Counted, opposed front mounts, identical meals, open and closed exchange ports. Both treatments form the same physical association.",
+          "attachedTicks": 1556,
+          "carbonIntoForager": 6.4542,
+          "mineralsFromForager": 0.3157,
+          "closedCarbonTransfer": 0,
+          "closedMineralTransfer": 0
+        }
+      },
+      {
+        "arm": "feeding116",
+        "fission": {
+          "setting": "Counted finite-bloom reproductive fixture. Observed every second. Gut and ATP arrays list parent then daughter. Machine counts are totals across both halves.",
+          "gutAssemblies": 3,
+          "translationAssemblies": 4,
+          "firstDivisionSeconds": 61,
+          "firstGranddaughterSeconds": 102,
+          "gutCapacities": [72,36],
+          "freeAtpRounded": [66.5,40.0]
+        },
+        "producerGrazerExchange": {
+          "setting": "Counted, opposed front mounts, identical meals, open and closed exchange ports. Both treatments form the same physical association.",
+          "attachedTicks": 1556,
+          "carbonIntoForager": 6.4613,
+          "mineralsFromForager": 0.3156,
+          "closedCarbonTransfer": 0,
+          "closedMineralTransfer": 0
+        }
+      }
+    ]
+  },
+  "nativeComparisonAt600Seconds": [
+    {"arm": "previous108","seed": 42,"population": 379,"lineagesAlive": 9,"extinctLineages": [],"foragersAlive": 1,"foragerBirths": 6},
+    {"arm": "previous108","seed": 2026,"population": 346,"lineagesAlive": 9,"extinctLineages": [],"foragersAlive": 2,"foragerBirths": 4},
+    {"arm": "previous108","seed": 7,"population": 323,"lineagesAlive": 9,"extinctLineages": [],"foragersAlive": 1,"foragerBirths": 5},
+    {
+      "arm": "revised108",
+      "seed": 42,
+      "population": 412,
+      "lineagesAlive": 7,
+      "extinctLineages": ["Rememberer","Crown rosette"],
+      "foragersAlive": 2,
+      "foragerBirths": 10
+    },
+    {"arm": "revised116","seed": 7,"population": 432,"lineagesAlive": 9,"extinctLineages": [],"foragersAlive": 2,"foragerBirths": 8},
+    {"arm": "revised116","seed": 17,"population": 407,"lineagesAlive": 9,"extinctLineages": [],"foragersAlive": 1,"foragerBirths": 7},
+    {"arm": "revised116","seed": 42,"population": 419,"lineagesAlive": 8,"extinctLineages": ["Forager"],"foragersAlive": 0,"foragerBirths": 8},
+    {"arm": "revised116","seed": 2026,"population": 435,"lineagesAlive": 8,"extinctLineages": ["Forager"],"foragersAlive": 0,"foragerBirths": 8},
+    {"arm": "feeding116","seed": 7,"population": 440,"lineagesAlive": 9,"extinctLineages": [],"foragersAlive": 2,"foragerBirths": 9},
+    {"arm": "feeding116","seed": 42,"population": 436,"lineagesAlive": 9,"extinctLineages": [],"foragersAlive": 2,"foragerBirths": 11}
+  ],
+  "naturalInheritance": {
+    "arm": "revised116",
+    "engine": "native",
+    "seed": 2026,
+    "seconds": 300,
+    "foragerIdsWithZeroGutCapacity": [401,425],
+    "otherForagersWith108GutCapacityAndNoTranslation": [73,79,81],
+    "qualification": "Physical inheritance varied in free-running cells. The finite-bloom capacity split applies to that observed division."
+  },
+  "naturalFeeding": {
+    "arm": "revised116",
+    "engine": "native",
+    "seed": 17,
+    "seconds": 300,
+    "foragerId": 73,
+    "structuralGutEnergyApproximately": 3.14,
+    "tissueEnzyme": 0,
+    "organicCarbon": 0,
+    "observation": "The earlier meal rule suppressed the motors with unprocessable structural cargo. The feeding116 genome checks whether the corresponding digestive enzyme is installed."
+  },
+  "replay": {
+    "stockWasm": "npm run test:scenarios -- --scenario springwater-basin --seeds 7 --output basin.json",
+    "longerWasm": "node --no-liftoff scripts/check-ecosystem.mjs --scenario springwater-basin --duration 900 --seed 7 --sample-at 300,600,900 --output census.json",
+    "otherArms": "Using scripts/organelle-harness.mjs, create fresh({...configuration, seed, mutationRate:0.1, countChemistry:true}). For each lineage in lineageOrder compile the source identified by the arm, then seed(api, genome, founderCount) with no coordinates. Step 30 ticks per simulated second. To reproduce a native run use the matching native build and the same exported operations."
+  },
+  "sourceRevisions": {
+    "da89d6be90cca56d730d3ff352cb25f87f0ae690581726b9214c2cf2465312af": {
+      "lineage": "Phototroph",
+      "source": "# Shared products supply independently regulated physical recipes.\n# Genes make stock; start_when permits new machines; activity runs built ones.\ncellular counts;\n\nproduct Catalyst = enzyme();\nproduct Wall = membrane();\nproduct Mount = anchor();\nproduct Pigment = pigment();\nproduct CoatPrecursor = scaffold();\nproduct Glue = adhesin(CoatPrecursor);\nproduct Carrier = transporter();\nproduct Detector = receptor();\nproduct Tail = filament();\nproduct Frame = scaffold();\nproduct Replicase = replicase();\nproduct Rotor = motor();\nproduct Ring = constrictor();\n\n# Tolerate modest wear while repair restores working capacity. The allowance\n# stays below one machine, even when a larger body needs many copies.\nfn missing(installed, required, unit) = installed + 0.000001 < required - min(required * 0.1, unit * 0.2);\nfn enough(installed, required) = installed + 0.000001 >= required * 0.9;\n\nlet funded = (energy > 100000 || gut.energy > 0) && nutrient.stored > 10;\nlet expanding = body.area > body.birth_area * 1.6;\nlet powered = enough(built.Solar, 0.12) && enough(built.Respiration, 0.04);\nlet equipped = powered;\n# Duplicate the four machines a daughter needs to feed and make proteins.\nlet preparing_daughters = body.area > body.birth_area * 1.45;\nlet provisioned = enough(built.Respiration, 0.08) && enough(built.Solar, 0.24) && enough(built.Minerals, 0.05) && enough(built.Translation, 0.08) && enough(built.MineralStore, 0.06);\nlet surplus = equipped && energy > 550000;\n# A receptive grazer can share surplus fixed carbon and dissolved minerals.\npublish rf090;\nrf090 = 41;\nrf091 = 72;\n# This stationary producer spends no material on locomotion.\n\nlet need_Respiration = funded && (true) && missing(built.Respiration, (if preparing_daughters then 0.08 else 0.04), 0.04);\nlet need_Solar = funded && (true) && missing(built.Solar, (if preparing_daughters then 0.24 else 0.12), 0.12);\nlet need_Dock = funded && (powered) && missing(built.Dock, (if expanding then 0.04 else 0.02), 0.02);\nlet need_CarbonPort = funded && (powered) && missing(built.CarbonPort, (if expanding then 0.1 else 0.05), 0.05);\nlet need_MineralPort = funded && (powered) && missing(built.MineralPort, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Badge = funded && (powered) && missing(built.Badge, 0.01, 0.01);\nlet need_DockReader = funded && (powered) && missing(built.DockReader, 0.01, 0.01);\nlet need_Outlet = funded && (powered) && missing(built.Outlet, (if expanding then 0.06 else 0.03), 0.03);\nlet need_FarOutlet = funded && (powered) && missing(built.FarOutlet, 0.03, 0.03);\nlet need_Translation = funded && (powered) && missing(built.Translation, (if preparing_daughters then 0.08 else 0.04), 0.04);\nlet need_Minerals = funded && (powered || nutrient.stored < 1300) && missing(built.Minerals, (if preparing_daughters then 0.05 else 0.025), 0.025);\nlet need_EnergyStore = funded && (powered) && missing(built.EnergyStore, (if expanding || energy.capacity <= 1000000 then 0.08 else 0.04), 0.04);\nlet need_MineralStore = funded && (powered && body.area > 1.2) && missing(built.MineralStore, if preparing_daughters then 0.06 else 0.02, 0.02);\nlet need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Support = funded && (powered && energy > 450000) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);\nlet need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);\n\ngene supply_CoatPrecursor: CoatPrecursor = if (need_Dock) && pool.Glue < 10 && pool.CoatPrecursor < 10 then 1 else 0;\ngene supply_Catalyst: Catalyst = if pool.Catalyst < 10 then (if need_Respiration then 1 else 0) + (if need_Solar then 0.25 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0) else 0;\ngene supply_Wall: Wall = if pool.Wall < 10 then (if need_Respiration then 0.6 else 0) + (if need_Dock then 1 else 0) + (if need_CarbonPort then 1 else 0) + (if need_MineralPort then 1 else 0) + (if need_Badge then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0) else 0;\ngene supply_Mount: Mount = if pool.Mount < 10 then (if need_Solar then 0.25 else 0) + (if need_Dock then 1 else 0) + (if need_Badge then 0.666667 else 0) + (if need_DockReader then 0.333333 else 0) + (if need_Outlet then 0.25 else 0) + (if need_FarOutlet then 0.25 else 0) + (if need_Minerals then 0.25 else 0) + (if need_Division then 0.5 else 0) else 0;\ngene supply_Pigment: Pigment = if pool.Pigment < 10 then (if need_Solar then 1 else 0) else 0;\ngene supply_Glue: Glue = if pool.Glue < 10 then (if need_Dock then 0.5 else 0) else 0;\ngene supply_Carrier: Carrier = if pool.Carrier < 10 then (if need_CarbonPort then 1 else 0) + (if need_MineralPort then 1 else 0) + (if need_Outlet then 1 else 0) + (if need_FarOutlet then 1 else 0) + (if need_Minerals then 1 else 0) else 0;\ngene supply_Detector: Detector = if pool.Detector < 10 then (if need_DockReader then 1 else 0) else 0;\ngene supply_Tail: Tail = if pool.Tail < 10 then (if need_DockReader then 0.333333 else 0) else 0;\ngene supply_Frame: Frame = if pool.Frame < 10 then (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0) else 0;\ngene supply_Replicase: Replicase = if pool.Replicase < 10 then (if need_Replication then 1 else 0) else 0;\ngene supply_Rotor: Rotor = if pool.Rotor < 10 then (if need_Division then 1 else 0) else 0;\ngene supply_Ring: Ring = if pool.Ring < 10 then (if need_Division then 1 else 0) else 0;\n\nassembly Respiration: respire(oxygen) {\n  Catalyst: 250;\n  Wall: 150;\n  start_when: need_Respiration;\n  activity: if oxygen > 0 && energy.fraction < 0.98 && (carbon.organic > 24000 * body.area || energy < 450000) then 1 else 0;\n}\n\nassembly Solar: harvest(light) {\n  Mount: 200;\n  Pigment: 800;\n  Catalyst: 200;\n  start_when: need_Solar;\n  activity: 1;\n}\n\nassembly Dock: adhere() {\n  Mount: 80;\n  Wall: 80;\n  Glue: 40;\n  start_when: need_Dock;\n  activity: 1;\n  engage_when: populated(rf091) && peer.message_valid && peer.message == rf091;\n}\n\nassembly CarbonPort: junction(carbon) {\n  Wall: 250;\n  Carrier: 250;\n  start_when: need_CarbonPort;\n  activity: if carbon.organic > 4500 * body.area && energy > 240000 then 1 else 0;\n}\n\nassembly MineralPort: junction(mineral) {\n  Wall: 100;\n  Carrier: 100;\n  start_when: need_MineralPort;\n  activity: if nutrient.fraction < 0.8 then 1 else 0;\n}\n\nassembly Badge: display() {\n  Mount: 40;\n  Wall: 60;\n  start_when: need_Badge;\n  activity: 1;\n}\n\nassembly DockReader: sense(contact) {\n  Mount: 20;\n  Detector: 60;\n  Tail: 20;\n  start_when: need_DockReader;\n  activity: 1;\n}\n\nassembly Outlet: export(carbon) {\n  Mount: 60;\n  Carrier: 240;\n  start_when: need_Outlet;\n  activity: if carbon.organic > 1500 * body.area && energy.fraction > 0.12 then 1 else 0;\n}\n\nassembly FarOutlet: export(carbon) {\n  Mount: 60;\n  Carrier: 240;\n  start_when: need_FarOutlet;\n  activity: if carbon.organic > 3500 * body.area && energy.fraction > 0.25 then 1 else 0;\n  at: 3.141592653589793;\n}\n\nassembly Translation: translate() {\n  Frame: 200;\n  Catalyst: 200;\n  start_when: need_Translation;\n  activity: 1;\n}\n\nassembly Minerals: import(mineral) {\n  Mount: 50;\n  Carrier: 200;\n  start_when: need_Minerals;\n  activity: if nutrient.fraction < 0.9 && energy.fraction > 0.05 then 1 else 0;\n}\n\nassembly EnergyStore: store(energy) {\n  Wall: 400;\n  start_when: need_EnergyStore;\n  activity: 1;\n}\n\nassembly MineralStore: store(mineral) {\n  Wall: 200;\n  start_when: need_MineralStore;\n  activity: 1;\n}\n\nassembly Repair: repair() {\n  Catalyst: 250;\n  start_when: need_Repair;\n  activity: 1;\n}\n\nassembly Support: support() {\n  Frame: 600;\n  start_when: need_Support;\n  activity: 1;\n}\n\nassembly Envelope: grow() {\n  Wall: 150;\n  Catalyst: 50;\n  start_when: need_Envelope;\n  activity: if energy > 900000 && body.area < body.birth_area * 2 then 0.8 else 0;\n}\n\nassembly Replication: replicate() {\n  Frame: 50;\n  Replicase: 150;\n  start_when: need_Replication;\n  activity: if energy > 800000 then 1 else 0;\n}\n\nassembly Division: constrict() {\n  Mount: 40;\n  Rotor: 80;\n  Ring: 80;\n  start_when: need_Division;\n  activity: if body.area + 0.000001 >= body.birth_area * 2 && provisioned && energy > 1000000 then 1 else 0;\n  at: 1.5707963267948966;\n}"
+    },
+    "b924e5ef8dfc5ca2e85a957d83f2889a0df87082d50aba90c1303fbefa3512ea": {
+      "lineage": "Ligand producer",
+      "source": "# Shared products supply independently regulated physical recipes.\n# Genes make stock; start_when permits new machines; activity runs built ones.\ncellular counts;\n\nproduct Catalyst = enzyme();\nproduct Wall = membrane();\nproduct Mount = anchor();\nproduct Pigment = pigment();\nproduct Carrier = transporter();\nproduct IsomeraseCatalyst = enzyme(90);\nproduct Frame = scaffold();\nproduct Replicase = replicase();\nproduct Rotor = motor();\nproduct Ring = constrictor();\n\n# Tolerate modest wear while repair restores working capacity. The allowance\n# stays below one machine, even when a larger body needs many copies.\nfn missing(installed, required, unit) = installed + 0.000001 < required - min(required * 0.1, unit * 0.2);\nfn enough(installed, required) = installed + 0.000001 >= required * 0.9;\n\nlet funded = (energy > 100000 || gut.energy > 0) && nutrient.stored > 10;\nlet expanding = body.area > body.birth_area * 1.6;\nlet powered = enough(built.Solar, 0.12) && enough(built.Respiration, 0.04);\nlet equipped = powered;\nlet surplus = equipped && energy > 550000;\n# Secrete ligand particles when fixed carbon and ATP are available.\n\nlet need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Solar = funded && (true) && missing(built.Solar, (if expanding then 0.24 else 0.12), 0.12);\nlet need_Vesicle = funded && (powered) && missing(built.Vesicle, 0.04, 0.04);\nlet need_ReleasePore = funded && (powered) && missing(built.ReleasePore, 0.03, 0.03);\nlet need_Isomerase = funded && (powered && enough(built.Vesicle,0.04) && enough(built.ReleasePore,0.03)) && missing(built.Isomerase, 0.02, 0.02);\nlet need_Translation = funded && (powered) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Minerals = funded && (powered) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);\nlet need_EnergyStore = funded && (powered) && missing(built.EnergyStore, (if expanding || energy.capacity <= 1000000 then 0.08 else 0.04), 0.04);\nlet need_MineralStore = funded && (powered && body.area > 1.2) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Support = funded && (powered && energy > 450000) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);\nlet need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);\n\ngene supply_Catalyst: Catalyst = if pool.Catalyst < 10 then (if need_Respiration then 1 else 0) + (if need_Solar then 0.25 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0) else 0;\ngene supply_Wall: Wall = if pool.Wall < 10 then (if need_Respiration then 0.6 else 0) + (if need_Vesicle then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0) else 0;\ngene supply_Mount: Mount = if pool.Mount < 10 then (if need_Solar then 0.25 else 0) + (if need_ReleasePore then 0.2 else 0) + (if need_Minerals then 0.25 else 0) + (if need_Division then 0.5 else 0) else 0;\ngene supply_Pigment: Pigment = if pool.Pigment < 10 then (if need_Solar then 1 else 0) else 0;\ngene supply_Carrier: Carrier = if pool.Carrier < 10 then (if need_ReleasePore then 1 else 0) + (if need_Minerals then 1 else 0) else 0;\ngene supply_IsomeraseCatalyst: IsomeraseCatalyst = if pool.IsomeraseCatalyst < 10 then (if need_Isomerase then 1 else 0) else 0;\ngene supply_Frame: Frame = if pool.Frame < 10 then (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0) else 0;\ngene supply_Replicase: Replicase = if pool.Replicase < 10 then (if need_Replication then 1 else 0) else 0;\ngene supply_Rotor: Rotor = if pool.Rotor < 10 then (if need_Division then 1 else 0) else 0;\ngene supply_Ring: Ring = if pool.Ring < 10 then (if need_Division then 1 else 0) else 0;\n\nassembly Respiration: respire(oxygen) {\n  Catalyst: 250;\n  Wall: 150;\n  start_when: need_Respiration;\n  activity: if oxygen > 0 && energy.fraction < 0.98 && (carbon.organic > 2000 * body.area || energy < 200000) then 1 else 0;\n}\n\nassembly Solar: harvest(light) {\n  Mount: 200;\n  Pigment: 800;\n  Catalyst: 200;\n  start_when: need_Solar;\n  activity: 1;\n}\n\nassembly Vesicle: store(food) {\n  Wall: 400;\n  start_when: need_Vesicle;\n  activity: 1;\n}\n\nassembly ReleasePore: export(ligand) {\n  Mount: 50;\n  Carrier: 250;\n  start_when: need_ReleasePore;\n  activity: if carbon.ligand > 0 then 1 else 0;\n}\n\nassembly Isomerase: isomerize(ligand) {\n  IsomeraseCatalyst: 200;\n  start_when: need_Isomerase;\n  activity: if energy.fraction > 0.55 && carbon.organic > 3500 * body.area && carbon.ligand < 1000 * body.area then 1 else 0;\n}\n\nassembly Translation: translate() {\n  Frame: 200;\n  Catalyst: 200;\n  start_when: need_Translation;\n  activity: 1;\n}\n\nassembly Minerals: import(mineral) {\n  Mount: 50;\n  Carrier: 200;\n  start_when: need_Minerals;\n  activity: if nutrient.fraction < 0.9 && energy.fraction > 0.05 then 1 else 0;\n}\n\nassembly EnergyStore: store(energy) {\n  Wall: 400;\n  start_when: need_EnergyStore;\n  activity: 1;\n}\n\nassembly MineralStore: store(mineral) {\n  Wall: 200;\n  start_when: need_MineralStore;\n  activity: 1;\n}\n\nassembly Repair: repair() {\n  Catalyst: 250;\n  start_when: need_Repair;\n  activity: 1;\n}\n\nassembly Support: support() {\n  Frame: 600;\n  start_when: need_Support;\n  activity: 1;\n}\n\nassembly Envelope: grow() {\n  Wall: 150;\n  Catalyst: 50;\n  start_when: need_Envelope;\n  activity: if energy > 900000 && body.area < body.birth_area * 2 then 0.8 else 0;\n}\n\nassembly Replication: replicate() {\n  Frame: 50;\n  Replicase: 150;\n  start_when: need_Replication;\n  activity: if energy > 800000 then 1 else 0;\n}\n\nassembly Division: constrict() {\n  Mount: 40;\n  Rotor: 80;\n  Ring: 80;\n  start_when: need_Division;\n  activity: if body.area + 0.000001 >= body.birth_area * 2 && energy > 1000000 then 1 else 0;\n  at: 1.5707963267948966;\n}"
+    },
+    "080c3594086eac49cb7ea070c717154686b29cdca35d4b345dea8db54cfcbe28": {
+      "lineage": "Forager",
+      "source": "# Shared products supply independently regulated physical recipes.\n# Genes make stock; start_when permits new machines; activity runs built ones.\ncellular counts;\n\nproduct Catalyst = enzyme();\nproduct Wall = membrane();\nproduct Mount = anchor();\nproduct CoatPrecursor = scaffold();\nproduct Glue = adhesin(CoatPrecursor);\nproduct Carrier = transporter();\nproduct Rotor = motor();\nproduct Frame = scaffold();\nproduct Tail = filament();\nproduct Detector = receptor();\nproduct Pigment = pigment();\nproduct Replicase = replicase();\nproduct Ring = constrictor();\nproduct IsomeraseCatalyst = enzyme(90);\n\n# Tolerate modest wear while repair restores working capacity. The allowance\n# stays below one machine, even when a larger body needs many copies.\nfn missing(installed, required, unit) = installed + 0.000001 < required - min(required * 0.1, unit * 0.2);\nfn enough(installed, required) = installed + 0.000001 >= required * 0.9;\n\nlet funded = (energy > 100000 || gut.energy > 0) && nutrient.stored > 10;\nlet expanding = body.area > body.birth_area * 1.6;\nlet powered = enough(built.Gut, 0.06) && enough(built.ExudateEnzyme, 0.04) && enough(built.Capture, 0.03) && enough(built.Respiration, 0.04);\nlet equipped = powered && enough(built.LeftMotor, 0.025) && enough(built.RightMotor, 0.025) && enough(built.Vision, 0.02) && enough(built.Touch, 0.01);\nlet scavenging = gut.structural.energy > 60000 && !rb093;\nlet provisioning = expanding && (energy > 600000 || gut.soluble.energy + gut.structural.energy > 100000);\n# Commit after a substantial meal or a productive carbon connection.\n# A daughter can start with a smaller inherited ATP compartment.\nrb061 = true when equipped && energy > min(650000, 0.85 * energy.capacity)\n  && (gut.soluble.energy + gut.structural.energy > 55000\n    || (gut.soluble.energy + gut.structural.energy > 30000 && carbon.organic > 8000 * body.area)\n    || (built.CarbonPort > 0.045 && carbon.organic > 12000 * body.area && energy.fraction > 0.85));\nlet surplus = equipped && rb061 && energy > min(320000, 0.65 * energy.capacity);\n# After recognizing a producer, build reciprocal junctions for future encounters.\npublish rf090;\nrf090 = 72;\nrf091 = 41;\nlet docked = sensed.Touch.message_valid && sensed.Touch.message == rf091;\nrb093 = true when docked;\n# Swing around hard obstacles and stay near edible particles.\nlet injured = integrity < 0.995;\nlet seen = sensed.Vision.valid;\nlet blocked = sensed.Touch.valid && sensed.Touch.resistance >= 0.12;\nlet obstacle = if sensed.Touch.valid then angle(sensed.Touch.offset) else 0;\nlet escape = if obstacle >= 0 then obstacle - 1.8 else obstacle + 1.8;\nlet meal = gut.soluble.energy + gut.structural.energy;\nlet meal_fraction = if gut.capacity > 0 then meal / gut.capacity else 0;\nlet seek = meal_fraction < 0.55;\n# Leave a known feeding contact if stored carbon and ATP stay low despite docking.\nlet depleted = energy.fraction < 0.55 && carbon.organic < 2500 * body.area && meal < 25000;\nrf094 = age when !docked || !depleted;\nlet starved_at_contact = docked && depleted && populated(rf094) && age - rf094 >= 6;\nrf095 = age when starved_at_contact && (!populated(rf095) || age - rf095 > 24);\nlet leaving = populated(rf095) && age - rf095 < 8;\nlet grazing = seen && sensed.Vision.area >= 0.35\n  && length(sensed.Vision.offset) < 7 * sqrt(sensed.Vision.area) + 5;\nlet particle = seen && sensed.Vision.area < 0.35;\nlet gradient = sensed.LeftChemistry.organic - sensed.RightChemistry.organic;\nlet has_gradient = sensed.LeftChemistry.valid && sensed.RightChemistry.valid && abs(gradient) > 0.0001;\nlet steer = if blocked then clamp(escape * 2, -1, 1)\n  else if injured || leaving then 0\n  else if seek && particle then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1)\n  else if seek && has_gradient then clamp(gradient * 35, -1, 1)\n  else if grazing then clamp((angle(sensed.Vision.offset) - 1.4) * 1.8, -1, 1)\n  else if seek && seen then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1)\n  else sin(age * 0.65) * 0.35;\nlet move = if blocked || injured || leaving then 0.65 else if meal_fraction > 0.45 then 0\n  else if seek && particle then 0.55 else if has_gradient then 0.35 else 0.23;\n\nlet need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Dock = funded && (equipped && rb093) && missing(built.Dock, (if provisioning then 0.04 else 0.02), 0.02);\nlet need_CarbonPort = funded && (equipped && rb093) && missing(built.CarbonPort, (if provisioning then 0.1 else 0.05), 0.05);\nlet need_MineralPort = funded && (equipped && rb093) && missing(built.MineralPort, (if provisioning then 0.04 else 0.02), 0.02);\nlet need_Badge = funded && (powered) && missing(built.Badge, 0.01, 0.01);\nlet need_Gut = funded && (true) && missing(built.Gut, (if provisioning then 0.12 else 0.06), 0.06);\nlet need_ExudateEnzyme = funded && (true) && missing(built.ExudateEnzyme, (if provisioning then 0.08 else 0.04), 0.04);\nlet need_Capture = funded && (enough(built.Gut, 0.06)) && missing(built.Capture, (if provisioning then 0.06 else 0.03), 0.03);\nlet need_TissueEnzyme = funded && (powered && gut.structural.energy > 0) && missing(built.TissueEnzyme, (if scavenging then 0.08 else if provisioning then 0.08 else 0.04), 0.04);\nlet need_WasteEnzyme = funded && (powered && gut.bound.energy > 0) && missing(built.WasteEnzyme, (if provisioning then 0.03 else 0.015), 0.015);\nlet need_Translation = funded && (powered) && missing(built.Translation, (if body.area > body.birth_area * 1.3 then 0.08 else 0.04), 0.04);\nlet need_Minerals = funded && (powered && (nutrient.stored < 1500 || surplus)) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);\nlet need_EnergyStore = funded && (surplus) && missing(built.EnergyStore, (if expanding then 0.04 else 0.02), 0.02);\nlet need_MineralStore = funded && (surplus && body.area > 1.25) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);\nlet need_LeftMotor = funded && (powered) && missing(built.LeftMotor, (if provisioning then 0.05 else 0.025), 0.025);\nlet need_RightMotor = funded && (powered) && missing(built.RightMotor, (if provisioning then 0.05 else 0.025), 0.025);\nlet need_Vision = funded && (powered) && missing(built.Vision, (if provisioning then 0.04 else 0.02), 0.02);\nlet need_Touch = funded && (powered) && missing(built.Touch, (if provisioning then 0.02 else 0.01), 0.01);\nlet need_LeftChemistry = funded && (powered) && missing(built.LeftChemistry, (if provisioning then 0.03 else 0.015), 0.015);\nlet need_RightChemistry = funded && (powered) && missing(built.RightChemistry, (if provisioning then 0.03 else 0.015), 0.015);\nlet need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if provisioning then 0.05 else 0.025), 0.025);\nlet need_Support = funded && (surplus) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);\nlet need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if provisioning then 0.04 else 0.02), 0.02);\nlet need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if provisioning then 0.04 else 0.02), 0.02);\nlet need_Division = funded && (surplus && body.area > 1.5 * body.birth_area) && missing(built.Division, (if provisioning then 0.04 else 0.02), 0.02);\nlet need_FlankInlet = funded && (powered) && missing(built.FlankInlet, 0.015, 0.015);\nlet need_FarInlet = funded && (powered) && missing(built.FarInlet, 0.015, 0.015);\nlet need_RecoveryEnzyme = funded && (carbon.ligand > 0) && missing(built.RecoveryEnzyme, 0.02, 0.02);\n\ngene supply_CoatPrecursor: CoatPrecursor = if (need_Dock) && pool.Glue < 10 && pool.CoatPrecursor < 10 then 1 else 0;\ngene supply_Catalyst: Catalyst = if pool.Catalyst < 10 then (if need_Respiration then 1 else 0) + (if need_ExudateEnzyme then 1 else 0) + (if need_TissueEnzyme then 1 else 0) + (if need_WasteEnzyme then 1 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0) else 0;\ngene supply_Wall: Wall = if pool.Wall < 10 then (if need_Respiration then 0.6 else 0) + (if need_Dock then 1 else 0) + (if need_CarbonPort then 1 else 0) + (if need_MineralPort then 1 else 0) + (if need_Badge then 1 else 0) + (if need_Gut then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0) else 0;\ngene supply_Mount: Mount = if pool.Mount < 10 then (if need_Dock then 1 else 0) + (if need_Badge then 0.666667 else 0) + (if need_Capture then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_LeftMotor then 0.5 else 0) + (if need_RightMotor then 0.5 else 0) + (if need_Vision then 0.333333 else 0) + (if need_Touch then 0.333333 else 0) + (if need_LeftChemistry then 0.25 else 0) + (if need_RightChemistry then 0.25 else 0) + (if need_Division then 0.5 else 0) + (if need_FlankInlet then 0.5 else 0) + (if need_FarInlet then 0.5 else 0) else 0;\ngene supply_Glue: Glue = if pool.Glue < 10 then (if need_Dock then 0.5 else 0) else 0;\ngene supply_Carrier: Carrier = if pool.Carrier < 10 then (if need_CarbonPort then 1 else 0) + (if need_MineralPort then 1 else 0) + (if need_Minerals then 1 else 0) else 0;\ngene supply_Rotor: Rotor = if pool.Rotor < 10 then (if need_Capture then 1 else 0) + (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Division then 1 else 0) + (if need_FlankInlet then 1 else 0) + (if need_FarInlet then 1 else 0) else 0;\ngene supply_Frame: Frame = if pool.Frame < 10 then (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0) else 0;\ngene supply_Tail: Tail = if pool.Tail < 10 then (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Touch then 0.333333 else 0) else 0;\ngene supply_Detector: Detector = if pool.Detector < 10 then (if need_Vision then 1 else 0) + (if need_Touch then 1 else 0) + (if need_LeftChemistry then 1 else 0) + (if need_RightChemistry then 1 else 0) else 0;\ngene supply_Pigment: Pigment = if pool.Pigment < 10 then (if need_Vision then 0.333333 else 0) else 0;\ngene supply_Replicase: Replicase = if pool.Replicase < 10 then (if need_Replication then 1 else 0) else 0;\ngene supply_Ring: Ring = if pool.Ring < 10 then (if need_Division then 1 else 0) else 0;\ngene supply_IsomeraseCatalyst: IsomeraseCatalyst = if pool.IsomeraseCatalyst < 10 then (if need_RecoveryEnzyme then 1 else 0) else 0;\n\nassembly Respiration: respire(oxygen) {\n  Catalyst: 250;\n  Wall: 150;\n  start_when: need_Respiration;\n  activity: if oxygen > 0 && energy.fraction < 0.98 && (carbon.organic > (if energy > 620000 then 6500 else 1800) * body.area || energy < 200000) then 1 else 0;\n}\n\nassembly Dock: adhere() {\n  Mount: 80;\n  Wall: 80;\n  Glue: 40;\n  start_when: need_Dock;\n  activity: if injured || leaving then 0 else 1;\n  engage_when: populated(rf091) && peer.message_valid && peer.message == rf091;\n}\n\nassembly CarbonPort: junction(carbon) {\n  Wall: 250;\n  Carrier: 250;\n  start_when: need_CarbonPort;\n  activity: if carbon.organic < 18000 * body.area then 1 else 0;\n}\n\nassembly MineralPort: junction(mineral) {\n  Wall: 100;\n  Carrier: 100;\n  start_when: need_MineralPort;\n  activity: if nutrient.fraction > 0.72 && nutrient.stored > 3000 * body.area then 1 else 0;\n}\n\nassembly Badge: display() {\n  Mount: 40;\n  Wall: 60;\n  start_when: need_Badge;\n  activity: 1;\n}\n\nassembly Gut: store(food) {\n  Wall: 600;\n  start_when: need_Gut;\n  activity: 1;\n}\n\nassembly ExudateEnzyme: digest(soluble) {\n  Catalyst: 400;\n  start_when: need_ExudateEnzyme;\n  activity: if gut.soluble.energy > 0 then 1 else 0;\n}\n\nassembly Capture: import(particle) {\n  Mount: 100;\n  Rotor: 200;\n  start_when: need_Capture;\n  activity: if gut.fraction < 0.7 then 1 else 0;\n}\n\nassembly TissueEnzyme: digest(structural) {\n  Catalyst: 400;\n  start_when: need_TissueEnzyme;\n  activity: if gut.structural.energy > 0 then 1 else 0;\n}\n\nassembly WasteEnzyme: digest(bound) {\n  Catalyst: 150;\n  start_when: need_WasteEnzyme;\n  activity: if gut.bound.energy > 0 then 1 else 0;\n}\n\nassembly Translation: translate() {\n  Frame: 200;\n  Catalyst: 200;\n  start_when: need_Translation;\n  activity: 1;\n}\n\nassembly Minerals: import(mineral) {\n  Mount: 50;\n  Carrier: 200;\n  start_when: need_Minerals;\n  activity: if nutrient.fraction < 0.9 && energy.fraction > 0.05 then 1 else 0;\n}\n\nassembly EnergyStore: store(energy) {\n  Wall: 200;\n  start_when: need_EnergyStore;\n  activity: 1;\n}\n\nassembly MineralStore: store(mineral) {\n  Wall: 200;\n  start_when: need_MineralStore;\n  activity: 1;\n}\n\nassembly LeftMotor: propel() {\n  Mount: 50;\n  Rotor: 100;\n  Tail: 100;\n  start_when: need_LeftMotor;\n  activity: if (docked || meal > 20000) && !injured && !leaving then 0 else clamp(move - steer * 0.5, 0, 1);\n  at: 1.570796;\n  direction: 0;\n}\n\nassembly RightMotor: propel() {\n  Mount: 50;\n  Rotor: 100;\n  Tail: 100;\n  start_when: need_RightMotor;\n  activity: if (docked || meal > 20000) && !injured && !leaving then 0 else clamp(move + steer * 0.5, 0, 1);\n  at: -1.570796;\n  direction: 0;\n}\n\nassembly Vision: sense(optical) {\n  Mount: 40;\n  Detector: 120;\n  Pigment: 40;\n  start_when: need_Vision;\n  activity: 1;\n}\n\nassembly Touch: sense(contact) {\n  Mount: 20;\n  Detector: 60;\n  Tail: 20;\n  start_when: need_Touch;\n  activity: 1;\n}\n\nassembly LeftChemistry: sense(chemical) {\n  Mount: 30;\n  Detector: 120;\n  start_when: need_LeftChemistry;\n  activity: 1;\n  at: 1.570796;\n}\n\nassembly RightChemistry: sense(chemical) {\n  Mount: 30;\n  Detector: 120;\n  start_when: need_RightChemistry;\n  activity: 1;\n  at: -1.570796;\n}\n\nassembly Repair: repair() {\n  Catalyst: 250;\n  start_when: need_Repair;\n  activity: 1;\n}\n\nassembly Support: support() {\n  Frame: 600;\n  start_when: need_Support;\n  activity: 1;\n}\n\nassembly Envelope: grow() {\n  Wall: 150;\n  Catalyst: 50;\n  start_when: need_Envelope;\n  activity: if energy > 340000 && body.area < body.birth_area * 2 then 0.8 else 0;\n}\n\nassembly Replication: replicate() {\n  Frame: 50;\n  Replicase: 150;\n  start_when: need_Replication;\n  activity: if energy > 340000 then 1 else 0;\n}\n\nassembly Division: constrict() {\n  Mount: 40;\n  Rotor: 80;\n  Ring: 80;\n  start_when: need_Division;\n  activity: if body.area + 0.000001 >= body.birth_area * 2 && enough(built.Minerals,0.05) && enough(built.EnergyStore,0.04) && enough(built.MineralStore,0.04) && enough(built.Respiration,0.08) && enough(built.Translation,0.08) && energy > 490000 && meal + carbon.organic * 20 > 70000 * body.area then 1 else 0;\n  at: 0;\n}\n\nassembly FlankInlet: import(particle) {\n  Mount: 50;\n  Rotor: 100;\n  start_when: need_FlankInlet;\n  activity: if gut.fraction < 0.9 then 1 else 0;\n  at: 1.5707963267948966;\n}\n\nassembly FarInlet: import(particle) {\n  Mount: 50;\n  Rotor: 100;\n  start_when: need_FarInlet;\n  activity: if gut.fraction < 0.9 then 1 else 0;\n  at: -1.5707963267948966;\n}\n\nassembly RecoveryEnzyme: isomerize(carbon) {\n  IsomeraseCatalyst: 200;\n  start_when: need_RecoveryEnzyme;\n  activity: if carbon.ligand > 0 then 1 else 0;\n}"
+    },
+    "d1d2d98093348f7dfc72c70e6d504aee31af3fda58ed0b62ee8811350bec6e32": {
+      "lineage": "Mixotroph",
+      "source": "# Shared products supply independently regulated physical recipes.\n# Genes make stock; start_when permits new machines; activity runs built ones.\ncellular counts;\n\nproduct Catalyst = enzyme();\nproduct Wall = membrane();\nproduct Mount = anchor();\nproduct Pigment = pigment();\nproduct Detector = receptor();\nproduct Rotor = motor();\nproduct Frame = scaffold();\nproduct Carrier = transporter();\nproduct Tail = filament();\nproduct Replicase = replicase();\nproduct Ring = constrictor();\n\n# Tolerate modest wear while repair restores working capacity. The allowance\n# stays below one machine, even when a larger body needs many copies.\nfn missing(installed, required, unit) = installed + 0.000001 < required - min(required * 0.1, unit * 0.2);\nfn enough(installed, required) = installed + 0.000001 >= required * 0.9;\n\nlet funded = (energy > 100000 || gut.energy > 0) && nutrient.stored > 10;\nlet expanding = body.area > body.birth_area * 1.6;\nlet powered = enough(built.Solar, 0.08) && enough(built.Gut, 0.06) && enough(built.ExudateEnzyme, 0.04) && enough(built.Capture, 0.03) && enough(built.Respiration, 0.04);\nlet equipped = powered;\nlet surplus = equipped && energy > 550000;\n# Only a built Canopy receptor can trigger a change of feeding mode.\n# Between the two thresholds, keep the mode from the previous measurement.\nrb050 = true when sensed.Canopy.valid && sensed.Canopy.level < 0.35;\nclear rb050 when sensed.Canopy.valid && sensed.Canopy.level > 0.55;\nlet shade_feed = sensed.Canopy.valid && (sensed.Canopy.level < 0.35\n  || (rb050 && sensed.Canopy.level <= 0.55));\nlet steer = if shade_feed then sin(age * 0.7) * 0.35 else 0;\nlet move = if shade_feed && gut.fraction < 0.5 then 0.4 else 0;\n\nlet need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Solar = funded && (true) && missing(built.Solar, (if expanding then 0.16 else 0.08), 0.08);\nlet need_Canopy = funded && (true) && missing(built.Canopy, 0.01, 0.01);\nlet need_Gut = funded && (true) && missing(built.Gut, 0.06, 0.06);\nlet need_ExudateEnzyme = funded && (true) && missing(built.ExudateEnzyme, 0.04, 0.04);\nlet need_Capture = funded && (enough(built.Gut, 0.06)) && missing(built.Capture, 0.03, 0.03);\nlet need_TissueEnzyme = funded && (powered && gut.structural.energy > 0) && missing(built.TissueEnzyme, (if expanding then 0.02 else 0.01), 0.01);\nlet need_WasteEnzyme = funded && (powered && gut.bound.energy > 0) && missing(built.WasteEnzyme, (if expanding then 0.02 else 0.01), 0.01);\nlet need_Translation = funded && (powered) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Minerals = funded && (powered && (nutrient.stored < 1500 || surplus)) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);\nlet need_EnergyStore = funded && (powered) && missing(built.EnergyStore, (if expanding || energy.capacity <= 1000000 then 0.08 else 0.04), 0.04);\nlet need_MineralStore = funded && (powered && body.area > 1.2) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);\nlet need_LeftMotor = funded && (powered) && missing(built.LeftMotor, 0.025, 0.025);\nlet need_RightMotor = funded && (powered) && missing(built.RightMotor, 0.025, 0.025);\nlet need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Support = funded && (equipped && energy > 650000) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);\nlet need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, 0.02, 0.02);\nlet need_Division = funded && (expanding) && missing(built.Division, 0.02, 0.02);\n\ngene supply_Catalyst: Catalyst = if pool.Catalyst < 10 then (if need_Respiration then 1 else 0) + (if need_Solar then 0.166667 else 0) + (if need_ExudateEnzyme then 1 else 0) + (if need_TissueEnzyme then 1 else 0) + (if need_WasteEnzyme then 1 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0) else 0;\ngene supply_Wall: Wall = if pool.Wall < 10 then (if need_Respiration then 0.6 else 0) + (if need_Gut then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0) else 0;\ngene supply_Mount: Mount = if pool.Mount < 10 then (if need_Solar then 0.166667 else 0) + (if need_Canopy then 0.333333 else 0) + (if need_Capture then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_LeftMotor then 0.5 else 0) + (if need_RightMotor then 0.5 else 0) + (if need_Division then 0.5 else 0) else 0;\ngene supply_Pigment: Pigment = if pool.Pigment < 10 then (if need_Solar then 1 else 0) + (if need_Canopy then 0.333333 else 0) else 0;\ngene supply_Detector: Detector = if pool.Detector < 10 then (if need_Canopy then 1 else 0) else 0;\ngene supply_Rotor: Rotor = if pool.Rotor < 10 then (if need_Capture then 1 else 0) + (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Division then 1 else 0) else 0;\ngene supply_Frame: Frame = if pool.Frame < 10 then (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0) else 0;\ngene supply_Carrier: Carrier = if pool.Carrier < 10 then (if need_Minerals then 1 else 0) else 0;\ngene supply_Tail: Tail = if pool.Tail < 10 then (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) else 0;\ngene supply_Replicase: Replicase = if pool.Replicase < 10 then (if need_Replication then 1 else 0) else 0;\ngene supply_Ring: Ring = if pool.Ring < 10 then (if need_Division then 1 else 0) else 0;\n\nassembly Respiration: respire(oxygen) {\n  Catalyst: 250;\n  Wall: 150;\n  start_when: need_Respiration;\n  activity: if oxygen > 0 && energy.fraction < 0.98 && (carbon.organic > 2000 * body.area || energy < 200000) then 1 else 0;\n}\n\nassembly Solar: harvest(light) {\n  Mount: 100;\n  Pigment: 600;\n  Catalyst: 100;\n  start_when: need_Solar;\n  activity: if shade_feed then 0 else 1;\n}\n\nassembly Canopy: sense(light) {\n  Mount: 20;\n  Detector: 60;\n  Pigment: 20;\n  start_when: need_Canopy;\n  activity: 1;\n}\n\nassembly Gut: store(food) {\n  Wall: 600;\n  start_when: need_Gut;\n  activity: 1;\n}\n\nassembly ExudateEnzyme: digest(soluble) {\n  Catalyst: 400;\n  start_when: need_ExudateEnzyme;\n  activity: if gut.soluble.energy > 0 then 1 else 0;\n}\n\nassembly Capture: import(particle) {\n  Mount: 100;\n  Rotor: 200;\n  start_when: need_Capture;\n  activity: if shade_feed && gut.fraction < 0.7 then 1 else 0;\n}\n\nassembly TissueEnzyme: digest(structural) {\n  Catalyst: 100;\n  start_when: need_TissueEnzyme;\n  activity: if gut.structural.energy > 0 then 1 else 0;\n}\n\nassembly WasteEnzyme: digest(bound) {\n  Catalyst: 100;\n  start_when: need_WasteEnzyme;\n  activity: if gut.bound.energy > 0 then 1 else 0;\n}\n\nassembly Translation: translate() {\n  Frame: 200;\n  Catalyst: 200;\n  start_when: need_Translation;\n  activity: 1;\n}\n\nassembly Minerals: import(mineral) {\n  Mount: 50;\n  Carrier: 200;\n  start_when: need_Minerals;\n  activity: if nutrient.fraction < 0.9 && energy.fraction > 0.05 then 1 else 0;\n}\n\nassembly EnergyStore: store(energy) {\n  Wall: 400;\n  start_when: need_EnergyStore;\n  activity: 1;\n}\n\nassembly MineralStore: store(mineral) {\n  Wall: 200;\n  start_when: need_MineralStore;\n  activity: 1;\n}\n\nassembly LeftMotor: propel() {\n  Mount: 50;\n  Rotor: 100;\n  Tail: 100;\n  start_when: need_LeftMotor;\n  activity: if gut.energy > 20000 then 0 else clamp(move - steer * 0.5, 0, 1);\n  at: 1.570796;\n  direction: 0;\n}\n\nassembly RightMotor: propel() {\n  Mount: 50;\n  Rotor: 100;\n  Tail: 100;\n  start_when: need_RightMotor;\n  activity: if gut.energy > 20000 then 0 else clamp(move + steer * 0.5, 0, 1);\n  at: -1.570796;\n  direction: 0;\n}\n\nassembly Repair: repair() {\n  Catalyst: 250;\n  start_when: need_Repair;\n  activity: 1;\n}\n\nassembly Support: support() {\n  Frame: 600;\n  start_when: need_Support;\n  activity: 1;\n}\n\nassembly Envelope: grow() {\n  Wall: 150;\n  Catalyst: 50;\n  start_when: need_Envelope;\n  activity: if energy > 900000 && body.area < body.birth_area * 2 then 0.8 else 0;\n}\n\nassembly Replication: replicate() {\n  Frame: 50;\n  Replicase: 150;\n  start_when: need_Replication;\n  activity: if energy > 800000 then 1 else 0;\n}\n\nassembly Division: constrict() {\n  Mount: 40;\n  Rotor: 80;\n  Ring: 80;\n  start_when: need_Division;\n  activity: if body.area + 0.000001 >= body.birth_area * 2 && energy > 1000000 then 1 else 0;\n  at: 1.5707963267948966;\n}"
+    },
+    "1ad996a70c229b26845b6a2be4e1241b410b2f69bbc5892888483c248f32f74b": {
+      "lineage": "Rememberer",
+      "source": "# Shared products supply independently regulated physical recipes.\n# Genes make stock; start_when permits new machines; activity runs built ones.\ncellular counts;\n\nproduct Catalyst = enzyme();\nproduct Wall = membrane();\nproduct Mount = anchor();\nproduct Rotor = motor();\nproduct Frame = scaffold();\nproduct Carrier = transporter();\nproduct Tail = filament();\nproduct Detector = receptor();\nproduct Replicase = replicase();\nproduct Ring = constrictor();\nproduct Persistence = regulator(8);\n\n# Tolerate modest wear while repair restores working capacity. The allowance\n# stays below one machine, even when a larger body needs many copies.\nfn missing(installed, required, unit) = installed + 0.000001 < required - min(required * 0.1, unit * 0.2);\nfn enough(installed, required) = installed + 0.000001 >= required * 0.9;\n\nlet funded = (energy > 100000 || gut.energy > 0) && nutrient.stored > 10;\nlet expanding = body.area > body.birth_area * 1.6;\nlet powered = enough(built.Gut, 0.06) && enough(built.ExudateEnzyme, 0.04) && enough(built.Capture, 0.03) && enough(built.Respiration, 0.04);\nlet equipped = powered && enough(built.LeftMotor, 0.025) && enough(built.RightMotor, 0.025);\nlet surplus = equipped && energy > 550000 && gut.energy > 20000 && carbon.organic > 3000 * body.area;\nlet difference = sensed.LeftChemistry.organic - sensed.RightChemistry.organic;\nlet cue = sensed.LeftChemistry.valid && sensed.RightChemistry.valid && abs(difference) > 0.000001;\nlet cue_turn = clamp(difference * 100, -1, 1);\nrf010 = cue_turn when cue;\nrf011 = age when cue;\nlet recent = populated(rf011) && age - rf011 < 1.5;\nclear rf010 when !cue && !recent;\nclear rf011 when !cue && !recent;\nlet steer = if cue then cue_turn else if recent then rf010 else sin(age * 0.5) * 0.3;\nlet move = if gut.fraction > 0.5 then 0 else 0.15 + 0.25 * activate(concentration.Persistence, 0.002);\n\nlet need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Gut = funded && (true) && missing(built.Gut, (if expanding then 0.12 else 0.06), 0.06);\nlet need_ExudateEnzyme = funded && (true) && missing(built.ExudateEnzyme, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Capture = funded && (enough(built.Gut, 0.06)) && missing(built.Capture, (if expanding then 0.06 else 0.03), 0.03);\nlet need_TissueEnzyme = funded && (powered && gut.structural.energy > 0) && missing(built.TissueEnzyme, (if expanding then 0.04 else 0.02), 0.02);\nlet need_WasteEnzyme = funded && (powered && gut.bound.energy > 0) && missing(built.WasteEnzyme, (if expanding then 0.03 else 0.015), 0.015);\nlet need_Translation = funded && (surplus) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Minerals = funded && (powered && (nutrient.stored < 1500 || surplus)) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);\nlet need_EnergyStore = funded && (powered) && missing(built.EnergyStore, (if expanding || energy.capacity <= 1000000 then 0.12 else 0.04), 0.04);\nlet need_MineralStore = funded && (powered && body.area > 1.2) && missing(built.MineralStore, (if expanding then 0.06 else 0.02), 0.02);\nlet need_LeftMotor = funded && (powered) && missing(built.LeftMotor, (if expanding then 0.05 else 0.025), 0.025);\nlet need_RightMotor = funded && (powered) && missing(built.RightMotor, (if expanding then 0.05 else 0.025), 0.025);\nlet need_LeftChemistry = funded && (powered) && missing(built.LeftChemistry, (if expanding then 0.03 else 0.015), 0.015);\nlet need_RightChemistry = funded && (powered) && missing(built.RightChemistry, (if expanding then 0.03 else 0.015), 0.015);\nlet need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Support = funded && (equipped && energy > 650000 && gut.energy > 20000 && carbon.organic > 3000 * body.area) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);\nlet need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);\n\ngene supply_Catalyst: Catalyst = if pool.Catalyst < 10 then (if need_Respiration then 1 else 0) + (if need_ExudateEnzyme then 1 else 0) + (if need_TissueEnzyme then 1 else 0) + (if need_WasteEnzyme then 1 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0) else 0;\ngene supply_Wall: Wall = if pool.Wall < 10 then (if need_Respiration then 0.6 else 0) + (if need_Gut then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0) else 0;\ngene supply_Mount: Mount = if pool.Mount < 10 then (if need_Capture then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_LeftMotor then 0.5 else 0) + (if need_RightMotor then 0.5 else 0) + (if need_LeftChemistry then 0.25 else 0) + (if need_RightChemistry then 0.25 else 0) + (if need_Division then 0.5 else 0) else 0;\ngene supply_Rotor: Rotor = if pool.Rotor < 10 then (if need_Capture then 1 else 0) + (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Division then 1 else 0) else 0;\ngene supply_Frame: Frame = if pool.Frame < 10 then (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0) else 0;\ngene supply_Carrier: Carrier = if pool.Carrier < 10 then (if need_Minerals then 1 else 0) else 0;\ngene supply_Tail: Tail = if pool.Tail < 10 then (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) else 0;\ngene supply_Detector: Detector = if pool.Detector < 10 then (if need_LeftChemistry then 1 else 0) + (if need_RightChemistry then 1 else 0) else 0;\ngene supply_Replicase: Replicase = if pool.Replicase < 10 then (if need_Replication then 1 else 0) else 0;\ngene supply_Ring: Ring = if pool.Ring < 10 then (if need_Division then 1 else 0) else 0;\n\n# Cue-driven material memory; growth dilutes its concentration.\ngene remember: Persistence = if sensed.LeftChemistry.valid && sensed.RightChemistry.valid\n  && concentration.Persistence < 0.008 then 0.15 * activate(sensed.LeftChemistry.organic + sensed.RightChemistry.organic, 0.002) else 0;\n\nassembly Respiration: respire(oxygen) {\n  Catalyst: 250;\n  Wall: 150;\n  start_when: need_Respiration;\n  activity: if oxygen > 0 && energy.fraction < 0.98 && (carbon.organic > 2000 * body.area || energy < 200000) then 1 else 0;\n}\n\nassembly Gut: store(food) {\n  Wall: 600;\n  start_when: need_Gut;\n  activity: 1;\n}\n\nassembly ExudateEnzyme: digest(soluble) {\n  Catalyst: 400;\n  start_when: need_ExudateEnzyme;\n  activity: if gut.soluble.energy > 0 then 1 else 0;\n}\n\nassembly Capture: import(particle) {\n  Mount: 100;\n  Rotor: 200;\n  start_when: need_Capture;\n  activity: if gut.fraction < 0.7 then 1 else 0;\n  at: 1.5707963267948966;\n}\n\nassembly TissueEnzyme: digest(structural) {\n  Catalyst: 200;\n  start_when: need_TissueEnzyme;\n  activity: if gut.structural.energy > 0 then 1 else 0;\n}\n\nassembly WasteEnzyme: digest(bound) {\n  Catalyst: 150;\n  start_when: need_WasteEnzyme;\n  activity: if gut.bound.energy > 0 then 1 else 0;\n}\n\nassembly Translation: translate() {\n  Frame: 200;\n  Catalyst: 200;\n  start_when: need_Translation;\n  activity: 1;\n}\n\nassembly Minerals: import(mineral) {\n  Mount: 50;\n  Carrier: 200;\n  start_when: need_Minerals;\n  activity: if nutrient.fraction < 0.9 && energy.fraction > 0.05 then 1 else 0;\n}\n\nassembly EnergyStore: store(energy) {\n  Wall: 400;\n  start_when: need_EnergyStore;\n  activity: 1;\n}\n\nassembly MineralStore: store(mineral) {\n  Wall: 200;\n  start_when: need_MineralStore;\n  activity: 1;\n}\n\nassembly LeftMotor: propel() {\n  Mount: 50;\n  Rotor: 100;\n  Tail: 100;\n  start_when: need_LeftMotor;\n  activity: clamp(move - steer * 0.5, 0, 1);\n  at: 1.570796;\n  direction: 0;\n}\n\nassembly RightMotor: propel() {\n  Mount: 50;\n  Rotor: 100;\n  Tail: 100;\n  start_when: need_RightMotor;\n  activity: clamp(move + steer * 0.5, 0, 1);\n  at: -1.570796;\n  direction: 0;\n}\n\nassembly LeftChemistry: sense(chemical) {\n  Mount: 30;\n  Detector: 120;\n  start_when: need_LeftChemistry;\n  activity: 1;\n  at: 1.570796;\n}\n\nassembly RightChemistry: sense(chemical) {\n  Mount: 30;\n  Detector: 120;\n  start_when: need_RightChemistry;\n  activity: 1;\n  at: -1.570796;\n}\n\nassembly Repair: repair() {\n  Catalyst: 250;\n  start_when: need_Repair;\n  activity: 1;\n}\n\nassembly Support: support() {\n  Frame: 600;\n  start_when: need_Support;\n  activity: 1;\n}\n\nassembly Envelope: grow() {\n  Wall: 150;\n  Catalyst: 50;\n  start_when: need_Envelope;\n  activity: if energy > 900000 && body.area < body.birth_area * 2 then 0.8 else 0;\n}\n\nassembly Replication: replicate() {\n  Frame: 50;\n  Replicase: 150;\n  start_when: need_Replication;\n  activity: if energy > 800000 then 1 else 0;\n}\n\nassembly Division: constrict() {\n  Mount: 40;\n  Rotor: 80;\n  Ring: 80;\n  start_when: need_Division;\n  activity: if body.area + 0.000001 >= body.birth_area * 2 && enough(built.EnergyStore,0.12) && enough(built.MineralStore,0.06) && energy > 1000000 then 1 else 0;\n  at: 1.5707963267948966;\n}"
+    },
+    "1e056112b7273a4a950b5e075da92342f4150ee5987bef6b2b048b94c883b1bb": {"lineage": "Nurse rosette","file": "examples/nurse-rosette.cell"},
+    "381f2db1a08d9afac5f6c888058190a1d421db6f87b50f596b7ffbbe35095699": {
+      "lineage": "Crown rosette",
+      "source": "# Shared products supply independently regulated physical recipes.\n# Genes make stock; start_when permits new machines; activity runs built ones.\ncellular counts;\n\nproduct Catalyst = enzyme();\nproduct Wall = membrane();\nproduct Mount = anchor();\nproduct Pigment = pigment();\nproduct CoatPrecursor = scaffold();\nproduct Glue = adhesin(CoatPrecursor);\nproduct Detector = receptor();\nproduct Frame = scaffold();\nproduct Carrier = transporter();\nproduct Replicase = replicase();\nproduct Rotor = motor();\nproduct Ring = constrictor();\n\n# Tolerate modest wear while repair restores working capacity. The allowance\n# stays below one machine, even when a larger body needs many copies.\nfn missing(installed, required, unit) = installed + 0.000001 < required - min(required * 0.1, unit * 0.2);\nfn enough(installed, required) = installed + 0.000001 >= required * 0.9;\n\nlet funded = (energy > 100000 || gut.energy > 0) && nutrient.stored > 10;\nlet expanding = body.area > body.birth_area * 1.6;\nlet powered = enough(built.Solar, 0.12) && enough(built.Respiration, 0.04);\nlet equipped = powered;\nlet surplus = equipped && energy > 550000;\n# A recent drop in area records that this cell has already divided.\nrb041 = true when populated(rf040) && body.area + 0.2 < rf040;\nrf040 = body.area;\nlet left_peer = sensed.LeftBus.valid;\nlet right_peer = sensed.RightBus.valid;\nlet paired_contact = left_peer || right_peer;\nsignal rf021;\nlet partners = (if left_peer then 1 else 0) + (if right_peer then 1 else 0);\nlet center = partners >= 2;\nrf021 = if center then 1 else 0;\nlet incoming = (sensed.LeftBus.signal_valid && sensed.LeftBus.value > 0.5)\n  || (sensed.RightBus.signal_valid && sensed.RightBus.value > 0.5);\nlet rim = partners == 1 && incoming;\n\nlet need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Solar = funded && (true) && missing(built.Solar, (if expanding then 0.24 else 0.12), 0.12);\nlet need_LeftGlue = funded && (powered) && missing(built.LeftGlue, if expanding && (paired_contact || rb041) then 0.04 else 0.02, 0.02);\nlet need_LeftBus = funded && (powered) && missing(built.LeftBus, if expanding && (paired_contact || rb041) then 0.04 else 0.02, 0.02);\nlet need_RightGlue = funded && (powered) && missing(built.RightGlue, if expanding && (paired_contact || rb041) then 0.04 else 0.02, 0.02);\nlet need_RightBus = funded && (powered) && missing(built.RightBus, if expanding && (paired_contact || rb041) then 0.04 else 0.02, 0.02);\nlet need_RimSolar = funded && (rim) && missing(built.RimSolar, 0.06, 0.06);\nlet need_Translation = funded && (powered) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Minerals = funded && (powered) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);\nlet need_EnergyStore = funded && (powered) && missing(built.EnergyStore, if expanding then 0.08 else 0.04, 0.02);\nlet need_MineralStore = funded && (powered && body.area > 1.2) && missing(built.MineralStore, if expanding then 0.06 else 0.02, 0.02);\nlet need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);\nlet need_Support = funded && (powered && energy > 450000) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);\nlet need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if expanding then 0.04 else 0.02), 0.02);\nlet need_Division = funded && (expanding) && missing(built.Division, (if expanding then 0.04 else 0.02), 0.02);\n\ngene supply_CoatPrecursor: CoatPrecursor = if (need_LeftGlue || need_RightGlue) && pool.Glue < 10 && pool.CoatPrecursor < 10 then 1 else 0;\ngene supply_Catalyst: Catalyst = if pool.Catalyst < 10 then (if need_Respiration then 1 else 0) + (if need_Solar then 0.25 else 0) + (if need_RimSolar then 0.25 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0) else 0;\ngene supply_Wall: Wall = if pool.Wall < 10 then (if need_Respiration then 0.6 else 0) + (if need_LeftGlue then 1 else 0) + (if need_LeftBus then 1 else 0) + (if need_RightGlue then 1 else 0) + (if need_RightBus then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0) else 0;\ngene supply_Mount: Mount = if pool.Mount < 10 then (if need_Solar then 0.25 else 0) + (if need_LeftGlue then 1 else 0) + (if need_RightGlue then 1 else 0) + (if need_RimSolar then 0.25 else 0) + (if need_Minerals then 0.25 else 0) + (if need_Division then 0.5 else 0) else 0;\ngene supply_Pigment: Pigment = if pool.Pigment < 10 then (if need_Solar then 1 else 0) + (if need_RimSolar then 1 else 0) else 0;\ngene supply_Glue: Glue = if pool.Glue < 10 then (if need_LeftGlue then 0.5 else 0) + (if need_RightGlue then 0.5 else 0) else 0;\ngene supply_Detector: Detector = if pool.Detector < 10 then (if need_LeftBus then 0.666667 else 0) + (if need_RightBus then 0.666667 else 0) else 0;\ngene supply_Frame: Frame = if pool.Frame < 10 then (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0) else 0;\ngene supply_Carrier: Carrier = if pool.Carrier < 10 then (if need_Minerals then 1 else 0) else 0;\ngene supply_Replicase: Replicase = if pool.Replicase < 10 then (if need_Replication then 1 else 0) else 0;\ngene supply_Rotor: Rotor = if pool.Rotor < 10 then (if need_Division then 1 else 0) else 0;\ngene supply_Ring: Ring = if pool.Ring < 10 then (if need_Division then 1 else 0) else 0;\n\nassembly Respiration: respire(oxygen) {\n  Catalyst: 250;\n  Wall: 150;\n  start_when: need_Respiration;\n  activity: if oxygen > 0 && energy.fraction < 0.98 && (carbon.organic > 2000 * body.area || energy < 200000) then 1 else 0;\n}\n\nassembly Solar: harvest(light) {\n  Mount: 200;\n  Pigment: 800;\n  Catalyst: 200;\n  start_when: need_Solar;\n  activity: 1;\n  at: 1.5707963267948966;\n}\n\nassembly LeftGlue: adhere() {\n  Mount: 80;\n  Wall: 80;\n  Glue: 40;\n  start_when: need_LeftGlue;\n  activity: 1;\n  engage_when: peer.division_interface;\n  at: 1.540796;\n}\n\nassembly LeftBus: junction(signal) {\n  Wall: 120;\n  Detector: 80;\n  start_when: need_LeftBus;\n  activity: 1;\n  at: 1.540796;\n}\n\nassembly RightGlue: adhere() {\n  Mount: 80;\n  Wall: 80;\n  Glue: 40;\n  start_when: need_RightGlue;\n  activity: 1;\n  engage_when: peer.division_interface;\n  at: 1.600796;\n}\n\nassembly RightBus: junction(signal) {\n  Wall: 120;\n  Detector: 80;\n  start_when: need_RightBus;\n  activity: 1;\n  at: 1.600796;\n}\n\nassembly RimSolar: harvest(light) {\n  Mount: 100;\n  Pigment: 400;\n  Catalyst: 100;\n  start_when: need_RimSolar;\n  activity: if rim then 1 else 0;\n  at: 1.5707963267948966;\n}\n\nassembly Translation: translate() {\n  Frame: 200;\n  Catalyst: 200;\n  start_when: need_Translation;\n  activity: 1;\n}\n\nassembly Minerals: import(mineral) {\n  Mount: 50;\n  Carrier: 200;\n  start_when: need_Minerals;\n  activity: if nutrient.fraction < 0.9 && energy.fraction > 0.05 then 1 else 0;\n  at: 1.5707963267948966;\n}\n\nassembly EnergyStore: store(energy) {\n  Wall: 200;\n  start_when: need_EnergyStore;\n  activity: 1;\n}\n\nassembly MineralStore: store(mineral) {\n  Wall: 200;\n  start_when: need_MineralStore;\n  activity: 1;\n}\n\nassembly Repair: repair() {\n  Catalyst: 250;\n  start_when: need_Repair;\n  activity: 1;\n}\n\nassembly Support: support() {\n  Frame: 600;\n  start_when: need_Support;\n  activity: 1;\n}\n\nassembly Envelope: grow() {\n  Wall: 150;\n  Catalyst: 50;\n  start_when: need_Envelope;\n  activity: if energy > 900000 && body.area < body.birth_area * 2 then 0.8 else 0;\n  at: 1.5707963267948966;\n}\n\nassembly Replication: replicate() {\n  Frame: 50;\n  Replicase: 150;\n  start_when: need_Replication;\n  activity: if energy > 800000 then 1 else 0;\n}\n\nassembly Division: constrict() {\n  Mount: 40;\n  Rotor: 80;\n  Ring: 80;\n  start_when: need_Division;\n  activity: if body.area + 0.000001 >= body.birth_area * 2 && energy > 1000000 then 1 else 0;\n  at: 0;\n}"
+    },
+    "e04aecd94cc7a9d7ee52804e483100578289666a0d1982ed83200dd6998243ad": {"lineage": "Pulse swimmer","file": "examples/pulse-swimmer.cell"},
+    "e95617cd2914be2e056f273397dc17897f0d3af7c33d881e0635df1b20bf4592": {"lineage": "Predator","file": "examples/predator.cell"},
+    "c4241dd3a4c344dd5c216a9b281e482d6c0212101242f9891a772bc8ec3d2d2c": {"lineage": "Phototroph","file": "examples/phototroph.cell"},
+    "bb515a76023bfe99e5ddcb457d7e355624d3c127f335564439a58b6d4b478e42": {"lineage": "Ligand producer","file": "examples/ligand-producer.cell"},
+    "98e6b0a809cff0875da1edf1c526652c712420b27f0d7673763cc9e0904fe480": {
+      "lineage": "Forager",
+      "source": "# Shared products supply independently regulated physical recipes.\n# Genes make stock; start_when permits new machines; activity runs built ones.\ncellular counts;\n\nproduct Catalyst = enzyme();\nproduct Wall = membrane();\nproduct Mount = anchor();\nproduct CoatPrecursor = scaffold();\nproduct Glue = adhesin(CoatPrecursor);\nproduct Carrier = transporter();\nproduct Rotor = motor();\nproduct Frame = scaffold();\nproduct Tail = filament();\nproduct Detector = receptor();\nproduct Pigment = pigment();\nproduct Replicase = replicase();\nproduct Ring = constrictor();\nproduct IsomeraseCatalyst = enzyme(90);\n\n# Tolerate modest wear while repair restores working capacity. The allowance\n# stays below one machine, even when a larger body needs many copies.\nfn missing(installed, required, unit) = installed + 0.000001 < required - min(required * 0.1, unit * 0.2);\nfn enough(installed, required) = installed + 0.000001 >= required * 0.9;\n\nlet funded = (energy > 100000 || gut.energy > 0) && nutrient.stored > 10;\nlet expanding = body.area > body.birth_area * 1.6;\nlet powered = enough(built.Gut, 0.045) && enough(built.ExudateEnzyme, 0.04) && enough(built.Capture, 0.03) && enough(built.Respiration, 0.04);\nlet equipped = powered && enough(built.LeftMotor, 0.025) && enough(built.RightMotor, 0.025) && enough(built.Vision, 0.02) && enough(built.Touch, 0.01);\nlet scavenging = gut.structural.energy > 60000;\nlet provisioning = expanding && (energy > 600000 || gut.soluble.energy + gut.structural.energy > 100000);\n# Commit after a substantial meal or a productive carbon connection.\n# A daughter can start with a smaller inherited ATP compartment.\nrb061 = true when equipped && energy > min(650000, 0.85 * energy.capacity)\n  && (gut.soluble.energy + gut.structural.energy > 55000\n    || (gut.soluble.energy + gut.structural.energy > 30000 && carbon.organic > 8000 * body.area)\n    || (built.CarbonPort > 0.045 && carbon.organic > 12000 * body.area && energy.fraction > 0.85));\nlet surplus = equipped && rb061 && energy > min(320000, 0.65 * energy.capacity);\n# After recognizing a producer, build reciprocal junctions for future encounters.\npublish rf090;\nrf090 = 72;\nrf091 = 41;\nlet docked = sensed.Touch.message_valid && sensed.Touch.message == rf091;\nrb093 = true when docked;\n# Swing around hard obstacles and stay near edible particles.\nlet injured = integrity < 0.995;\nlet seen = sensed.Vision.valid;\nlet blocked = sensed.Touch.valid && sensed.Touch.resistance >= 0.12;\nlet obstacle = if sensed.Touch.valid then angle(sensed.Touch.offset) else 0;\nlet escape = if obstacle >= 0 then obstacle - 1.8 else obstacle + 1.8;\nlet meal = gut.soluble.energy + gut.structural.energy;\n# A persistent plume with little captured carbon funds one adhesion patch.\n# Its own contact guard still needs the local complementary display.\nlet poor_plume = sensed.LeftChemistry.valid && sensed.RightChemistry.valid\n  && max(sensed.LeftChemistry.organic, sensed.RightChemistry.organic) > 0.002 && meal < 10000 && !rb061 && body.area < 1.1 * body.birth_area;\nclear rf096 when !poor_plume;\nrf096 = age when poor_plume && !populated(rf096);\nrb097 = true when poor_plume && populated(rf096) && age - rf096 > 6 && energy > 330000;\nlet meal_fraction = if gut.capacity > 0 then meal / gut.capacity else 0;\nlet seek = meal_fraction < 0.55;\n# Leave a known feeding contact if stored carbon and ATP stay low despite docking.\nlet depleted = energy.fraction < 0.55 && carbon.organic < 2500 * body.area && meal < 25000;\nrf094 = age when !docked || !depleted;\nlet starved_at_contact = docked && depleted && populated(rf094) && age - rf094 >= 6;\nrf095 = age when starved_at_contact && (!populated(rf095) || age - rf095 > 24);\nlet leaving = populated(rf095) && age - rf095 < 8;\nlet grazing = seen && sensed.Vision.area >= 0.35\n  && length(sensed.Vision.offset) < 7 * sqrt(sensed.Vision.area) + 5;\nlet particle = seen && sensed.Vision.area < 0.35;\nlet gradient = sensed.LeftChemistry.organic - sensed.RightChemistry.organic;\nlet has_gradient = sensed.LeftChemistry.valid && sensed.RightChemistry.valid && abs(gradient) > 0.0001;\nlet steer = if blocked then clamp(escape * 2, -1, 1)\n  else if injured || leaving then 0\n  else if seek && particle then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1)\n  else if seek && has_gradient then clamp(gradient * 35, -1, 1)\n  else if grazing then clamp((angle(sensed.Vision.offset) - 1.4) * 1.8, -1, 1)\n  else if seek && seen then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1)\n  else sin(age * 0.65) * 0.35;\nlet move = if blocked || injured || leaving then 0.65 else if meal_fraction > 0.45 then 0\n  else if seek && particle then 0.55 else if has_gradient then 0.35 else 0.23;\n\nlet need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);\nlet need_Dock = funded && (equipped && (rb093 || rb097)) && missing(built.Dock, 0.02, 0.02);\nlet need_CarbonPort = funded && (equipped && rb093) && missing(built.CarbonPort, 0.05, 0.05);\nlet need_MineralPort = funded && (equipped && rb093) && missing(built.MineralPort, 0.02, 0.02);\nlet need_Badge = funded && (powered) && missing(built.Badge, 0.01, 0.01);\nlet need_Gut = funded && (true) && missing(built.Gut, (if provisioning then 0.135 else 0.045), 0.045);\nlet need_ExudateEnzyme = funded && (true) && missing(built.ExudateEnzyme, (if provisioning then 0.08 else 0.04), 0.04);\nlet need_Capture = funded && (enough(built.Gut, 0.045)) && missing(built.Capture, (if provisioning then 0.06 else 0.03), 0.03);\nlet need_TissueEnzyme = funded && (powered && gut.structural.energy > 0) && missing(built.TissueEnzyme, (if scavenging then 0.08 else if provisioning then 0.08 else 0.04), 0.04);\nlet need_WasteEnzyme = funded && (powered && gut.bound.energy > 0) && missing(built.WasteEnzyme, (if provisioning then 0.03 else 0.015), 0.015);\nlet need_Translation = funded && (powered) && missing(built.Translation, (if body.area > body.birth_area * 1.3 then 0.08 else 0.04), 0.02);\nlet need_Minerals = funded && (powered && (nutrient.stored < 1500 || surplus)) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);\nlet need_EnergyStore = funded && (surplus) && missing(built.EnergyStore, (if expanding then 0.04 else 0.02), 0.02);\nlet need_MineralStore = funded && (surplus && body.area > 1.25) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);\nlet need_LeftMotor = funded && (powered) && missing(built.LeftMotor, (if provisioning then 0.05 else 0.025), 0.025);\nlet need_RightMotor = funded && (powered) && missing(built.RightMotor, (if provisioning then 0.05 else 0.025), 0.025);\nlet need_Vision = funded && (powered) && missing(built.Vision, (if provisioning then 0.04 else 0.02), 0.02);\nlet need_Touch = funded && (powered) && missing(built.Touch, (if provisioning then 0.02 else 0.01), 0.01);\nlet need_LeftChemistry = funded && (powered) && missing(built.LeftChemistry, (if provisioning then 0.03 else 0.015), 0.015);\nlet need_RightChemistry = funded && (powered) && missing(built.RightChemistry, (if provisioning then 0.03 else 0.015), 0.015);\nlet need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if provisioning then 0.05 else 0.025), 0.025);\nlet need_Support = funded && (surplus) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);\nlet need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, (if provisioning then 0.04 else 0.02), 0.02);\nlet need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, (if provisioning then 0.04 else 0.02), 0.02);\nlet need_Division = funded && (surplus && body.area > 1.5 * body.birth_area) && missing(built.Division, (if provisioning then 0.04 else 0.02), 0.02);\nlet need_FlankInlet = funded && (powered) && missing(built.FlankInlet, 0.015, 0.015);\nlet need_FarInlet = funded && (powered) && missing(built.FarInlet, 0.015, 0.015);\nlet need_RecoveryEnzyme = funded && (carbon.ligand > 0) && missing(built.RecoveryEnzyme, 0.02, 0.02);\n\ngene supply_CoatPrecursor: CoatPrecursor = if (need_Dock) && pool.Glue < 10 && pool.CoatPrecursor < 10 then 1 else 0;\ngene supply_Catalyst: Catalyst = if pool.Catalyst < 10 then (if need_Respiration then 1 else 0) + (if need_ExudateEnzyme then 1 else 0) + (if need_TissueEnzyme then 1 else 0) + (if need_WasteEnzyme then 1 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0) else 0;\ngene supply_Wall: Wall = if pool.Wall < 10 then (if need_Respiration then 0.6 else 0) + (if need_Dock then 1 else 0) + (if need_CarbonPort then 1 else 0) + (if need_MineralPort then 1 else 0) + (if need_Badge then 1 else 0) + (if need_Gut then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0) else 0;\ngene supply_Mount: Mount = if pool.Mount < 10 then (if need_Dock then 1 else 0) + (if need_Badge then 0.666667 else 0) + (if need_Capture then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_LeftMotor then 0.5 else 0) + (if need_RightMotor then 0.5 else 0) + (if need_Vision then 0.333333 else 0) + (if need_Touch then 0.333333 else 0) + (if need_LeftChemistry then 0.25 else 0) + (if need_RightChemistry then 0.25 else 0) + (if need_Division then 0.5 else 0) + (if need_FlankInlet then 0.5 else 0) + (if need_FarInlet then 0.5 else 0) else 0;\ngene supply_Glue: Glue = if pool.Glue < 10 then (if need_Dock then 0.5 else 0) else 0;\ngene supply_Carrier: Carrier = if pool.Carrier < 10 then (if need_CarbonPort then 1 else 0) + (if need_MineralPort then 1 else 0) + (if need_Minerals then 1 else 0) else 0;\ngene supply_Rotor: Rotor = if pool.Rotor < 10 then (if need_Capture then 1 else 0) + (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Division then 1 else 0) + (if need_FlankInlet then 1 else 0) + (if need_FarInlet then 1 else 0) else 0;\ngene supply_Frame: Frame = if pool.Frame < 10 then (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0) else 0;\ngene supply_Tail: Tail = if pool.Tail < 10 then (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Touch then 0.333333 else 0) else 0;\ngene supply_Detector: Detector = if pool.Detector < 10 then (if need_Vision then 1 else 0) + (if need_Touch then 1 else 0) + (if need_LeftChemistry then 1 else 0) + (if need_RightChemistry then 1 else 0) else 0;\ngene supply_Pigment: Pigment = if pool.Pigment < 10 then (if need_Vision then 0.333333 else 0) else 0;\ngene supply_Replicase: Replicase = if pool.Replicase < 10 then (if need_Replication then 1 else 0) else 0;\ngene supply_Ring: Ring = if pool.Ring < 10 then (if need_Division then 1 else 0) else 0;\ngene supply_IsomeraseCatalyst: IsomeraseCatalyst = if pool.IsomeraseCatalyst < 10 then (if need_RecoveryEnzyme then 1 else 0) else 0;\n\nassembly Respiration: respire(oxygen) {\n  Catalyst: 250;\n  Wall: 150;\n  start_when: need_Respiration;\n  activity: if oxygen > 0 && energy.fraction < 0.98 && (carbon.organic > (if energy > 620000 then 6500 else 1800) * body.area || energy < 200000) then 1 else 0;\n}\n\nassembly Dock: adhere() {\n  Mount: 80;\n  Wall: 80;\n  Glue: 40;\n  start_when: need_Dock;\n  activity: if injured || leaving then 0 else 1;\n  engage_when: populated(rf091) && peer.message_valid && peer.message == rf091;\n}\n\nassembly CarbonPort: junction(carbon) {\n  Wall: 250;\n  Carrier: 250;\n  start_when: need_CarbonPort;\n  activity: if carbon.organic < 18000 * body.area then 1 else 0;\n}\n\nassembly MineralPort: junction(mineral) {\n  Wall: 100;\n  Carrier: 100;\n  start_when: need_MineralPort;\n  activity: if nutrient.fraction > 0.72 && nutrient.stored > 3000 * body.area then 1 else 0;\n}\n\nassembly Badge: display() {\n  Mount: 40;\n  Wall: 60;\n  start_when: need_Badge;\n  activity: 1;\n}\n\nassembly Gut: store(food) {\n  Wall: 450;\n  start_when: need_Gut;\n  activity: 1;\n}\n\nassembly ExudateEnzyme: digest(soluble) {\n  Catalyst: 400;\n  start_when: need_ExudateEnzyme;\n  activity: if gut.soluble.energy > 0 then 1 else 0;\n}\n\nassembly Capture: import(particle) {\n  Mount: 100;\n  Rotor: 200;\n  start_when: need_Capture;\n  activity: if gut.fraction < 0.7 then 1 else 0;\n}\n\nassembly TissueEnzyme: digest(structural) {\n  Catalyst: 400;\n  start_when: need_TissueEnzyme;\n  activity: if gut.structural.energy > 0 then 1 else 0;\n}\n\nassembly WasteEnzyme: digest(bound) {\n  Catalyst: 150;\n  start_when: need_WasteEnzyme;\n  activity: if gut.bound.energy > 0 then 1 else 0;\n}\n\nassembly Translation: translate() {\n  Frame: 100;\n  Catalyst: 100;\n  start_when: need_Translation;\n  activity: 1;\n}\n\nassembly Minerals: import(mineral) {\n  Mount: 50;\n  Carrier: 200;\n  start_when: need_Minerals;\n  activity: if nutrient.fraction < 0.9 && energy.fraction > 0.05 then 1 else 0;\n}\n\nassembly EnergyStore: store(energy) {\n  Wall: 200;\n  start_when: need_EnergyStore;\n  activity: 1;\n}\n\nassembly MineralStore: store(mineral) {\n  Wall: 200;\n  start_when: need_MineralStore;\n  activity: 1;\n}\n\nassembly LeftMotor: propel() {\n  Mount: 50;\n  Rotor: 100;\n  Tail: 100;\n  start_when: need_LeftMotor;\n  activity: if (docked || meal > 20000) && !injured && !leaving then 0 else clamp(move - steer * 0.5, 0, 1);\n  at: 1.570796;\n  direction: 0;\n}\n\nassembly RightMotor: propel() {\n  Mount: 50;\n  Rotor: 100;\n  Tail: 100;\n  start_when: need_RightMotor;\n  activity: if (docked || meal > 20000) && !injured && !leaving then 0 else clamp(move + steer * 0.5, 0, 1);\n  at: -1.570796;\n  direction: 0;\n}\n\nassembly Vision: sense(optical) {\n  Mount: 40;\n  Detector: 120;\n  Pigment: 40;\n  start_when: need_Vision;\n  activity: 1;\n}\n\nassembly Touch: sense(contact) {\n  Mount: 20;\n  Detector: 60;\n  Tail: 20;\n  start_when: need_Touch;\n  activity: 1;\n}\n\nassembly LeftChemistry: sense(chemical) {\n  Mount: 30;\n  Detector: 120;\n  start_when: need_LeftChemistry;\n  activity: 1;\n  at: 1.570796;\n}\n\nassembly RightChemistry: sense(chemical) {\n  Mount: 30;\n  Detector: 120;\n  start_when: need_RightChemistry;\n  activity: 1;\n  at: -1.570796;\n}\n\nassembly Repair: repair() {\n  Catalyst: 250;\n  start_when: need_Repair;\n  activity: 1;\n}\n\nassembly Support: support() {\n  Frame: 600;\n  start_when: need_Support;\n  activity: 1;\n}\n\nassembly Envelope: grow() {\n  Wall: 150;\n  Catalyst: 50;\n  start_when: need_Envelope;\n  activity: if energy > 330000 && (energy > 540000 || meal > 40000 || carbon.organic > 5800 * body.area) && body.area < body.birth_area * 2 then 0.8 else 0;\n}\n\nassembly Replication: replicate() {\n  Frame: 50;\n  Replicase: 150;\n  start_when: need_Replication;\n  activity: if energy > 330000 && (energy > 510000 || meal > 30000 || carbon.organic > 5000 * body.area) then 1 else 0;\n}\n\nassembly Division: constrict() {\n  Mount: 40;\n  Rotor: 80;\n  Ring: 80;\n  start_when: need_Division;\n  activity: if body.area + 0.000001 >= body.birth_area * 2 && enough(built.Minerals,0.05) && enough(built.EnergyStore,0.04) && enough(built.MineralStore,0.04) && enough(built.Respiration,0.08) && enough(built.Translation,0.08) && energy > 490000 && meal + carbon.organic * 20 > 70000 * body.area then 1 else 0;\n  at: 0;\n}\n\nassembly FlankInlet: import(particle) {\n  Mount: 50;\n  Rotor: 100;\n  start_when: need_FlankInlet;\n  activity: if gut.fraction < 0.9 then 1 else 0;\n  at: 1.5707963267948966;\n}\n\nassembly FarInlet: import(particle) {\n  Mount: 50;\n  Rotor: 100;\n  start_when: need_FarInlet;\n  activity: if gut.fraction < 0.9 then 1 else 0;\n  at: -1.5707963267948966;\n}\n\nassembly RecoveryEnzyme: isomerize(carbon) {\n  IsomeraseCatalyst: 200;\n  start_when: need_RecoveryEnzyme;\n  activity: if carbon.ligand > 0 then 1 else 0;\n}"
+    },
+    "9394d75e27ca4112ff732422e0e4b55da680dceac2a0f9fcf1adb70b392a4080": {"lineage": "Mixotroph","file": "examples/mixotroph.cell"},
+    "1ed8f7c39f00ef2daabc1206c1c1a55d406a81bd8c2ad19af24451e24f7e228c": {"lineage": "Rememberer","file": "examples/rememberer.cell"},
+    "8f497c2fb6d8a23fdc7dea832fc3a5691c91939994481996a5ec0e7f97af009b": {"lineage": "Crown rosette","file": "examples/crown-rosette.cell"},
+    "88ba5fbd774f3ad4aceda51b770c5a2df5123b394c50c64ca80884a73db89abc": {"lineage": "Forager","file": "examples/forager.cell"}
+  }
+}

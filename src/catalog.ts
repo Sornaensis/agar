@@ -17,6 +17,30 @@ export const BUILTIN_GENOMES: readonly GenomeDocument[] = freeze(PRESETS.map(pre
 
 export const BUILTIN_ENVIRONMENTS: readonly EnvironmentDocument[] = freeze([
   {
+    id: 'builtin:environment:springwater-basin', name: 'Springwater basin',
+    description: 'Two mineral springs feed a lit basin. Opposing currents pass fixed ledges and a drifting barrier; a downstream sink removes dissolved minerals.',
+    createdAt: 0, updatedAt: 0,
+    config: {
+      width: 800, height: 520, ambientTemperature: 0.20, ambientLight: 0.76,
+      currentStrength: 1, initialNutrients: 1, exchangeRate: 0.2,
+      sources: [
+        { kind: 0, x: 210, y: 125, strength: 0.32, radius: 205 },
+        { kind: 0, x: 560, y: 355, strength: 0.38, radius: 185 },
+        { kind: 3, x: 138, y: 155, strength: 0.34, radius: 94 },
+        { kind: 3, x: 656, y: 378, strength: 0.24, radius: 82 },
+        { kind: 4, x: 717, y: 182, strength: 0.36, radius: 102 },
+        { kind: 6, x: 400, y: 157, strength: 0.25, radius: 76, angle: 0, length: 740 },
+        { kind: 6, x: 400, y: 373, strength: -0.19, radius: 88, angle: 0, length: 700 },
+        { kind: 2, x: 640, y: 246, strength: 0.13, radius: 105 },
+      ],
+      barriers: [
+        { x: 272, y: 225, length: 140, width: 18, angle: 0.20, floating: false },
+        { x: 524, y: 300, length: 156, width: 18, angle: -0.25, floating: false },
+        { x: 340, y: 405, length: 62, width: 14, angle: 0.45, floating: true },
+      ],
+    },
+  },
+  {
     id: 'builtin:environment:still-water', name: 'Still water', description: 'A quiet, evenly lit pool where phototrophs turn dissolved carbon into biomass and exudate.', createdAt: 0, updatedAt: 0,
     config: { width: 640, height: 480, ambientTemperature: 0.5, ambientLight: 0.85, currentStrength: 0, initialNutrients: 0.3, sources: [] },
   },
@@ -106,47 +130,20 @@ export function simulationStartSettings(): { mutationRate: number; countChemistr
 
 export const BUILTIN_SIMULATIONS: readonly BuiltinSimulation[] = freeze([
   {
-    id: 'builtin:simulation:hunting-ground', name: 'Hunting ground',
-    description: 'Watch predators grow their own sensors and piercers, approach living producers and feed on tissue.',
-    environmentId: 'builtin:environment:grazing-shallows', seed: 42,
+    id: 'builtin:simulation:springwater-basin', name: 'Springwater basin',
+    description: 'Producers, grazers, hunters and colonies share two mineral springs. Currents carry cells and food past sheltered ledges to a mineral sink.',
+    environmentId: 'builtin:environment:springwater-basin', seed: 7,
     populations: [
-      { genomeId: 'builtin:genome:phototroph', count: 16 },
+      { genomeId: 'builtin:genome:phototroph', count: 68 },
+      { genomeId: 'builtin:genome:ligand-producer', count: 4 },
+      { genomeId: 'builtin:genome:forager', count: 12 },
+      { genomeId: 'builtin:genome:mixotroph', count: 8 },
+      { genomeId: 'builtin:genome:rememberer', count: 6 },
+      { genomeId: 'builtin:genome:nurse-rosette', count: 5 },
+      { genomeId: 'builtin:genome:crown-rosette', count: 5 },
+      { genomeId: 'builtin:genome:pulse-swimmer', count: 5 },
       { genomeId: 'builtin:genome:predator', count: 3 },
     ],
-  },
-  {
-    id: 'builtin:simulation:mixed-ecosystem', name: 'Sunlit food web',
-    description: 'Phototrophs feed grazers through released particles and contact. Predators hunt among them. No organic food is supplied.',
-    environmentId: 'builtin:environment:grazing-shallows', seed: 42,
-    populations: [
-      { genomeId: 'builtin:genome:phototroph', count: 48 },
-      { genomeId: 'builtin:genome:forager', count: 12 },
-      { genomeId: 'builtin:genome:predator', count: 1 },
-    ],
-  },
-  {
-    id: 'builtin:simulation:light-and-shade', name: 'Light and shade',
-    description: 'Mixotrophs bask near the lamp and feed in the shade. Rememberers follow chemical food cues.',
-    environmentId: 'builtin:environment:light-and-shade', seed: 42,
-    populations: [{ genomeId: 'builtin:genome:phototroph', count: 32 }, { genomeId: 'builtin:genome:mixotroph', count: 12 }, { genomeId: 'builtin:genome:rememberer', count: 2 }],
-  },
-  {
-    id: 'builtin:simulation:nurse-rosette', name: 'Nurse rosette',
-    description: 'Follow one founder through division. Inspect the attached adult and juvenile to see harvesting, growth and resource exchange.',
-    environmentId: 'builtin:environment:colony-pool', seed: 42,
-    populations: [{ genomeId: 'builtin:genome:nurse-rosette', count: 1 }],
-  },
-  {
-    id: 'builtin:simulation:crown-rosette', name: 'Crown rosette',
-    description: 'One founder grows a colony. A cell with two occupied ports can signal an edge cell to build another light harvester.',
-    environmentId: 'builtin:environment:colony-pool', seed: 42,
-    populations: [{ genomeId: 'builtin:genome:crown-rosette', count: 1 }],
-  },
-  {
-    id: 'builtin:simulation:pulse-swimmers', name: 'Pulse swimmers',
-    description: 'After division, mature cells start a pulse. Attached young cells relay it, swim briefly and rest before responding again.',
-    environmentId: 'builtin:environment:colony-pool', seed: 42,
-    populations: [{ genomeId: 'builtin:genome:pulse-swimmer', count: 3 }],
   },
 ]);
 

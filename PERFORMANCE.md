@@ -1,6 +1,23 @@
 # Simulation performance
 
-The measurements below describe the archived engines named in each section. The current benchmark measures compatible ABI 18 builds and uses biologically produced organic particles. Reproduce historical comparisons with the corresponding archived harness and engine binaries.
+The results below identify the engine used for each measurement. The current harness accepts ABI 22–24. Paired runs require equivalent physics and compatible checkpoint layouts.
+
+## Fluid transport and collisions
+
+Field transport repeatedly traced heat and organic cues past walls, even in open water. It now consults the padded wall raster before checking individual segments. It also reuses grid neighbors for interpolation and caches face velocities between source edits when ambient current is zero. The same raster skips swept collision tests for small bodies in clear water. Longer movements, larger bodies and points near obstacles use the full oriented-rectangle solver. Cell pairs whose axis separation already exceeds contact distance avoid a square root. Candidate pairs resolve in ascending cell-index order with the original contact arithmetic.
+
+| Measured work | Previous | Updated | Time saved |
+| --- | ---: | ---: | ---: |
+| Native water-field step, 4,000 patches and three barriers | 1.406 ms | 1.145 ms | 19% |
+| Native collision phase, 1,536 bodies | 2.272 ms | 1.721 ms | 24% |
+| Release WASM whole tick, 36,480 patches and three floating barriers | 13.04 ms | 11.65 ms | 11% |
+| Release WASM whole tick, 84 mixed founders and three barriers | 5.13 ms | 4.75 ms | 7% |
+
+The comparison uses the previous stock organisms and ABI 23 to isolate the physics changes. Native measurements use 12 paired samples of 120 iterations. WASM measurements use seven paired samples of 40 ticks per configuration in Node with `--no-liftoff`. The mixed world warmed for 600 ticks. The paired WASM engines produced byte-identical checkpoints, cell and particle snapshots, and environment fields at each checked boundary. Native phase fingerprints also matched. [Individual samples and build hashes](experiments/field-collision-performance.json)
+
+The same builds replayed the new Springwater basin geometry with the pre-chemistry stock organisms. At 180 simulated seconds the checkpoint held 225 cells and 2,662 particles. Median process CPU time per tick fell from 31.49 to 28.46 ms (9.6%). On the shared host, elapsed medians at this point were 75.35 and 64.27 ms. An earlier 120-second checkpoint (178 cells and 1,632 particles) gave elapsed medians of 21.15 and 22.49 ms. Individual elapsed samples ranged from 19.6 to 62.3 ms in that run. At 300 seconds, 285 cells and 4,362 particles took 43.24 and 42.18 ms of CPU time per tick, with elapsed medians of 43.37 and 43.04 ms. The five-minute difference was smaller than the run-to-run variability. All three trajectories matched byte-for-byte. The integrated ABI 24 build also passed the mixed and maximum-field projection checks. The benchmark accepts a saved world through `--checkpoint /path/to/world.bin`.
+
+To repeat the native phase benchmark, run `cargo test --release --manifest-path engine/Cargo.toml benchmark_field_transport_and_cell_collisions -- --ignored --nocapture`. For a WASM comparison, run `npm run bench:simulation -- --baseline /path/to/compatible.wasm --scenario maximum-fields-current8-floating3 --samples 7 --ticks 40`. Select `mixed-floating-barriers` for the mixed world.
 
 ## ABI 13: larger simulations
 

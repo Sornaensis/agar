@@ -9,8 +9,8 @@ product Pigment = pigment();
 product CoatPrecursor = scaffold();
 product Glue = adhesin(CoatPrecursor);
 product Detector = receptor();
-product Frame = scaffold();
 product Carrier = transporter();
+product Frame = scaffold();
 product Replicase = replicase();
 product Rotor = motor();
 product Ring = constrictor();
@@ -46,6 +46,7 @@ let need_LeftBus = funded && (powered) && missing(built.LeftBus, if expanding &&
 let need_RightGlue = funded && (powered) && missing(built.RightGlue, if expanding && (paired_contact || rb041) then 0.04 else 0.02, 0.02);
 let need_RightBus = funded && (powered) && missing(built.RightBus, if expanding && (paired_contact || rb041) then 0.04 else 0.02, 0.02);
 let need_RimSolar = funded && (rim) && missing(built.RimSolar, 0.06, 0.06);
+let need_RimOutlet = funded && (rim && enough(built.RimSolar, 0.06)) && missing(built.RimOutlet, 0.015, 0.015);
 let need_Translation = funded && (powered) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);
 let need_Minerals = funded && (powered) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);
 let need_EnergyStore = funded && (powered) && missing(built.EnergyStore, if expanding then 0.08 else 0.04, 0.02);
@@ -59,12 +60,12 @@ let need_Division = funded && (expanding) && missing(built.Division, (if expandi
 gene supply_CoatPrecursor: CoatPrecursor = if (need_LeftGlue || need_RightGlue) && pool.Glue < 10 && pool.CoatPrecursor < 10 then 1 else 0;
 gene supply_Catalyst: Catalyst = if pool.Catalyst < 10 then (if need_Respiration then 1 else 0) + (if need_Solar then 0.25 else 0) + (if need_RimSolar then 0.25 else 0) + (if need_Translation then 1 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0) else 0;
 gene supply_Wall: Wall = if pool.Wall < 10 then (if need_Respiration then 0.6 else 0) + (if need_LeftGlue then 1 else 0) + (if need_LeftBus then 1 else 0) + (if need_RightGlue then 1 else 0) + (if need_RightBus then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Envelope then 1 else 0) else 0;
-gene supply_Mount: Mount = if pool.Mount < 10 then (if need_Solar then 0.25 else 0) + (if need_LeftGlue then 1 else 0) + (if need_RightGlue then 1 else 0) + (if need_RimSolar then 0.25 else 0) + (if need_Minerals then 0.25 else 0) + (if need_Division then 0.5 else 0) else 0;
+gene supply_Mount: Mount = if pool.Mount < 10 then (if need_Solar then 0.25 else 0) + (if need_LeftGlue then 1 else 0) + (if need_RightGlue then 1 else 0) + (if need_RimSolar then 0.25 else 0) + (if need_RimOutlet then 0.25 else 0) + (if need_Minerals then 0.25 else 0) + (if need_Division then 0.5 else 0) else 0;
 gene supply_Pigment: Pigment = if pool.Pigment < 10 then (if need_Solar then 1 else 0) + (if need_RimSolar then 1 else 0) else 0;
 gene supply_Glue: Glue = if pool.Glue < 10 then (if need_LeftGlue then 0.5 else 0) + (if need_RightGlue then 0.5 else 0) else 0;
 gene supply_Detector: Detector = if pool.Detector < 10 then (if need_LeftBus then 0.666667 else 0) + (if need_RightBus then 0.666667 else 0) else 0;
+gene supply_Carrier: Carrier = if pool.Carrier < 10 then (if need_RimOutlet then 1 else 0) + (if need_Minerals then 1 else 0) else 0;
 gene supply_Frame: Frame = if pool.Frame < 10 then (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0) else 0;
-gene supply_Carrier: Carrier = if pool.Carrier < 10 then (if need_Minerals then 1 else 0) else 0;
 gene supply_Replicase: Replicase = if pool.Replicase < 10 then (if need_Replication then 1 else 0) else 0;
 gene supply_Rotor: Rotor = if pool.Rotor < 10 then (if need_Division then 1 else 0) else 0;
 gene supply_Ring: Ring = if pool.Ring < 10 then (if need_Division then 1 else 0) else 0;
@@ -128,6 +129,14 @@ assembly RimSolar: harvest(light) {
   start_when: need_RimSolar;
   activity: if rim then 1 else 0;
   at: 1.5707963267948966;
+}
+
+assembly RimOutlet: export(carbon) {
+  Mount: 30;
+  Carrier: 120;
+  start_when: need_RimOutlet;
+  activity: if rim && carbon.organic > 6500 * body.area && energy.fraction > 0.55 then 1 else 0;
+  at: -1.570796;
 }
 
 assembly Translation: translate() {

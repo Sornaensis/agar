@@ -1356,3 +1356,25 @@ fn a_large_excretion_batch_stays_outside_the_emitter_across_the_torus_seam() {
         assert_eq!(food.kind, OrganicKind::Waste);
     }
 }
+
+#[test]
+fn near_complete_hydrolysis_retains_carrier_for_continuous_enrichment() {
+    let mut world = world(BodyFixture::Scavenger);
+    let energy = 0.4284576141869493;
+    let enrichment = 0.3162240370148918;
+    let minerals = 0.003927709149758176;
+    world.cells[0].organic_carbon = 0.0;
+    world.cells[0].ingest_enriched(OrganicKind::Tissue, energy, minerals, enrichment);
+    let mut capacities = caps(&world);
+    capacities[0].substrate_digestion[OrganicKind::Tissue as usize] = 100.0;
+    let before_energy = world.energy_total();
+    let before_minerals = world.nutrient_total();
+    world.digest(&[Outputs::default()], &capacities, &mut [0.0]);
+
+    let residue = world.cells[0].gut[OrganicKind::Tissue as usize];
+    assert!(residue.energy < 1e-15, "The meal was almost completely digested");
+    assert!(residue.extra_energy == 0.0 || residue.extra_energy < residue.energy,
+        "Every remaining unit of enrichment still has carrier carbon");
+    close(world.nutrient_total(), before_minerals);
+    close(before_energy - world.energy_total(), 0.02 * (energy - enrichment));
+}

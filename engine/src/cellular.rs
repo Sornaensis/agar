@@ -107,17 +107,17 @@ pub enum MechanismKind {
     LightHarvest, MineralImport, ParticleCapture, Engulf,
     DigestExudate, DigestTissue, DigestWaste, Propulsion, Pierce, Shield,
     Repair, SenseLight, SenseHeat, SenseChemical, SenseContact, SenseOptical,
-    Grow, Replicate, Constrict, Recycle, RespireOxygen, Adhere, JunctionEnergy, JunctionMineral, JunctionCarbon, JunctionSignal, Display, CarbonExport,
+    Grow, Replicate, Constrict, Recycle, RespireOxygen, Adhere, JunctionEnergy, JunctionMineral, JunctionCarbon, JunctionSignal, Display, CarbonExport, MakeLigand, RecoverCarbon, LigandExport,
 }
 impl MechanismKind {
-    pub const ALL: [Self; 33] = [
+    pub const ALL: [Self; 36] = [
         Self::Support, Self::Translation, Self::EnergyStorage, Self::MineralStorage,
         Self::FoodStorage, Self::LightHarvest, Self::MineralImport, Self::ParticleCapture,
         Self::Engulf, Self::DigestExudate, Self::DigestTissue, Self::DigestWaste,
         Self::Propulsion, Self::Pierce, Self::Shield, Self::Repair, Self::SenseLight,
         Self::SenseHeat, Self::SenseChemical, Self::SenseContact, Self::SenseOptical,
         Self::Grow, Self::Replicate, Self::Constrict, Self::Recycle, Self::RespireOxygen, Self::Adhere,
-        Self::JunctionEnergy, Self::JunctionMineral, Self::JunctionCarbon, Self::JunctionSignal, Self::Display, Self::CarbonExport,
+        Self::JunctionEnergy, Self::JunctionMineral, Self::JunctionCarbon, Self::JunctionSignal, Self::Display, Self::CarbonExport, Self::MakeLigand, Self::RecoverCarbon, Self::LigandExport,
     ];
     pub fn name(self) -> &'static str {
         ["support()", "translate()", "store(energy)", "store(mineral)", "store(food)",
@@ -125,7 +125,7 @@ impl MechanismKind {
          "digest(soluble)", "digest(structural)", "digest(bound)", "propel()", "pierce()",
          "shield()", "repair()", "sense(light)", "sense(heat)", "sense(chemical)",
          "sense(contact)", "sense(optical)", "grow()", "replicate()", "constrict()", "recycle()", "respire(oxygen)", "adhere()",
-         "junction(energy)", "junction(mineral)", "junction(carbon)", "junction(signal)", "display()", "export(carbon)"]
+         "junction(energy)", "junction(mineral)", "junction(carbon)", "junction(signal)", "display()", "export(carbon)", "isomerize(ligand)", "isomerize(carbon)", "export(ligand)"]
             [self as usize]
     }
     pub fn from_name(name: &str) -> Option<Self> {
@@ -177,7 +177,10 @@ impl MechanismKind {
          "Exchanges organic carbon reserves with an adhered neighbor carrying an active carbon junction.",
          "Reads occupancy and the frozen payload of one overlapping signal port on a bonded neighbor.",
          "Displays the selected marker and payload registers at this membrane patch.",
-         "Spends one ATP per organic carbon transported from reserve to this membrane opening."]
+         "Spends one ATP per organic carbon transported from reserve to this membrane opening.",
+         "Converts reserve carbon to an inhibitory carbon isomer in the food compartment, spending one ATP per carbon.",
+         "Converts food-compartment ligand back to reserve carbon, spending one ATP per carbon.",
+         "Exports ligand from the food compartment at this membrane patch, spending one ATP per carbon."]
             [self as usize]
     }
     pub fn required_roles(self) -> &'static [ProductKind] {
@@ -192,10 +195,10 @@ impl MechanismKind {
             Self::JunctionSignal => &[Membrane, Receptor],
             Self::Display => &[Anchor, Membrane],
             Self::JunctionEnergy | Self::JunctionMineral | Self::JunctionCarbon => &[Membrane, Transporter],
-            Self::CarbonExport | Self::MineralImport => &[Anchor, Transporter],
+            Self::LigandExport | Self::CarbonExport | Self::MineralImport => &[Anchor, Transporter],
             Self::ParticleCapture => &[Anchor, Motor],
             Self::Engulf => &[Anchor, Motor, Membrane],
-            Self::DigestExudate | Self::DigestTissue | Self::DigestWaste | Self::Repair | Self::Recycle => &[Enzyme],
+            Self::DigestExudate | Self::DigestTissue | Self::DigestWaste | Self::MakeLigand | Self::RecoverCarbon | Self::Repair | Self::Recycle => &[Enzyme],
             Self::Propulsion => &[Anchor, Motor, Filament],
             Self::Pierce => &[Anchor, Filament, Enzyme],
             Self::SenseLight | Self::SenseOptical => &[Anchor, Receptor, Pigment],
@@ -209,17 +212,17 @@ impl MechanismKind {
     pub fn minimum_mass(self) -> f64 {
         [0.04, 0.02, 0.02, 0.02, 0.04, 0.04, 0.015, 0.015, 0.025,
          0.01, 0.01, 0.01, 0.025, 0.025, 0.02, 0.025, 0.01, 0.01,
-         0.015, 0.01, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.01, 0.015][self as usize]
+         0.015, 0.01, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.01, 0.015, 0.01, 0.01, 0.015][self as usize]
     }
     fn internal_footprint(self) -> f64 {
         [1.0, 1.0, 2.4, 2.4, 2.5, 1.35, 0.7, 0.8, 0.8,
          1.0, 1.0, 1.0, 0.65, 0.8, 0.35, 1.0, 0.8, 0.8,
-         1.0, 0.7, 1.3, 1.0, 1.0, 1.0, 1.0, 1.2, 1.0, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7][self as usize]
+         1.0, 0.7, 1.3, 1.0, 1.0, 1.0, 1.0, 1.2, 1.0, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 1.0, 1.0, 0.7][self as usize]
     }
     fn surface_footprint(self) -> f64 {
         [0.0, 0.0, 0.0, 0.0, 0.0, 0.55, 1.8, 2.2, 2.2,
          0.0, 0.0, 0.0, 1.5, 2.0, 3.0, 0.0, 1.2, 1.1,
-         1.5, 1.1, 2.0, 1.5, 0.0, 1.5, 0.0, 0.0, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.8][self as usize]
+         1.5, 1.1, 2.0, 1.5, 0.0, 1.5, 0.0, 0.0, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.8, 0.0, 0.0, 1.8][self as usize]
     }
 }
 
@@ -661,11 +664,11 @@ impl AssemblyInstance {
         // Reference fractions set rates for mixed machines. Both of the
         // harvester's stages must keep up with the same carbon flux.
         let capacity = match kind {
-            M::DigestExudate | M::DigestTissue | M::DigestWaste | M::Repair | M::Recycle => installed(P::Enzyme),
+            M::DigestExudate | M::DigestTissue | M::DigestWaste | M::MakeLigand | M::RecoverCarbon | M::Repair | M::Recycle => installed(P::Enzyme),
             M::Translation => installed(P::Enzyme) * 2.0,
             M::RespireOxygen => installed(P::Enzyme) * 1.6,
             M::LightHarvest => (installed(P::Pigment) * 1.5).min(installed(P::Enzyme) * 6.0),
-            M::MineralImport | M::CarbonExport => installed(P::Transporter) * 1.25,
+            M::MineralImport | M::LigandExport | M::CarbonExport => installed(P::Transporter) * 1.25,
             M::JunctionEnergy | M::JunctionCarbon | M::JunctionMineral => installed(P::Transporter) * 2.0,
             M::Propulsion => (installed(P::Motor) * 2.5).min(installed(P::Filament) * 2.5),
             M::Engulf => installed(P::Motor) * 2.5,
@@ -969,6 +972,7 @@ pub struct CellularActions {
     pub bite_extraction_fraction: f64,
     pub light_harvest: f64,
     pub respiration: f64,
+    pub isomerization: [f64; 2],
     pub substrate_digestion: [f64; 3],
     pub bite: f64,
     pub defend: f64,
@@ -1015,7 +1019,9 @@ impl CellularState {
                 SenseContact => cap.mechanical_sensing += active,
                 JunctionSignal => cap.signal_junction += active,
                 SenseOptical => cap.optical_sensing += active,
-                CarbonExport | Display | Support | Grow | Replicate | Constrict | Recycle | Adhere | JunctionEnergy | JunctionMineral | JunctionCarbon => {},
+                MakeLigand => cap.isomerization[0] += 2.0 * active,
+                RecoverCarbon => cap.isomerization[1] += 2.0 * active,
+                LigandExport | CarbonExport | Display | Support | Grow | Replicate | Constrict | Recycle | Adhere | JunctionEnergy | JunctionMineral | JunctionCarbon => {},
             }
         }
         cap.optical_range = if cap.optical_sensing > 0.0 {
@@ -1369,6 +1375,7 @@ impl CellularState {
                 43 if version >= 7 => AssemblyKind::Mechanism(MechanismKind::Recycle),
                 44 if version >= 9 => AssemblyKind::Mechanism(MechanismKind::RespireOxygen),
                 45 if version >= 10 => AssemblyKind::Mechanism(MechanismKind::Adhere),
+                tag @ 52..=54 if version >= 21 => AssemblyKind::Mechanism(MechanismKind::ALL[(tag - 19) as usize]),
                 51 if version >= 20 => AssemblyKind::Mechanism(MechanismKind::CarbonExport),
                 50 if version >= 20 => AssemblyKind::Mechanism(MechanismKind::Display),
                 49 if version >= 12 => AssemblyKind::Mechanism(MechanismKind::JunctionSignal),
@@ -1640,6 +1647,8 @@ impl Body {
         };
         actions.photosynthesize = ratio(OrganelleKind::Photosynthetic);
         actions.light_harvest = 55.0 * mechanism_active[MechanismKind::LightHarvest as usize];
+        actions.isomerization = [MechanismKind::MakeLigand, MechanismKind::RecoverCarbon]
+            .map(|kind| 2.0 * mechanism_active[kind as usize]);
         actions.respiration = 60.0 * mechanism_active[MechanismKind::RespireOxygen as usize];
         actions.substrate_digestion = [MechanismKind::DigestExudate, MechanismKind::DigestTissue, MechanismKind::DigestWaste]
             .map(|kind| 65.0 * mechanism_active[kind as usize]);
@@ -2780,32 +2789,33 @@ mod tests {
     }
 
     #[test]
-    fn regulator_half_life_recovers_material_and_accounts_for_all_embodied_energy() {
-        let program = CellularProgram::new(
-            vec![product("Run", ProductKind::Regulator)],
-            vec![],
-        );
-        let mut body = stocked(&program, &[0.2]);
-        let mut energy = 20.0;
-        let mut minerals = 0.0;
-        let initial_material = body.structural_mass();
-        let initial_energy = body.embodied_energy() + energy;
-        let report = work(
-            &mut body,
-            &program,
-            &controls(&program, 0.0),
-            &mut energy,
-            &mut minerals,
-            1.0,
-        );
-        close(body.cellular_inputs(&program).0[0], 0.1);
-        close(minerals, 0.1);
-        close(body.structural_mass() + minerals, initial_material);
-        close(
-            body.embodied_energy() + energy + report.dissipated_energy,
-            initial_energy,
-        );
-        close(report.energy_recovered, 0.0);
+    fn free_product_half_life_recovers_material_and_accounts_for_all_embodied_energy() {
+        for role in [ProductKind::Regulator, ProductKind::Enzyme] {
+            let mut material = product("ShortLived", role);
+            material.half_life = 1.0;
+            let program = CellularProgram::new(vec![material], vec![]);
+            let mut body = stocked(&program, &[0.2]);
+            let mut energy = 20.0;
+            let mut minerals = 0.0;
+            let initial_material = body.structural_mass();
+            let initial_energy = body.embodied_energy() + energy;
+            let report = work(
+                &mut body,
+                &program,
+                &controls(&program, 0.0),
+                &mut energy,
+                &mut minerals,
+                1.0,
+            );
+            close(body.cellular_inputs(&program).0[0], 0.1);
+            close(minerals, 0.1);
+            close(body.structural_mass() + minerals, initial_material);
+            close(
+                body.embodied_energy() + energy + report.dissipated_energy,
+                initial_energy,
+            );
+            close(report.energy_recovered, 0.0);
+        }
     }
 
     #[test]

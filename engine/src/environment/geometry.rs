@@ -410,6 +410,12 @@ impl Environment {
         }
     }
 
+    /// The broad-phase raster extends a full patch beyond every wall's AABB.
+    /// A point in an unmarked patch can move this far without hitting a wall.
+    #[inline]
+    pub(super) fn clear_wall_neighborhood(&self, patch: usize) -> bool {
+        self.barrier_cache.candidates[patch] == 0
+    }
     /// Closest point on a solid rectangle within a receptor's contact reach.
     /// Test periodic images because a long rotated barrier can cross a seam.
     pub(crate) fn touching_wall(&self, x: f64, y: f64, reach: f64) -> Option<(&Barrier, [f64; 2])> {
@@ -465,6 +471,22 @@ impl Environment {
         if self.barriers.is_empty() {
             return (to.0.rem_euclid(self.width), to.1.rem_euclid(self.height));
         }
+        let mut movement = (
+            delta(to.0 - from.0, self.width),
+            delta(to.1 - from.1, self.height),
+        );
+        // The slab algorithm expands both local axes; sqrt(2) bounds the
+        // expansion projected on either world axis, including the push-out.
+        let sweep = movement.0.abs().max(movement.1.abs())
+            + (radius + 0.001) * std::f64::consts::SQRT_2;
+        if sweep < PATCH_SIZE - 1e-6
+            && self.clear_wall_neighborhood(self.patch_index(from.0, from.1))
+        {
+            return (
+                wrapped(from.0 + movement.0, self.width),
+                wrapped(from.1 + movement.1, self.height),
+            );
+        }
         let mut position = from;
         for _ in 0..8 {
             let mut changed = false;
@@ -512,10 +534,6 @@ impl Environment {
                 break;
             }
         }
-        let mut movement = (
-            delta(to.0 - from.0, self.width),
-            delta(to.1 - from.1, self.height),
-        );
         if movement.0 == 0.0 && movement.1 == 0.0 {
             return (
                 (position.0 + movement.0).rem_euclid(self.width),
@@ -791,4 +809,39 @@ fn barrier_overlap(
         }
     }
     result
+}
+
+#[cfg(test)]
+mod broad_phase_tests {
+    use super::*;
+
+    #[test]
+    fn swept_circle_cache_matches_full_wall_scan_across_seams_and_edits() {
+        let mut env = Environment::default();
+        let wall = env.add_barrier(5.0, 12.0, 220.0, 20.0, 0.75, true);
+        env.add_barrier(510.0, 350.0, 230.0, 42.0, 1.1, false);
+        env.configure(0.5, 0.5, 9.0);
+        for stage in 0..3 {
+            if stage == 1 {
+                env.step(0.0);
+            } else if stage == 2 {
+                assert!(env.update_barrier(wall, 1187.0, 752.0, 300.0, 22.0, 0.5, false));
+            }
+            let mut exhaustive = env.clone();
+            exhaustive.barrier_cache.candidates.fill(u64::MAX);
+            for i in 0..env.patch_count() {
+                let (x, y) = env.patch_position(i);
+                let from = (x - 9.8, y + 9.8);
+                for (dx, dy, r) in [(0.0, 0.0, 7.0), (-3.4, 2.0, 7.0), (0.25, -0.125, 13.6),
+                                     (40.0, -15.0, 1.5), (0.1, 0.2, 50.0)] {
+                    let to = (from.0 + dx, from.1 + dy);
+                    let check = |w: &Environment| {
+                        let (x, y) = w.move_circle(from, to, r);
+                        (x.to_bits(), y.to_bits())
+                    };
+                    assert_eq!(check(&env), check(&exhaustive), "stage {stage}, patch {i}");
+                }
+            }
+        }
+    }
 }

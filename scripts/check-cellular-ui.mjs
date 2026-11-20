@@ -122,9 +122,10 @@ assert.deepEqual(names(complete('cellular; product Coat = scaffold(); product Wa
 assert.deepEqual(names(complete(source+'\ngene new_gene: ')),['Anchor','Rotor','Tail','Memory']);
 assert.ok(!names(complete(source+'\nassembly Other: ')).includes('replicator'),'New recipe completion offers explicit mechanisms');
 assert.equal(language.lookupCellularSymbol('replicator',source).category,'keyword','The editor can still explain an existing combined recipe');
-for (const name of ['store(food)','digest(structural)','display()','export(carbon)','translate()','propel()']) assert.ok(names(complete(source+'\nassembly Other: ')).includes(name));
+for (const name of ['store(food)','digest(structural)','display()','export(carbon)','export(ligand)','isomerize(carbon)','isomerize(ligand)','translate()','propel()']) assert.ok(names(complete(source+'\nassembly Other: ')).includes(name));
 assert.deepEqual(names(complete(source+'\nassembly Other: store(')),['energy','mineral','food']);
 assert.deepEqual(names(complete(source+'\nassembly Other: digest(st','st')),['structural']);
+assert.deepEqual(names(complete(source+'\nassembly Other: isomerize(li','li')),['ligand']);
 assert.deepEqual(names(complete(source+'\nassembly Other: propel() ')),[]);
 assert.equal(language.cellularDeclarations(source).assemblies[0].kind,'propel()');
 assert.equal(language.cellularDeclarations('cellular; assembly Vessel: store( food ) {').assemblies[0].kind,'store(food)');
@@ -149,7 +150,7 @@ assert.deepEqual(schema.cellular.contactMessages,{
 });
 assert.deepEqual(schema.cellular.reads,language.CELLULAR_READ_SIGNALS.map(item=>({name:item.name,type:item.type})));
 assert.deepEqual(names(schema.cellular.products),[...language.CELLULAR_PRODUCT_ROLES]);
-assert.deepEqual(schema.cellular.products.find(p=>p.name==='adhesin').arguments, ['precursor']);
+assert.deepEqual(schema.cellular.products.find(p=>p.name==='adhesin').arguments, ['precursor','halfLife?']);
 const adhesin=language.CELLULAR_CONSTRUCTORS.find(p=>p.name==='adhesin');
 engine.compile('cellular;\n'+language.genomeSymbolDocumentation(adhesin).example);
 assert.deepEqual(names(schema.cellular.assemblies),names(language.CELLULAR_ASSEMBLY_KINDS));

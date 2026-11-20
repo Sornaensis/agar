@@ -155,8 +155,8 @@ async function swimmer(sender) {
 // water. Two distant donors acquire inorganic minerals and carbon. Their
 // tissue later supplies the mineral-bearing meal in both treatments.
 async function tradeWithProducer(openPorts) {
-  // Seed 11 gives opposing stock front mounts in this controlled encounter.
-  const api = await fresh({seed:11,countChemistry:true,width:400,height:400,ambientLight:.9,ambientTemperature:.18,initialNutrients:0,gases:{mode:'open',exchangeRate:.2}});
+  // This seed gives opposing stock front mounts in the controlled encounter.
+  const api = await fresh({seed:26,countChemistry:true,width:400,height:400,ambientLight:.9,ambientTemperature:.18,initialNutrients:0,gases:{mode:'open',exchangeRate:.2}});
   const producer = PRESETS.find(preset => preset.name === 'Phototroph');
   const grazer = PRESETS.find(preset => preset.name === 'Forager');
   seed(api, compile(api,producer.source), 1, 200, 200);

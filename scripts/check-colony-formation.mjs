@@ -94,7 +94,7 @@ for (const [file,version] of [['independent-founders-v14.bin',14],['family-v14.b
     }
   }
   const upgraded = save(api), copy = await fresh();
-  assert.equal(new DataView(upgraded.buffer).getUint32(8,true),20);
+  assert.equal(new DataView(upgraded.buffer).getUint32(8,true),21);
   assert.equal(restore(copy,upgraded),1,error(copy));
   advance(api,1); advance(copy,1);
   assert.equal(degree(api,1),0);

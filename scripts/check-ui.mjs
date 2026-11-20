@@ -28,7 +28,7 @@ try {
   await page.goto(base);
   await textIs('#save-state', 'Saved');
   const presetCards = page.locator('[data-action="start-template"]');
-  assert.equal(await presetCards.count(), 6);
+  assert.equal(await presetCards.count(), 1);
   assert.ok((await presetCards.first().locator('.preset-founders').innerText()).includes('Predator'));
   const launchControls = () => page.locator('.new-simulation-dialog[open]').evaluate(dialog => ({
     environment: dialog.querySelector('#simulation-environment').value,
@@ -42,9 +42,12 @@ try {
   await presetCards.first().click();
   assert.deepEqual(await launchControls(), defaultStart);
   await page.locator('.new-simulation-dialog[open] [data-close]').click();
-  await page.locator('[data-action="start-template"][data-id="builtin:simulation:nurse-rosette"]').click();
-  assert.equal(await page.locator('[data-population="0"]').inputValue(), 'builtin:genome:nurse-rosette');
-  assert.equal(await page.locator('[data-count="0"]').inputValue(), '1');
+  await presetCards.first().click();
+  assert.equal(defaultStart.environment, 'builtin:environment:springwater-basin');
+  assert.equal(defaultStart.founders.length, 9);
+  while (await page.locator('[data-remove-population]').count() > 1) {
+    await page.locator('[data-remove-population]').last().click();
+  }
   await page.locator('#simulation-environment').selectOption('builtin:environment:still-water');
   await page.locator('[data-population="0"]').selectOption('builtin:genome:forager');
   await page.locator('#simulation-name').fill('Worker smoke');
@@ -143,6 +146,7 @@ try {
   await page.waitForFunction(() => document.querySelector('#player-caption')?.textContent?.startsWith('13 organisms'));
   await page.locator('[data-action="close-simulation"]').click();
   await page.locator('[data-action="open-simulation"]').waitFor();
+  await Promise.all(page.workers().map(worker => worker.waitForEvent('close', { timeout: 5000 })));
   assert.equal(page.workers().length, 0, 'Closing flushes the run and terminates its worker');
   saved = await readSaved();
   assert.equal(saved[0].summary.population, 13); assert.equal(saved[0].summary.time, pausedTime);
@@ -185,6 +189,7 @@ try {
   await page.locator('#world').waitFor();
   await page.locator('[data-action="close-simulation"]').click();
   await page.locator('[data-action="open-simulation"]').waitFor();
+  await Promise.all(page.workers().map(worker => worker.waitForEvent('close', { timeout: 5000 })));
   assert.equal(page.workers().length, 0, 'All closed workers have been disposed');
   // Import an actual old document via the file chooser, then reopen it from storage.
   await page.getByRole('tab', { name: 'Genomes', exact: true }).click();

@@ -410,8 +410,9 @@ export class Renderer {
     // Three batched material paths keep large particle populations cheap to draw.
     const organicPaths = [new Path2D(),new Path2D(),new Path2D()];
     const organicHalos = [new Path2D(),new Path2D(),new Path2D()];
+    const ligandRings = new Path2D();
     for (const food of world.food) {
-      const count = this.visibility.collect(food.x, food.y, 5);
+      const count = this.visibility.collect(food.x, food.y, 6);
       if (!count) continue;
       // Area tracks remaining chemical energy up to one freshly supplied packet.
       const fullness = Math.sqrt(clamp(food.energy / 24, 0, 1));
@@ -420,6 +421,11 @@ export class Renderer {
       const path = organicPaths[food.kind], halo = organicHalos[food.kind];
       for (let image = 0; image < count; image += 2) {
         const x = this.visibility.points[image], y = this.visibility.points[image + 1];
+        if (food.ligandFraction > 0) {
+          const ringRadius = radius + 0.65 + 1.5 * food.ligandFraction;
+          ligandRings.moveTo(x + ringRadius,y);
+          ligandRings.arc(x,y,ringRadius,0,Math.PI * 2);
+        }
         halo.moveTo(x + haloRadius,y); halo.arc(x,y,haloRadius,0,Math.PI * 2);
         if (food.kind === 1) {
           path.moveTo(x,y-radius); path.lineTo(x+radius,y);
@@ -437,6 +443,9 @@ export class Renderer {
       context.fillStyle=haloColors[kind]; context.fill(organicHalos[kind]);
       context.fillStyle=organicColors[kind]; context.fill(organicPaths[kind]);
     }
+    context.strokeStyle = 'rgba(191,155,234,0.72)';
+    context.lineWidth = 0.6;
+    context.stroke(ligandRings);
 
     for (const cell of world.cells) {
       const margin = Math.max(cell.radius * 2.4 + 5, cell.id === selectedId ? cell.radius + 8 / this.scale : 0);

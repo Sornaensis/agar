@@ -27,12 +27,16 @@ export function prepareBloom(api, donorSource, scattered = false) {
   assert.ok(state.food.some(p=>p.kind===1) && state.deaths===count);
   api.set_environment(.15,.85,0);
   if(!scattered) return state.food.reduce((a,b)=>a.energy>b.energy ? a : b);
-  // Start the older, obligate feeder in a rich patch of this finite bloom.
-  // Rank once by the actual energy within one local capture neighborhood.
+  return richestFeedingSite(state.food);
+}
+
+// Rank sites by actual energy within one local capture neighborhood.
+export function richestFeedingSite(particles) {
+  assert.ok(particles.length, 'The feeding site requires existing food');
   let best=null,highest=-1;
-  for(const food of state.food) {
+  for(const food of particles) {
     let energy=0;
-    for(const neighbor of state.food) {
+    for(const neighbor of particles) {
       if(Math.hypot(neighbor.x-food.x,neighbor.y-food.y)<12) energy+=neighbor.energy;
     }
     if(energy>=highest) { highest=energy; best=food; }

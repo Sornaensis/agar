@@ -1,5 +1,26 @@
 # Ecosystem measurements
 
+## Springwater basin
+
+Nine stock genomes start as 116 founders in the 800 × 520 Springwater basin. Two mineral springs supply 8,700 counts per simulated second at their configured rates. A downstream absorber can remove up to 5,400 counts per second when minerals are present. Two current bands and a vortex move released food around two fixed ledges and one drifting barrier. All organic food comes from cells.
+
+On native seed 7, a docked Forager received carbon from a Phototroph at 40 seconds. Juvenile Nurse cells received carbon, ATP and minerals between 96 and 116 seconds. A Crown rim cell responding to a neighboring signal released carbon at 128 seconds, and a bonded Pulse swimmer powered its motor at 148 seconds. These are the first observations in four-second samples.
+
+At ten simulated minutes, the shipped WebAssembly engine recorded these outcomes. Late Forager births occurred between minutes five and ten.
+
+| Seed | Cells alive | Lineages alive | Foragers alive | Late Forager births | Extinct lineages |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 7 (default) | 432 | 9 of 9 | 1 | 1 | None |
+| 17 | 418 | 9 of 9 | 1 | 4 | None |
+| 42 | 426 | 9 of 9 | 1 | 2 | None |
+| 2026 | 449 | 8 of 9 | 0 | 3 | Forager |
+
+Native seed 7 reached 900 seconds with 547 cells across all nine lineages, including 1 Forager. Native seed 42 reached 900 seconds with 550 cells and 8 surviving lineages. The Forager lineage disappeared between the 780- and 840-second censuses. On WASM seed 7, doubling the number of Forager founders from 12 to 24 left 0 at 600 seconds. The same study includes the 108-founder genome-only comparison and the 116-founder community before the feeding change. [Censuses, source programs and measured interactions](springwater-food-web.json) · [Previous basin study](springwater-basin.json)
+
+In a finite carcass bloom the revised Forager divided at 61 seconds. The two halves inherited 72 and 36 units of gut capacity, and the daughter divided at 102 seconds. Physical inheritance also produced daughters with zero gut capacity in a free-running control. In a separate paired encounter, a Forager gained 6.4613 carbon and returned 0.3156 mineral through its producer dock. Both transfers were zero with exchange ports closed.
+
+From the project root, replay the default ten-minute observation with `npm run test:scenarios -- --scenario springwater-basin --seeds 7 --output basin.json`. For a fifteen-minute census, run `node --no-liftoff scripts/check-ecosystem.mjs --scenario springwater-basin --duration 900 --seed 7 --sample-at 300,600,900 --output census.json`.
+
 ## Predator recognition
 
 [The paired pond study](predator-recognition-pond.json) compares the current stock Predator with its [previous genome](fixtures/predator-before-recognition.cell). The habitat, mutation rate, Phototrophs, Foragers, and founder counts are identical on both sides. Every kill was credited to the Predator lineage. Each victim’s founding lineage therefore gives the exact number of kin and prey kills, including mutated descendants. The study also records births, deaths from ATP depletion, and whether each fission product has an active display carrying marker 17 immediately after the split and one tick later.
@@ -13,8 +34,8 @@ The separate finite-prey stress test, `npm run test:predator-foraging`, still mi
 Run either command from the project folder to produce the detailed censuses.
 
 ```sh
-node --no-liftoff scripts/check-ecosystem.mjs --seed 42,7 --duration 600 --sample-at 450 --trace-predator-births --output revised-recognition.json
-node --no-liftoff scripts/check-ecosystem.mjs --seed 42,7 --duration 600 --sample-at 450 --trace-predator-births --predator-source experiments/fixtures/predator-before-recognition.cell --output previous-recognition.json
+node --no-liftoff scripts/check-ecosystem.mjs --scenario mixed-ecosystem --seed 42,7 --duration 600 --sample-at 450 --trace-predator-births --output revised-recognition.json
+node --no-liftoff scripts/check-ecosystem.mjs --scenario mixed-ecosystem --seed 42,7 --duration 600 --sample-at 450 --trace-predator-births --predator-source experiments/fixtures/predator-before-recognition.cell --output previous-recognition.json
 ```
 
 ## Earlier pond measurements
@@ -23,7 +44,7 @@ node --no-liftoff scripts/check-ecosystem.mjs --seed 42,7 --duration 600 --sampl
 
 [The 45-minute Sunlit food web runs](extended-local-ecology.json) follow 48 Phototrophs, 12 Foragers, and one Predator per seed with the stock mutation rate of 0.1. At 45 minutes seed 42 had 71 Phototrophs, zero Foragers and two Predators. Seed 7 had 124, zero and two. Of 39 Forager deaths, 38 came from ATP depletion and one from predation. Phototrophs reproduced into the final minute on both seeds. The last Predator births occurred at 21:10 on seed 42 and 7:00 on seed 7. The integer energy balance closed at every census. The report identifies the engine used for the long runs and the editor build that reproduced every recorded measurement through 120 seconds on seed 42.
 
-To repeat the study, run `node --no-liftoff scripts/check-ecosystem.mjs --seed 42,7 --duration 2700 --sample-at 450,750,1200,1500,1800,2100,2400 --predator-source experiments/fixtures/predator-before-recognition.cell --output pond-45min.json`.
+To repeat the study, run `node --no-liftoff scripts/check-ecosystem.mjs --scenario mixed-ecosystem --seed 42,7 --duration 2700 --sample-at 450,750,1200,1500,1800,2100,2400 --predator-source experiments/fixtures/predator-before-recognition.cell --output pond-45min.json`.
 
 [Curated ecology](curated-ecology.md) records earlier predator and preset investigations. Older runs below used the catalogs and engines identified in each section.
 
@@ -44,7 +65,7 @@ In whole-count runs with the stock founders and habitat, the first 30 minutes ga
 
 At minute 75 on seed 42, 68 producers, 107 grazers and 32 hunters were alive. The hunter lineage had 123 births and 92 deaths; its latest birth was at 74:46. Producer deaths comprised 658 kills and two deaths with depleted ATP. The counts for minerals, carbon, oxygen and energy reconciled at all 151 observations. The pond had received 13,701,939,580 energy counts. It retained 584,870,144 and recorded 13,117,069,436 in process losses. Seed 7 ended its separate 45-minute run with 80 producers, 97 grazers and 37 hunters and zero discrepancies at all 91 observations.
 
-To measure the same habitat over 75 simulated minutes, run `node --no-liftoff scripts/check-ecosystem.mjs --seed 42 --duration 4500 --output experiments/pond-75min.json`. The report includes the engine hash, founder programs, feeding, births, deaths and energy balance.
+To measure the same habitat over 75 simulated minutes, run `node --no-liftoff scripts/check-ecosystem.mjs --scenario mixed-ecosystem --seed 42 --duration 4500 --output experiments/pond-75min.json`. The report includes the engine hash, founder programs, feeding, births, deaths and energy balance.
 
 The small-bite accounting test feeds tissue containing ten carbon counts and ten mineral counts, once as ten equal bites and once as a single portion. Both cost four ATP counts and retain eight mineral counts. In the older model, the ten single bites cost ten ATP counts and retained zero minerals.
 
@@ -168,8 +189,8 @@ The baseline and later ABI 8 measurements differ in program behavior and engine 
 npm run test:food-chain
 npm run test:cellular
 npm run test:ecosystem
-node --no-liftoff scripts/check-ecosystem.mjs --assert --seed 42,7,2026 --duration 600 --output experiments/ecosystem-rerun.json
-node --no-liftoff scripts/check-ecosystem.mjs --assert --seed 42 --duration 600 --mutation 0.1 --output experiments/ecosystem-mutation-rerun.json
+node --no-liftoff scripts/check-ecosystem.mjs --scenario mixed-ecosystem --assert --seed 42,7,2026 --duration 600 --output experiments/ecosystem-rerun.json
+node --no-liftoff scripts/check-ecosystem.mjs --scenario mixed-ecosystem --assert --seed 42 --duration 600 --mutation 0.1 --output experiments/ecosystem-mutation-rerun.json
 ```
 
 These commands use the current bundled WASM and programs. They do not reproduce historical runs unless that exact engine and source are restored. Omit `--assert` to record an experiment without requiring consumer persistence. The regression gate checks a finite observation window, not a desired equilibrium.

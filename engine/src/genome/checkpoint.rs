@@ -338,7 +338,7 @@ impl Program {
                     if kind == ProductKind::Regulator {
                         half_life >= 0.001
                     } else {
-                        half_life == 0.0
+                        half_life == 0.0 || (version >= 21 && half_life >= 0.001)
                     },
                     "invalid product half-life",
                 )?;
@@ -364,6 +364,7 @@ impl Program {
                     version >= 6 || !matches!(kind, AssemblyKind::Mechanism(_)),
                     "mechanism assemblies need checkpoint version 6",
                 )?;
+                ensure(version >= 21 || !matches!(kind, AssemblyKind::Mechanism(k) if k as usize >= 33), "isomer chemistry needs checkpoint version 21")?;
                 ensure(version >= 20 || !matches!(kind, AssemblyKind::Mechanism(crate::cellular::MechanismKind::Display | crate::cellular::MechanismKind::CarbonExport)), "surface display needs checkpoint version 20")?;
                 ensure(version >= 12 || kind != AssemblyKind::Mechanism(crate::cellular::MechanismKind::JunctionSignal),
                     "signal junctions need checkpoint version 12")?;
@@ -424,7 +425,7 @@ impl Program {
             let op = match r.u8()? {
                 0 => Op::Constant(read_value(r)?),
                 1 => Op::Sensor(
-                    Sensor::ALL[r.index(if version == 3 { 144 } else { Sensor::ALL.len() })?],
+                    Sensor::ALL[r.index(if version == 3 { 144 } else if version < 21 { 174 } else { Sensor::ALL.len() })?],
                 ),
                 2 => Op::Register(read_register(r)?),
                 3 => Op::Populated(read_register(r)?),

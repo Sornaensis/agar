@@ -211,7 +211,7 @@ compileProgram(`${required} feed = 1 - gut.fraction; build.piercer = energy.frac
 compileProgram(`rf001 = object.area; rs001 = object.token; rv001 = object.offset; ${required}`);
 compileProgram(`ri001 = object.area; ${required}`, false);
 compileProgram(`object.area = 1; ${required}`, false);
-assert.equal(BUILTIN_SIGNALS.length, 174);
+assert.equal(BUILTIN_SIGNALS.length, 175);
 assert.equal(BUILTIN_OUTPUTS.length, 81);
 const schemaPointer = api.language_schema_ptr();
 const schema = JSON.parse(decode(schemaPointer,api.language_schema_len()));

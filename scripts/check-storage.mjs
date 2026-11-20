@@ -25,12 +25,16 @@ const { BUILTIN_GENOMES: genomes, BUILTIN_ENVIRONMENTS: environments, BUILTIN_SI
 const copy = value => structuredClone(value);
 
 const slugs = rows => rows.map(row => row.id.split(':').at(-1)).sort();
-assert.deepEqual(slugs(genomes), ['crown-rosette','forager','mixotroph','nurse-rosette','phototroph','predator','pulse-swimmer','rememberer']);
-assert.deepEqual(slugs(simulations), ['crown-rosette','hunting-ground','light-and-shade','mixed-ecosystem','nurse-rosette','pulse-swimmers']);
+assert.deepEqual(slugs(genomes), ['crown-rosette','forager','ligand-producer','mixotroph','nurse-rosette','phototroph','predator','pulse-swimmer','rememberer']);
+assert.deepEqual(slugs(simulations), ['springwater-basin']);
 assert.equal(new Set(environments.map(row => row.id)).size, environments.length);
 for (const id of ['still-water','sunlit-pond','thermal-currents','colony-pool','current-bands']) {
   assert.ok(environments.some(row => row.id === 'builtin:environment:' + id), 'Historical environment remains addressable: ' + id);
 }
+const basin = environments.find(row => row.id === simulations[0].environmentId).config;
+assert.ok(basin.width >= 800 && basin.height >= 500 && basin.barriers.length >= 2);
+assert.ok([3,4,6].every(kind => basin.sources.some(source => source.kind === kind)));
+assert.deepEqual(simulations[0].populations.map(row => row.genomeId).sort(), genomes.map(row => row.id).sort());
 for (const genome of genomes) {
   assert.ok(Object.isFrozen(genome));
   assert.throws(() => storage.validateGenomeDocument(genome), /copied/);

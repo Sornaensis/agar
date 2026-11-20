@@ -6,7 +6,7 @@ use crate::body::{
     Body, BodyCapacities, BodyControls, FounderBudget, OrganelleKind as Kind, FAMILY_COUNT,
 };
 use crate::cellular::{AssemblyKind, CellularWorkScratch, MechanismKind};
-use crate::environment::{Environment, PATCHES};
+use crate::environment::{delta, wrapped as wrap, Environment, PATCHES};
 use crate::genome::{
     EvalScratch, Inputs, MutationKind, OrganelleInput, Outputs, Program, ReceptorInput, Registers, Sensor,
 };
@@ -20,6 +20,7 @@ mod manipulation;
 mod checkpoint;
 mod chemistry;
 mod substrate;
+mod isomers;
 mod inlets;
 use substrate::Composition;
 mod counted;
@@ -61,7 +62,7 @@ pub const CELL_RADIUS: f64 = 7.0;
 // Geometric safety bound, not a carrying capacity: at most one quarter of the
 // shorter torus dimension across. Broad phases use actual radii up to this bound.
 pub const MAX_AREA: f64 = (HEIGHT / 8.0 / CELL_RADIUS) * (HEIGHT / 8.0 / CELL_RADIUS);
-pub const CELL_STRIDE: usize = 39 + FAMILY_COUNT * 6 + 6 + FAMILY_COUNT + 1 + 5;
+pub const CELL_STRIDE: usize = 39 + FAMILY_COUNT * 6 + 6 + FAMILY_COUNT + 1 + 8;
 /// Compatibility signal: zero denotes no age-based death limit.
 pub const LIFESPAN: f64 = 0.0;
 pub const MEMORY_REGISTER_COST: f64 = 0.0025;
@@ -83,7 +84,8 @@ const ORGANIC_RELEASE_CLEARANCE: f64 = 0.05;
 const DIGESTION_SPEED: [f64; 3] = [1.2, 0.7, 0.35];
 const ASSIMILATION_EFFICIENCY: [f64; 3] = [0.8, 0.65, 0.32];
 const MINERAL_ASSIMILATION: [f64; 3] = [1.0, 0.8, 0.5];
-const ORGANIC_DECAY: [f64; 3] = [0.04, 0.012, 0.006];
+const LIGAND: usize = 3;
+const ORGANIC_DECAY: [f64; 4] = [0.04, 0.012, 0.006, 0.012];
 const PHOTO_HABITAT_POWER: f64 = 2400.0;
 const DIVISION_COST: f64 = 12.0;
 const DIVISION_COOLDOWN: f64 = 12.0;
@@ -155,6 +157,9 @@ pub fn mutate_registered(
         MutationKind::GeneSilence => 4,
         MutationKind::GeneDuplicate => 5,
         MutationKind::Geometry => 6,
+        MutationKind::Ingredient => 7,
+        MutationKind::Specificity => 8,
+        MutationKind::Turnover => 9,
     };
     if mutation_kind == 0 || mutation.source == parent.source {
         return MutationResult {
@@ -231,8 +236,8 @@ impl Grid {
         self.columns=columns;self.rows=rows;self.width=width;self.height=height;
     }
     fn index(&self, x: f64, y: f64) -> usize {
-        let col=((x.rem_euclid(self.width)/self.width*self.columns as f64) as usize).min(self.columns-1);
-        let row=((y.rem_euclid(self.height)/self.height*self.rows as f64) as usize).min(self.rows-1);
+        let col=((wrap(x,self.width)/self.width*self.columns as f64) as usize).min(self.columns-1);
+        let row=((wrap(y,self.height)/self.height*self.rows as f64) as usize).min(self.rows-1);
         row*self.columns+col
     }
     fn insert(&mut self, x:f64, y:f64, id:usize) { let i=self.index(x,y);self.buckets[i].push(id); }
@@ -359,7 +364,7 @@ pub struct Cell {
     pub junction_net: [f64; 3],
     pub gut_energy: f64,
     pub gut_nutrients: f64,
-    pub gut: [OrganicMatter; 3],
+    pub gut: [OrganicMatter; 4],
     pub birth_area: f64,
     pub photosynthesis_rate: f64,
     pub uptake_rate: f64,
@@ -436,6 +441,7 @@ impl Cell {
     fn ingest(&mut self, kind: OrganicKind, energy: f64, nutrients: f64) {
         self.ingest_enriched(kind, energy, nutrients, 0.0);
     }
+    #[cfg(test)]
     fn ingest_enriched(&mut self, kind: OrganicKind, energy: f64, nutrients: f64, extra_energy: f64) {
         self.gut[kind as usize].extra_energy += extra_energy;
         self.gut[kind as usize].energy += energy;
@@ -950,7 +956,7 @@ impl World {
                 junction_net: [0.0; 3],
                 gut_energy: 0.0,
                 gut_nutrients: 0.0,
-                gut: [OrganicMatter::default(); 3],
+                gut: [OrganicMatter::default(); 4],
                 birth_area,
                 photosynthesis_rate: 0.0,
                 uptake_rate: 0.0,
@@ -1129,6 +1135,7 @@ impl World {
                 digestion_rate: cell.digestion_rate,
                 growth_rate: cell.growth_rate,
                 lifespan: LIFESPAN,
+                ligand: cell.ligand_carbon(),
                 gut_exudate_energy: cell.gut[0].energy,
                 gut_exudate_nutrients: cell.gut[0].nutrients,
                 gut_tissue_energy: cell.gut[1].energy,
@@ -1499,7 +1506,7 @@ impl World {
         // location. Reserve this space before any cell pays the export cost.
         let packet_overhead = self.cells.iter().try_fold(0usize, |slots, c| {
             let outlets = c.body.cellular.as_ref().map_or(0, |state|
-                state.assemblies.iter().filter(|a| a.recipe.kind == AssemblyKind::Mechanism(MechanismKind::CarbonExport)).count());
+                state.assemblies.iter().filter(|a| matches!(a.recipe.kind, AssemblyKind::Mechanism(MechanismKind::CarbonExport | MechanismKind::LigandExport))).count());
             slots.checked_add(20)?.checked_add(outlets)
         }).ok_or("Simulation paused: organic material exceeds addressable memory.")?;
         self.reserve_organic_packets(packet_energy, packet_overhead)?;
@@ -1549,6 +1556,7 @@ impl World {
                 cap.light_harvest = action.light_harvest;
                 cap.substrate_digestion = action.substrate_digestion;
                 cap.respiration = cap.metabolism + action.respiration;
+                cap.isomerization = action.isomerization;
                 motors.push([action.force_x, action.force_y, action.torque, action.motor_cost]);
                 output.photosynthesize = action.photosynthesize;
                 output.absorb = action.absorb;
@@ -1567,6 +1575,7 @@ impl World {
         }
         self.exchange_gases_in(phases);
         self.respire_in(caps);
+        self.isomerize_in(caps);
         let time = self.time();
         for (i, cell) in self.cells.iter_mut().enumerate() {
             let output = &outputs[i];
@@ -1916,7 +1925,12 @@ impl World {
             let independent = std::array::from_fn::<_, 3, _>(|k| demands[k].min(caps[i].substrate_digestion[k] * DT));
             let remaining = std::array::from_fn(|k| (demands[k] - independent[k]).max(0.0));
             let mut work = shared_digestive_work(budget, remaining, weights);
-            for k in 0..3 { work[k] += independent[k]; }
+            for k in 0..3 {
+                work[k] += independent[k];
+                if c.gut[LIGAND].energy > 0.0 {
+                    work[k] *= c.hydrolase_availability(k, caps[i].gut_energy);
+                }
+            }
             if let Some(q) = &c.counted {
                 let before = q.atp;
                 c.count_digest(&caps[i], work, residues);
@@ -1936,7 +1950,6 @@ impl World {
                 let base = (work[k] * DIGESTION_SPEED[k]).min(base_stock).min(c.energy / 0.02);
                 if base <= 0.0 { continue; }
                 let fraction = base / base_stock;
-                let raw = pool.energy * fraction;
                 let extra = pool.extra_energy * fraction;
                 let minerals = pool.nutrients * fraction;
                 let useful = (base * ASSIMILATION_EFFICIENCY[k]).min(remaining_room);
@@ -1945,9 +1958,14 @@ impl World {
                 useful_base += useful;
                 useful_extra += enriched;
                 c.energy = (c.energy - base * 0.02).max(0.0);
-                c.gut[k].energy = (pool.energy - raw).max(0.0);
-                c.gut[k].extra_energy = (pool.extra_energy - extra).max(0.0);
-                c.gut[k].nutrients = (pool.nutrients - minerals).max(0.0);
+                // Compute the unconsumed carrier first. Subtracting enrichment
+                // and total energy independently can erase the last carrier.
+                let retained_base = base_stock - base;
+                let retained_fraction = retained_base / base_stock;
+                let retained_extra = pool.extra_energy * retained_fraction;
+                c.gut[k].energy = retained_base + retained_extra;
+                c.gut[k].extra_energy = retained_extra;
+                c.gut[k].nutrients = pool.nutrients * retained_fraction;
                 let assimilated_minerals = minerals * MINERAL_ASSIMILATION[k];
                 let overflow = c.receive_nutrients(assimilated_minerals);
                 self.environment.recycle_nutrients(c.x, c.y, overflow);
@@ -2014,15 +2032,14 @@ impl World {
         } else {
             1.0
         });
-        for kind in OrganicKind::ALL {
-            let pool = c.gut[kind as usize];
+        for (index, pool) in c.gut.iter().enumerate() {
             spills.push(OrganicEmission::new(
                 OrganicKind::Waste,
                 c.x,
                 c.y,
                 pool.energy * (1.0 - kept),
                 pool.nutrients * (1.0 - kept),
-            ).enriched(pool.extra_energy * (1.0 - kept)).material(Composition::pool(kind as usize)));
+            ).enriched(pool.extra_energy * (1.0 - kept)).material(Composition::pool(index)));
         }
         c.scale_gut(kept);
         0
@@ -2284,10 +2301,12 @@ impl World {
                 self.environment.release_inorganic_carbon(b.x, b.y, b.internal_inorganic_carbon);
                 self.cells[i].energy -= cost;
                 self.cells[i].ingest_mixture(mixture, tissue_energy, tissue_minerals, tissue_extra);
-                for kind in OrganicKind::ALL {
-                    let pool = contents[kind as usize];
-                    self.cells[i].ingest_enriched(kind, pool.energy, pool.nutrients, pool.extra_energy);
+                for (held, incoming) in self.cells[i].gut.iter_mut().zip(contents) {
+                    held.energy += incoming.energy;
+                    held.nutrients += incoming.nutrients;
+                    held.extra_energy += incoming.extra_energy;
                 }
+                self.cells[i].refresh_gut_totals();
                 if port == 0 { self.cells[i].engulf_cooldown = 2.0; } else { self.cells[i].mouth_ready.insert(port,self.ticks+60); }
                 self.cells[j].energy = 0.0;
                 self.cells[j].organic_carbon = 0.0;
@@ -2508,15 +2527,14 @@ impl World {
                 (c.chemical_body_mass() * STRUCTURAL_CARBON_PER_MASS + c.organic_carbon) * CHEMICAL_ENERGY_PER_CARBON + extra_energy,
                 c.chemical_body_mass() + c.nutrient_stored,
             ).enriched(extra_energy).material(Composition::from_body(c.chemical_body_mass() * STRUCTURAL_CARBON_PER_MASS, c.organic_carbon)));
-            for kind in OrganicKind::ALL {
-                let pool = c.gut[kind as usize];
+            for (index, pool) in c.gut.iter().enumerate() {
                 phases.emissions.push(OrganicEmission::new(
                     OrganicKind::Tissue,
                     c.x,
                     c.y,
                     pool.energy,
                     pool.nutrients,
-                ).enriched(pool.extra_energy).material(Composition::pool(kind as usize)));
+                ).enriched(pool.extra_energy).material(Composition::pool(index)));
             }
         }
         self.emit_organic_pending(phases);
@@ -2668,8 +2686,8 @@ impl World {
                 )
                 .filter(|&j| j > i),
             );
+            // The frozen grid inserts each live cell once and visits each bucket once.
             candidates.sort_unstable();
-            candidates.dedup();
             for &j in candidates.iter() {
                 let (a, b) = self.cells.split_at_mut(j);
                 let a = &mut a[i];
@@ -2679,8 +2697,11 @@ impl World {
                 }
                 let dx = delta(geometry.positions[j][0] - geometry.positions[i][0], self.environment.width);
                 let dy = delta(geometry.positions[j][1] - geometry.positions[i][1], self.environment.height);
-                let distance = dx.hypot(dy);
                 let contact = geometry.radii[i] + geometry.radii[j];
+                if dx.abs() >= contact || dy.abs() >= contact {
+                    continue;
+                }
+                let distance = dx.hypot(dy);
                 if distance >= contact {
                     continue;
                 }
@@ -2778,7 +2799,7 @@ impl World {
             self.snapshot_cell_into(c, target);
         }
         for f in &self.food {
-            target.extend([f.x, f.y, f.energy, f.nutrients, f.kind as u8 as f64]);
+            target.extend([f.x, f.y, f.energy, f.nutrients, f.kind as u8 as f64, f.composition.ligand]);
         }
     }
     pub fn body_json(&self, id: u32, genomes: &[Genome]) -> Option<String> {
@@ -2968,12 +2989,6 @@ fn photon_footprint_into(environment: &Environment, x: f64, y: f64, area: f64, r
     for (_, weight) in result.iter_mut() {
         *weight /= total;
     }
-}
-fn wrap(value: f64, size: f64) -> f64 {
-    value.rem_euclid(size)
-}
-fn delta(value: f64, size: f64) -> f64 {
-    (value + size * 0.5).rem_euclid(size) - size * 0.5
 }
 fn relative_angle(angle: f64) -> f64 {
     (angle + PI).rem_euclid(TAU) - PI

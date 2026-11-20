@@ -73,11 +73,12 @@ impl World {
                 food.energy,
                 food.nutrients,
                 food.kind as u8 as f64,
+                food.composition.ligand,
             ]);
         }
         debug_assert_eq!(
             target.len(),
-            RENDER_HEADER + self.cells.len() * RENDER_CELL_STRIDE + self.food.len() * 5
+            RENDER_HEADER + self.cells.len() * RENDER_CELL_STRIDE + self.food.len() * 6
         );
     }
 
@@ -278,11 +279,12 @@ impl World {
                 .map(|v| v as f64),
             );
         }
-        target.extend(c.gut.iter().map(|pool| pool.energy));
-        target.extend(c.gut.iter().map(|pool| pool.nutrients));
+        target.extend(c.gut[..3].iter().map(|pool| pool.energy));
+        target.extend(c.gut[..3].iter().map(|pool| pool.nutrients));
         target.extend(c.body.precursor_mass);
         target.push(c.synthesis_rate);
-        target.extend([c.organic_carbon, c.internal_oxygen, c.internal_inorganic_carbon, c.respiration_rate, c.carbon_fixation_rate]);
+        target.extend([c.organic_carbon, c.internal_oxygen, c.internal_inorganic_carbon, c.respiration_rate, c.carbon_fixation_rate,
+            c.ligand_carbon(), c.gut[LIGAND].energy, c.gut[LIGAND].nutrients]);
     }
 }
 
@@ -327,7 +329,7 @@ mod tests {
         world.render_snapshot(&mut compact);
         assert_eq!(
             compact.len(),
-            RENDER_HEADER + 5 * RENDER_CELL_STRIDE + 9 * 5
+            RENDER_HEADER + 5 * RENDER_CELL_STRIDE + 9 * 6
         );
         let mapping = [
             0,

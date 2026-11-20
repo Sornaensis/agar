@@ -1,4 +1,4 @@
-import {prepareBloom, placeByTissue} from './feeding-culture.mjs';
+import {prepareBloom, placeByTissue, richestFeedingSite} from './feeding-culture.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fresh as newWorld, compile, seed, snapshot, advance, graph, body, evaluation, save, restore, source, error, catalog } from './organelle-harness.mjs';
@@ -90,6 +90,53 @@ for (const name of importable) {
   conserved(state);
 }
 
+// Light and an organic cue can activate both pathways in basin conditions.
+{
+  const api = await fresh({width:400, height:400, ambientLight:.8, ambientTemperature:.2,
+    initialNutrients:1, gases:{mode:'open', exchangeRate:.2}});
+  seed(api, compile(api, playable.get('mixotroph').source), 1, 200, 200);
+  let state = advance(api, 45 * 30);
+  const marginMeal = () => evaluation(api, 1).bindings.find(binding => binding.name === 'margin_meal').value;
+  assert.equal(marginMeal(), false);
+  placeByTissue(api, state.cells[0], 0);
+  let usedBoth = false;
+  const eaten = state.eaten;
+  for (let second = 0; second < 25 && !(usedBoth && state.eaten > eaten); second++) {
+    state = advance(api, 30);
+    const cell = state.cells.find(cell => cell.id === 1);
+    usedBoth ||= marginMeal() && cell.digestionRate > 0 && cell.carbonFixationRate > 0;
+  }
+  assert.ok(usedBoth && state.eaten > eaten, 'A real particle at the inlet sustains feeding alongside carbon fixation');
+  conserved(state);
+}
+
+// Follow injury, repair and clearance of the ligand producer's memory.
+{
+  const api = await fresh({width:400, height:400, ambientLight:.85, ambientTemperature:.2,
+    initialNutrients:1, gases:{mode:'open', exchangeRate:.2}});
+  seed(api, compile(api, playable.get('ligand-producer').source), 1, 200, 200);
+  let state = snapshot(api);
+  const activity = () => body(api, 1).cellular.assemblies.find(part => part.name === 'Isomerase' && part.complete)?.activity ?? 0;
+  // Begin the injury assay when this founder has both working enzyme and released cargo.
+  while (state.seconds < 80 && !(activity() > 0 && state.food.some(packet => packet.ligandFraction > 0))) {
+    state = advance(api, 30);
+  }
+  const damaged = () => evaluation(api, 1).bindings.find(binding => binding.name === 'damaged').value;
+  const basal = activity();
+  assert.ok(basal > 0 && basal < 1 && !damaged());
+  assert.ok(state.food.some(packet => packet.ligandFraction > 0), 'An intact producer exports ligand');
+  api.set_environment(1, .85, 0);
+  while (state.cells[0].integrity > .965 && state.seconds < 105) state = advance(api, 30);
+  api.set_environment(.2, .85, 0);
+  state = advance(api, 30);
+  assert.ok(damaged() && activity() > basal, 'An injured producer increases conversion');
+  while (state.cells[0].integrity < .98 && state.seconds < 150) state = advance(api, 30);
+  assert.ok(state.cells[0].integrity >= .98 && damaged(), 'The repair response persists after physical recovery');
+  advance(api, 9 * 30);
+  assert.equal(damaged(), false);
+  assert.equal(activity(), basal);
+}
+
 // Exercise the shipped local-control program through real sensing and paid
 // remodeling. Compilation and a successful birth alone do not prove these work.
 {
@@ -174,7 +221,7 @@ console.log(`Five seconds after division, colony surface gaps with and without a
 
 const cycles = [];
 for (const preset of PRESETS) {
-  const producer = ['Phototroph', 'Nurse rosette', 'Pulse swimmer', 'Crown rosette', 'Mixotroph'].includes(preset.name);
+  const producer = /\bassembly\s+\w+\s*:\s*harvest\(light\)/.test(preset.source);
   const api = await fresh({width:400,height:400,ambientLight:.85,ambientTemperature:producer ? 0.5 : 0.2,initialNutrients:3,
     gases:{mode:'open',initialOxygen:producer ? 1 : 3,oxygenEquilibrium:producer ? 1 : 3,exchangeRate:.5}});
   const genome = compile(api,preset.source);
@@ -182,6 +229,15 @@ for (const preset of PRESETS) {
   const site = producer ? {x:200,y:200} : prepareBloom(api,playable.get('phototroph').source);
   const founder = api.place_cell(genome,site.x,site.y);
   assert.ok(founder,error(api));
+  if (preset.name === 'Predator') {
+    // Its only inlet is on the forward membrane. Align that surface with the
+    // densest local patch of tissue in the finite bloom.
+    const habitat = snapshot(api);
+    const tissue = richestFeedingSite(habitat.food.filter(packet => packet.kind === 1));
+    const cell = habitat.cells.find(cell => cell.id === founder);
+    assert.ok(api.move_cell(founder, tissue.x - cell.radius * Math.cos(cell.angle),
+      tissue.y - cell.radius * Math.sin(cell.angle), 0), error(api));
+  }
   const startTick=snapshot(api).ticks;
   const initial = body(api, founder);
   assert.equal(initial.organs.length, 1);
@@ -213,7 +269,7 @@ for (const preset of PRESETS) {
     conserved(state);
   }
   assert.equal(state.births, 1, `${preset.name} assembles and funds a complete reproductive cycle within ${cycleSeconds} seconds in its supplied habitat`);
-  assert.equal(state.population, 2);
+  assert.equal(state.population, 2, `Both halves of the ${preset.name} founder must survive fission`);
   assert.ok(previous, 'Observe the actual fission tick');
   const daughter = state.cells.find(cell => cell.generation === 1);
   assert.ok(daughter && daughter.parentId === founder);
@@ -231,6 +287,17 @@ for (const preset of PRESETS) {
     assert.equal(cell.constriction.progress, 0);
     assert.equal(cell.replication.mass, 0);
     assert.ok(cell.replication.genomeMass > 0, 'Paid copied material is inherited instead of disappearing');
+  }
+  if (preset.name === 'Forager') {
+    const parentGuts = new Set(previous.assemblies
+      .filter(machine => machine.kind === 'store(food)' && machine.complete)
+      .map(machine => machine.id));
+    for (const cell of state.cells) {
+      const retained = body(api, cell.id).cellular.assemblies.some(machine =>
+        parentGuts.has(machine.id) && machine.complete && machine.functionalMass > 0);
+      assert.ok(retained && cell.gutCapacity > 0,
+        'Each Forager half inherits an actual functioning food compartment at fission');
+    }
   }
   if (preset.name === 'Forager' || preset.name === 'Predator') {
     // The grazer provisions duplicate machinery. The hunter places one
@@ -257,12 +324,12 @@ for (const preset of PRESETS) {
 
   const firstDivisionSeconds = (state.ticks-startTick)/30;
   const bytes = save(api), resumed = await fresh();
-  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 20);
+  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 21);
   assert.equal(restore(resumed, bytes), 1, error(resumed));
   assert.deepEqual(save(resumed), bytes);
   advance(api, 90); advance(resumed, 90);
   assert.deepEqual(save(resumed), save(api), 'Products, progress, inherited recipes and subsequent dynamics resume exactly');
-  if (['Phototroph', 'Mixotroph', 'Forager'].includes(preset.name)) {
+  if (['Phototroph', 'Ligand producer', 'Mixotroph', 'Forager'].includes(preset.name)) {
     const daughter = state.cells.find(cell => cell.parentId === founder);
     assert.ok(daughter, 'Follow the first daughter after she inherits her own machinery');
     const hasGranddaughter = () => state.cells.some(cell => cell.parentId === daughter.id);

@@ -94,8 +94,11 @@ impl Engine {
             4 => MutationKind::GeneSilence,
             5 => MutationKind::GeneDuplicate,
             6 => MutationKind::Geometry,
+            7 => MutationKind::Ingredient,
+            8 => MutationKind::Specificity,
+            9 => MutationKind::Turnover,
             _ => {
-                self.error = "Unknown mutation kind. Use 0 (any), 1 (constant), 2 (expression), 3 (reference), 4 (silence gene), or 5 (duplicate gene).".into();
+                self.error = "Unknown mutation kind. Use 0 (any), 1 (constant), 2 (expression), 3 (reference), 4 (silence gene), 5 (duplicate gene), 6 (placement), 7 (ingredient dose), 8 (specificity), or 9 (stock turnover).".into();
                 return 0;
             }
         };
@@ -132,7 +135,7 @@ thread_local! { static ENGINE: RefCell<Engine> = RefCell::new(Engine::new()); }
 
 #[no_mangle]
 pub extern "C" fn abi_version() -> u32 {
-    23
+    24
 }
 
 /// Allocate a writable, zero-initialized byte buffer. The caller must deallocate
@@ -1179,8 +1182,8 @@ mod tests {
         engine.world.cells[0].vy = -1.25;
         engine.world.cells[0].integrity = 0.8;
         engine.world.snapshot(&mut engine.snapshot);
-        assert_eq!(abi_version(), 23);
-        assert_eq!(simulation::CELL_STRIDE, 163);
+        assert_eq!(abi_version(), 24);
+        assert_eq!(simulation::CELL_STRIDE, 166);
         assert_eq!(engine.snapshot.len(), 12 + 22 * simulation::CELL_STRIDE);
         assert_eq!(engine.snapshot[7], simulation::WIDTH as f64);
         assert_eq!(engine.snapshot[8], simulation::HEIGHT as f64);

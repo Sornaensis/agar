@@ -7,9 +7,11 @@ import { resolve } from 'node:path';
 import { observePredatorBirths } from './predator-birth-observation.mjs';
 import { bytes, fresh, compile, seed, snapshot, advance, body, save, catalog } from './organelle-harness.mjs';
 
-// Measure the actual shipped mixed scenario, without the supplied-food or
+import { scenarioFixtures } from './scenario-fixtures.mjs';
+
+// Measure the default basin or a named control, without the supplied-food or
 // stationary-organism shortcuts used by isolated pathway tests.
-const options = { seeds: [42], duration: 600, extraSamples: [], birthsAfter: null, mutation: undefined, output: null, wasm: null, assert: false, disableExport: false, flankDivision: false, predatorSource: null, tracePredatorBirths: false };
+const options = { scenario: null, seeds: null, duration: 600, extraSamples: [], birthsAfter: null, mutation: undefined, output: null, wasm: null, assert: false, disableExport: false, flankDivision: false, predatorSource: null, tracePredatorBirths: false };
 for (let i = 2; i < process.argv.length; i++) {
   const key = process.argv[i];
   if (key === '--flank-forager-division') { options.flankDivision = true; continue; }
@@ -17,7 +19,8 @@ for (let i = 2; i < process.argv.length; i++) {
   if (key === '--trace-predator-births') { options.tracePredatorBirths = true; continue; }
   if (key === '--assert') { options.assert = true; continue; }
   const value = process.argv[++i];
-  assert.ok(value && ['--seed', '--duration', '--sample-at', '--births-after', '--mutation', '--output', '--wasm', '--predator-source'].includes(key), `Unknown or missing argument: ${key}`);
+  assert.ok(value && ['--scenario','--seed', '--duration', '--sample-at', '--births-after', '--mutation', '--output', '--wasm', '--predator-source'].includes(key), `Unknown or missing argument: ${key}`);
+  if (key === '--scenario') options.scenario = value;
   if (key === '--seed') options.seeds = value.split(',').map(Number);
   if (key === '--duration') options.duration = Number(value);
   if (key === '--sample-at') {
@@ -31,7 +34,6 @@ for (let i = 2; i < process.argv.length; i++) {
   if (key === '--wasm') options.wasm = value;
   if (key === '--predator-source') options.predatorSource = value;
 }
-assert.ok(options.seeds.every(n => Number.isInteger(n) && n >= 0 && n <= 0xffffffff));
 assert.ok(Number.isSafeInteger(options.duration) && options.duration > 0);
 assert.ok(options.extraSamples.every(n => Number.isSafeInteger(n) && n <= options.duration), '--sample-at must fall within the run');
 assert.ok(!options.assert || options.duration >= 300, 'Ecological regression checks require at least 300 simulated seconds');
@@ -40,7 +42,12 @@ assert.ok(options.birthsAfter === null || options.assert && Number.isFinite(opti
 const binary = options.wasm ? await readFile(options.wasm) : bytes;
 const customModule = options.wasm ? await WebAssembly.compile(binary) : undefined;
 const { BUILTIN_ENVIRONMENTS, BUILTIN_GENOMES, BUILTIN_SIMULATIONS, simulationStartSettings } = await catalog();
-const template = BUILTIN_SIMULATIONS.find(item => item.id === 'builtin:simulation:mixed-ecosystem');
+const template = options.scenario
+  ? [...BUILTIN_SIMULATIONS, ...scenarioFixtures].find(item => item.id === 'builtin:simulation:' + options.scenario)
+  : BUILTIN_SIMULATIONS[0];
+assert.ok(template, 'Unknown ecology scenario');
+options.seeds ??= [template.seed];
+assert.ok(options.seeds.every(n => Number.isInteger(n) && n >= 0 && n <= 0xffffffff));
 const environment = BUILTIN_ENVIRONMENTS.find(item => item.id === template.environmentId);
 const startSettings = simulationStartSettings();
 options.mutation ??= startSettings.mutationRate;
@@ -49,18 +56,22 @@ const populations = template.populations.map(row => ({ ...BUILTIN_GENOMES.find(i
 if (options.predatorSource) {
   // Exported .cell files carry a final newline that the catalog source omits.
   const source = await readFile(options.predatorSource, 'utf8');
-  populations.find(entry => entry.name === 'Predator').source = source.replace(/\r?\n$/, '');
+  const predator = populations.find(entry => entry.name === 'Predator');
+  assert.ok(predator, '--predator-source requires a scenario with a Predator');
+  predator.source = source.replace(/\r?\n$/, '');
 }
 // Matched secretion control: retain the outlet, its cost, and every other
 // expression. Close only the stock producer's outlet during this run.
 if (options.disableExport) {
   const producer = populations.find(p => p.name === 'Phototroph');
+  assert.ok(producer, '--disable-stock-export requires a Phototroph');
   const outlet = /(assembly \w+: export\(carbon\) \{[^}]*?activity: )[^;]+/g;
   assert.match(producer.source, outlet);
   producer.source = producer.source.replace(outlet, (_, declaration) => declaration + '0');
 }
 if (options.flankDivision) {
   const forager = populations.find(entry => entry.name === 'Forager');
+  assert.ok(forager, '--flank-forager-division requires a Forager');
   const mount = /(assembly Division: constrict\(\) \{[^}]*?at: )[^;]+/;
   assert.match(forager.source, mount);
   forager.source = forager.source.replace(mount, (_, prefix) => prefix + String(Math.PI / 2));
@@ -190,12 +201,12 @@ for (const randomSeed of options.seeds) {
           entry.mass += machine.mass; machinery.set(machine.name, entry);
         }
       }
-      const totalKeys = ['area', 'mass', 'energy', 'nutrients', 'gutEnergy', 'photosynthesisRate', 'digestionRate', 'growthRate', 'exudationRate', 'upkeep', 'metabolism', 'expressionRate', 'organicCarbon', 'internalOxygen', 'internalInorganicCarbon', 'respirationRate', 'carbonFixationRate'];
+      const totalKeys = ['area', 'mass', 'energy', 'nutrients', 'gutEnergy', 'photosynthesisRate', 'digestionRate', 'growthRate', 'exudationRate', 'upkeep', 'metabolism', 'expressionRate', 'organicCarbon', 'internalOxygen', 'internalInorganicCarbon', 'respirationRate', 'carbonFixationRate', 'ligandCarbon'];
       return {
         name, count: cells.length, census: census.get(name), ...Object.fromEntries(totalKeys.map(key => [key, round(sum(cells, key))])),
         meanEnergyFraction: cells.length ? round(cells.reduce((total, cell) => total + cell.energy / cell.capacity, 0) / cells.length) : null,
         maxGeneration: cells.length ? Math.max(...cells.map(cell => cell.generation)) : null,
-        gutByFraction: Object.fromEntries(['soluble','structural','bound'].map((kind, i) => [kind, round(cells.reduce((total, cell) => total + cell.gutEnergyByKind[i], 0))])),
+        gutByFraction: Object.fromEntries(['soluble','structural','bound','ligand'].map((kind, i) => [kind, round(cells.reduce((total, cell) => total + (cell.gutEnergyByKind[i] ?? 0), 0))])),
         machinery: [...machinery.values()].map(entry => ({ ...entry, mass: round(entry.mass) })),
         consumers: name === 'Phototroph' ? undefined : cells.map(cell => ({
           id: cell.id, generation: cell.generation, x: round(cell.x), y: round(cell.y), angle: round(cell.angle),
@@ -241,16 +252,21 @@ for (const randomSeed of options.seeds) {
   }
   if (options.assert) {
     const last = result.samples.at(-1);
+    const stock = Object.fromEntries(last.lineages.map(item => [item.name, item]));
     result.assertions = {
       noExternalOrganicFood: !('add_food' in api) && !('set_food_rate' in api),
-      producerLineageReproducesAcrossGenerations: last.lineages.find(item => item.name === 'Phototroph').maxGeneration >= 3,
-      foragerSurvives: last.lineages.find(item => item.name === 'Forager').count > 0,
-      predatorSurvives: last.lineages.find(item => item.name === 'Predator').count > 0,
-      foragerReproduces: last.lineages.find(item => item.name === 'Forager').maxGeneration >= 2,
-      predatorReproduces: last.lineages.find(item => item.name === 'Predator').maxGeneration >= 2,
-      attacksOccur: last.attacks > 0,
-      predationOccurs: last.predations > 0,
     };
+    if (stock.Phototroph) result.assertions.producerLineageReproducesAcrossGenerations = stock.Phototroph.maxGeneration >= 3;
+    if (stock.Forager) {
+      result.assertions.foragerSurvives = stock.Forager.count > 0;
+      result.assertions.foragerReproduces = stock.Forager.maxGeneration >= 2;
+    }
+    if (stock.Predator) {
+      result.assertions.predatorSurvives = stock.Predator.count > 0;
+      result.assertions.predatorReproduces = stock.Predator.maxGeneration >= 2;
+      result.assertions.attacksOccur = last.attacks > 0;
+      result.assertions.predationOccurs = last.predations > 0;
+    }
     if (options.birthsAfter !== null) for (const item of last.lineages) {
       result.assertions[`${item.name} birth after ${options.birthsAfter}s`] = item.census?.lastBirth > options.birthsAfter;
     }
@@ -260,6 +276,6 @@ for (const randomSeed of options.seeds) {
 if (!options.output && !options.assert) console.log(JSON.stringify(study));
 if (options.assert) {
   const failures = study.results.flatMap(result => Object.entries(result.assertions).filter(([, passed]) => !passed).map(([name]) => `seed ${result.seed}: ${name}`));
-  assert.deepEqual(failures, [], `Mixed ecosystem regression failures: ${failures.join(', ')}`);
-  console.log(`Mixed ecosystem checks passed: living producers reach generation three, consumers survive and reproduce, physical attacks and predation occur, no supplied food, ${options.duration} seconds across ${options.seeds.length} seed(s).`);
+  assert.deepEqual(failures, [], `Ecology regression failures: ${failures.join(', ')}`);
+  console.log(`${template.name} ecological checks passed at ${options.duration} seconds across ${options.seeds.length} seed(s).`);
 }

@@ -411,12 +411,50 @@ envelope, genetic material, guts, particles and dissolved fields. Transfers do n
 create material. Fabrication retains 90% of the energy spent on new material as embodied energy. The remaining 10% dissipates during construction. Gene duplication changes demand, not the shared
 budget. Recipe definitions are retained with each physical instance.
 
+## Ligand chemistry
+
+Ligand is a modeled isomer of organic carbon. It travels in particles, shares food storage with other captured material and can pass to a consumer. Its concentration in that compartment reduces the rate of ordinary digestive enzymes. The reduction is reversible as the ligand is removed. Organism names and particle origins have no role in the reaction.
+
+| Mechanism | Substrate → product | Required working material |
+| --- | --- | --- |
+| `isomerize(ligand)` | Organic reserve → stored ligand | Enzyme |
+| `isomerize(carbon)` | Stored ligand → organic reserve | Enzyme |
+| `export(ligand)` | Stored ligand → external particle | Mounted anchor and transporter |
+
+Both isomerases spend one ATP per converted carbon. Turnover scales with the working enzyme and available substrate, and synthesis needs room in the food compartment. The `carbon.ligand` operand reports the amount held inside the cell. For example, a consumer can use `activity: if carbon.ligand > 0 then 1 else 0;` on its recovery enzyme. Ligand models one kind of reversible inhibition at the scale of a compartment.
+
+A genome can also use named product concentrations to regulate other machines. This fragment uses competing pools to control an exporter. `Gate` and `Blocker` are ordinary products made by genes. Their free stocks persist, turn over and partition at division. The weights in the expression are mutable. The example uses concentration units throughout.
+
+```cell
+cellular counts;
+product Gate = regulator(12);
+product Blocker = regulator(35);
+product Mount = anchor();
+product Pump = transporter();
+
+gene gate: Gate = activate(carbon.organic, 9000);
+gene brake: Blocker = repress(energy.fraction, 0.35);
+gene mounts: Mount = if pool.Mount < 180 then 1 else 0;
+gene pumps: Pump = if pool.Pump < 180 then 1 else 0;
+
+fn occupancy(s, competitor, k) = s / (k + s + competitor);
+assembly Outlet: export(carbon) {
+  Mount: 150;
+  Pump: 150;
+  activity: occupancy(concentration.Gate, 3 * concentration.Blocker, 0.01);
+}
+```
+
 ## Inspection, mutation and saves
 
 The Body inspector shows product stocks, requested and achieved synthesis,
 recipe composition, progress, shortages, activity, placement and replication.
 The Program inspector and graph expose gene/activity expressions and pool/built
 dependencies. Inspection does not commit a tick.
+
+Stock turnover can evolve independently of a product’s role. All primary product constructors take an optional free-stock half-life in seconds. `enzyme(90)` turns over with a 90-second half-life. `enzyme()` and `enzyme(0)` describe stable free stock. Adhesin takes its optional lifetime after its scaffold precursor. Regulators require a positive lifetime. A turnover mutation can introduce or change a half-life while previously synthesized material retains its original lifetime. Installed ingredients remain subject to the machine’s damage and recycling.
+
+Two other physical mutations can change a newly built machine. An ingredient mutation changes one positive amount in its own unit system. A specificity mutation substitutes the target of the same constructor among alternatives with the same material roles. A digestive enzyme can switch from soluble to structural carbon. An isomerase can switch conversion direction. Each change must compile with the existing recipe, sensor reads and contact guards. Installed machinery retains its original ingredients and specificity until recycled.
 
 Constant, expression and reference mutations remain source preserving. Cellular
 programs additionally support silencing one gene (kind 4), duplicating one gene

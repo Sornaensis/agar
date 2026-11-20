@@ -2,7 +2,7 @@ import type {GenomeLineageEntry, MetricsSnapshot} from './engine';
 import {genomeColor} from './renderer';
 import {icon} from './ui';
 
-const mutationLabels = ['Root genome','Constant change','Expression change','Reference change','Gene silencing','Gene duplication','Placement change'];
+const mutationLabels = ['Root genome','Constant change','Expression change','Reference change','Gene silencing','Gene duplication','Placement change','Recipe ingredient change','Mechanism specificity change','Stock turnover change'];
 const pageSize = 40;
 const branchDepth = 20;
 type Node = GenomeLineageEntry & {rootId:number; depth:number};

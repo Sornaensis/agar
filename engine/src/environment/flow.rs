@@ -146,6 +146,7 @@ fn capped(velocity: (f64, f64)) -> (f64, f64) {
 
 impl Environment {
     pub(super) fn rebuild_flow_samples(&mut self) {
+        self.scratch.face_flow.clear();
         let sources: Vec<_> = self
             .sources
             .iter()

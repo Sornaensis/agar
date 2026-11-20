@@ -15,7 +15,7 @@ async function run(file) {
   const { instance } = await WebAssembly.instantiate(bytes, {});
   const api = instance.exports;
   const abi = api.abi_version();
-  assert.ok([16,17,18,19,20,21,22,23].includes(abi));
+  assert.ok([16,17,18,19,20,21,22,23,24].includes(abi));
   const sha = data => createHash('sha256').update(data).digest('hex');
   const { PRESETS } = await catalog();
   const ok = (status, reason) => assert.ok(status, reason + ' ' + error(api));

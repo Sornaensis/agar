@@ -146,6 +146,7 @@ const sensorRows: ReadonlyArray<readonly [string, PrimitiveType, string]> = [
   ['oxygen', 'scalar', 'Internal oxygen available for aerobic respiration. Membrane exchange follows the concentration gradient.'],
   ['respiration.rate', 'scalar', 'Organic carbon oxidized per second during the last completed tick. The same amount of oxygen is consumed and inorganic carbon produced.'],
   ['carbon.fixation.rate', 'scalar', 'Inorganic carbon fixed into organic carbon per second during the last completed tick. The same amount of oxygen is produced.'],
+  ['carbon.ligand', 'scalar', 'Carbon held as an inhibitory ligand inside the food compartment. Captured ligand slows digestive enzymes. A working isomerize(carbon) assembly can convert it to reserve carbon.'],
 ];
 export const BUILTIN_SIGNALS: readonly GenomeSymbol[] = Object.freeze(sensorRows.map(([name, type, description]) =>
   symbol(name, 'signal', type, `${name}: ${type}`, `${description} Sampled before actions this tick.`)));
@@ -195,11 +196,11 @@ export const CELLULAR_PRODUCT_ROLES = Object.freeze([
   'receptor', 'regulator', 'replicase', 'constrictor', 'adhesin',
 ] as const);
 export const CELLULAR_CONSTRUCTORS: readonly GenomeSymbol[] = Object.freeze(CELLULAR_PRODUCT_ROLES.map(role =>
-  symbol(role, 'function', 'product', `${role}(${role === 'regulator' ? 'halfLife: number' : role === 'adhesin' ? 'precursor: scaffold product' : ''}) → product`,
+  symbol(role, 'function', 'product', `${role}(${role === 'regulator' ? 'halfLife: number' : role === 'adhesin' ? 'precursor: scaffold product, halfLife?: number' : 'halfLife?: number'}) → product`,
     role === 'regulator'
       ? 'Declares a persistent regulatory product. Its positive half-life is measured in seconds; pool.Name reads its physical stock. Synthesis costs material and energy, and stock partitions at division.'
-      : role === 'adhesin' ? 'Finishes a named scaffold precursor into a binding protein. Expression consumes existing precursor stock, usable energy and translation work. Adhesion surfaces install the finished protein together with membrane and anchor material.'
-      : `Declares a ${role} product. Genes synthesize its stock; assembly recipes consume it as a physical component. A declaration by itself creates no material.`)));
+      : role === 'adhesin' ? 'Finishes a named scaffold precursor into a binding protein. Expression consumes existing precursor stock, usable energy and translation work. Adhesion surfaces install the finished protein together with membrane and anchor material. An optional second argument gives the free product’s half-life in seconds.'
+      : `Declares a ${role} product. Genes synthesize its stock; assembly recipes consume it as a physical component. An optional half-life in seconds controls turnover of uninstalled stock. Omit it or use zero for stable stock.`)));
 export const CONTACT_RECIPE_KINDS = ['pierce()', 'import(particle)', 'engulf()', 'adhere()', 'piercer', 'phagocyte'] as const;
 export const CONTACT_FIELDS: readonly GenomeSymbol[] = [
   ['message_valid', 'boolean', 'True when a working touch receptor on this surface reaches the contact partner’s active display and reads its occupied marker register.'],
@@ -236,7 +237,7 @@ export const CELLULAR_ASSEMBLY_KINDS: readonly GenomeSymbol[] = Object.freeze([
   symbol('replicator', 'keyword', 'assembly', 'replicator { components; activity: expression; }', 'Scaffold and replicase products build machinery that performs paid genome replication over time.'),
   symbol('constrictor', 'keyword', 'assembly', 'constrictor { components; activity: expression; }', 'Anchor, motor and constrictor products build machinery that advances physical constriction after growth and replication.'),
 ]);
-const internalMechanisms = new Set(['support','translate','store','digest','repair','replicate','recycle','respire']);
+const internalMechanisms = new Set(['support','translate','store','digest','isomerize','repair','replicate','recycle','respire']);
 const directionalMechanisms = new Set(['propel()','pierce()','sense(optical)']);
 function mechanismHasControl(kind: string | undefined, field: string): boolean {
   if (!kind) return true;
@@ -355,7 +356,7 @@ export function usesCountUnits(source: string): boolean { return cellularHeader.
 export const COUNT_RESOURCE_SIGNALS = Object.freeze([
   'energy','energy.capacity','nutrient.stored','nutrient.capacity','gut.energy','gut.capacity',
   'gut.soluble.energy','gut.soluble.nutrients','gut.structural.energy','gut.structural.nutrients','gut.bound.energy','gut.bound.nutrients',
-  'carbon.organic','carbon.inorganic','oxygen',
+  'carbon.organic','carbon.inorganic','oxygen','carbon.ligand',
 ]);
 const countSignals = CELLULAR_READ_SIGNALS.map(item => COUNT_RESOURCE_SIGNALS.includes(item.name)
   ? symbol(item.name,'signal','count',`${item.name}: count`,`${item.description} One unit equals 10,000 whole counts.`) : item);

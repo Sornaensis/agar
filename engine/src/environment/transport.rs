@@ -63,30 +63,27 @@ impl Environment {
     }
     pub(super) fn transport_stencil(&self, origin: usize, x: f64, y: f64) -> TransportStencil {
         let walls = !self.barriers.is_empty();
-        if walls {
-            let from = self.patch_position(origin);
-            if delta(x - from.0, self.width).abs() + delta(y - from.1, self.height).abs() < 1e-12
-                || self.transport_segment_blocked(origin, (x, y))
-            {
-                return TransportStencil::Origin(origin);
-            }
+        let from = self.patch_position(origin);
+        let local = (x - from.0).abs() <= PATCH_SIZE && (y - from.1).abs() <= PATCH_SIZE;
+        let clear = walls && local && self.clear_wall_neighborhood(origin);
+        if walls && (delta(x - from.0, self.width).abs() + delta(y - from.1, self.height).abs() < 1e-12
+            || (!clear && self.transport_segment_blocked(origin, (x, y)))) {
+            return TransportStencil::Origin(origin);
         }
-        let gx = x.rem_euclid(self.width) / PATCH_SIZE - 0.5;
-        let gy = y.rem_euclid(self.height) / PATCH_SIZE - 0.5;
+        let gx = wrapped(x, self.width) / PATCH_SIZE - 0.5;
+        let gy = wrapped(y, self.height) / PATCH_SIZE - 0.5;
         let ix = gx.floor() as isize;
         let iy = gy.floor() as isize;
         let fx = gx - gx.floor();
         let fy = gy - gy.floor();
-        let at = |x: isize, y: isize| {
-            y.rem_euclid(self.rows as isize) as usize * self.columns
-                + x.rem_euclid(self.columns as isize) as usize
-        };
-        let indices = [
-            at(ix, iy),
-            at(ix + 1, iy),
-            at(ix, iy + 1),
-            at(ix + 1, iy + 1),
-        ];
+        // Only the seam needs integer wrapping. Neighbors are shared by the
+        // four corners; the common case has no division or remainder here.
+        let col = if ix < 0 { self.columns - 1 } else { ix as usize };
+        let row = if iy < 0 { self.rows - 1 } else { iy as usize };
+        let top_left = row * self.columns + col;
+        let [_, top_right, _, bottom_left] = self.grid.neighbors[top_left];
+        let bottom_right = self.grid.neighbors[bottom_left][1];
+        let indices = [top_left, top_right, bottom_left, bottom_right];
         if !walls {
             return TransportStencil::Bilinear { indices, fx, fy };
         }
@@ -101,7 +98,7 @@ impl Environment {
             if weights[corner] <= 0.0 {
                 continue;
             }
-            if indices[corner] == origin
+            if clear || indices[corner] == origin
                 || !self.transport_neighbor_blocked(origin, indices[corner])
             {
                 total += weights[corner];

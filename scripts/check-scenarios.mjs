@@ -1,20 +1,31 @@
+import { scenarioFixtures } from './scenario-fixtures.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { crownObservation, sampleCrown } from './crown-observation.mjs';
 import { advance, body, bytes, catalog, compile, error, evaluation, fresh, memory, restore, save, seed, snapshot } from './organelle-harness.mjs';
 
-// Each run advances the shipped scattered launch without interventions. Descendant
+// Each run advances a controlled scenario without interventions. Descendant
 // counts include the distinct individuals observed at the chosen sample interval.
 const { BUILTIN_ENVIRONMENTS, BUILTIN_GENOMES, BUILTIN_SIMULATIONS, simulationStartSettings } = await catalog();
 const requested = new Map();
+const replacements = new Map();
 for (let index = 2; index < process.argv.length; index += 2) {
   const key = process.argv[index], value = process.argv[index + 1];
-  assert.ok(['--scenario', '--seeds', '--output'].includes(key) && value, 'Expected --scenario id[,id] --seeds n[,n] or --output path');
+  if (key === '--genome') {
+    const separator = value?.indexOf('=') ?? -1;
+    const name = value?.slice(0, separator);
+    assert.ok(separator > 0 && value.slice(separator+1) && BUILTIN_GENOMES.some(item => item.name === name),
+      'Expected --genome "Stock name=path/to/program.cell"');
+    assert.ok(!replacements.has(name), 'Each founder genome can be replaced once');
+    replacements.set(name, (await readFile(value.slice(separator+1), 'utf8')).trim());
+    continue;
+  }
+  assert.ok(['--scenario', '--seeds', '--output'].includes(key) && value, 'Expected --scenario, --seeds, --genome or --output');
   requested.set(key, value);
 }
 const chosen = requested.get('--scenario')?.split(',');
-const templates = BUILTIN_SIMULATIONS.filter(item => !chosen || chosen.includes(item.id.split(':').at(-1)));
+const templates = [...BUILTIN_SIMULATIONS, ...(chosen ? scenarioFixtures : [])].filter(item => !chosen || chosen.includes(item.id.split(':').at(-1)));
 assert.ok(templates.length && (!chosen || templates.length === new Set(chosen).size), 'Choose a shipped scenario ID');
 const seeds = requested.get('--seeds')?.split(',').map(Number);
 assert.ok(!seeds || seeds.every(n => Number.isInteger(n) && n >= 0 && n <= 0xffffffff), 'Seeds must be uint32 values');
@@ -25,7 +36,7 @@ const report = { wasmSha256: hash(bytes), ticksPerSecond:30,
   environments:Object.fromEntries(BUILTIN_ENVIRONMENTS
     .filter(habitat => templates.some(template => template.environmentId === habitat.id))
     .map(habitat => [habitat.id,habitat.config])), scenarios:[] };
-const horizons = { 'mixed-ecosystem':600, 'hunting-ground':120, 'light-and-shade':150, 'nurse-rosette':210, 'pulse-swimmers':210, 'crown-rosette':360 };
+const horizons = { 'springwater-basin':600, 'mixed-ecosystem':600, 'hunting-ground':120, 'light-and-shade':150, 'nurse-rosette':210, 'pulse-swimmers':210, 'crown-rosette':360 };
 
 const activeMass = (inventory, name) => inventory.cellular.assemblies
   .filter(machine => machine.name === name && machine.complete)
@@ -41,17 +52,39 @@ async function run(template, worldSeed) {
   const lineages = new Map(), cohorts = [], observedOffspring = {};
   for (const row of template.populations) {
     const genome = BUILTIN_GENOMES.find(item => item.id === row.genomeId);
-    const genomeId = compile(api, genome.source);
+    const source = replacements.get(genome.name) ?? genome.source;
+    const genomeId = compile(api, source);
     seed(api, genomeId, row.count);
     lineages.set(genomeId, genome.name);
     observedOffspring[genome.name] = new Set();
-    cohorts.push({ name:genome.name, count:row.count, sourceSha256:hash(genome.source) });
+    cohorts.push({ name:genome.name, count:row.count, sourceSha256:hash(source) });
   }
   let state = snapshot(api);
   assert.equal(state.population, cohorts.reduce((sum, row) => sum + row.count, 0));
   assert.equal(state.food.length, 0, 'Every scenario starts with living founders and no organic particles');
   const result = { id, seed:worldSeed, seconds:horizons[id], habitat:habitat.id, settings, cohorts, observations:{}, checks:{} };
   const obs = result.observations;
+  const basin = id === 'springwater-basin';
+  // A working recipe can sit idle for an entire run. Count individuals seen
+  // carrying out each process, including individuals that die before the end.
+  const observedFlux = new Map(cohorts.map(({name}) => [name, {
+    fixing: new Set(), digesting: new Set(), secreting: new Set(), feedingInLight: new Set()
+  }]));
+  const birthsAtMidpoint = new Map();
+  const basinEvents = () => {
+    const ptr = api.ecology_snapshot_ptr();
+    const data = new Float64Array(api.memory.buffer, ptr, api.presentation_len());
+    const events = new Map(), stride = 20;
+    assert.equal(data.length, 2 + data[1] * stride);
+    for (let i=2; i<data.length; i+=stride) {
+      events.set(lineage(data[i]), {births:data[i+3], predationDeaths:data[i+5], depletedDeaths:data[i+6], kills:data[i+8]});
+    }
+    return events;
+  };
+  const initialMinerals = api.nutrient_input_total();
+  const exposed = new Set();
+  let firstLigandRelease = null, firstLigandUptake = null, firstRecoveryEnzyme = null;
+
   const crown = id === 'crown-rosette' ? crownObservation() : null;
   const shade = new Set(), bright = new Set(), hungryTissue = new Set(), grazing = new Set();
   const rememberedSteering = new Set(), grazersReceivingCarbon = new Set();
@@ -84,11 +117,30 @@ async function run(template, worldSeed) {
       const dissipated = losses.reduce((total, value) => total + value, 0n);
       assert.equal(ledger[9] + ledger[11] + dissipated, ledger[10], `${id} energy losses at tick ${state.ticks}`);
     }
+    if (basin && firstLigandRelease === null && state.food.some(p => p.ligandFraction > 0)) firstLigandRelease = state.seconds;
+    if (basin && state.ticks === result.seconds * 15) {
+      for (const [name, events] of basinEvents()) birthsAtMidpoint.set(name, events.births);
+    }
     if (crown) sampleCrown(api,state,crown);
     if (firstBirth === null && state.births) firstBirth = state.seconds;
     if (firstKill === null && state.predations) firstKill = state.seconds;
     for (const cell of state.cells) {
       const family = lineage(cell.genome);
+      if (basin) {
+        const flux = observedFlux.get(family);
+        if (cell.carbonFixationRate > 0) flux.fixing.add(cell.id);
+        if (cell.digestionRate > 0) flux.digesting.add(cell.id);
+        if (cell.exudationRate > 0) flux.secreting.add(cell.id);
+        if (cell.carbonFixationRate > 0 && cell.digestionRate > 0) flux.feedingInLight.add(cell.id);
+      }
+      if (basin && family !== 'Ligand producer' && cell.ligandCarbon > 0) {
+        exposed.add(family);
+        firstLigandUptake ??= state.seconds;
+        if (family === 'Forager' && firstRecoveryEnzyme === null
+            && body(api,cell.id).cellular.assemblies.some(machine => machine.name === 'RecoveryEnzyme' && machine.complete)) {
+          firstRecoveryEnzyme = state.seconds;
+        }
+      }
       if (cell.generation) {
         observedOffspring[family].add(cell.id);
         oldestOffspring.set(family,Math.max(oldestOffspring.get(family) ?? 0, cell.age));
@@ -168,7 +220,31 @@ async function run(template, worldSeed) {
   obs.kills = state.predations;
   obs.attacks = state.attacks;
   obs.foodCaptures = state.eaten;
-  if (id === 'hunting-ground' || id === 'mixed-ecosystem') {
+  if (basin) {
+    const events = basinEvents();
+    obs.lineageActivity = Object.fromEntries(cohorts.map(({name}) => {
+      const {fixing,digesting,secreting,feedingInLight} = observedFlux.get(name);
+      const census = events.get(name);
+      assert.ok(census && birthsAtMidpoint.has(name));
+      return [name, {fixing:fixing.size,digesting:digesting.size,secreting:secreting.size,
+        cellsSeenFixingAndDigesting:[...fixing].filter(id => digesting.has(id)).length,
+        cellsSeenFixingWhileDigesting:feedingInLight.size,
+        ...census,birthsAfterMidpoint:census.births-birthsAtMidpoint.get(name)}];
+    }));
+    result.checks.producerExports = obs.lineageActivity.Phototroph.secreting > 0;
+    result.checks.consumersDigest = ['Forager','Rememberer'].every(name => obs.lineageActivity[name].digesting > 0 && !obs.lineageActivity[name].fixing);
+    result.checks.consumersRenew = ['Forager','Rememberer'].every(name => obs.alive[name] > 0 && obs.lineageActivity[name].birthsAfterMidpoint > 0);
+    obs.firstObservedLigandRelease = firstLigandRelease;
+    obs.firstObservedLigandUptake = firstLigandUptake;
+    obs.lineagesWithInternalLigand = [...exposed];
+    obs.firstObservedRecoveryEnzyme = firstRecoveryEnzyme;
+    obs.mineralsEmitted = round(api.nutrient_input_total() - initialMinerals);
+    obs.mineralsAbsorbed = round(api.nutrient_removed_total());
+    result.checks.mineralExchange = obs.mineralsEmitted > 0 && obs.mineralsAbsorbed > 0;
+    result.checks.ligandReleasedAndCaptured = firstLigandRelease !== null && firstLigandUptake !== null;
+    result.checks.grazerBuiltRecoveryEnzyme = firstRecoveryEnzyme !== null;
+  }
+  if (basin || id === 'hunting-ground' || id === 'mixed-ecosystem') {
     obs.huntersObservedWithStructuralCarbon = hungryTissue.size;
     result.checks.naturalHunt = state.predations > 0 && hungryTissue.size > 0 && obs.alive.Predator > 0;
     result.checks.photosynthesis = state.photosynthesis > 0;

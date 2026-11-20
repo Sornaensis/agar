@@ -556,13 +556,6 @@ impl Parser {
                     };
                     let kind = ProductKind::from_name(kind_name).ok_or_else(|| constructor.location.error(format!("unknown product constructor '{kind_name}'.")))?;
                     self.expect(Kind::LeftParen, "'(' after product constructor")?;
-                    let half_life = if kind == ProductKind::Regulator {
-                        let value = self.material_number()?;
-                        if !(0.001..=1.0e6).contains(&value) {
-                            return Err(constructor.location.error("regulator half-life must be between 0.001 and 1000000 seconds."));
-                        }
-                        value
-                    } else { 0.0 };
                     if kind == ProductKind::Adhesin {
                         let precursor = self.take();
                         let Kind::Name(precursor_name) = &precursor.kind else {
@@ -572,6 +565,24 @@ impl Parser {
                             precursor.location.error(format!("unknown adhesin precursor '{precursor_name}'.")))?;
                         finishes.push((products.len(), index, precursor.location));
                     }
+                    let has_lifetime = if kind == ProductKind::Adhesin {
+                        if self.peek().kind == Kind::Comma { self.take(); true } else { false }
+                    } else {
+                        kind == ProductKind::Regulator || self.peek().kind != Kind::RightParen
+                    };
+                    let mut lifetime = self.peek().location;
+                    let half_life = if has_lifetime {
+                        let value = self.material_number()?;
+                        if !((0.001..=1.0e6).contains(&value) || (value == 0.0 && kind != ProductKind::Regulator)) {
+                            return Err(lifetime.error("product half-life must be 0.001 to 1000000 seconds. Ordinary stock can also be stable (0)."));
+                        }
+                        lifetime = lifetime.through(self.tokens[self.position - 1].location.to);
+                        value
+                    } else {
+                        lifetime.to = lifetime.from; // insertion just before the closing parenthesis
+                        0.0
+                    };
+                    self.lifetime_locations.push(lifetime);
                     self.expect(Kind::RightParen, "')' after product constructor arguments")?;
                     self.expect(Kind::Semicolon, "';' after product declaration")?;
                     if self.product_names.get(&name) != Some(&products.len()) {
@@ -603,7 +614,13 @@ impl Parser {
                 "assembly" => {
                     let (name, location) = self.declaration_name("assembly")?;
                     self.expect(Kind::Colon, "':' after assembly name")?;
+                    let kind_start = self.position;
                     let kind = self.assembly_kind()?;
+                    // A single-target constructor has exactly four tokens, even
+                    // with comments or whitespace surrounding its argument.
+                    let target_location = (self.position == kind_start + 4)
+                        .then(|| self.tokens[kind_start + 2].location);
+                    self.target_locations.push(target_location);
                     self.expect(Kind::LeftBrace, "'{' before assembly recipe")?;
                     let mut parts = Vec::new();
                     let mut fields = HashSet::new();
@@ -656,6 +673,7 @@ impl Parser {
                             }
                             _ => {
                                 let product = self.product_names.get(field_name).copied().ok_or_else(|| field.location.error(format!("unknown recipe product '{field_name}'.")))?;
+                                let literal = self.peek().location;
                                 let amount = if self.count_units {
                                     let token = self.take();
                                     match token.kind {
@@ -666,6 +684,7 @@ impl Parser {
                                 if !(0.0..=1.0e6).contains(&amount) || amount == 0.0 {
                                     return Err(field.location.error("recipe material amounts must be positive and no more than 1000000."));
                                 }
+                                self.ingredient_locations.push(literal);
                                 parts.push((product, amount));
                             }
                         }
@@ -826,8 +845,8 @@ pub(super) fn schema_json() -> String {
     let products = ProductKind::ALL.iter().map(|kind| {
         let arguments = match kind {
             ProductKind::Regulator => "\"halfLife\"",
-            ProductKind::Adhesin => "\"precursor\"",
-            _ => "",
+            ProductKind::Adhesin => "\"precursor\",\"halfLife?\"",
+            _ => "\"halfLife?\"",
         };
         format!("{{\"name\":{},\"arguments\":[{arguments}]}}", quote(kind.name()))
     })
@@ -1244,7 +1263,7 @@ clear rf001 when ri001 == 1;
     fn constructor_and_recipe_checks_reject_untyped_or_free_machinery() {
         for source in [
             "cellular; product A = \"motor\";",
-            "cellular; product A = motor(2);",
+            "cellular; product A = motor(2, 3);",
             "cellular; product A = regulator();",
             "cellular; product A = regulator(0);",
             "cellular; product A = regulator(-1);",
