@@ -6,7 +6,7 @@ Nine stock genomes start as 116 founders in the 800 × 520 Springwater basin. Tw
 
 On native seed 7, a docked Forager received carbon from a Phototroph at 40 seconds. Juvenile Nurse cells received carbon, ATP and minerals between 96 and 116 seconds. A Crown rim cell responding to a neighboring signal released carbon at 128 seconds, and a bonded Pulse swimmer powered its motor at 148 seconds. These are the first observations in four-second samples.
 
-At ten simulated minutes, the shipped WebAssembly engine recorded these outcomes. Late Forager births occurred between minutes five and ten.
+In the basin study preceding the Predator feeding revision, the WebAssembly engine recorded these outcomes at ten simulated minutes. Late Forager births occurred between minutes five and ten.
 
 | Seed | Cells alive | Lineages alive | Foragers alive | Late Forager births | Extinct lineages |
 | --- | ---: | ---: | ---: | ---: | --- |
@@ -19,22 +19,37 @@ Native seed 7 reached 900 seconds with 547 cells across all nine lineages, inclu
 
 In a finite carcass bloom the revised Forager divided at 61 seconds. The two halves inherited 72 and 36 units of gut capacity, and the daughter divided at 102 seconds. Physical inheritance also produced daughters with zero gut capacity in a free-running control. In a separate paired encounter, a Forager gained 6.4613 carbon and returned 0.3156 mineral through its producer dock. Both transfers were zero with exchange ports closed.
 
-From the project root, replay the default ten-minute observation with `npm run test:scenarios -- --scenario springwater-basin --seeds 7 --output basin.json`. For a fifteen-minute census, run `node --no-liftoff scripts/check-ecosystem.mjs --scenario springwater-basin --duration 900 --seed 7 --sample-at 300,600,900 --output census.json`.
+Replay this earlier ten-minute observation with `npm run test:scenarios -- --seeds 7 --genome "Predator=experiments/fixtures/predator-before-particle-foraging.cell" --output basin.json`. The current stock uses `npm run test:scenarios -- --seeds 7 --output current-basin.json`.
+
+## Predator particle feeding
+
+The preceding Predator had a forward eye and generally pursued optical returns only while hungry. The current Predator can grow a pair of flank eyes in weak organic plumes. Once a flank eye is built, it can pay for a sideways motor that brings its forward inlet toward a nearby small object. A well-fuelled cell with room in its gut can use the same response. The particle must still reach a working inlet.
+
+In 18 six-second approaches to a real Phototroph secretion, the old genome consumed and digested 8 packets and the revised genome consumed and digested 17. Each approach used one isolated 0.570-energy packet, with two starting gaps and nine bearings. Closing all inlets prevented feeding. In a separate trial both adults had more than 70% of their ATP capacity, an empty gut, and an identical fresh 0.582-energy packet. The old adult missed both flank placements for 16 seconds. The revised adult collected the left and right packets in 0.73 and 0.70 seconds. The remote control packet persisted for the full 16 seconds.
+
+In Springwater, five-minute measurements sum the energy assimilated by every living Predator descendant after each tick. The rates divide those amounts by cumulative live Predator-seconds. The totals include scavenged material and tissue from kills.
+
+| Seed | Previous energy | Revised energy | Previous rate | Revised rate | Previous kills | Revised kills |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 7 | 1,719.3 | 1,805.3 | 1.90 | 1.99 | 18 | 18 |
+| 42 | 3,264.4 | 2,072.0 | 2.44 | 1.98 | 37 | 23 |
+
+The revised default browser simulation had 427 cells from 9 founding lineages at ten minutes, including 3 Predators and 1 Forager. The older finite-prey stress test still misses its granddaughter target. All three dark-carrion trials ended without a surviving Predator for either genome. [Exact observations and replay commands](predator-particle-feeding.json)
 
 ## Predator recognition
 
-[The paired pond study](predator-recognition-pond.json) compares the current stock Predator with its [previous genome](fixtures/predator-before-recognition.cell). The habitat, mutation rate, Phototrophs, Foragers, and founder counts are identical on both sides. Every kill was credited to the Predator lineage. Each victim’s founding lineage therefore gives the exact number of kin and prey kills, including mutated descendants. The study also records births, deaths from ATP depletion, and whether each fission product has an active display carrying marker 17 immediately after the split and one tick later.
+[The paired pond study](predator-recognition-pond.json) compares the earlier ring-of-displays Predator with its [pre-recognition genome](fixtures/predator-before-recognition.cell). The habitat, mutation rate, Phototrophs, Foragers, and founder counts are identical on both sides. Every kill was credited to the Predator lineage. Each victim’s founding lineage therefore gives the exact number of kin and prey kills, including mutated descendants. The study also records births, deaths from ATP depletion, and whether each fission product has an active display carrying marker 17 immediately after the split and one tick later.
 
 At ten simulated minutes, the previous Predator had killed two kin and 44 other cells on seed 42, and zero kin and 32 other cells on seed 7. The revised Predator killed zero kin on either seed. It killed 29 Phototrophs on seed 42 and 15 on seed 7. Two revised Predators were alive on seed 42 and one on seed 7. Both lineages reproduced.
 
 Every observable revised daughter carried marker 17 after one tick (1/30 second). On each seed the first division left eight active display patches in each half. The next observable division left twelve in the retaining parent and eleven in the daughter. One further daughter was absent from the live snapshot on the split tick. The previous genome also wrote 17 within one tick in all six observable births in its 300-second timing control. Each of those halves had one active patch.
 
-The separate finite-prey stress test, `npm run test:predator-foraging`, still misses its granddaughter target with both the previous and revised stock genome. The continuously fed division regression tests the marker timing independently of that food limitation.
+The continuously fed division regression tests marker timing independently of the finite-prey stress test.
 
 Run either command from the project folder to produce the detailed censuses.
 
 ```sh
-node --no-liftoff scripts/check-ecosystem.mjs --scenario mixed-ecosystem --seed 42,7 --duration 600 --sample-at 450 --trace-predator-births --output revised-recognition.json
+node --no-liftoff scripts/check-ecosystem.mjs --scenario mixed-ecosystem --seed 42,7 --duration 600 --sample-at 450 --trace-predator-births --predator-source experiments/fixtures/predator-before-particle-foraging.cell --output revised-recognition.json
 node --no-liftoff scripts/check-ecosystem.mjs --scenario mixed-ecosystem --seed 42,7 --duration 600 --sample-at 450 --trace-predator-births --predator-source experiments/fixtures/predator-before-recognition.cell --output previous-recognition.json
 ```
 

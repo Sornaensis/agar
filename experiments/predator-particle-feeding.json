@@ -1,0 +1,1444 @@
+{
+  "title": "Predator particle feeding in Springwater basin",
+  "engineSha256": "c3d496d7c9ef7ed3c33c24d7a8a5a303f47be16a86a9cceb27125cb7f58c30f2",
+  "method": {
+    "hungry": "The donor exports one soluble packet. After 34 seconds a swimming Predator with an empty gut and working inlet approaches it at nine bearings and two membrane gaps. Each replay starts from the same saved state. No further positioning occurs during the six seconds of observation. The current test also closes every inlet and checks for zero uptake and assimilation.",
+    "funded": "A separate adult digests tissue before each saved encounter. During priming its ATP is replenished. After priming, a remote outlet makes a fresh equal-energy pulse for each genotype. Both trials report the free organic reserve, gut, ATP and delivered pulse energy at the start. A loss of the tracked pulse must coincide with a capture increment while this hunter is uniquely in range. A remote control verifies the pulse persists.",
+    "mixed": "Bundled WebAssembly module under Node.js, counted chemistry, normal Springwater founders and 0.1 mutation. At every tick, integrate the sum of reported digestion rates in all live Predator descendants, in assimilated food energy. Also integrate the number of living Predators in seconds. These totals include both scavenging and tissue from predation. Each 30-second check balances carbon, mineral, oxygen and energy including work and heat losses.",
+    "defaultScenario": "Ten-minute whole-basin run on the default launch seed. The lineage census includes mutated descendants."
+  },
+  "arms": {
+    "previous": {
+      "source": "experiments/fixtures/predator-before-particle-foraging.cell",
+      "sourceSha256": "e95617cd2914be2e056f273397dc17897f0d3af7c33d881e0635df1b20bf4592",
+      "particleTrials": {
+        "hungry": {
+          "packetEnergy": 0.57,
+          "trials": [
+            {
+              "gap": 6,
+              "degrees": -120,
+              "firstIngestionTick": null,
+              "targetConsumedTick": null,
+              "targetPresent": true,
+              "firstDivisionTick": null,
+              "assimilated": 0,
+              "particlesEaten": 0
+            },
+            {
+              "gap": 6,
+              "degrees": -90,
+              "firstIngestionTick": null,
+              "targetConsumedTick": null,
+              "targetPresent": true,
+              "firstDivisionTick": null,
+              "assimilated": 0,
+              "particlesEaten": 0
+            },
+            {
+              "gap": 6,
+              "degrees": -60,
+              "firstIngestionTick": null,
+              "targetConsumedTick": null,
+              "targetPresent": true,
+              "firstDivisionTick": null,
+              "assimilated": 0,
+              "particlesEaten": 0
+            },
+            {
+              "gap": 6,
+              "degrees": -30,
+              "firstIngestionTick": 9,
+              "targetConsumedTick": 9,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.45000000000000007,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 6,
+              "degrees": 0,
+              "firstIngestionTick": 5,
+              "targetConsumedTick": 5,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.452,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 6,
+              "degrees": 30,
+              "firstIngestionTick": 10,
+              "targetConsumedTick": 10,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.44800000000000006,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 6,
+              "degrees": 60,
+              "firstIngestionTick": null,
+              "targetConsumedTick": null,
+              "targetPresent": true,
+              "firstDivisionTick": null,
+              "assimilated": 0,
+              "particlesEaten": 0
+            },
+            {
+              "gap": 6,
+              "degrees": 90,
+              "firstIngestionTick": null,
+              "targetConsumedTick": null,
+              "targetPresent": true,
+              "firstDivisionTick": null,
+              "assimilated": 0,
+              "particlesEaten": 0
+            },
+            {
+              "gap": 6,
+              "degrees": 120,
+              "firstIngestionTick": null,
+              "targetConsumedTick": null,
+              "targetPresent": true,
+              "firstDivisionTick": null,
+              "assimilated": 0,
+              "particlesEaten": 0
+            },
+            {
+              "gap": 14,
+              "degrees": -120,
+              "firstIngestionTick": null,
+              "targetConsumedTick": null,
+              "targetPresent": true,
+              "firstDivisionTick": null,
+              "assimilated": 0,
+              "particlesEaten": 0
+            },
+            {
+              "gap": 14,
+              "degrees": -90,
+              "firstIngestionTick": null,
+              "targetConsumedTick": null,
+              "targetPresent": true,
+              "firstDivisionTick": null,
+              "assimilated": 0,
+              "particlesEaten": 0
+            },
+            {
+              "gap": 14,
+              "degrees": -60,
+              "firstIngestionTick": 51,
+              "targetConsumedTick": 51,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.42400000000000004,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 14,
+              "degrees": -30,
+              "firstIngestionTick": 25,
+              "targetConsumedTick": 25,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.44000000000000006,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 14,
+              "degrees": 0,
+              "firstIngestionTick": 21,
+              "targetConsumedTick": 21,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.44200000000000006,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 14,
+              "degrees": 30,
+              "firstIngestionTick": 27,
+              "targetConsumedTick": 27,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.44000000000000006,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 14,
+              "degrees": 60,
+              "firstIngestionTick": 56,
+              "targetConsumedTick": 56,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.42400000000000004,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 14,
+              "degrees": 90,
+              "firstIngestionTick": null,
+              "targetConsumedTick": null,
+              "targetPresent": true,
+              "firstDivisionTick": null,
+              "assimilated": 0,
+              "particlesEaten": 0
+            },
+            {
+              "gap": 14,
+              "degrees": 120,
+              "firstIngestionTick": null,
+              "targetConsumedTick": null,
+              "targetPresent": true,
+              "firstDivisionTick": null,
+              "assimilated": 0,
+              "particlesEaten": 0
+            }
+          ]
+        },
+        "funded": {
+          "atp": 155.6821,
+          "atpCapacity": 160,
+          "organicCarbon": 4.9143,
+          "gutEnergy": 0,
+          "gutCapacity": 48,
+          "packetEnergy": 0.582,
+          "horizonSeconds": 16,
+          "distant": {
+            "gap": 280,
+            "degrees": 0,
+            "targetConsumedTick": null,
+            "targetPresent": true,
+            "firstDivisionTick": 340
+          },
+          "trials": [
+            {
+              "gap": 6,
+              "degrees": -90,
+              "targetConsumedTick": null,
+              "targetPresent": true,
+              "firstDivisionTick": 340
+            },
+            {
+              "gap": 6,
+              "degrees": 0,
+              "targetConsumedTick": 86,
+              "targetPresent": false,
+              "firstDivisionTick": 340
+            },
+            {
+              "gap": 6,
+              "degrees": 90,
+              "targetConsumedTick": null,
+              "targetPresent": true,
+              "firstDivisionTick": 340
+            }
+          ]
+        }
+      },
+      "basinFeeding": [
+        {
+          "seed": 7,
+          "founders": {
+            "Phototroph": {
+              "count": 68,
+              "sha256": "c4241dd3a4c344dd5c216a9b281e482d6c0212101242f9891a772bc8ec3d2d2c"
+            },
+            "Ligand producer": {
+              "count": 4,
+              "sha256": "bb515a76023bfe99e5ddcb457d7e355624d3c127f335564439a58b6d4b478e42"
+            },
+            "Forager": {
+              "count": 12,
+              "sha256": "88ba5fbd774f3ad4aceda51b770c5a2df5123b394c50c64ca80884a73db89abc"
+            },
+            "Mixotroph": {
+              "count": 8,
+              "sha256": "9394d75e27ca4112ff732422e0e4b55da680dceac2a0f9fcf1adb70b392a4080"
+            },
+            "Rememberer": {
+              "count": 6,
+              "sha256": "1ed8f7c39f00ef2daabc1206c1c1a55d406a81bd8c2ad19af24451e24f7e228c"
+            },
+            "Nurse rosette": {
+              "count": 5,
+              "sha256": "1e056112b7273a4a950b5e075da92342f4150ee5987bef6b2b048b94c883b1bb"
+            },
+            "Crown rosette": {
+              "count": 5,
+              "sha256": "8f497c2fb6d8a23fdc7dea832fc3a5691c91939994481996a5ec0e7f97af009b"
+            },
+            "Pulse swimmer": {
+              "count": 5,
+              "sha256": "e04aecd94cc7a9d7ee52804e483100578289666a0d1982ed83200dd6998243ad"
+            },
+            "Predator": {
+              "count": 3,
+              "sha256": "e95617cd2914be2e056f273397dc17897f0d3af7c33d881e0635df1b20bf4592"
+            }
+          },
+          "engineSha256": "c3d496d7c9ef7ed3c33c24d7a8a5a303f47be16a86a9cceb27125cb7f58c30f2",
+          "rows": [
+            {
+              "seconds": 30,
+              "living": 116,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 0,
+              "gutEnergy": 0,
+              "assimilatedEnergy": 0,
+              "hunterSeconds": 89.99999999999916,
+              "assimilationPerLivingHunterSecond": 0
+            },
+            {
+              "seconds": 60,
+              "living": 114,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 2,
+              "gutEnergy": 0,
+              "assimilatedEnergy": 177.1962999999994,
+              "hunterSeconds": 179.99999999999406,
+              "assimilationPerLivingHunterSecond": 0.9844238888889181
+            },
+            {
+              "seconds": 90,
+              "living": 174,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 2,
+              "gutEnergy": 0,
+              "assimilatedEnergy": 188.25230000000013,
+              "hunterSeconds": 269.9999999999929,
+              "assimilationPerLivingHunterSecond": 0.6972307407407596
+            },
+            {
+              "seconds": 120,
+              "living": 198,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 4,
+              "gutEnergy": 19.737899999999996,
+              "assimilatedEnergy": 288.06540000000143,
+              "hunterSeconds": 360.00000000001336,
+              "assimilationPerLivingHunterSecond": 0.8001816666666409
+            },
+            {
+              "seconds": 150,
+              "living": 218,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 5,
+              "gutEnergy": 0.02,
+              "assimilatedEnergy": 513.192800000003,
+              "hunterSeconds": 450.0000000000338,
+              "assimilationPerLivingHunterSecond": 1.1404284444443653
+            },
+            {
+              "seconds": 180,
+              "living": 241,
+              "richness": 9,
+              "alive": 2,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 1,
+              "kills": 8,
+              "gutEnergy": 50.019400000000005,
+              "assimilatedEnergy": 707.9543000000058,
+              "hunterSeconds": 534.4000000000593,
+              "assimilationPerLivingHunterSecond": 1.3247647829339955
+            },
+            {
+              "seconds": 210,
+              "living": 253,
+              "richness": 9,
+              "alive": 3,
+              "births": 1,
+              "killedByPredation": 0,
+              "depletionDeaths": 1,
+              "kills": 9,
+              "gutEnergy": 8.0404,
+              "assimilatedEnergy": 846.1508000000133,
+              "hunterSeconds": 609.2666666667602,
+              "assimilationPerLivingHunterSecond": 1.3888020571176551
+            },
+            {
+              "seconds": 240,
+              "living": 279,
+              "richness": 9,
+              "alive": 3,
+              "births": 1,
+              "killedByPredation": 0,
+              "depletionDeaths": 1,
+              "kills": 14,
+              "gutEnergy": 47.2151,
+              "assimilatedEnergy": 1218.4021000000153,
+              "hunterSeconds": 699.2666666667807,
+              "assimilationPerLivingHunterSecond": 1.7423997997899943
+            },
+            {
+              "seconds": 270,
+              "living": 287,
+              "richness": 9,
+              "alive": 3,
+              "births": 2,
+              "killedByPredation": 0,
+              "depletionDeaths": 2,
+              "kills": 17,
+              "gutEnergy": 9.7623,
+              "assimilatedEnergy": 1635.7985000000217,
+              "hunterSeconds": 789.2666666668011,
+              "assimilationPerLivingHunterSecond": 2.072554903285425
+            },
+            {
+              "seconds": 300,
+              "living": 307,
+              "richness": 9,
+              "alive": 4,
+              "births": 3,
+              "killedByPredation": 0,
+              "depletionDeaths": 2,
+              "kills": 18,
+              "gutEnergy": 43.192499999999995,
+              "assimilatedEnergy": 1719.3079000000066,
+              "hunterSeconds": 907.2333333334628,
+              "assimilationPerLivingHunterSecond": 1.8951110335449475
+            }
+          ]
+        },
+        {
+          "seed": 42,
+          "founders": {
+            "Phototroph": {
+              "count": 68,
+              "sha256": "c4241dd3a4c344dd5c216a9b281e482d6c0212101242f9891a772bc8ec3d2d2c"
+            },
+            "Ligand producer": {
+              "count": 4,
+              "sha256": "bb515a76023bfe99e5ddcb457d7e355624d3c127f335564439a58b6d4b478e42"
+            },
+            "Forager": {
+              "count": 12,
+              "sha256": "88ba5fbd774f3ad4aceda51b770c5a2df5123b394c50c64ca80884a73db89abc"
+            },
+            "Mixotroph": {
+              "count": 8,
+              "sha256": "9394d75e27ca4112ff732422e0e4b55da680dceac2a0f9fcf1adb70b392a4080"
+            },
+            "Rememberer": {
+              "count": 6,
+              "sha256": "1ed8f7c39f00ef2daabc1206c1c1a55d406a81bd8c2ad19af24451e24f7e228c"
+            },
+            "Nurse rosette": {
+              "count": 5,
+              "sha256": "1e056112b7273a4a950b5e075da92342f4150ee5987bef6b2b048b94c883b1bb"
+            },
+            "Crown rosette": {
+              "count": 5,
+              "sha256": "8f497c2fb6d8a23fdc7dea832fc3a5691c91939994481996a5ec0e7f97af009b"
+            },
+            "Pulse swimmer": {
+              "count": 5,
+              "sha256": "e04aecd94cc7a9d7ee52804e483100578289666a0d1982ed83200dd6998243ad"
+            },
+            "Predator": {
+              "count": 3,
+              "sha256": "e95617cd2914be2e056f273397dc17897f0d3af7c33d881e0635df1b20bf4592"
+            }
+          },
+          "engineSha256": "c3d496d7c9ef7ed3c33c24d7a8a5a303f47be16a86a9cceb27125cb7f58c30f2",
+          "rows": [
+            {
+              "seconds": 30,
+              "living": 116,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 0,
+              "gutEnergy": 0,
+              "assimilatedEnergy": 0,
+              "hunterSeconds": 89.99999999999916,
+              "assimilationPerLivingHunterSecond": 0
+            },
+            {
+              "seconds": 60,
+              "living": 113,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 3,
+              "gutEnergy": 0,
+              "assimilatedEnergy": 201.53590000000122,
+              "hunterSeconds": 179.99999999999406,
+              "assimilationPerLivingHunterSecond": 1.1196438888889326
+            },
+            {
+              "seconds": 90,
+              "living": 173,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 6,
+              "gutEnergy": 0,
+              "assimilatedEnergy": 386.2431999999997,
+              "hunterSeconds": 269.9999999999929,
+              "assimilationPerLivingHunterSecond": 1.4305303703704069
+            },
+            {
+              "seconds": 120,
+              "living": 185,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 11,
+              "gutEnergy": 1.162,
+              "assimilatedEnergy": 817.5082999999995,
+              "hunterSeconds": 360.00000000001336,
+              "assimilationPerLivingHunterSecond": 2.270856388888803
+            },
+            {
+              "seconds": 150,
+              "living": 204,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 15,
+              "gutEnergy": 14.2051,
+              "assimilatedEnergy": 1229.5078999999969,
+              "hunterSeconds": 450.0000000000338,
+              "assimilationPerLivingHunterSecond": 2.7322397777775653
+            },
+            {
+              "seconds": 180,
+              "living": 235,
+              "richness": 9,
+              "alive": 6,
+              "births": 3,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 20,
+              "gutEnergy": 34.0858,
+              "assimilatedEnergy": 1694.8117999999947,
+              "hunterSeconds": 579.0333333333842,
+              "assimilationPerLivingHunterSecond": 2.926967589660663
+            },
+            {
+              "seconds": 210,
+              "living": 244,
+              "richness": 9,
+              "alive": 6,
+              "births": 3,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 26,
+              "gutEnergy": 57.8651,
+              "assimilatedEnergy": 2146.795499999993,
+              "hunterSeconds": 759.0333333334252,
+              "assimilationPerLivingHunterSecond": 2.828328356242238
+            },
+            {
+              "seconds": 240,
+              "living": 259,
+              "richness": 9,
+              "alive": 6,
+              "births": 4,
+              "killedByPredation": 0,
+              "depletionDeaths": 1,
+              "kills": 30,
+              "gutEnergy": 0.178,
+              "assimilatedEnergy": 2562.6985000000227,
+              "hunterSeconds": 939.0333333334661,
+              "assimilationPerLivingHunterSecond": 2.7290815022537296
+            },
+            {
+              "seconds": 270,
+              "living": 279,
+              "richness": 9,
+              "alive": 7,
+              "births": 5,
+              "killedByPredation": 0,
+              "depletionDeaths": 1,
+              "kills": 35,
+              "gutEnergy": 91.4656,
+              "assimilatedEnergy": 3092.1845000000144,
+              "hunterSeconds": 1129.0000000001646,
+              "assimilationPerLivingHunterSecond": 2.7388702391493034
+            },
+            {
+              "seconds": 300,
+              "living": 301,
+              "richness": 9,
+              "alive": 7,
+              "births": 5,
+              "killedByPredation": 0,
+              "depletionDeaths": 1,
+              "kills": 37,
+              "gutEnergy": 107.6876,
+              "assimilatedEnergy": 3264.4458000000054,
+              "hunterSeconds": 1339.0000000001783,
+              "assimilationPerLivingHunterSecond": 2.437972964898858
+            }
+          ]
+        }
+      ]
+    },
+    "revised": {
+      "source": "examples/predator.cell",
+      "sourceSha256": "3a45653a83d01ae2ce33eb0f6418f875d10d586d0f2930490aca5ed71c05b04b",
+      "particleTrials": {
+        "hungry": {
+          "packetEnergy": 0.57,
+          "trials": [
+            {
+              "gap": 6,
+              "degrees": -120,
+              "firstIngestionTick": 46,
+              "targetConsumedTick": 46,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.42800000000000005,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 6,
+              "degrees": -90,
+              "firstIngestionTick": 34,
+              "targetConsumedTick": 34,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.43400000000000005,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 6,
+              "degrees": -60,
+              "firstIngestionTick": null,
+              "targetConsumedTick": null,
+              "targetPresent": true,
+              "firstDivisionTick": null,
+              "assimilated": 0,
+              "particlesEaten": 0
+            },
+            {
+              "gap": 6,
+              "degrees": -30,
+              "firstIngestionTick": 9,
+              "targetConsumedTick": 9,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.45000000000000007,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 6,
+              "degrees": 0,
+              "firstIngestionTick": 5,
+              "targetConsumedTick": 5,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.452,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 6,
+              "degrees": 30,
+              "firstIngestionTick": 10,
+              "targetConsumedTick": 10,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.44800000000000006,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 6,
+              "degrees": 60,
+              "firstIngestionTick": 29,
+              "targetConsumedTick": 29,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.43800000000000006,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 6,
+              "degrees": 90,
+              "firstIngestionTick": 34,
+              "targetConsumedTick": 34,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.44800000000000006,
+              "particlesEaten": 2
+            },
+            {
+              "gap": 6,
+              "degrees": 120,
+              "firstIngestionTick": 47,
+              "targetConsumedTick": 47,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.42800000000000005,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 14,
+              "degrees": -120,
+              "firstIngestionTick": 67,
+              "targetConsumedTick": 67,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.41600000000000004,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 14,
+              "degrees": -90,
+              "firstIngestionTick": 53,
+              "targetConsumedTick": 53,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.42400000000000004,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 14,
+              "degrees": -60,
+              "firstIngestionTick": 42,
+              "targetConsumedTick": 42,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.43200000000000005,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 14,
+              "degrees": -30,
+              "firstIngestionTick": 26,
+              "targetConsumedTick": 26,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.44000000000000006,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 14,
+              "degrees": 0,
+              "firstIngestionTick": 22,
+              "targetConsumedTick": 22,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.44200000000000006,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 14,
+              "degrees": 30,
+              "firstIngestionTick": 28,
+              "targetConsumedTick": 28,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.44000000000000006,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 14,
+              "degrees": 60,
+              "firstIngestionTick": 44,
+              "targetConsumedTick": 44,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.43000000000000005,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 14,
+              "degrees": 90,
+              "firstIngestionTick": 59,
+              "targetConsumedTick": 59,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.42200000000000004,
+              "particlesEaten": 1
+            },
+            {
+              "gap": 14,
+              "degrees": 120,
+              "firstIngestionTick": 68,
+              "targetConsumedTick": 68,
+              "targetPresent": false,
+              "firstDivisionTick": null,
+              "assimilated": 0.41600000000000004,
+              "particlesEaten": 1
+            }
+          ]
+        },
+        "funded": {
+          "atp": 158.4222,
+          "atpCapacity": 160,
+          "organicCarbon": 6.1008,
+          "gutEnergy": 0,
+          "gutCapacity": 48,
+          "packetEnergy": 0.582,
+          "horizonSeconds": 16,
+          "distant": {
+            "gap": 280,
+            "degrees": 0,
+            "targetConsumedTick": null,
+            "targetPresent": true,
+            "firstDivisionTick": null
+          },
+          "trials": [
+            {
+              "gap": 6,
+              "degrees": -90,
+              "targetConsumedTick": 22,
+              "targetPresent": false,
+              "firstDivisionTick": null
+            },
+            {
+              "gap": 6,
+              "degrees": 0,
+              "targetConsumedTick": 31,
+              "targetPresent": false,
+              "firstDivisionTick": null
+            },
+            {
+              "gap": 6,
+              "degrees": 90,
+              "targetConsumedTick": 21,
+              "targetPresent": false,
+              "firstDivisionTick": null
+            }
+          ]
+        }
+      },
+      "basinFeeding": [
+        {
+          "seed": 7,
+          "founders": {
+            "Phototroph": {
+              "count": 68,
+              "sha256": "c4241dd3a4c344dd5c216a9b281e482d6c0212101242f9891a772bc8ec3d2d2c"
+            },
+            "Ligand producer": {
+              "count": 4,
+              "sha256": "bb515a76023bfe99e5ddcb457d7e355624d3c127f335564439a58b6d4b478e42"
+            },
+            "Forager": {
+              "count": 12,
+              "sha256": "88ba5fbd774f3ad4aceda51b770c5a2df5123b394c50c64ca80884a73db89abc"
+            },
+            "Mixotroph": {
+              "count": 8,
+              "sha256": "9394d75e27ca4112ff732422e0e4b55da680dceac2a0f9fcf1adb70b392a4080"
+            },
+            "Rememberer": {
+              "count": 6,
+              "sha256": "1ed8f7c39f00ef2daabc1206c1c1a55d406a81bd8c2ad19af24451e24f7e228c"
+            },
+            "Nurse rosette": {
+              "count": 5,
+              "sha256": "1e056112b7273a4a950b5e075da92342f4150ee5987bef6b2b048b94c883b1bb"
+            },
+            "Crown rosette": {
+              "count": 5,
+              "sha256": "8f497c2fb6d8a23fdc7dea832fc3a5691c91939994481996a5ec0e7f97af009b"
+            },
+            "Pulse swimmer": {
+              "count": 5,
+              "sha256": "e04aecd94cc7a9d7ee52804e483100578289666a0d1982ed83200dd6998243ad"
+            },
+            "Predator": {
+              "count": 3,
+              "sha256": "3a45653a83d01ae2ce33eb0f6418f875d10d586d0f2930490aca5ed71c05b04b"
+            }
+          },
+          "engineSha256": "c3d496d7c9ef7ed3c33c24d7a8a5a303f47be16a86a9cceb27125cb7f58c30f2",
+          "rows": [
+            {
+              "seconds": 30,
+              "living": 116,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 0,
+              "gutEnergy": 0,
+              "assimilatedEnergy": 0,
+              "hunterSeconds": 89.99999999999916,
+              "assimilationPerLivingHunterSecond": 0
+            },
+            {
+              "seconds": 60,
+              "living": 114,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 2,
+              "gutEnergy": 0,
+              "assimilatedEnergy": 177.1962999999994,
+              "hunterSeconds": 179.99999999999406,
+              "assimilationPerLivingHunterSecond": 0.9844238888889181
+            },
+            {
+              "seconds": 90,
+              "living": 174,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 2,
+              "gutEnergy": 0,
+              "assimilatedEnergy": 188.25230000000013,
+              "hunterSeconds": 269.9999999999929,
+              "assimilationPerLivingHunterSecond": 0.6972307407407596
+            },
+            {
+              "seconds": 120,
+              "living": 198,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 4,
+              "gutEnergy": 19.737899999999996,
+              "assimilatedEnergy": 288.06540000000143,
+              "hunterSeconds": 360.00000000001336,
+              "assimilationPerLivingHunterSecond": 0.8001816666666409
+            },
+            {
+              "seconds": 150,
+              "living": 218,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 5,
+              "gutEnergy": 0.02,
+              "assimilatedEnergy": 513.192800000003,
+              "hunterSeconds": 450.0000000000338,
+              "assimilationPerLivingHunterSecond": 1.1404284444443653
+            },
+            {
+              "seconds": 180,
+              "living": 241,
+              "richness": 9,
+              "alive": 2,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 1,
+              "kills": 8,
+              "gutEnergy": 50.019400000000005,
+              "assimilatedEnergy": 707.9543000000058,
+              "hunterSeconds": 534.4000000000593,
+              "assimilationPerLivingHunterSecond": 1.3247647829339955
+            },
+            {
+              "seconds": 210,
+              "living": 253,
+              "richness": 9,
+              "alive": 3,
+              "births": 1,
+              "killedByPredation": 0,
+              "depletionDeaths": 1,
+              "kills": 9,
+              "gutEnergy": 8.0404,
+              "assimilatedEnergy": 846.1508000000133,
+              "hunterSeconds": 609.2666666667602,
+              "assimilationPerLivingHunterSecond": 1.3888020571176551
+            },
+            {
+              "seconds": 240,
+              "living": 279,
+              "richness": 9,
+              "alive": 3,
+              "births": 1,
+              "killedByPredation": 0,
+              "depletionDeaths": 1,
+              "kills": 14,
+              "gutEnergy": 47.2151,
+              "assimilatedEnergy": 1218.4021000000153,
+              "hunterSeconds": 699.2666666667807,
+              "assimilationPerLivingHunterSecond": 1.7423997997899943
+            },
+            {
+              "seconds": 270,
+              "living": 287,
+              "richness": 9,
+              "alive": 3,
+              "births": 2,
+              "killedByPredation": 0,
+              "depletionDeaths": 2,
+              "kills": 17,
+              "gutEnergy": 7.896299999999999,
+              "assimilatedEnergy": 1646.2985000000174,
+              "hunterSeconds": 789.2666666668011,
+              "assimilationPerLivingHunterSecond": 2.085858391755727
+            },
+            {
+              "seconds": 300,
+              "living": 307,
+              "richness": 9,
+              "alive": 4,
+              "births": 3,
+              "killedByPredation": 0,
+              "depletionDeaths": 2,
+              "kills": 18,
+              "gutEnergy": 64.7744,
+              "assimilatedEnergy": 1805.2704000000122,
+              "hunterSeconds": 907.2333333334628,
+              "assimilationPerLivingHunterSecond": 1.9898633942018824
+            }
+          ]
+        },
+        {
+          "seed": 42,
+          "founders": {
+            "Phototroph": {
+              "count": 68,
+              "sha256": "c4241dd3a4c344dd5c216a9b281e482d6c0212101242f9891a772bc8ec3d2d2c"
+            },
+            "Ligand producer": {
+              "count": 4,
+              "sha256": "bb515a76023bfe99e5ddcb457d7e355624d3c127f335564439a58b6d4b478e42"
+            },
+            "Forager": {
+              "count": 12,
+              "sha256": "88ba5fbd774f3ad4aceda51b770c5a2df5123b394c50c64ca80884a73db89abc"
+            },
+            "Mixotroph": {
+              "count": 8,
+              "sha256": "9394d75e27ca4112ff732422e0e4b55da680dceac2a0f9fcf1adb70b392a4080"
+            },
+            "Rememberer": {
+              "count": 6,
+              "sha256": "1ed8f7c39f00ef2daabc1206c1c1a55d406a81bd8c2ad19af24451e24f7e228c"
+            },
+            "Nurse rosette": {
+              "count": 5,
+              "sha256": "1e056112b7273a4a950b5e075da92342f4150ee5987bef6b2b048b94c883b1bb"
+            },
+            "Crown rosette": {
+              "count": 5,
+              "sha256": "8f497c2fb6d8a23fdc7dea832fc3a5691c91939994481996a5ec0e7f97af009b"
+            },
+            "Pulse swimmer": {
+              "count": 5,
+              "sha256": "e04aecd94cc7a9d7ee52804e483100578289666a0d1982ed83200dd6998243ad"
+            },
+            "Predator": {
+              "count": 3,
+              "sha256": "3a45653a83d01ae2ce33eb0f6418f875d10d586d0f2930490aca5ed71c05b04b"
+            }
+          },
+          "engineSha256": "c3d496d7c9ef7ed3c33c24d7a8a5a303f47be16a86a9cceb27125cb7f58c30f2",
+          "rows": [
+            {
+              "seconds": 30,
+              "living": 116,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 0,
+              "gutEnergy": 0,
+              "assimilatedEnergy": 0,
+              "hunterSeconds": 89.99999999999916,
+              "assimilationPerLivingHunterSecond": 0
+            },
+            {
+              "seconds": 60,
+              "living": 113,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 3,
+              "gutEnergy": 40.765,
+              "assimilatedEnergy": 189.05789999999996,
+              "hunterSeconds": 179.99999999999406,
+              "assimilationPerLivingHunterSecond": 1.050321666666701
+            },
+            {
+              "seconds": 90,
+              "living": 175,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 5,
+              "gutEnergy": 11.7936,
+              "assimilatedEnergy": 404.05969999999974,
+              "hunterSeconds": 269.9999999999929,
+              "assimilationPerLivingHunterSecond": 1.4965174074074459
+            },
+            {
+              "seconds": 120,
+              "living": 193,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 7,
+              "gutEnergy": 21.6132,
+              "assimilatedEnergy": 510.6681999999982,
+              "hunterSeconds": 360.00000000001336,
+              "assimilationPerLivingHunterSecond": 1.41852277777772
+            },
+            {
+              "seconds": 150,
+              "living": 214,
+              "richness": 9,
+              "alive": 3,
+              "births": 0,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 9,
+              "gutEnergy": 15.2876,
+              "assimilatedEnergy": 670.3745999999988,
+              "hunterSeconds": 450.0000000000338,
+              "assimilationPerLivingHunterSecond": 1.4897213333332189
+            },
+            {
+              "seconds": 180,
+              "living": 239,
+              "richness": 9,
+              "alive": 4,
+              "births": 1,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 14,
+              "gutEnergy": 68.405,
+              "assimilatedEnergy": 1011.3713999999966,
+              "hunterSeconds": 540.7666666667202,
+              "assimilationPerLivingHunterSecond": 1.8702547001169263
+            },
+            {
+              "seconds": 210,
+              "living": 251,
+              "richness": 9,
+              "alive": 4,
+              "births": 1,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 15,
+              "gutEnergy": 58.37729999999999,
+              "assimilatedEnergy": 1231.8527999999985,
+              "hunterSeconds": 660.7666666667134,
+              "assimilationPerLivingHunterSecond": 1.864278060838286
+            },
+            {
+              "seconds": 240,
+              "living": 278,
+              "richness": 9,
+              "alive": 4,
+              "births": 1,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 18,
+              "gutEnergy": 59.4336,
+              "assimilatedEnergy": 1468.349700000002,
+              "hunterSeconds": 780.7666666667066,
+              "assimilationPerLivingHunterSecond": 1.8806511121546263
+            },
+            {
+              "seconds": 270,
+              "living": 292,
+              "richness": 9,
+              "alive": 4,
+              "births": 1,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 22,
+              "gutEnergy": 80.6162,
+              "assimilatedEnergy": 1796.333799999998,
+              "hunterSeconds": 900.7666666666997,
+              "assimilationPerLivingHunterSecond": 1.9942276579209548
+            },
+            {
+              "seconds": 300,
+              "living": 299,
+              "richness": 9,
+              "alive": 5,
+              "births": 2,
+              "killedByPredation": 0,
+              "depletionDeaths": 0,
+              "kills": 23,
+              "gutEnergy": 122.54990000000001,
+              "assimilatedEnergy": 2072.006599999998,
+              "hunterSeconds": 1045.3666666666852,
+              "assimilationPerLivingHunterSecond": 1.9820859666464345
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "defaultScenario": {
+    "id": "springwater-basin",
+    "habitat": "builtin:environment:springwater-basin",
+    "seconds": 600,
+    "sampleSeconds": 2,
+    "settings": {
+      "mutationRate": 0.1,
+      "countChemistry": true
+    },
+    "cohorts": [
+      {
+        "name": "Phototroph",
+        "count": 68,
+        "sourceSha256": "c4241dd3a4c344dd5c216a9b281e482d6c0212101242f9891a772bc8ec3d2d2c"
+      },
+      {
+        "name": "Ligand producer",
+        "count": 4,
+        "sourceSha256": "bb515a76023bfe99e5ddcb457d7e355624d3c127f335564439a58b6d4b478e42"
+      },
+      {
+        "name": "Forager",
+        "count": 12,
+        "sourceSha256": "88ba5fbd774f3ad4aceda51b770c5a2df5123b394c50c64ca80884a73db89abc"
+      },
+      {
+        "name": "Mixotroph",
+        "count": 8,
+        "sourceSha256": "9394d75e27ca4112ff732422e0e4b55da680dceac2a0f9fcf1adb70b392a4080"
+      },
+      {
+        "name": "Rememberer",
+        "count": 6,
+        "sourceSha256": "1ed8f7c39f00ef2daabc1206c1c1a55d406a81bd8c2ad19af24451e24f7e228c"
+      },
+      {
+        "name": "Nurse rosette",
+        "count": 5,
+        "sourceSha256": "1e056112b7273a4a950b5e075da92342f4150ee5987bef6b2b048b94c883b1bb"
+      },
+      {
+        "name": "Crown rosette",
+        "count": 5,
+        "sourceSha256": "8f497c2fb6d8a23fdc7dea832fc3a5691c91939994481996a5ec0e7f97af009b"
+      },
+      {
+        "name": "Pulse swimmer",
+        "count": 5,
+        "sourceSha256": "e04aecd94cc7a9d7ee52804e483100578289666a0d1982ed83200dd6998243ad"
+      },
+      {
+        "name": "Predator",
+        "count": 3,
+        "sourceSha256": "3a45653a83d01ae2ce33eb0f6418f875d10d586d0f2930490aca5ed71c05b04b"
+      }
+    ],
+    "runs": [
+      {
+        "seed": 7,
+        "observations": {
+          "alive": {
+            "Phototroph": 209,
+            "Ligand producer": 95,
+            "Forager": 1,
+            "Mixotroph": 20,
+            "Rememberer": 4,
+            "Nurse rosette": 25,
+            "Crown rosette": 33,
+            "Pulse swimmer": 37,
+            "Predator": 3
+          },
+          "observedDescendants": {
+            "Phototroph": 174,
+            "Ligand producer": 101,
+            "Forager": 6,
+            "Mixotroph": 18,
+            "Rememberer": 3,
+            "Nurse rosette": 31,
+            "Crown rosette": 33,
+            "Pulse swimmer": 32,
+            "Predator": 2
+          },
+          "firstObservedBirth": 82,
+          "firstObservedKill": 44,
+          "kills": 35,
+          "attacks": 15600,
+          "foodCaptures": 36603,
+          "lineageActivity": {
+            "Phototroph": {
+              "fixing": 241,
+              "digesting": 0,
+              "secreting": 236,
+              "cellsSeenFixingAndDigesting": 0,
+              "cellsSeenFixingWhileDigesting": 0,
+              "births": 300,
+              "predationDeaths": 26,
+              "depletedDeaths": 133,
+              "kills": 0,
+              "birthsAfterMidpoint": 128
+            },
+            "Ligand producer": {
+              "fixing": 105,
+              "digesting": 0,
+              "secreting": 30,
+              "cellsSeenFixingAndDigesting": 0,
+              "cellsSeenFixingWhileDigesting": 0,
+              "births": 101,
+              "predationDeaths": 1,
+              "depletedDeaths": 9,
+              "kills": 0,
+              "birthsAfterMidpoint": 65
+            },
+            "Forager": {
+              "fixing": 0,
+              "digesting": 12,
+              "secreting": 0,
+              "cellsSeenFixingAndDigesting": 0,
+              "cellsSeenFixingWhileDigesting": 0,
+              "births": 6,
+              "predationDeaths": 0,
+              "depletedDeaths": 17,
+              "kills": 0,
+              "birthsAfterMidpoint": 1
+            },
+            "Mixotroph": {
+              "fixing": 26,
+              "digesting": 15,
+              "secreting": 0,
+              "cellsSeenFixingAndDigesting": 15,
+              "cellsSeenFixingWhileDigesting": 15,
+              "births": 31,
+              "predationDeaths": 2,
+              "depletedDeaths": 17,
+              "kills": 0,
+              "birthsAfterMidpoint": 12
+            },
+            "Rememberer": {
+              "fixing": 0,
+              "digesting": 8,
+              "secreting": 0,
+              "cellsSeenFixingAndDigesting": 0,
+              "cellsSeenFixingWhileDigesting": 0,
+              "births": 5,
+              "predationDeaths": 2,
+              "depletedDeaths": 5,
+              "kills": 0,
+              "birthsAfterMidpoint": 3
+            },
+            "Nurse rosette": {
+              "fixing": 36,
+              "digesting": 0,
+              "secreting": 0,
+              "cellsSeenFixingAndDigesting": 0,
+              "cellsSeenFixingWhileDigesting": 0,
+              "births": 31,
+              "predationDeaths": 2,
+              "depletedDeaths": 9,
+              "kills": 0,
+              "birthsAfterMidpoint": 16
+            },
+            "Crown rosette": {
+              "fixing": 38,
+              "digesting": 0,
+              "secreting": 5,
+              "cellsSeenFixingAndDigesting": 0,
+              "cellsSeenFixingWhileDigesting": 0,
+              "births": 35,
+              "predationDeaths": 2,
+              "depletedDeaths": 5,
+              "kills": 0,
+              "birthsAfterMidpoint": 8
+            },
+            "Pulse swimmer": {
+              "fixing": 37,
+              "digesting": 0,
+              "secreting": 0,
+              "cellsSeenFixingAndDigesting": 0,
+              "cellsSeenFixingWhileDigesting": 0,
+              "births": 36,
+              "predationDeaths": 0,
+              "depletedDeaths": 4,
+              "kills": 0,
+              "birthsAfterMidpoint": 13
+            },
+            "Predator": {
+              "fixing": 0,
+              "digesting": 5,
+              "secreting": 0,
+              "cellsSeenFixingAndDigesting": 0,
+              "cellsSeenFixingWhileDigesting": 0,
+              "births": 3,
+              "predationDeaths": 0,
+              "depletedDeaths": 3,
+              "kills": 35,
+              "birthsAfterMidpoint": 0
+            }
+          },
+          "firstObservedLigandRelease": 32,
+          "firstObservedLigandUptake": 52,
+          "lineagesWithInternalLigand": [
+            "Forager",
+            "Rememberer",
+            "Predator",
+            "Mixotroph"
+          ],
+          "firstObservedRecoveryEnzyme": 52,
+          "mineralsEmitted": 521.5076,
+          "mineralsAbsorbed": 313.8534,
+          "huntersObservedWithStructuralCarbon": 5
+        },
+        "checks": {
+          "producerExports": true,
+          "consumersDigest": true,
+          "consumersRenew": true,
+          "mineralExchange": true,
+          "ligandReleasedAndCaptured": true,
+          "grazerBuiltRecoveryEnzyme": true,
+          "naturalHunt": true,
+          "photosynthesis": true,
+          "exactResourceBudgets": true,
+          "endpointSaveRestore": true
+        },
+        "passed": true
+      }
+    ]
+  },
+  "replay": {
+    "navigation": "npm run test:navigation",
+    "feeding": "node --no-liftoff experiments/measure-predator-feeding.mjs examples/predator.cell 7 300 result.json",
+    "previous": "Supply experiments/fixtures/predator-before-particle-foraging.cell as the first argument for the previous genotype.",
+    "defaultScenario": "npm run test:scenarios -- --seeds 7 --output basin.json"
+  }
+}

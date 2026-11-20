@@ -248,7 +248,9 @@ Foragers approach optical returns, follow the edge of large nearby objects to en
 
 The Forager gives injury escape priority over feeding rest and optical attraction. Its own integrity can trigger that response even when an attacker is outside its contact receptor's coverage. Escape uses the existing paid motors and lasts until repair restores integrity.
 
-Predators remember a recent prey sighting or firm contact for 18 seconds. They pursue visual returns and use two chemical receptors to search when no target is visible. Matching contact markers make them turn away. Tissue and exudate in the gut contribute to feeding rest, and paired thermoreceptors can interrupt a meal to steer toward cooler water.
+A Predator grows a forward eye first. When its gut holds little soluble or structural food, the front eye sees nothing, and both chemical receptors measure a weak organic cue, it can build eyes on its flanks. Each flank eye permits construction of a small sideways motor at the nose. A nearby small optical return can then draw the working inlet toward a packet even when ATP is plentiful. Uptake requires the packet to enter an open inlet’s reach.
+
+Predators remember a recent prey sighting or firm contact for 18 seconds. Matching contact markers make them turn away, a substantial meal suppresses pursuit, and paired thermoreceptors can interrupt feeding to steer toward cooler water. [Predator feeding measurements](experiments/README.md#predator-particle-feeding)
 
 Chemoreception reads local dissolved minerals and an organic-cue field emitted by release, leakage and decay. Cues diffuse, move with currents and decay; they do not point to a chosen meal. Light sensing is separate from photosynthesis, and temperature and currents affect cells even without their sensors.
 

@@ -230,7 +230,7 @@ for (const preset of PRESETS) {
   const founder = api.place_cell(genome,site.x,site.y);
   assert.ok(founder,error(api));
   if (preset.name === 'Predator') {
-    // Its only inlet is on the forward membrane. Align that surface with the
+    // The founder builds its first inlet on the forward membrane. Align it with the
     // densest local patch of tissue in the finite bloom.
     const habitat = snapshot(api);
     const tissue = richestFeedingSite(habitat.food.filter(packet => packet.kind === 1));

@@ -660,6 +660,21 @@ function cellularOrganism(path: EnergyPath, behavior: string, options: { drift?:
       {...tail,name:'TailPiercer',kind:'pierce()',direction:Math.PI,parts:[['anchor',0.0055],['filament',0.0145],['enzyme',0.005]],goal:'0.025',
         engageWhen:'may_strike',activity:'if weapons_ready && sensed.TailTouch.valid && sensed.TailTouch.resistance > 0.1 && hunting_budget && meal < 170000 * body.area then 1 else 0'},
     );
+    // In open water, flank eyes can guide two opposed paddles at the nose.
+    // Each paddle grows only after the corresponding eye is functional.
+    for (const [side, angle] of [['Left', Math.PI / 2], ['Right', -Math.PI / 2]] as const) {
+      recipes.push({
+        name: side + 'Eye', kind: 'sense(optical)', parts: [['anchor',0.004],['receptor',0.012],['pigment',0.004]],
+        ready: 'need_wider_view', goal: '0.02', at: String(angle), direction: angle,
+      });
+    }
+    for (const [side, angle, turn] of [['Left', Math.PI / 2,'bearing'], ['Right', -Math.PI / 2,'-bearing']] as const) {
+      recipes.push({
+        name: side + 'Paddle', kind: 'propel()', parts: [['anchor',0.005],['motor',0.01],['filament',0.01]],
+        ready: `enough(built.${side}Eye,0.02)`, goal: '0.025', at: 0, direction: angle,
+        activity: `if gathering && !heat_escape && !peer && !processing then clamp(${turn} * 1.5, 0, 1) else 0`,
+      });
+    }
   }
   let surplusRule = `let surplus = equipped && energy > 550000${hasGut&&!hasLight?feedingReserve:''};`;
   if (options.local && options.memory) {
@@ -873,17 +888,39 @@ rf003 = age when prey_cue;
 let hunting = prey_cue || populated(rf003) && age - rf003 < 18;
 let processing = meal > (if hunting then 230000 else 140000) * body.area;
 let hungry = (energy.fraction < 0.7 || carbon.organic * 20 < energy.capacity * 0.4) && !processing;
+# When neither the front eye nor a strong organic trail guides feeding, grow flank eyes.
+let need_wider_view = equipped && !sensed.Vision.valid && meal < 15000
+  && sensed.LeftNose.valid && sensed.RightNose.valid
+  && max(sensed.LeftNose.organic, sensed.RightNose.organic) < 0.006;
+# Each eye measures a return from its own membrane patch.
+let front_range = if sensed.Vision.valid then length(sensed.Vision.offset) else 1000;
+let left_range = if sensed.LeftEye.valid then length(sensed.LeftEye.offset) else 1000;
+let right_range = if sensed.RightEye.valid then length(sensed.RightEye.offset) else 1000;
+let distance = min(front_range, min(left_range, right_range));
+let front_view = front_range == distance;
+let left_view = !front_view && left_range == distance;
+let sightline = if front_view then sensed.Vision.offset else if left_view then sensed.LeftEye.offset else sensed.RightEye.offset;
+let viewed_area = if front_view then sensed.Vision.area else if left_view then sensed.LeftEye.area else sensed.RightEye.area;
+# Side eyes view the target from the flank. Aim the forward intake from the body center.
+let radius = 7 * sqrt(body.area);
+let bearing = if front_view then angle(sightline)
+  else atan2(y(sightline) + (if left_view then radius else -radius), x(sightline));
+let small_return = distance < 23 && viewed_area < 0.35;
 # Paired local temperatures select the cooler side before tissue is damaged.
 let heat_escape = sensed.LeftHeat.valid && sensed.RightHeat.valid
   && max(sensed.LeftHeat.value, sensed.RightHeat.value) > 0.78;
 let heat_delta = sensed.RightHeat.value - sensed.LeftHeat.value;
 let cool_turn = if heat_delta < -0.002 then -0.75 else 0.75;
-# Search for decaying food by its local chemical gradient when vision has no target.
+# Turn toward a nearby small return when a working inlet has room.
+let gathering = powered && small_return && gut.fraction < 0.55 && (!front_view || !hungry);
 let steer = if heat_escape then cool_turn else if peer then leave_peer else if processing then 0
+  else if gathering then clamp(bearing * 2.4, -1, 1)
   else if hungry && sensed.Vision.valid then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1)
   else if sensed.LeftNose.valid && sensed.RightNose.valid then clamp((sensed.LeftNose.organic - sensed.RightNose.organic) * 22 + sin(age * 0.25) * 0.10, -1, 1)
   else sin(age * 0.5) * (if equipped then 0.12 else 0.4);
-let move = if heat_escape then 0.4 else if peer then 0.25 else if firm_contact || processing then 0 else if hungry && sensed.Vision.valid then 0.5 else if hungry && equipped then 0.85 else 0.07;`;
+let move = if heat_escape then 0.4 else if peer then 0.25 else if firm_contact || processing then 0
+  else if gathering then 0.14 + 0.3 * clamp(distance / 19, 0, 1)
+  else if hungry && sensed.Vision.valid then 0.5 else if hungry && equipped then 0.85 else 0.07;`;
 
 const rememberGradient = `let difference = sensed.LeftChemistry.organic - sensed.RightChemistry.organic;
 let cue = sensed.LeftChemistry.valid && sensed.RightChemistry.valid && abs(difference) > 0.000001;
@@ -956,7 +993,7 @@ export const PRESETS: Preset[] = [
     '# Read a grazer display at the same surface as the carbon junction.\nlet grazer_present = sensed.DockReader.message_valid && sensed.DockReader.message == rf091;', {local:true}) },
   { name:'Ligand producer', description:'Releases a basal supply of ligand and increases conversion while its membrane is damaged or recovering.', source:cellularOrganism('light',
     '# A recent loss of integrity raises conversion for the next eight seconds.\nrf017 = age when integrity < 0.98;\nlet damaged = integrity < 0.98 || (populated(rf017) && age - rf017 < 8);', {local:true,ligandProducer:true}) },
-  { name:'Predator', description:'Prepare working displays for both daughters, spare cells showing a matching tag and hunt unmarked prey on contact.', source:cellularOrganism('organic',localHunting,{local:true,predator:true}) },
+  { name:'Predator', description:'Hunts unmarked prey and gathers nearby particles. Flank eyes and steering paddles grow when forward sight and organic cues are poor. Both daughters inherit kin displays.', source:cellularOrganism('organic',localHunting,{local:true,predator:true}) },
   { name:'Crown rosette', description:'Attached cells with multiple signaling partners become beacons. Edge cells touching a beacon build extra light harvesters and release surplus carbon through an outward-facing pore.', source:cellularOrganism('light',crownBehavior,{local:true,colony:true,multicellular:'crown'}) },
   { name:'Nurse rosette', description:'Adult cells with a requesting juvenile build extra harvesters, pause growth and exchange energy, organic carbon and minerals through junctions.', source:cellularOrganism('light',nurseBehavior,{local:true,colony:true,multicellular:'nursery'}) },
   { name:'Pulse swimmer', description:'Attached cells relay brief pulses to their neighbors and activate propulsion. A refractory interval separates each burst.', source:cellularOrganism('light',relayBehavior,{local:true,colony:true,multicellular:'relay'}) },

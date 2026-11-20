@@ -1,0 +1,549 @@
+# Shared products supply independently regulated physical recipes.
+# Genes make stock; start_when permits new machines; activity runs built ones.
+cellular counts;
+
+product Mount = anchor();
+product Detector = receptor();
+product Catalyst = enzyme();
+product Wall = membrane();
+product Rotor = motor();
+product Frame = scaffold();
+product Carrier = transporter();
+product Tail = filament();
+product Pigment = pigment();
+product Replicase = replicase();
+product Ring = constrictor();
+
+# Tolerate modest wear while repair restores working capacity. The allowance
+# stays below one machine, even when a larger body needs many copies.
+fn missing(installed, required, unit) = installed + 0.000001 < required - min(required * 0.1, unit * 0.2);
+fn enough(installed, required) = installed + 0.000001 >= required * 0.9;
+
+let funded = (energy > 100000 || gut.energy > 0) && nutrient.stored > 10;
+let expanding = body.area > body.birth_area * 1.75;
+let powered = enough(built.Gut, 0.06) && enough(built.ExudateEnzyme, 0.05) && enough(built.Capture, 0.03) && enough(built.Respiration, 0.04);
+let equipped = powered && enough(built.LeftMotor, 0.025) && enough(built.RightMotor, 0.025) && enough(built.Vision, 0.02) && enough(built.Touch, 0.01) && enough(built.Piercer, 0.05) && enough(built.TissueEnzyme, 0.08);
+let surplus = equipped && energy > 550000 && (gut.energy > 20000 || carbon.organic > 6500 * body.area) && carbon.organic > 3000 * body.area;
+# Independent marker and payload values let kin recognize a single changed tag.
+publish rf001;
+signal rf002;
+rf001 = 17;
+rf002 = -2.5;
+# Refresh both display values on the first ordinary evaluation. For that tick,
+# a daughter has empty memory; its parent detects its halved envelope area.
+let tags_ready = populated(rf001) && populated(rf002);
+let just_split = !populated(rf005) || body.area < rf005 * 0.75;
+let weapons_ready = tags_ready && !just_split;
+rf005 = body.area;
+# A seam patch inherited from the previous furrow has moved. Measure that
+# stock once in each half, then pay for a fresh patch on each side of this cut.
+rf006 = built.LeftBadge when just_split;
+rf007 = built.RightBadge when just_split;
+rf008 = built.LeftSeamTouch when just_split;
+rf009 = built.RightSeamTouch when just_split;
+rf010 = built.Badge1 when just_split;
+rf011 = built.Badge2 when just_split;
+rf012 = built.Badge3 when just_split;
+rf013 = built.Badge5 when just_split;
+rf014 = built.Badge6 when just_split;
+rf015 = built.Badge7 when just_split;
+rf016 = built.Badge9 when just_split;
+rf017 = built.Badge10 when just_split;
+rf018 = built.Badge11 when just_split;
+rf019 = built.Badge13 when just_split;
+rf020 = built.Badge14 when just_split;
+rf021 = built.Badge15 when just_split;
+let first_coat = enough(built.Badge,0.01) && enough(built.TailBadge,0.01)
+  && enough(built.LeftBadge,0.01) && enough(built.RightBadge,0.01)
+  && enough(built.Badge2,0.01) && enough(built.Badge6,0.01) && enough(built.Badge10,0.01) && enough(built.Badge14,0.01);
+let left_badge_goal = rf006 + 0.01;
+let right_badge_goal = rf007 + 0.01;
+let left_reader_goal = rf008 + 0.01;
+let right_reader_goal = rf009 + 0.01;
+let may_strike = peer.resistance_valid && !peer.division_interface
+  && !(peer.message_valid && peer.message == rf001)
+  && !(peer.signal_valid && peer.signal == rf002);
+let front_peer = (populated(rf001) && sensed.Touch.message_valid && sensed.Touch.message == rf001)
+  || (populated(rf002) && sensed.Touch.signal_valid && sensed.Touch.signal == rf002);
+let tail_peer = (populated(rf001) && sensed.TailTouch.message_valid && sensed.TailTouch.message == rf001)
+  || (populated(rf002) && sensed.TailTouch.signal_valid && sensed.TailTouch.signal == rf002);
+let left_peer = (populated(rf001) && sensed.LeftSeamTouch.message_valid && sensed.LeftSeamTouch.message == rf001)
+  || (populated(rf002) && sensed.LeftSeamTouch.signal_valid && sensed.LeftSeamTouch.signal == rf002);
+let right_peer = (populated(rf001) && sensed.RightSeamTouch.message_valid && sensed.RightSeamTouch.message == rf001)
+  || (populated(rf002) && sensed.RightSeamTouch.signal_valid && sensed.RightSeamTouch.signal == rf002);
+let peer = front_peer || tail_peer || left_peer || right_peer;
+let displays_ready = enough(built.Badge,0.01) && enough(built.TailBadge,0.01)
+  && !missing(built.LeftBadge,left_badge_goal,0.01) && !missing(built.RightBadge,right_badge_goal,0.01)
+  && enough(built.Touch,0.01) && enough(built.TailTouch,0.01)
+  && !missing(built.LeftSeamTouch,left_reader_goal,0.01) && !missing(built.RightSeamTouch,right_reader_goal,0.01)
+  && !missing(built.Badge1,rf010+0.01,0.01)
+  && !missing(built.Badge2,rf011+0.01,0.01)
+  && !missing(built.Badge3,rf012+0.01,0.01)
+  && !missing(built.Badge5,rf013+0.01,0.01)
+  && !missing(built.Badge6,rf014+0.01,0.01)
+  && !missing(built.Badge7,rf015+0.01,0.01)
+  && !missing(built.Badge9,rf016+0.01,0.01)
+  && !missing(built.Badge10,rf017+0.01,0.01)
+  && !missing(built.Badge11,rf018+0.01,0.01)
+  && !missing(built.Badge13,rf019+0.01,0.01)
+  && !missing(built.Badge14,rf020+0.01,0.01)
+  && !missing(built.Badge15,rf021+0.01,0.01);
+# After a kin encounter, feed when stored fuel is low and leave room for neighbours before dividing.
+rf004 = age when peer;
+let recent_peer = populated(rf004) && age - rf004 < 10;
+let crowded = peer || recent_peer;
+let contact_angle = if front_peer then angle(sensed.Touch.offset) else if tail_peer then angle(sensed.TailTouch.offset)
+  else if left_peer then angle(sensed.LeftSeamTouch.offset) else angle(sensed.RightSeamTouch.offset);
+let leave_peer = if abs(contact_angle) > 1.57 then 0 else if contact_angle >= 0 then -0.8 else 0.8;
+let firm_contact = sensed.Touch.valid && sensed.Touch.resistance > 0.1;
+let meal = gut.structural.energy + gut.soluble.energy;
+let hunting_budget = !recent_peer || energy + carbon.organic * 20 + meal < energy.capacity * 1.05;
+let prey_cue = !peer && (firm_contact || sensed.Vision.valid && sensed.Vision.area >= 0.35);
+rf003 = age when prey_cue;
+let hunting = prey_cue || populated(rf003) && age - rf003 < 18;
+let processing = meal > (if hunting then 230000 else 140000) * body.area;
+let hungry = (energy.fraction < 0.7 || carbon.organic * 20 < energy.capacity * 0.4) && !processing;
+# Paired local temperatures select the cooler side before tissue is damaged.
+let heat_escape = sensed.LeftHeat.valid && sensed.RightHeat.valid
+  && max(sensed.LeftHeat.value, sensed.RightHeat.value) > 0.78;
+let heat_delta = sensed.RightHeat.value - sensed.LeftHeat.value;
+let cool_turn = if heat_delta < -0.002 then -0.75 else 0.75;
+# Search for decaying food by its local chemical gradient when vision has no target.
+let steer = if heat_escape then cool_turn else if peer then leave_peer else if processing then 0
+  else if hungry && sensed.Vision.valid then clamp(angle(sensed.Vision.offset) * 1.8, -1, 1)
+  else if sensed.LeftNose.valid && sensed.RightNose.valid then clamp((sensed.LeftNose.organic - sensed.RightNose.organic) * 22 + sin(age * 0.25) * 0.10, -1, 1)
+  else sin(age * 0.5) * (if equipped then 0.12 else 0.4);
+let move = if heat_escape then 0.4 else if peer then 0.25 else if firm_contact || processing then 0 else if hungry && sensed.Vision.valid then 0.5 else if hungry && equipped then 0.85 else 0.07;
+
+let need_LeftNose = funded && (equipped && !hunting) && missing(built.LeftNose, 0.015, 0.015);
+let need_RightNose = funded && (equipped && !hunting) && missing(built.RightNose, 0.015, 0.015);
+let need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);
+let need_Badge = funded && (true) && missing(built.Badge, 0.01, 0.01);
+let need_Gut = funded && (true) && missing(built.Gut, (if expanding then 0.12 else 0.06), 0.06);
+let need_ExudateEnzyme = funded && (true) && missing(built.ExudateEnzyme, (if expanding then 0.1 else 0.05), 0.05);
+let need_Capture = funded && (enough(built.Gut, 0.06)) && missing(built.Capture, 0.03, 0.03);
+let need_TissueEnzyme = funded && (powered) && missing(built.TissueEnzyme, (if expanding then 0.16 else 0.08), 0.08);
+let need_WasteEnzyme = funded && (powered && gut.bound.energy > 0) && missing(built.WasteEnzyme, (if expanding then 0.03 else 0.015), 0.015);
+let need_Translation = funded && (powered && body.area > body.birth_area * 1.3) && missing(built.Translation, 0.08, 0.04);
+let need_Minerals = funded && (powered && (nutrient.stored < 1500 || surplus)) && missing(built.Minerals, 0.025, 0.025);
+let need_EnergyStore = funded && (powered && (energy.capacity < 950000 || surplus)) && missing(built.EnergyStore, (if expanding then 0.08 else 0.04), 0.04);
+let need_MineralStore = funded && (powered && body.area > body.birth_area * 1.3) && missing(built.MineralStore, 0.04, 0.02);
+let need_LeftMotor = funded && (powered) && missing(built.LeftMotor, 0.025, 0.025);
+let need_RightMotor = funded && (powered) && missing(built.RightMotor, 0.025, 0.025);
+let need_Vision = funded && (powered) && missing(built.Vision, 0.02, 0.02);
+let need_Touch = funded && (powered) && missing(built.Touch, 0.01, 0.01);
+let need_Piercer = funded && (powered && first_coat) && missing(built.Piercer, 0.05, 0.05);
+let need_Engulfment = funded && (surplus && body.area > 1.2) && missing(built.Engulfment, 0.025, 0.025);
+let need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);
+let need_Support = funded && (equipped && energy > 650000 && (gut.energy > 20000 || carbon.organic > 6500 * body.area) && carbon.organic > 3000 * body.area) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);
+let need_Envelope = funded && (enough(built.Support, 0.06)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);
+let need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, 0.02, 0.02);
+let need_Division = funded && (expanding) && missing(built.Division, 0.02, 0.02);
+let need_LeftHeat = funded && (powered) && missing(built.LeftHeat, 0.01, 0.01);
+let need_RightHeat = funded && (powered) && missing(built.RightHeat, 0.01, 0.01);
+let need_Badge1 = funded && (body.area > 1.3 * body.birth_area) && missing(built.Badge1, (if body.area > 1.3 * body.birth_area then rf010 + 0.01 else 0.01), 0.01);
+let need_Badge2 = funded && (true) && missing(built.Badge2, (if body.area > 1.3 * body.birth_area then rf011 + 0.01 else 0.01), 0.01);
+let need_Badge3 = funded && (body.area > 1.3 * body.birth_area) && missing(built.Badge3, (if body.area > 1.3 * body.birth_area then rf012 + 0.01 else 0.01), 0.01);
+let need_Badge5 = funded && (body.area > 1.3 * body.birth_area) && missing(built.Badge5, (if body.area > 1.3 * body.birth_area then rf013 + 0.01 else 0.01), 0.01);
+let need_Badge6 = funded && (true) && missing(built.Badge6, (if body.area > 1.3 * body.birth_area then rf014 + 0.01 else 0.01), 0.01);
+let need_Badge7 = funded && (body.area > 1.3 * body.birth_area) && missing(built.Badge7, (if body.area > 1.3 * body.birth_area then rf015 + 0.01 else 0.01), 0.01);
+let need_Badge9 = funded && (body.area > 1.3 * body.birth_area) && missing(built.Badge9, (if body.area > 1.3 * body.birth_area then rf016 + 0.01 else 0.01), 0.01);
+let need_Badge10 = funded && (true) && missing(built.Badge10, (if body.area > 1.3 * body.birth_area then rf017 + 0.01 else 0.01), 0.01);
+let need_Badge11 = funded && (body.area > 1.3 * body.birth_area) && missing(built.Badge11, (if body.area > 1.3 * body.birth_area then rf018 + 0.01 else 0.01), 0.01);
+let need_Badge13 = funded && (body.area > 1.3 * body.birth_area) && missing(built.Badge13, (if body.area > 1.3 * body.birth_area then rf019 + 0.01 else 0.01), 0.01);
+let need_Badge14 = funded && (true) && missing(built.Badge14, (if body.area > 1.3 * body.birth_area then rf020 + 0.01 else 0.01), 0.01);
+let need_Badge15 = funded && (body.area > 1.3 * body.birth_area) && missing(built.Badge15, (if body.area > 1.3 * body.birth_area then rf021 + 0.01 else 0.01), 0.01);
+let need_LeftBadge = funded && (true) && missing(built.LeftBadge, left_badge_goal, 0.01);
+let need_LeftSeamTouch = funded && (body.area > 1.3 * body.birth_area || meal > 30000 || built.TailPiercer > 0) && missing(built.LeftSeamTouch, left_reader_goal, 0.01);
+let need_RightBadge = funded && (true) && missing(built.RightBadge, right_badge_goal, 0.01);
+let need_RightSeamTouch = funded && (body.area > 1.3 * body.birth_area || meal > 30000 || built.TailPiercer > 0) && missing(built.RightSeamTouch, right_reader_goal, 0.01);
+let need_TailInlet = funded && (body.area > 1.3 * body.birth_area) && missing(built.TailInlet, 0.016, 0.016);
+let need_TailMotor = funded && (body.area > 1.3 * body.birth_area) && missing(built.TailMotor, 0.025, 0.025);
+let need_TailTouch = funded && (body.area > 1.3 * body.birth_area || meal > 30000 || built.TailPiercer > 0) && missing(built.TailTouch, 0.01, 0.01);
+let need_TailBadge = funded && (true) && missing(built.TailBadge, 0.01, 0.01);
+let need_TailPiercer = funded && (body.area > 1.3 * body.birth_area) && missing(built.TailPiercer, 0.025, 0.025);
+
+gene supply_Mount: Mount = if pool.Mount < 10 then (if need_LeftNose then 0.25 else 0) + (if need_RightNose then 0.25 else 0) + (if need_Badge then 0.666667 else 0) + (if need_Capture then 0.5 else 0) + (if need_Minerals then 0.25 else 0) + (if need_LeftMotor then 0.5 else 0) + (if need_RightMotor then 0.5 else 0) + (if need_Vision then 0.333333 else 0) + (if need_Touch then 0.333333 else 0) + (if need_Piercer then 0.333333 else 0) + (if need_Engulfment then 0.5 else 0) + (if need_Division then 0.5 else 0) + (if need_LeftHeat then 0.25 else 0) + (if need_RightHeat then 0.25 else 0) + (if need_Badge1 then 0.666667 else 0) + (if need_Badge2 then 0.666667 else 0) + (if need_Badge3 then 0.666667 else 0) + (if need_Badge5 then 0.666667 else 0) + (if need_Badge6 then 0.666667 else 0) + (if need_Badge7 then 0.666667 else 0) + (if need_Badge9 then 0.666667 else 0) + (if need_Badge10 then 0.666667 else 0) + (if need_Badge11 then 0.666667 else 0) + (if need_Badge13 then 0.666667 else 0) + (if need_Badge14 then 0.666667 else 0) + (if need_Badge15 then 0.666667 else 0) + (if need_LeftBadge then 0.666667 else 0) + (if need_LeftSeamTouch then 0.333333 else 0) + (if need_RightBadge then 0.666667 else 0) + (if need_RightSeamTouch then 0.333333 else 0) + (if need_TailInlet then 0.52381 else 0) + (if need_TailMotor then 0.5 else 0) + (if need_TailTouch then 0.333333 else 0) + (if need_TailBadge then 0.666667 else 0) + (if need_TailPiercer then 0.37931 else 0) else 0;
+gene supply_Detector: Detector = if pool.Detector < 10 then (if need_LeftNose then 1 else 0) + (if need_RightNose then 1 else 0) + (if need_Vision then 1 else 0) + (if need_Touch then 1 else 0) + (if need_LeftHeat then 1 else 0) + (if need_RightHeat then 1 else 0) + (if need_LeftSeamTouch then 1 else 0) + (if need_RightSeamTouch then 1 else 0) + (if need_TailTouch then 1 else 0) else 0;
+gene supply_Catalyst: Catalyst = if pool.Catalyst < 10 then (if need_Respiration then 1 else 0) + (if need_ExudateEnzyme then 1 else 0) + (if need_TissueEnzyme then 1 else 0) + (if need_WasteEnzyme then 1 else 0) + (if need_Translation then 1 else 0) + (if need_Piercer then 0.333333 else 0) + (if need_Repair then 1 else 0) + (if need_Envelope then 0.333333 else 0) + (if need_TailPiercer then 0.344828 else 0) else 0;
+gene supply_Wall: Wall = if pool.Wall < 10 then (if need_Respiration then 0.6 else 0) + (if need_Badge then 1 else 0) + (if need_Gut then 1 else 0) + (if need_EnergyStore then 1 else 0) + (if need_MineralStore then 1 else 0) + (if need_Engulfment then 1 else 0) + (if need_Envelope then 1 else 0) + (if need_Badge1 then 1 else 0) + (if need_Badge2 then 1 else 0) + (if need_Badge3 then 1 else 0) + (if need_Badge5 then 1 else 0) + (if need_Badge6 then 1 else 0) + (if need_Badge7 then 1 else 0) + (if need_Badge9 then 1 else 0) + (if need_Badge10 then 1 else 0) + (if need_Badge11 then 1 else 0) + (if need_Badge13 then 1 else 0) + (if need_Badge14 then 1 else 0) + (if need_Badge15 then 1 else 0) + (if need_LeftBadge then 1 else 0) + (if need_RightBadge then 1 else 0) + (if need_TailBadge then 1 else 0) else 0;
+gene supply_Rotor: Rotor = if pool.Rotor < 10 then (if need_Capture then 1 else 0) + (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Engulfment then 1 else 0) + (if need_Division then 1 else 0) + (if need_TailInlet then 1 else 0) + (if need_TailMotor then 1 else 0) else 0;
+gene supply_Frame: Frame = if pool.Frame < 10 then (if need_Translation then 1 else 0) + (if need_Support then 1 else 0) + (if need_Replication then 0.333333 else 0) else 0;
+gene supply_Carrier: Carrier = if pool.Carrier < 10 then (if need_Minerals then 1 else 0) else 0;
+gene supply_Tail: Tail = if pool.Tail < 10 then (if need_LeftMotor then 1 else 0) + (if need_RightMotor then 1 else 0) + (if need_Touch then 0.333333 else 0) + (if need_Piercer then 1 else 0) + (if need_LeftSeamTouch then 0.333333 else 0) + (if need_RightSeamTouch then 0.333333 else 0) + (if need_TailMotor then 1 else 0) + (if need_TailTouch then 0.333333 else 0) + (if need_TailPiercer then 1 else 0) else 0;
+gene supply_Pigment: Pigment = if pool.Pigment < 10 then (if need_Vision then 0.333333 else 0) else 0;
+gene supply_Replicase: Replicase = if pool.Replicase < 10 then (if need_Replication then 1 else 0) else 0;
+gene supply_Ring: Ring = if pool.Ring < 10 then (if need_Division then 1 else 0) else 0;
+
+assembly LeftNose: sense(chemical) {
+  Mount: 30;
+  Detector: 120;
+  start_when: need_LeftNose;
+  activity: 1;
+  at: 1.5707963267948966;
+}
+
+assembly RightNose: sense(chemical) {
+  Mount: 30;
+  Detector: 120;
+  start_when: need_RightNose;
+  activity: 1;
+  at: -1.5707963267948966;
+}
+
+assembly Respiration: respire(oxygen) {
+  Catalyst: 250;
+  Wall: 150;
+  start_when: need_Respiration;
+  activity: if oxygen > 0 && energy.fraction < 0.98 && (carbon.organic > (if energy < 640000 then 3000 else 6500) * body.area || energy < 320000) then 1 else 0;
+}
+
+assembly Badge: display() {
+  Mount: 40;
+  Wall: 60;
+  start_when: need_Badge;
+  activity: 1;
+}
+
+assembly Gut: store(food) {
+  Wall: 600;
+  start_when: need_Gut;
+  activity: 1;
+}
+
+assembly ExudateEnzyme: digest(soluble) {
+  Catalyst: 500;
+  start_when: need_ExudateEnzyme;
+  activity: if gut.soluble.energy > 0 then 1 else 0;
+}
+
+assembly Capture: import(particle) {
+  Mount: 100;
+  Rotor: 200;
+  start_when: need_Capture;
+  activity: if gut.fraction < 0.9 || meal < 40000 then 1 else 0;
+  engage_when: !peer.resistance_valid || peer.resistance < 0.085;
+}
+
+assembly TissueEnzyme: digest(structural) {
+  Catalyst: 800;
+  start_when: need_TissueEnzyme;
+  activity: if gut.structural.energy > 0 then 1 else 0;
+}
+
+assembly WasteEnzyme: digest(bound) {
+  Catalyst: 150;
+  start_when: need_WasteEnzyme;
+  activity: if gut.bound.energy > 0 then 1 else 0;
+}
+
+assembly Translation: translate() {
+  Frame: 200;
+  Catalyst: 200;
+  start_when: need_Translation;
+  activity: 1;
+}
+
+assembly Minerals: import(mineral) {
+  Mount: 50;
+  Carrier: 200;
+  start_when: need_Minerals;
+  activity: if nutrient.fraction < 0.9 && energy.fraction > 0.05 then 1 else 0;
+  at: 3.141592653589793;
+}
+
+assembly EnergyStore: store(energy) {
+  Wall: 400;
+  start_when: need_EnergyStore;
+  activity: 1;
+}
+
+assembly MineralStore: store(mineral) {
+  Wall: 200;
+  start_when: need_MineralStore;
+  activity: 1;
+}
+
+assembly LeftMotor: propel() {
+  Mount: 50;
+  Rotor: 100;
+  Tail: 100;
+  start_when: need_LeftMotor;
+  activity: clamp(move - steer * 0.5, 0, 1);
+  at: 0.52;
+  direction: 0;
+}
+
+assembly RightMotor: propel() {
+  Mount: 50;
+  Rotor: 100;
+  Tail: 100;
+  start_when: need_RightMotor;
+  activity: clamp(move + steer * 0.5, 0, 1);
+  at: -0.52;
+  direction: 0;
+}
+
+assembly Vision: sense(optical) {
+  Mount: 40;
+  Detector: 120;
+  Pigment: 40;
+  start_when: need_Vision;
+  activity: 1;
+}
+
+assembly Touch: sense(contact) {
+  Mount: 20;
+  Detector: 60;
+  Tail: 20;
+  start_when: need_Touch;
+  activity: 1;
+}
+
+assembly Piercer: pierce() {
+  Mount: 100;
+  Tail: 300;
+  Catalyst: 100;
+  start_when: need_Piercer;
+  activity: if weapons_ready && !heat_escape && hunting_budget && firm_contact && meal < 300000 * body.area && (energy.fraction < 0.85 || carbon.organic * 20 < energy.capacity * 0.65 || meal < 20000) then 0.8 else 0;
+  engage_when: may_strike;
+}
+
+assembly Engulfment: engulf() {
+  Mount: 50;
+  Rotor: 100;
+  Wall: 100;
+  start_when: need_Engulfment;
+  activity: if weapons_ready && hunting_budget && gut.fraction < 0.5 then 1 else 0;
+  engage_when: may_strike;
+  at: 3.141592653589793;
+}
+
+assembly Repair: repair() {
+  Catalyst: 250;
+  start_when: need_Repair;
+  activity: 1;
+}
+
+assembly Support: support() {
+  Frame: 600;
+  start_when: need_Support;
+  activity: 1;
+}
+
+assembly Envelope: grow() {
+  Wall: 150;
+  Catalyst: 50;
+  start_when: need_Envelope;
+  activity: if (energy > 600000 || body.space.free < 0.05 && energy > 240000) && body.area < body.birth_area * 2 then (if body.space.free < 0.05 then 0.65 else if crowded then 0.04 else 0.26 + 0.35 * clamp((meal - 130000 * body.area) / 150000, 0, 1)) else 0;
+  at: 1.5707963267948966;
+}
+
+assembly Replication: replicate() {
+  Frame: 50;
+  Replicase: 150;
+  start_when: need_Replication;
+  activity: if energy > 550000 then 1 else 0;
+}
+
+assembly Division: constrict() {
+  Mount: 40;
+  Rotor: 80;
+  Ring: 80;
+  start_when: need_Division;
+  activity: if body.area + 0.000001 >= body.birth_area * 2 && enough(built.Envelope,0.04) && enough(built.Translation,0.08) && enough(built.EnergyStore,0.08) && enough(built.MineralStore,0.04) && enough(built.Respiration,0.08) && displays_ready && !crowded && energy > 580000 then 1 else 0;
+  at: 0;
+}
+
+assembly LeftHeat: sense(heat) {
+  Mount: 20;
+  Detector: 80;
+  start_when: need_LeftHeat;
+  activity: 1;
+  at: 1.5707963267948966;
+}
+
+assembly RightHeat: sense(heat) {
+  Mount: 20;
+  Detector: 80;
+  start_when: need_RightHeat;
+  activity: 1;
+  at: -1.5707963267948966;
+}
+
+assembly Badge1: display() {
+  Mount: 40;
+  Wall: 60;
+  start_when: need_Badge1;
+  activity: 1;
+  at: 0.39269908169872414;
+}
+
+assembly Badge2: display() {
+  Mount: 40;
+  Wall: 60;
+  start_when: need_Badge2;
+  activity: 1;
+  at: 0.7853981633974483;
+}
+
+assembly Badge3: display() {
+  Mount: 40;
+  Wall: 60;
+  start_when: need_Badge3;
+  activity: 1;
+  at: 1.1780972450961724;
+}
+
+assembly Badge5: display() {
+  Mount: 40;
+  Wall: 60;
+  start_when: need_Badge5;
+  activity: 1;
+  at: 1.9634954084936207;
+}
+
+assembly Badge6: display() {
+  Mount: 40;
+  Wall: 60;
+  start_when: need_Badge6;
+  activity: 1;
+  at: 2.356194490192345;
+}
+
+assembly Badge7: display() {
+  Mount: 40;
+  Wall: 60;
+  start_when: need_Badge7;
+  activity: 1;
+  at: 2.748893571891069;
+}
+
+assembly Badge9: display() {
+  Mount: 40;
+  Wall: 60;
+  start_when: need_Badge9;
+  activity: 1;
+  at: 3.5342917352885173;
+}
+
+assembly Badge10: display() {
+  Mount: 40;
+  Wall: 60;
+  start_when: need_Badge10;
+  activity: 1;
+  at: 3.9269908169872414;
+}
+
+assembly Badge11: display() {
+  Mount: 40;
+  Wall: 60;
+  start_when: need_Badge11;
+  activity: 1;
+  at: 4.319689898685965;
+}
+
+assembly Badge13: display() {
+  Mount: 40;
+  Wall: 60;
+  start_when: need_Badge13;
+  activity: 1;
+  at: 5.105088062083414;
+}
+
+assembly Badge14: display() {
+  Mount: 40;
+  Wall: 60;
+  start_when: need_Badge14;
+  activity: 1;
+  at: 5.497787143782138;
+}
+
+assembly Badge15: display() {
+  Mount: 40;
+  Wall: 60;
+  start_when: need_Badge15;
+  activity: 1;
+  at: 5.890486225480862;
+}
+
+assembly LeftBadge: display() {
+  Mount: 40;
+  Wall: 60;
+  start_when: need_LeftBadge;
+  activity: 1;
+  at: 1.5457963267948966;
+}
+
+assembly LeftSeamTouch: sense(contact) {
+  Mount: 20;
+  Detector: 60;
+  Tail: 20;
+  start_when: need_LeftSeamTouch;
+  activity: 1;
+  at: 1.5457963267948966;
+}
+
+assembly RightBadge: display() {
+  Mount: 40;
+  Wall: 60;
+  start_when: need_RightBadge;
+  activity: 1;
+  at: -1.5957963267948965;
+}
+
+assembly RightSeamTouch: sense(contact) {
+  Mount: 20;
+  Detector: 60;
+  Tail: 20;
+  start_when: need_RightSeamTouch;
+  activity: 1;
+  at: -1.5957963267948965;
+}
+
+assembly TailInlet: import(particle) {
+  Mount: 55;
+  Rotor: 105;
+  start_when: need_TailInlet;
+  activity: if gut.fraction < 0.9 then 1 else 0;
+  engage_when: !peer.resistance_valid || peer.resistance < 0.085;
+  at: 3.141592653589793;
+}
+
+assembly TailMotor: propel() {
+  Mount: 50;
+  Rotor: 100;
+  Tail: 100;
+  start_when: need_TailMotor;
+  activity: if built.LeftMotor < 0.02 && gut.fraction < 0.65 then 0.85 else 0;
+  at: 3.141592653589793;
+  direction: 3.141593;
+}
+
+assembly TailTouch: sense(contact) {
+  Mount: 20;
+  Detector: 60;
+  Tail: 20;
+  start_when: need_TailTouch;
+  activity: 1;
+  at: 3.141592653589793;
+}
+
+assembly TailBadge: display() {
+  Mount: 40;
+  Wall: 60;
+  start_when: need_TailBadge;
+  activity: 1;
+  at: 3.141592653589793;
+}
+
+assembly TailPiercer: pierce() {
+  Mount: 55;
+  Tail: 145;
+  Catalyst: 50;
+  start_when: need_TailPiercer;
+  activity: if weapons_ready && sensed.TailTouch.valid && sensed.TailTouch.resistance > 0.1 && hunting_budget && meal < 170000 * body.area then 1 else 0;
+  engage_when: may_strike;
+  at: 3.141592653589793;
+  direction: 3.141593;
+}

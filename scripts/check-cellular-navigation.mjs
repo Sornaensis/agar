@@ -1,3 +1,4 @@
+import {checkPredatorMeals} from './predator-meal-observation.mjs';
 import {placeByTissue} from './feeding-culture.mjs';
 import assert from 'node:assert/strict';
 import { fresh, compile, seed, snapshot, advance, body, evaluation, save, restore, catalog } from './organelle-harness.mjs';
@@ -153,6 +154,8 @@ assert.equal(hunted.photosynthesis, 0);
   assert.ok(captured !== null && digested > 0.3, 'The paid hunter approaches, captures and digests the sensed soft particle');
   console.log(`Predator soft-contact approach passed: a particle beyond capture range is captured after ${captured.toFixed(2)} seconds without an attack.`);
 }
+
+await checkPredatorMeals(PRESETS.find(preset => preset.name === 'Predator').source);
 
 // A late carcass remains usable while the scavenger retains ATP and enough
 // organic carbon to build its missing enzyme. ATP alone cannot pay that mass.
