@@ -63,7 +63,7 @@ const report = {
   close(totals[37],403.79,'Historical supplied carbon');
   assert.deepEqual(Array.from(totals.slice(51,53)),[0,0],'Migration records no player withdrawals');
   const migrated = save(api);
-  assert.equal(new DataView(migrated.buffer,migrated.byteOffset).getUint32(8,true),17);
+  assert.equal(new DataView(migrated.buffer,migrated.byteOffset).getUint32(8,true),19);
   const replay = await fresh();
   assert.equal(restore(replay,migrated),1,error(replay));
   assert.deepEqual(save(replay),migrated,'Migration is canonical on immediate v16 resave');

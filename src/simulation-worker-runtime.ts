@@ -19,9 +19,13 @@ export function createSimulationWorkerHandler(send: Send, load: () => Promise<En
       : engine!.status();
     if (options.metrics) {
       result.metrics = engine!.metricsSnapshotData();
+      result.mineralAbsorbedTotal = engine!.mineralAbsorbedTotal();
       const audit = engine!.countAudit();
       if (audit) result.countAudit = audit;
+      const losses = engine!.energyLoss();
+      if (losses) result.energyLoss = losses;
     }
+    if (options.metrics || options.ecology) result.ecology = engine!.ecologySnapshotData();
     if (options.environment) result.environment = options.environment === 'metadata' ? engine!.environmentMetadata() : engine!.environment();
     return result;
   }
@@ -67,6 +71,9 @@ export function createSimulationWorkerHandler(send: Send, load: () => Promise<En
           const record = result as Partial<WirePresentation & CapturedCheckpoint> & { samples?: Float32Array };
           if (record.frame) transfer.push(record.frame.buffer as ArrayBuffer);
           if (record.metrics) transfer.push(record.metrics.buffer as ArrayBuffer);
+          // metricsSnapshot() returns decoded lineage rows; presentation()
+          // returns a transferable projection under the same field name.
+          if (record.ecology instanceof Float64Array) transfer.push(record.ecology.buffer as ArrayBuffer);
           if (record.environment && 'samples' in record.environment) transfer.push(record.environment.samples.buffer as ArrayBuffer);
           if (record.state) transfer.push(record.state.buffer as ArrayBuffer);
           if (record.samples) transfer.push(record.samples.buffer as ArrayBuffer);

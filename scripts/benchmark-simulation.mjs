@@ -82,7 +82,7 @@ function advance(api, count) {
 }
 async function create(engine, scenario) {
   const api = (await WebAssembly.instantiate(engine.module, {})).exports;
-  assert.equal(api.abi_version(), 21, `${engine.name}: this benchmark requires a compatible ABI21 engine`);
+  assert.equal(api.abi_version(), 22, `${engine.name}: this benchmark requires a compatible ABI22 engine`);
   const c = scenario.config;
   assert.equal(api.set_world_size(c.width ?? 1200, c.height ?? 760), 1, error(api));
   api.set_environment(c.ambientTemperature, c.ambientLight, c.currentStrength);
@@ -268,7 +268,7 @@ function exportMeasurements(api, selectedId) {
 }
 const report = {
   runtime: process.version, runtimeFlags: process.execArgv, platform: process.platform, architecture: process.arch,
-  abi: 21, resourceArithmetic: 'whole counts', seed: 42, measuredTicks: ticks, samples, scratchWarmTicks: 5, warmupCheckInterval: 120, exportCallsPerSample: 30,
+  abi: 22, resourceArithmetic: 'whole counts', seed: 42, measuredTicks: ticks, samples, scratchWarmTicks: 5, warmupCheckInterval: 120, exportCallsPerSample: 30,
   note: 'Release WASM in Node/V8. Tick and Rust export timings exclude JS hydration/copies, worker transfer/scheduling, main-thread rendering and setup. Medians of identical trajectories with alternating engine order.',
   tissuePreparation: 'Scattered ordinary founders start in anoxic water with a sealed surface. Their ATP is withdrawn to one ATP count before one upkeep tick per cohort. The scenario surface boundary is restored before seeding resident populations and warming the world.',
   equivalence: 'Canonical checkpoints and legacy world/environment buffers must match exactly. Compact projections match those legacy values; only metrics header[13] (genomeBytes) is normalized because derived execution-plan storage is now counted.',

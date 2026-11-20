@@ -196,6 +196,14 @@ async function tradeWithProducer(openPorts) {
   const separation = host.radius + trial.radius + 0.12;
   seed(api,id,1,host.x - Math.cos(trial.angle)*separation - (trial.x-200),host.y - Math.sin(trial.angle)*separation - (trial.y-200));
   const report = {attachedTicks:0,grazerCarbonNet:0,grazerMineralNet:0};
+  let bloomPosition;
+  function feedAtRemains(grazer, donor) {
+    const distance = packet => Math.hypot(packet.x - donor.x, packet.y - donor.y);
+    const tissue = snapshot(api).food.filter(packet => packet.kind === 1);
+    const nearest = tissue.sort((a, b) => distance(a) - distance(b))[0];
+    assert.ok(nearest, 'Each feeding site contains real tissue');
+    assert.equal(api.move_cell(grazer.id, nearest.x, nearest.y, 1), 2, 'Move both attached partners to the meal');
+  }
   for (let tick=1; tick<=70*30; tick++) {
     const state = advance(api,1);
     const grazer = state.cells.find(cell => cell.id === trial.id);
@@ -210,18 +218,18 @@ async function tradeWithProducer(openPorts) {
     report.grazerCarbonNet += receiver.carbonNet;
     report.grazerMineralNet += receiver.mineralNet;
     if (tick===18*30) {
-      // Move the attached pair once onto a real carcass so tissue supplies
-      // minerals in both treatments without changing their contact geometry.
-      const donorMinerals=state.cells.find(c=>c.id===donor)?.nutrients;
-      assert.ok(donorMinerals>1,'The donor must concentrate real minerals');
+      // Present the mineral donor first, followed by the carbon-rich bloom at
+      // 36 seconds. Both pairs receive the same meals with their geometry intact.
+      const mineralPosition = state.cells.find(cell => cell.id === donor);
+      bloomPosition = state.cells.find(cell => cell.id === bloomDonor);
+      assert.ok(mineralPosition?.nutrients > 1, 'The donor must concentrate real minerals');
+      assert.ok(bloomPosition?.organicCarbon > 0, 'The producer must fix carbon before lysis');
       api.remove_source(spring);
       assert.equal(api.set_cell_stores(donor,1,0,0),1);
       assert.equal(api.set_cell_stores(bloomDonor,1,0,0),1);
-      const packet=snapshot(api).food.find(p=>p.kind===1);
-      assert.ok(packet);
-      assert.ok(api.move_cell(grazer.id,packet.x,packet.y,1));
+      feedAtRemains(grazer, mineralPosition);
     }
-
+    if (tick === 36 * 30) feedAtRemains(grazer, bloomPosition);
   }
   assert.ok(report.attachedTicks > 40*30, 'Both treatments sustain real adhesion');
   const inventory = body(api,trial.id).cellular.assemblies;

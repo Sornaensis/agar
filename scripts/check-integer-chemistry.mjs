@@ -12,7 +12,8 @@ function audit(api) {
   assert.ok(ptr);
   const v=Array.from(new BigUint64Array(api.memory.buffer,ptr,12));
   for (let i=0;i<9;i+=3) assert.equal(v[i]+v[i+2],v[i+1],'Whole-count ledger '+i);
-  assert.ok(v[9]+v[11]<=v[10],'Usable and chemical energy cannot exceed input');
+  const losses = new BigInt64Array(api.memory.buffer,api.energy_loss_ptr(),7);
+  assert.equal(v[9]+v[11]+losses.reduce((n,x)=>n+x,0n),v[10],'Stored, withdrawn and spent energy must equal input');
   return v;
 }
 const zero={width:400,height:400,initialNutrients:0,gases:{mode:'sealed',initialOxygen:0,initialCarbon:0},countChemistry:true};
@@ -26,7 +27,7 @@ const historical=await readFile(new URL('../engine/fixtures/continuous-culture-v
 assert.equal(historical.readUInt32LE(8),16);
 const old=await fresh(zero);
 assert.equal(restore(old,historical),1,error(old)); assert.equal(old.uses_count_chemistry(),0);
-assert.equal(old.count_audit_ptr(),0);
+assert.equal(old.count_audit_ptr(),0); assert.equal(old.energy_loss_ptr(),0);
 const original=save(old);assert.equal(old.set_count_chemistry(1),0);assert.deepEqual(save(old),original);
 assert.equal(restore(old,original),1,error(old));assert.deepEqual(save(old),original);
 
@@ -105,6 +106,40 @@ async function observe(countChemistry) {
   return {population:finish.population,births:finish.births,deaths:finish.deaths,successfulKills:finish.predations,
     firstObservedKillSeconds:firstKill,firstObservedBirthSeconds:firstBirth,steppingMilliseconds:Math.round(ms)};
 }
+// A lineage must make daughters able to fix and respire carbon, take up
+// minerals and synthesize proteins using the machinery they actually inherit.
+async function checkProducerInheritance(countChemistry) {
+  const api = await fresh({seed:42,width:400,height:400,ambientLight:1,initialNutrients:8,countChemistry,
+    gases:{mode:'open',initialOxygen:4,initialCarbon:4,exchangeRate:0.8,oxygenEquilibrium:4,carbonEquilibrium:4}});
+  const producer = BUILTIN_GENOMES.find(g=>g.name==='Phototroph');
+  seed(api,compile(api,producer.source),1);
+  const seen = new Set([1]);
+  let firstBirth = null;
+  let generation = 0;
+  for (let seconds=1; seconds<=300 && generation<2; seconds++) {
+    const current = advance(api,30);
+    for (const child of current.cells) {
+      if (seen.has(child.id)) continue;
+      seen.add(child.id);
+      for (const id of [child.id,child.parentId]) {
+        const installed = body(api,id).cellular.assemblies;
+        for (const name of ['Solar','Respiration','Minerals','Translation']) {
+          assert.ok(installed.some(a=>a.name===name && a.complete && a.functionalMass>0), `Cell ${id} lacks working ${name} immediately after fission`);
+        }
+      }
+      generation = Math.max(generation,child.generation);
+      if (firstBirth===null) {
+        firstBirth = seconds;
+        const saved = save(api);
+        assert.equal(restore(api,saved),1,error(api));
+        assert.deepEqual(save(api),saved);
+      }
+    }
+  }
+  assert.ok(generation>=2,'A light-fed daughter must itself reproduce');
+  return {firstBirth,generation};
+}
+report.producerInheritance={continuous:await checkProducerInheritance(false),counts:await checkProducerInheritance(true)};
 report.sameSeed120Seconds={continuous:await observe(false),counts:await observe(true)};
 assert.ok(report.sameSeed120Seconds.counts.successfulKills>0 && report.sameSeed120Seconds.counts.births>0);
 const out=JSON.stringify(report,null,2)+'\n';

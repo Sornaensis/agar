@@ -1,9 +1,10 @@
-import type { CountAudit, EnvironmentMetadata, EnvironmentSnapshot, MetricsSnapshot, RenderSnapshot, SimulationSummary } from './engine';
+import type { CountAudit, EcologySnapshot, EnergyLoss, EnvironmentMetadata, EnvironmentSnapshot, MetricsSnapshot, RenderSnapshot, SimulationSummary } from './engine';
 
 export interface PresentationOptions {
   /** Omit drawing data when only the simulation clock or aggregates are needed. */
   frame?: boolean;
   metrics?: boolean;
+  ecology?: boolean;
   environment?: boolean | 'metadata';
 }
 export interface Presentation {
@@ -11,6 +12,7 @@ export interface Presentation {
   summary: SimulationSummary;
   frame?: RenderSnapshot;
   metrics?: MetricsSnapshot;
+  ecology?: EcologySnapshot;
   environment?: EnvironmentMetadata | EnvironmentSnapshot;
   /** A tick batch may have advanced before stopping; tick/summary describe that state. */
   error?: string;
@@ -20,7 +22,10 @@ export interface WirePresentation {
   summary: SimulationSummary;
   frame?: Float64Array;
   metrics?: Float64Array;
+  ecology?: Float64Array;
   countAudit?: CountAudit;
+  mineralAbsorbedTotal?: number;
+  energyLoss?: EnergyLoss;
   environment?: EnvironmentMetadata | EnvironmentSnapshot;
   error?: string;
 }

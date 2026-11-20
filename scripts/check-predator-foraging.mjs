@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { advance, body, catalog, compile, fresh, seed, snapshot } from './organelle-harness.mjs';
+import { advance, body, catalog, compile, fresh, restore, save, seed, snapshot } from './organelle-harness.mjs';
 
 // Every founder, particle and prey position is drawn by the engine. The two
 // trials exercise different carbon supplies in the same finite 400 × 400 world.
@@ -85,6 +85,11 @@ while (!daughter && state.seconds < 300) {
   daughter = state.cells.find(c=>c.parentId===founder);
 }
 assert.ok(daughter, 'A fed hunter must produce a daughter');
+const firstSplit = save(api);
+for (const id of [founder, daughter.id]) {
+  const hasEnvelope = body(api,id).cellular.assemblies.some(a => a.name === 'Envelope' && a.complete);
+  assert.ok(hasEnvelope,'Each half needs working envelope growth machinery after dividing');
+}
 assert.ok(daughter.capacity > 65 && daughter.mineralCapacity > 0 && body(api,daughter.id).assemblyCapacity > 0,
   'The daughter needs funded ATP, mineral storage, and translation to build its own body');
 const founderKills = state.predations;
@@ -100,3 +105,12 @@ while (!born && state.seconds < 600) {
 }
 assert.ok(born && state.predations > founderKills && peakTissue > 1,
   'The hunter daughter must kill live prey, ingest its tissue, and produce a granddaughter');
+
+// Keep both halves in this branch. A serial chain of births can hide a
+// packed original parent that hunts indefinitely but never grows again.
+assert.equal(restore(api,firstSplit),1);
+let repeatBirth;
+while (!repeatBirth && (state = advance(api,30)).seconds < 600) {
+  repeatBirth = state.cells.find(c => c.parentId === founder && c.id !== daughterId);
+}
+assert.ok(repeatBirth,'The same fed parent must rebuild and produce a second daughter');

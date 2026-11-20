@@ -5,9 +5,16 @@ impl World {
     pub fn organic_cell_total(&self) -> f64 { self.cells.iter().map(Cell::organic_carbon_total).sum() }
     pub fn organic_food_total(&self) -> f64 { self.food.iter().map(Food::carbon).sum() }
     pub fn internal_inorganic_carbon_total(&self) -> f64 { self.cells.iter().map(|c| c.internal_inorganic_carbon).sum() }
-    pub fn oxygen_cell_total(&self) -> f64 { self.cells.iter().map(|c| c.internal_oxygen).sum::<f64>() + crate::counts::wide_units(self.deposits.iter().map(|d|u64::from(d.quantities[1])).sum()) }
+    fn pending_dissolved(&self, species: usize) -> f64 {
+        crate::counts::wide_units(self.deposits.iter().map(|d| u64::from(d.quantities[species])).sum())
+    }
+    // A saturated patch may defer a released count. It remains outside the cell.
+    pub fn dissolved_minerals(&self) -> f64 { self.environment.nutrient_total() + self.pending_dissolved(0) }
+    pub fn dissolved_oxygen(&self) -> f64 { self.environment.oxygen_total() + self.pending_dissolved(1) }
+    pub fn dissolved_carbon(&self) -> f64 { self.environment.inorganic_carbon_total() + self.pending_dissolved(2) }
+    pub fn oxygen_cell_total(&self) -> f64 { self.cells.iter().map(|c| c.internal_oxygen).sum() }
     pub fn carbon_total(&self) -> f64 {
-        crate::counts::wide_units(self.deposits.iter().map(|d|u64::from(d.quantities[2])).sum()) + self.environment.inorganic_carbon_total() + self.internal_inorganic_carbon_total()
+        self.dissolved_carbon() + self.internal_inorganic_carbon_total()
             + self.organic_cell_total() + self.organic_food_total()
     }
     pub fn carbon_input_total(&self) -> f64 {

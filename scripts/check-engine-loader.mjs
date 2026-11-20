@@ -183,7 +183,7 @@ export async function checkEngineLoader() {
     organicProbe.restoreState(organicSaved); organicProbe.tick(300);
     assert.deepEqual(organicProbe.saveState(), future);
     const current=editorA.saveState();
-    assert.equal(new DataView(current.buffer,current.byteOffset,current.byteLength).getUint32(8,true),17);
+    assert.equal(new DataView(current.buffer,current.byteOffset,current.byteLength).getUint32(8,true),19);
     for (const filename of ['trophic-v1.bin','trophic-v2.bin']) {
       const legacy=new Uint8Array(await readFile(new URL('../engine/fixtures/'+filename,import.meta.url)));
       assert.throws(()=>editorA.restoreState(legacy),/Unsupported simulation version.*preserved/);
@@ -215,7 +215,7 @@ export async function checkEngineLoader() {
     const migrated = await Engine.load();
     migrated.restoreState(historical);
     const upgraded = migrated.saveState();
-    assert.equal(new DataView(upgraded.buffer, upgraded.byteOffset, upgraded.byteLength).getUint32(8,true), 17);
+    assert.equal(new DataView(upgraded.buffer, upgraded.byteOffset, upgraded.byteLength).getUint32(8,true), 19);
     // Recorded on the shipped ABI19 engine using this authentic v9 founder.
     // Compare biology independently of the current genome registry's memory budget.
     function physicalStateHash(instance) {
@@ -226,8 +226,8 @@ export async function checkEngineLoader() {
         const pointer = api[read]();
         const bytes = new Uint8Array(api.memory.buffer, pointer, api[len]() * width);
         if (read === 'metrics_snapshot_ptr') {
-          // A cellular definition now holds an extra three-word Vec header on WASM32.
-          assert.equal(new DataView(bytes.buffer,bytes.byteOffset).getFloat64(13 * width,true),5543+12);
+          // One three-word recipe Vec and an optional contact guard pointer live in the WASM32 cellular definition.
+          assert.equal(new DataView(bytes.buffer,bytes.byteOffset).getFloat64(13 * width,true),5543+12+4);
           hash.update(bytes.subarray(0, 13 * width));
           hash.update(bytes.subarray(14 * width));
         } else hash.update(bytes);
@@ -274,7 +274,7 @@ export async function checkEngineLoader() {
   } finally {
     globalThis.fetch = originalFetch; WebAssembly.compile = originalCompile;
   }
-  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, version17 body/product/substrate/mechanism/control/environment/gas continuation and explicit atomic rejection of pre-organelle checkpoints.');
+  console.log('Engine artifact/loader checks passed: export types/memory/ABI guards, bounded input, fingerprinted cache isolation, retry/shared compilation, independent state, version19 body/product/substrate/mechanism/control/environment/gas continuation and explicit atomic rejection of pre-organelle checkpoints.');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await checkEngineLoader();

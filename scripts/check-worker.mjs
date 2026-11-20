@@ -121,6 +121,12 @@ try {
   const initial = (await Promise.all(pending)).at(-1);
   assert.deepEqual(initial.frame, reference.renderSnapshot());
   assert.deepEqual(initial.metrics, reference.metricsSnapshot());
+  const censusOnly = await remote.presentation({ frame: false, ecology: true });
+  assert.equal(censusOnly.frame, undefined);
+  assert.equal(censusOnly.metrics, undefined);
+  assert.deepEqual(censusOnly.ecology, initial.metrics.ecology);
+  assert.equal(censusOnly.ecology.lineages[0].introduced, 12);
+  assert.equal(censusOnly.ecology.lineages[0].alive, 12);
   assert.deepEqual(initial.environment, reference.environment());
   assert.equal(Object.hasOwn(initial.frame, 'environment'), false);
   assert.equal(Object.hasOwn(initial.frame.cells[0], 'organelles'), false);
@@ -496,7 +502,7 @@ try {
   assert.ok(migratedGas.metrics.legacyCarbonImported>0,'Legacy organic inventory is explicitly counted at migration');
   checkChemicalBudget(migratedGas.metrics);
   const upgradedGas=await chemistry.saveState();
-  assert.equal(new DataView(upgradedGas.buffer,upgradedGas.byteOffset,upgradedGas.byteLength).getUint32(8,true),17);
+  assert.equal(new DataView(upgradedGas.buffer,upgradedGas.byteOffset,upgradedGas.byteLength).getUint32(8,true),19);
   const migratedFuture=await chemistry.advance(12,{metrics:true,environment:true});
   await chemistry.restoreState(upgradedGas);
   assert.deepEqual(await chemistry.advance(12,{metrics:true,environment:true}),migratedFuture);

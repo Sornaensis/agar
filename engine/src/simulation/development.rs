@@ -10,6 +10,7 @@ impl Cell {
         cap: &BodyCapacities,
         geometry_ready: bool,
         scratch: &mut CellularWorkScratch,
+        fabrication_loss: &mut i64,
     ) -> crate::body::WorkReport {
         let prior_mass = self.body.structural_mass();
         let prior_investment = self.body.embodied_energy();
@@ -68,7 +69,9 @@ impl Cell {
             counts.mineral += n;
             funds.material -= n;
         }
+        let before = funds.investment;
         funds.settle_investment(bound_change);
+        *fabrication_loss += charge + i64::from(before) - i64::from(funds.investment);
         self.project_counts();
         report
     }

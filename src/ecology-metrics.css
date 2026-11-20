@@ -1,0 +1,44 @@
+.ecology-panel, .ecology-balance { min-width: 0; margin-bottom: 26px; padding-top: 20px; border-top: 1px solid #333637; }
+.ecology-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 14px; }
+.ecology-heading h2 { margin: 0; color: #e1e7e6; font-size: 16px; font-weight: 600; }
+.ecology-heading h3 { margin: 0; font-size: 13px; font-weight: 500; }
+.ecology-heading span, .ecology-empty, .ecology-times { color: #a1abaa; font-size: 12px; }
+.ecology-census { overflow-x: auto; }
+.ecology-census table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.ecology-census th, .ecology-census td { padding: 8px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid #303535; }
+.ecology-census thead th { color: #a2acaa; font-size: 11px; font-weight: 500; }
+.ecology-census th:first-child { padding-left: 0; text-align: left; }
+.ecology-census th:last-child, .ecology-census td:last-child { padding-right: 0; }
+.ecology-lineage { display: inline-flex; align-items: baseline; gap: 8px; padding: 5px; margin-left: -5px; background: transparent; color: #e1e7e6; font: inherit; font-weight: 500; text-align: left; white-space: normal; overflow-wrap: anywhere; border: 0; border-radius: 4px; cursor: pointer; }
+.ecology-lineage i { flex: 0 0 7px; height: 7px; border-radius: 50%; background: var(--lineage-color); }
+.ecology-lineage:hover, .ecology-lineage[aria-pressed=true] { color: var(--lineage-color); text-decoration: underline; text-underline-offset: 3px; }
+.ecology-chart { margin-top: 22px; }
+.ecology-chart select { max-width: min(60%, 240px); min-width: 0; height: 32px; padding: 4px 24px 4px 8px; font-size: 12px; }
+.ecology-plot { display: grid; grid-template-columns: max-content minmax(0, 1fr); grid-template-rows: 1fr 1fr; column-gap: 12px; align-items: start; }
+.ecology-plot span, .ecology-times { font: 10px var(--mono); color: #a4acab; text-align: right; }
+.ecology-plot span:last-child { align-self: end; }
+.ecology-plot svg { display: block; width: 100%; height: 112px; grid-column: 2; grid-row: 1 / 3; }
+.ecology-times { display: flex; justify-content: space-between; padding: 5px 0 0 19px; }
+.ecology-recent { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; margin: 16px 0 0; padding: 9px 0; border-top: 1px solid #303535; color: #b4bdbc; font-size: 12px; font-variant-numeric: tabular-nums; }
+.ecology-recent h4 { margin: 0; color: #e1e7e6; font-size: inherit; font-weight: 500; }
+.ecology-readouts, .ecology-balance dl { display: grid; grid-template-columns: repeat(auto-fit,minmax(140px,1fr)); gap: 12px 18px; margin: 16px 0 0; }
+.ecology-readouts dt, .ecology-balance dt { color: #a1aaa8; font-size: 11px; }
+.ecology-readouts dd, .ecology-balance dd { margin: 4px 0 0; font-size: 13px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.ecology-reserve-heading { margin: 18px 0 0; color: #d7dfdc; font-size: 12px; font-weight: 500; }
+.ecology-readouts.ecology-reserves { margin-top: 8px; }
+.ecology-balance p { margin: 6px 0; font-size: 12px; line-height: 1.6; }
+.ecology-balance [data-budget-status] { color: #a8d3c1; }
+.ecology-balance .budget-mismatch[data-budget-status] { color: #ffc281; }
+.ecology-balance details { margin-top: 9px; }
+.ecology-balance summary { width: fit-content; padding: 5px 0; color: #bfc8c5; font-size: 12px; cursor: pointer; }
+.ecology-balance dl { margin-bottom: 12px; }
+@media (max-width: 620px) {
+  .ecology-census table, .ecology-census tbody { display: block; }
+  .ecology-census thead { position: absolute; height: 1px; width: 1px; overflow: hidden; clip-path: inset(50%); }
+  .ecology-census tr { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)) minmax(78px,1.5fr); gap: 4px; padding: 8px 0; border-bottom: 1px solid #303535; }
+  .ecology-census tbody th { grid-column: 1 / -1; }
+  .ecology-census td, .ecology-census th { padding: 0; border: 0; text-align: left; }
+  .ecology-census td { font-size: 12px; white-space: normal; overflow-wrap: anywhere; }
+  .ecology-census td::before { content: attr(data-label); display: block; color: #a2acaa; font-size: 10px; margin-bottom: 2px; }
+  .ecology-chart select { min-height: 36px; }
+}

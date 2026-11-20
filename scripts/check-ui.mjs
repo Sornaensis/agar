@@ -61,9 +61,9 @@ try {
   await page.locator('#world').focus(); await page.keyboard.press('ArrowRight');
   await page.locator('#inspector-content .inspector-metrics').waitFor();
   await page.locator('[data-food-potential] > summary').click();
-  await page.waitForFunction(() => Number(document.querySelector('[data-food-pool="total"]')?.textContent) > 0);
+  await page.waitForFunction(() => Number(document.querySelector('[data-food-pool="total"]')?.textContent.replaceAll(',', '')) > 0);
   const foodEnergy = await page.locator('[data-food-pool]').evaluateAll(fields =>
-    Object.fromEntries(fields.map(field => [field.dataset.foodPool,Number(field.textContent)])));
+    Object.fromEntries(fields.map(field => [field.dataset.foodPool,Number(field.textContent.replaceAll(',', ''))])));
   assert.ok(Math.abs(foodEnergy.total-foodEnergy.body-foodEnergy.reserve-foodEnergy.gut-foodEnergy.atp)<0.03);
   await page.locator('[data-food-potential] > summary').click();
   await page.locator('[data-inspector-view="body"]').click();
@@ -75,6 +75,13 @@ try {
   await page.locator('[data-inspector-view="program"]').click();
   await page.locator('#organism-program .cm-editor').waitFor();
   await page.locator('#organism-program .program-evaluation-time').waitFor({ state: 'visible' });
+  const program = page.locator('#organism-program');
+  await program.locator('.program-signal-select.read').selectOption('peer.signal');
+  assert.match(await program.locator('.program-reference-example').textContent(), /engage_when: peer.signal_valid && peer.signal > 0.5/);
+  await program.locator('.program-signal-select.write').selectOption('engage_when');
+  assert.match(await program.locator('.program-reference-example').textContent(), /peer.message != rf001/);
+  assert.equal(await program.locator('option[value="avoid_message"],option[value="adhere_message"]').count(), 0);
+  await program.locator('.program-reference-close').click();
   await page.locator('[data-action="cell-program"]').click();
   await page.locator('.live-program-dialog .program-evaluation-time').waitFor({ state: 'visible' });
   await page.locator('.live-program-dialog [data-close]').click();
@@ -96,6 +103,28 @@ try {
   await page.locator('#setting-overlay').selectOption('nutrients');
   await page.locator('[data-view="metrics"]').click();
   await textIs('#metric-population', '12');
+  const lineage = page.getByRole('button', {name:'Show population history and physiology for Forager'});
+  await lineage.click();
+  assert.deepEqual(await page.locator('[data-ecology-rows] tr').first().locator('td').allTextContents(),
+    ['12','0','0','0','None recorded']);
+  assert.match(await page.locator('[data-ecology-detail]').innerText(), /Introduced\s+12/);
+  const reserves = await page.locator('.ecology-reserves').innerText();
+  assert.match(reserves, /ATP ≤10% · reserve fuel ≥25%\s+0 \/ 12/);
+  assert.match(reserves, /Cells with no free minerals\s+0 \/ 12/);
+  assert.match(reserves, /Free minerals\s+[\d,]+ counts/);
+  assert.match(reserves, /Stored organic carbon\s+[\d,]+ counts/);
+  assert.match(reserves, /Food energy in guts\s+0 counts/);
+  assert.match(await page.locator('[data-ecology-plot]').getAttribute('aria-label'), /^Forager, 12 at /);
+  await page.locator('[data-ecology-selection]').selectOption('0');
+  assert.equal(await page.locator('[data-ecology-detail]').isVisible(), false);
+  await textIs('[data-budget-status]', 'Minerals, carbon, oxygen and energy balance.');
+  await page.locator('[data-energy-detail] > summary').click();
+  assert.match(await page.locator('[data-energy-loss]').innerText(), /Difference\s+0$/);
+  await page.setViewportSize({width:375,height:812});
+  const fits = await page.locator('#ecology-panel').evaluate(el => el.scrollWidth <= el.clientWidth
+    && [...el.querySelectorAll('tbody td')].every(td => td.getBoundingClientRect().right <= innerWidth));
+  assert.ok(fits, 'Lineage census fits a narrow viewport');
+  await page.setViewportSize({width:1400,height:1000});
   const balance = await page.evaluate(() => Object.fromEntries(['introduced-energy','light-energy','withdrawn-energy','held-energy','packet-energy','dissipated-energy']
     .map(key => [key,Number(document.getElementById(key).textContent)])));
   assert.ok(balance['packet-energy']>=0 && balance['held-energy']>=balance['packet-energy']);
@@ -146,8 +175,9 @@ try {
   assert.equal(page.workers().length, 2, 'Environment preview uses its own worker');
   await page.locator('.environment-editor-dialog[open] [data-copy]').click();
   await page.locator('.environment-editor-dialog[open] .preview-status').waitFor({ state: 'hidden' });
-  await page.locator('#environment-width').fill('2400');
-  await page.locator('#environment-height').fill('1520');
+  const editableEnvironment = page.getByRole('dialog', { name: 'Edit copy' });
+  await editableEnvironment.locator('#environment-width').fill('2400');
+  await editableEnvironment.locator('#environment-height').fill('1520');
   await page.locator('.environment-editor-dialog[open] [data-object-field="strength"]').fill('.65');
   await page.locator('.environment-editor-dialog[open] [data-close]').click();
   await page.waitForFunction(() => !document.querySelector('.environment-editor-dialog'));
@@ -156,8 +186,25 @@ try {
   await page.locator('[data-action="close-simulation"]').click();
   await page.locator('[data-action="open-simulation"]').waitFor();
   assert.equal(page.workers().length, 0, 'All closed workers have been disposed');
+  // Import an actual old document via the file chooser, then reopen it from storage.
+  await page.getByRole('tab', { name: 'Genomes', exact: true }).click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Import genome' }).click();
+  await (await chooser).setFiles({name:'Contact import.cell',mimeType:'text/plain',buffer:Buffer.from(
+    'cellular counts;\npublish rf001 = 0;\navoid_message rf001;\nproduct Mount = anchor(); product Fiber = filament(); product Fuel = enzyme();\nassembly Tip: pierce() { Mount: 150; Fiber: 200; Fuel: 150; }')});
+  const imported = page.getByRole('button',{name:'Open genome Contact import',exact:true});
+  await imported.waitFor();
+  await page.reload();
+  await imported.click();
+  const importedCode = page.locator('.genome-editor-dialog[open] #genome-source .cm-content');
+  await importedCode.waitFor();
+  const upgradedSource = await importedCode.innerText();
+  assert.match(upgradedSource,/engage_when:/);
+  assert.match(upgradedSource,/peer\.message_valid/);
+  assert.doesNotMatch(upgradedSource,/avoid_message/);
+  await page.locator('.genome-editor-dialog[open] [data-close]').click();
   assert.deepEqual(failures, [], 'No browser or worker errors');
-  console.log('Browser checks passed: production worker loading, pause/save/reopen, adjacent per-source edits, compact metrics, all inspector modes, live evaluation, insertion, exclusive locks, resized asynchronous previews and worker disposal.');
+  console.log('Browser checks passed: production worker loading, pause/save/reopen, adjacent per-source edits, compact metrics, all inspector modes, live evaluation, contact references, persisted legacy .cell import, insertion, exclusive locks, resized asynchronous previews and worker disposal.');
 } catch (error) {
   console.error('Browser errors:', failures);
   console.error('Visible page:', (await page.locator('body').innerText()).slice(0, 6000));

@@ -1,9 +1,11 @@
-import type { EnvironmentSnapshot, GenomeEvaluation, MetricsSnapshot, RenderSnapshot } from './engine';
+import type { EcologySnapshot, EnvironmentSnapshot, GenomeEvaluation, MetricsSnapshot, RenderSnapshot } from './engine';
 import type { WorkerEngine, Presentation, PresentationOptions } from './worker-engine';
 import type { SimulationMetadata, SimulationRecord, SimulationSummary, Storage } from './storage';
 
 export type RenderWorldSnapshot = RenderSnapshot & { environment: EnvironmentSnapshot };
 export interface CellEvaluationSnapshot { evaluation: GenomeEvaluation; stateVersion: number }
+const CENSUS_SECONDS = 15;
+const censusPeriod = (time: number): number => Math.floor((time + 1e-7) / CENSUS_SECONDS);
 
 export function summarize(world: RenderSnapshot): SimulationSummary {
   return { time: world.time, population: world.cells.length, food: world.food.length,
@@ -39,6 +41,22 @@ export class SimulationSession {
     this.metrics = initial.metrics;
     this.tick = initial.tick;
     this.metadata.summary = initial.summary;
+    this.recordCensus(initial.summary.time, initial.metrics.ecology);
+  }
+
+  private recordCensus(time: number, ecology?: EcologySnapshot): void {
+    if (!ecology) return;
+    const history = this.metadata.ecologyHistory ??= [];
+    const last = history[history.length - 1];
+    if (last && last.time !== time && censusPeriod(last.time) === censusPeriod(time)) return;
+    const populations = ecology.lineages.filter(row => row.alive > 0)
+      .map((row): [number, number] => [row.rootGenomeId, row.alive]);
+    const events = ecology.lineages.filter(row => row.births || row.deaths || row.kills)
+      .map((row): [number, number, number, number] => [row.rootGenomeId, row.births, row.deaths, row.kills]);
+    const point = { time, populations, events };
+    if (last?.time === time) history[history.length - 1] = point;
+    else history.push(point);
+    if (history.length > 720) history.shift();
   }
 
   get busy(): boolean { return this.queued > 0 || this.flushing > 0 || this.disposed; }
@@ -64,6 +82,7 @@ export class SimulationSession {
     }
     if (presentation.frame || incoming) this.world = { ...(presentation.frame ?? this.world), environment };
     if (presentation.metrics) this.metrics = presentation.metrics;
+    this.recordCensus(presentation.summary.time, presentation.ecology ?? presentation.metrics?.ecology);
     const summary = presentation.summary, history = this.metadata.history;
     if (!history.length || summary.time - history[history.length - 1].time >= 1) {
       history.push(summary);
@@ -103,7 +122,10 @@ export class SimulationSession {
   advance(steps: number, options: PresentationOptions = {}): Promise<void> {
     this.commandEpoch++;
     return this.enqueue(async () => {
-      const presentation = await this.engine.advance(steps, options);
+      const census = this.metadata.ecologyHistory;
+      const nextTime = this.metadata.summary.time + steps / 30;
+      const sampleDue = !census?.length || censusPeriod(nextTime) > censusPeriod(census[census.length - 1].time);
+      const presentation = await this.engine.advance(steps, sampleDue ? { ...options, ecology: true } : options);
       // Even a failed batch can have completed earlier ticks. Accept that exact
       // state and mark it dirty before propagating the original engine error.
       this.accept(presentation);

@@ -64,7 +64,10 @@ for (const simulation of simulations) {
 
 const portable = JSON.parse(storage.exportGenome(genomes[0]));
 assert.equal(portable.format, 'agar.genome');
-assert.equal(portable.version,2); assert.equal(portable.languageVersion,3);
+assert.equal(portable.version,2); assert.equal(portable.languageVersion,4);
+const v3 = storage.parseGenomeImport(JSON.stringify({...portable, languageVersion:3}));
+assert.equal(v3.languageVersion,3);
+assert.equal(JSON.parse(storage.exportGenome(v3)).languageVersion,3);
 const legacyGenome = storage.validateGenomeDocument({ id:'genome:old',name:'Old genome',source:'thrust=0;turn=0;divide=false;invest.sensing=.2;',createdAt:1,updatedAt:1 });
 assert.equal(legacyGenome.languageVersion,1,'Older stored rows are preserved as older language');
 const legacyExport = JSON.parse(storage.exportGenome(legacyGenome));
@@ -132,6 +135,12 @@ const simulation = {
   genomeNames: { 1: 'Forager' }, history: [{ ...summary, time: 1 }, { ...summary, time: 12 }], summary,
 };
 assert.equal(storage.validateSimulationRecord(simulation).speed, 5);
+const ecologyHistory = [{ time: 0, populations: [[1, 8], [2, 4]] }, { time: 12, populations: [[2, 3]], events: [[2, 0, 1, 3]] }];
+assert.deepEqual(storage.validateSimulationRecord({ ...simulation, ecologyHistory }).ecologyHistory, ecologyHistory);
+for (const invalid of [
+  [{ time: 1, populations: [[1, 3], [1, 4]] }], [{ time: 5, populations: [[1, -4]] }],
+  [{ time: 13, populations: [] }], [...ecologyHistory, ecologyHistory[1]],
+]) assert.throws(() => storage.validateSimulationRecord({ ...simulation, ecologyHistory: invalid }));
 for (const population of [385, 2049, 10000, Number.MAX_SAFE_INTEGER]) {
   const record = storage.validateSimulationRecord({ ...simulation, summary: { ...summary, population }, history: [{ ...summary, population }] });
   assert.equal(record.summary.population, population, 'Simulation metadata has no fixed population ceiling');

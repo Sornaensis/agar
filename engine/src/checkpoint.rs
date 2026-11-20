@@ -8,7 +8,7 @@ use crate::{
 
 pub(crate) const MAX_STATE_BYTES: usize = 128 * 1024 * 1024;
 const MAGIC: &[u8; 8] = b"CELLAR01";
-pub(crate) const VERSION: u32 = 17;
+pub(crate) const VERSION: u32 = 19;
 pub(crate) type Result<T> = std::result::Result<T, String>;
 
 pub(crate) fn ensure(ok: bool, message: &str) -> Result<()> {
@@ -231,8 +231,11 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
         let saved_bytes = r.count(MAX_GENOME_BYTES)?;
         let source = r.text(MAX_SOURCE_BYTES)?;
         // Both the retained exact expression graph and its editable source are validated.
-        let compiled =
-            Program::compile_stored(&source).map_err(|error| format!("Invalid saved genome: {error}"))?;
+        let compiled = if version < 19 {
+            Program::compile_historical_contact_source(&source)
+        } else {
+            Program::compile_stored(&source)
+        }.map_err(|error| format!("Invalid saved genome: {error}"))?;
         let program = Program::read_checkpoint_version(&mut r, version)?;
         ensure(
             program.checkpoint_source_matches(&compiled, &source, parent == 0),
@@ -262,6 +265,16 @@ pub(crate) fn restore(bytes: &[u8]) -> Result<Engine> {
                 .checked_add(derived_bytes)
                 .and_then(|bytes| bytes.checked_add(added_controls))
                 .ok_or("Invalid simulation save: genome budget overflow.")?;
+        }
+        // Check the historical source, graph and allocation claim together before translating.
+        // The new recipes keep their original indices, so installed organs and lineage IDs survive.
+        if version < 19 {
+            if let Some(updated) = Program::upgrade_contact_source(&genome.source)? {
+                let updated = updated.into_boxed_str().into_string();
+                let program = Program::compile_stored(&updated)
+                    .map_err(|error| format!("Could not migrate saved contact rules: {error}"))?;
+                genome = Genome::new(updated, program, parent, kind);
+            }
         }
         genomes.push(genome);
         ensure(
@@ -482,8 +495,8 @@ mod tests {
         assert_eq!(p.published_message(first),None);
         assert_eq!(first.value("rf002"),Some(&crate::genome::Value::Scalar(6.0)));
         assert_eq!(p.published_message(second),Some(17.0));
-        assert_eq!(p.avoid_message(second),Some(17.0));
-        assert_eq!(p.adhesion_message(second),Some(17.0));
+        assert!(!live.genomes[0].source.contains("avoid_message"));
+        assert!(!live.genomes[0].source.contains("adhere_message"));
         assert_eq!(p.contact_signal(first),None);
         assert_eq!(p.contact_signal(second),None);
         let checkpoint = save(&live).unwrap();
@@ -647,10 +660,11 @@ mod tests {
         assert_eq!(restored.world.cells.len(), 2049);
         assert_eq!(save(&restored).unwrap(), bytes);
 
-        // An empty world ends with cell_count and food_count. Recompute the
+        // An empty continuous world ends with three zero collection lengths,
+        // then the 12-byte empty census. Recompute the
         // checksum so rejection tests the count boundary, not corruption checks.
         let mut malformed = save(&Engine::new()).unwrap();
-        let offset = malformed.len() - 8;
+        let offset = malformed.len() - 24;
         malformed[offset..offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
         let hash = checksum(&malformed[20..]);
         malformed[16..20].copy_from_slice(&hash.to_le_bytes());

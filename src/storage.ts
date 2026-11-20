@@ -2,7 +2,7 @@ import { MAX_PROGRAM_BYTES, MAX_STATE_BYTES } from './engine';
 import type { EnvironmentBarrier, EnvironmentSource, GasConfig } from './engine';
 
 export interface DocumentBase { id: string; name: string; createdAt: number; updatedAt: number }
-export const GENOME_LANGUAGE_VERSION = 3;
+export const GENOME_LANGUAGE_VERSION = 4;
 export interface GenomeDocument extends DocumentBase { source: string; description?: string; languageVersion: number }
 export interface EnvironmentConfig {
   width: number; height: number;
@@ -13,10 +13,17 @@ export interface EnvironmentConfig {
 }
 export interface EnvironmentDocument extends DocumentBase { config: EnvironmentConfig; description?: string }
 export interface HistoryPoint { time: number; population: number; food: number; births: number; deaths: number }
+export interface EcologyHistoryPoint {
+  time: number;
+  populations: [number, number][];
+  /** Cumulative event counters at this observation, in birth, death and kill order. */
+  events?: [number, number, number, number][];
+}
 export interface SimulationSummary extends HistoryPoint { generation: number }
 export interface SimulationRecord extends DocumentBase {
   state: Uint8Array; environmentName: string; seed: number; paused: boolean; speed: 1 | 2 | 5 | 10;
   genomeNames: Record<string, string>; history: HistoryPoint[]; summary: SimulationSummary;
+  ecologyHistory?: EcologyHistoryPoint[];
 }
 export type SimulationMetadata = Omit<SimulationRecord, 'state'>;
 const FIELD_OVERLAYS = ['none', 'light', 'heat', 'flow', 'nutrients', 'oxygen', 'carbon'] as const;
@@ -166,6 +173,38 @@ function historyPoint(value: unknown): HistoryPoint {
     deaths: number(item.deaths, 'Deaths', 0, Number.MAX_SAFE_INTEGER, true),
   };
 }
+function ecologyHistory(value: unknown, end: number): EcologyHistoryPoint[] {
+  if (!Array.isArray(value) || value.length > MAX_HISTORY_POINTS) throw new Error('Invalid ecology history length.');
+  let previous = -1;
+  return value.map(entry => {
+    const point = object(entry, 'Ecology history point');
+    const time = number(point.time, 'Ecology sample time', 0, end);
+    if (time <= previous) throw new Error('Ecology sample times must increase.');
+    previous = time;
+    if (!Array.isArray(point.populations) || point.populations.length > 2048) throw new Error('Invalid lineage census.');
+    const seen = new Set<number>();
+    const populations = point.populations.map((pair): [number, number] => {
+      if (!Array.isArray(pair) || pair.length !== 2) throw new Error('Invalid lineage population.');
+      const id = number(pair[0], 'Founder genome', 1, 2048, true);
+      if (seen.has(id)) throw new Error('Duplicate founder in a lineage census.');
+      seen.add(id);
+      return [id, number(pair[1], 'Living descendants', 0, Number.MAX_SAFE_INTEGER, true)];
+    });
+    if (point.events === undefined) return { time, populations };
+    if (!Array.isArray(point.events) || point.events.length > 2048) throw new Error('Invalid lineage event history.');
+    seen.clear();
+    const events = point.events.map((row): [number, number, number, number] => {
+      if (!Array.isArray(row) || row.length !== 4) throw new Error('Invalid lineage events.');
+      const id = number(row[0], 'Founder genome', 1, 2048, true);
+      if (seen.has(id)) throw new Error('Duplicate founder in a lineage event history.');
+      seen.add(id);
+      return [id, number(row[1], 'Lineage births', 0, Number.MAX_SAFE_INTEGER, true),
+        number(row[2], 'Lineage deaths', 0, Number.MAX_SAFE_INTEGER, true),
+        number(row[3], 'Lineage kills', 0, Number.MAX_SAFE_INTEGER, true)];
+    });
+    return { time, populations, events };
+  });
+}
 function validateSimulationMetadata(value: unknown): SimulationMetadata {
   const item = object(value, 'Simulation');
   if (typeof item.paused !== 'boolean') throw new Error('Simulation playback state is invalid.');
@@ -186,6 +225,7 @@ function validateSimulationMetadata(value: unknown): SimulationMetadata {
   return {
     ...base(item), environmentName: validateName(item.environmentName), seed: number(item.seed, 'Seed', 0, 0xffffffff, true),
     paused: item.paused, speed: item.speed as SimulationRecord['speed'], genomeNames, history, summary: checkedSummary,
+    ...(item.ecologyHistory === undefined ? {} : { ecologyHistory: ecologyHistory(item.ecologyHistory, checkedSummary.time) }),
   };
 }
 export function validateSimulationRecord(value: unknown): SimulationRecord {
@@ -213,14 +253,14 @@ function parseImport(text: string, format: string, limit: number): Record<string
     if (genome && item.version === 1) throw new Error('This genome uses the older investment language. Its file is preserved; create a new organelle genome or manually update a copy.');
     throw new Error(`Expected a version ${genome ? 2 : 1} ${format} file.`);
   }
-  if (genome && item.languageVersion !== GENOME_LANGUAGE_VERSION) throw new Error('Unsupported genome language version. This build uses organelle language 3.');
+  if (genome && item.languageVersion !== 3 && item.languageVersion !== GENOME_LANGUAGE_VERSION) throw new Error('Unsupported genome language version.');
   const allowed = format === 'agar.genome' ? ['format', 'version', 'languageVersion', 'name', 'source', 'description'] : ['format', 'version', 'name', 'config', 'description'];
   if (Object.keys(item).some(key => !allowed.includes(key))) throw new Error('This import contains unsupported fields.');
   return item;
 }
 export function parseGenomeImport(text: string): GenomeDocument {
   const item = parseImport(text, 'agar.genome', MAX_GENOME_IMPORT_BYTES);
-  return newGenome(validateName(item.name), source(item.source), description(item.description));
+  return { ...newGenome(validateName(item.name), source(item.source), description(item.description)), languageVersion: Number(item.languageVersion) };
 }
 export function parseEnvironmentImport(text: string): EnvironmentDocument {
   const item = parseImport(text, 'agar.environment', MAX_ENVIRONMENT_IMPORT_BYTES);
@@ -228,8 +268,8 @@ export function parseEnvironmentImport(text: string): EnvironmentDocument {
 }
 export function exportGenome(value: GenomeDocument): string {
   const item = validateGenomeDocument(value, true);
-  return JSON.stringify({ format: 'agar.genome', version: item.languageVersion === GENOME_LANGUAGE_VERSION ? 2 : 1,
-    ...(item.languageVersion === GENOME_LANGUAGE_VERSION ? { languageVersion: item.languageVersion } : {}),
+  return JSON.stringify({ format: 'agar.genome', version: item.languageVersion >= 3 ? 2 : 1,
+    ...(item.languageVersion >= 3 ? { languageVersion: item.languageVersion } : {}),
     name: item.name, source: item.source, description: item.description }, null, 2);
 }
 export function exportEnvironment(value: EnvironmentDocument): string {
@@ -396,9 +436,19 @@ export function loadGenomeDraft(): GenomeDraft | null {
   return typeof draft.name === 'string' && draft.name.length <= 80 && typeof draft.source === 'string' && encoder.encode(draft.source).byteLength <= MAX_PROGRAM_BYTES
     ? { name: draft.name, source: draft.source } : null;
 }
+/** A partially typed draft stays editable if it cannot be parsed. Never replace a concurrent edit. */
+export async function upgradePreviousGenomeDraft(convert: (code: string) => Promise<string>): Promise<void> {
+  const saved = localRead(GENOME_DRAFT_KEY) as (Partial<GenomeDraft> & { languageVersion?: number }) | null;
+  if (!saved || saved.languageVersion !== undefined || typeof saved.source !== 'string' || typeof saved.name !== 'string') return;
+  if (!saved.source.includes('avoid_message') && !saved.source.includes('adhere_message')) return;
+  const code = await convert(saved.source);
+  const latest = localRead(GENOME_DRAFT_KEY) as typeof saved;
+  if (latest?.name === saved.name && latest.source === saved.source && latest.languageVersion === undefined)
+    saveGenomeDraft({ name: saved.name, source: code });
+}
 export function saveGenomeDraft(value: GenomeDraft): void {
   if (typeof value.name !== 'string' || value.name.length > 80 || typeof value.source !== 'string' || encoder.encode(value.source).byteLength > MAX_PROGRAM_BYTES) throw new Error('This genome draft is too large to save.');
-  localWrite(GENOME_DRAFT_KEY, value);
+  localWrite(GENOME_DRAFT_KEY, { ...value, languageVersion: GENOME_LANGUAGE_VERSION });
 }
 export function clearGenomeDraft(): void { localClear(GENOME_DRAFT_KEY); }
 export function loadEnvironmentDraft(): EnvironmentDraft | null {

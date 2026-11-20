@@ -165,7 +165,7 @@ impl MechanismKind {
          "Performs paid constriction after replication and feasible division geometry.",
          "Dismantles selected machinery over time, recovering original ingredients with paid work.",
          "Consumes organic carbon and oxygen to make usable energy and inorganic carbon.",
-         "Holds contacting cells together while their surface messages match in both directions.",
+         "Uses exposed adhesin to hold contacting cells together when both surfaces accept the interface.",
          "Exchanges stored ATP with an adhered neighbor carrying an active energy junction.",
          "Exchanges free mineral with an adhered neighbor carrying an active mineral junction.",
          "Exchanges organic carbon reserves with an adhered neighbor carrying an active carbon junction.",
@@ -1426,6 +1426,14 @@ impl Body {
                 masses[*definition] += assembly.functional_mass() * assembly.activity;
             }
         }
+    }
+
+    /// Resolve inherited hardware by its complete physical recipe, just as activity does.
+    pub(crate) fn recipe_definition(&self, program: &CellularProgram, instance: usize) -> Option<usize> {
+        let state = self.cellular.as_ref()?;
+        let mut bindings = state.bindings.0.borrow_mut();
+        bindings.ensure(program, &state.pools, &state.assemblies, state.next_assembly_id);
+        bindings.instance_definition.get(instance).copied().flatten()
     }
 
     pub fn active_recipe_mass(&self, program: &CellularProgram, definition: usize) -> f64 {

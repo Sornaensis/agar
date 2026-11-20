@@ -1,5 +1,4 @@
-//! Contact adhesion is a reversible surface interaction. Register matching
-//! selects partners; the smaller active adhesive surface limits their coupling.
+//! Contact adhesion is a reversible surface interaction. Each paid surface evaluates its own partner predicate; the smaller active adhesive surface limits their coupling.
 use super::*;
 
 pub(super) const CONTACT_GAP: f64 = 1.0;
@@ -35,12 +34,7 @@ impl ContactPorts {
         for assembly in cell.body.cellular.iter().flat_map(|state| &state.assemblies) {
             let mass = match assembly.recipe.kind {
                 AssemblyKind::Mechanism(Adhere) => {
-                    if assembly.functional_mass() > 0.0 {
-                        let material: f64 = assembly.ingredients.iter().zip(&assembly.recipe.parts)
-                            .filter(|(_, p)| p.product.kind == crate::cellular::ProductKind::Adhesin)
-                            .map(|(ingredient, _)| ingredient.mass).sum();
-                        exposed_adhesin += material * assembly.integrity * assembly.activity;
-                    }
+                    exposed_adhesin += exposed_glue(assembly);
                     continue;
                 }
                 AssemblyKind::Mechanism(JunctionEnergy) => &mut ports.junction[0],
@@ -53,6 +47,100 @@ impl ContactPorts {
         ports.sites = (exposed_adhesin / ADHESIN_PER_SITE + 1e-12).floor() as u32;
         ports
     }
+}
+
+/// A site can draw material only from physical recipes that accept this partner.
+/// Stock is consumed for the duration of a phase, so a permissive small patch
+/// cannot lend the capacity of an unrelated patch on the same membrane.
+#[derive(Default)]
+struct GlueStock(Vec<(usize, f64)>);
+
+impl GlueStock {
+    fn refill(&mut self, cell: &Cell, program: Option<&Program>) {
+        self.0.clear();
+        for (index, assembly) in cell.body.cellular.iter().flat_map(|state| &state.assemblies).enumerate() {
+            let amount = exposed_glue(assembly);
+            if amount <= 0.0 {
+                continue;
+            }
+            let def = match program {
+                None => 0, // Geometry-only removal after an external barrier edit.
+                Some(p) => {
+                    let Some(d) = p.cellular().and_then(|def| cell.body.recipe_definition(def, index)) else {
+                        continue;
+                    };
+                    if !p.has_contact_guard(d) {
+                        continue;
+                    }
+                    d
+                }
+            };
+            if let Some((_, stock)) = self.0.iter_mut().find(|(d, _)| *d == def) {
+                *stock += amount;
+            } else {
+                self.0.push((def, amount));
+            }
+        }
+    }
+
+    fn eligible(
+        &self,
+        program: Option<&Program>,
+        local: &CellSignal,
+        peer: &CellSignal,
+        division: bool,
+        scratch: &mut Vec<crate::genome::Value>,
+    ) -> u64 {
+        let mut mask = 0u64;
+        let mut mass = 0.0;
+        for &(definition, stock) in &self.0 {
+            if stock <= 0.0 {
+                continue;
+            }
+            if program
+                .is_none_or(|p| p.allows_contact(definition, &local.registers, peer.peer(division), scratch))
+            {
+                mask |= 1u64 << definition;
+                mass += stock;
+            }
+        }
+        if mass / ADHESIN_PER_SITE + 1e-12 >= 1.0 {
+            mask
+        } else {
+            0
+        }
+    }
+
+    fn claim(&mut self, mask: u64) {
+        let mut need = ADHESIN_PER_SITE;
+        for (definition, stock) in &mut self.0 {
+            if mask & (1u64 << *definition) == 0 {
+                continue;
+            }
+            let take = need.min(*stock);
+            *stock -= take;
+            need -= take;
+            if need <= 0.0 {
+                break;
+            }
+        }
+    }
+}
+
+fn exposed_glue(assembly: &crate::cellular::AssemblyInstance) -> f64 {
+    if assembly.recipe.kind != AssemblyKind::Mechanism(MechanismKind::Adhere)
+        || assembly.functional_mass() <= 0.0
+    {
+        return 0.0;
+    }
+    let material: f64 = assembly
+        .ingredients
+        .iter()
+        .zip(&assembly.recipe.parts)
+        .filter(|(_, p)| p.product.kind == crate::cellular::ProductKind::Adhesin)
+        .map(|(ingredient, _)| ingredient.mass)
+        .sum();
+    material * assembly.integrity * assembly.activity
 }
 
 fn contact_geometry(env: &Environment, a: &Cell, b: &Cell, max_gap: f64)
@@ -115,6 +203,7 @@ struct JunctionEdge {
 #[derive(Default)]
 pub(super) struct JunctionWorkspace {
     ports: Vec<ContactPorts>,
+    glue: Vec<GlueStock>,
     edges: Vec<JunctionEdge>,
     accounts: Vec<JunctionAccount>,
     candidates: Vec<BondCandidate>,
@@ -252,7 +341,7 @@ impl JunctionWorkspace {
 }
 
 impl World {
-    pub(super) fn apply_adhesion_in(&mut self, workspace: &mut PhaseWorkspace) {
+    pub(super) fn apply_adhesion_in(&mut self, genomes: &[Genome], workspace: &mut PhaseWorkspace) {
         if self.had_adhesive_contacts {
             for cell in &mut self.cells {
                 cell.adhered_neighbors = 0;
@@ -262,7 +351,7 @@ impl World {
         }
         let previous = std::mem::take(&mut self.contacts);
         let signals = &workspace.signals;
-        if previous.is_empty() && !signals.iter().any(|s| s.recruits && s.adhesion.is_some() && s.published.is_some()) {
+        if signals.is_empty() || (previous.is_empty() && !genomes.iter().any(|g| g.program.has_adhesion_guard())) {
             return;
         }
 
@@ -275,49 +364,87 @@ impl World {
         grid.configure(self.environment.width, self.environment.height);
         grid.clear();
         let mut max_radius: f64 = 0.0;
-        for (index, (cell, signal)) in self.cells.iter().zip(signals).enumerate() {
-            let can_attach = cell.alive() && signal.adhesion.is_some() && signal.published.is_some();
+        junctions.glue.resize_with(self.cells.len(), GlueStock::default);
+        for (index, cell) in self.cells.iter().enumerate() {
+            let program = &genomes[(cell.genome_id - 1) as usize].program;
+            let can_attach = cell.alive() && program.has_adhesion_guard();
             let ports = if can_attach { ContactPorts::of(cell) } else { ContactPorts::default() };
             junctions.ports.push(ports);
             if ports.sites > 0 {
+                junctions.glue[index].refill(cell, Some(program));
+                if junctions.glue[index].0.is_empty() {
+                    continue;
+                }
                 grid.insert(cell.x, cell.y, index);
                 max_radius = max_radius.max(cell.radius());
             }
         }
         for i in 0..junctions.ports.len() {
-            if junctions.ports[i].sites == 0 { continue; }
+            if junctions.ports[i].sites == 0 {
+                continue;
+            }
             let a = &self.cells[i];
             let search = grid.nearby_radius(a.x, a.y, a.radius() + max_radius + RELEASE_GAP);
             for j in search {
-                if j <= i { continue; }
+                if j <= i {
+                    continue;
+                }
                 let b = &self.cells[j];
-                let (sa, sb) = (signals[i], signals[j]);
-                if !sa.accepts(sb) { continue; }
                 let key = (a.id.min(b.id), a.id.max(b.id));
                 let old = previous.get(&key).copied().unwrap_or(0);
-                if old != CLONAL && !(sa.recruits && sb.recruits) { continue; }
                 let max_gap = if old >= MATURE { RELEASE_GAP } else { CONTACT_GAP };
                 if let Some(geometry) = contact_geometry(&self.environment, a, b, max_gap) {
                     junctions.candidates.push(BondCandidate {
-                        rows: (i, j), ids: key, previous_stage: old, geometry,
+                        rows: (i, j),
+                        ids: key,
+                        previous_stage: old,
+                        geometry,
                     });
                 }
             }
         }
         // Mature contacts hold their sites. Longer uninterrupted trials precede
         // new arrivals. Stable organism IDs break ties independently of grid order.
-        junctions.candidates.sort_unstable_by_key(|c|
-            (std::cmp::Reverse(c.previous_stage.min(MATURE)), c.ids));
+        junctions.candidates.sort_unstable_by_key(|c| (std::cmp::Reverse(c.previous_stage.min(MATURE)), c.ids));
         for k in 0..junctions.candidates.len() {
             let candidate = &junctions.candidates[k];
             let (i, j) = candidate.rows;
-            if junctions.ports[i].sites == 0 || junctions.ports[j].sites == 0 { continue; }
+            if junctions.ports[i].sites == 0 || junctions.ports[j].sites == 0 {
+                continue;
+            }
+            let division = candidate.previous_stage == CLONAL;
+            let pa = &genomes[(self.cells[i].genome_id - 1) as usize].program;
+            let pb = &genomes[(self.cells[j].genome_id - 1) as usize].program;
+            let ma = junctions.glue[i].eligible(
+                Some(pa),
+                &signals[i],
+                &signals[j],
+                division,
+                &mut workspace.contact_scratch,
+            );
+            if ma == 0 {
+                continue;
+            }
+            let mb = junctions.glue[j].eligible(
+                Some(pb),
+                &signals[j],
+                &signals[i],
+                division,
+                &mut workspace.contact_scratch,
+            );
+            if mb == 0 {
+                continue;
+            }
+            junctions.glue[i].claim(ma);
+            junctions.glue[j].claim(mb);
             junctions.ports[i].sites -= 1;
             junctions.ports[j].sites -= 1;
             let old = candidate.previous_stage;
             let progress = if old >= MATURE { old } else { old + 1 };
             self.contacts.insert(candidate.ids, progress);
-            if progress < MATURE { continue; }
+            if progress < MATURE {
+                continue;
+            }
             let (dx, dy, distance, gap) = candidate.geometry;
             let (before, after) = self.cells.split_at_mut(j);
             let (a, b) = (&mut before[i], &mut after[0]);
@@ -336,7 +463,9 @@ impl World {
             let change_x = nx * pull + SHEAR_DAMPING * (vx - radial * nx);
             let change_y = ny * pull + SHEAR_DAMPING * (vy - radial * ny);
             let magnitude = change_x.hypot(change_y);
-            if magnitude == 0.0 { continue; }
+            if magnitude == 0.0 {
+                continue;
+            }
             let limit = ACCELERATION_PER_SITE * DT;
             let scale = (limit / magnitude).min(1.0);
             let (ma, mb) = (a.inertia(), b.inertia());
@@ -350,6 +479,7 @@ impl World {
         }
         junctions.share(&mut self.cells, &mut workspace.geometry);
     }
+
 }
 
 #[cfg(test)]
@@ -357,7 +487,7 @@ pub(in crate::simulation) fn advance_contact_phases(world: &mut World, genomes: 
     let mut ws=PhaseWorkspace::default();
     world.freeze_contact_signals(genomes,&mut ws.signals);
     ws.geometry.rebuild(&world.cells,false,true);
-    for _ in 0..count { world.apply_adhesion_in(&mut ws); }
+    for _ in 0..count { world.apply_adhesion_in(genomes,&mut ws); }
 }
 
 #[cfg(test)]
@@ -366,7 +496,7 @@ mod tests {
     use super::super::mechanism_tests::equipped;
 
     fn pair() -> (World, Vec<Genome>) {
-        let (mut world, genomes) = equipped("product GlueMaterial = adhesin(Frame); assembly Glue: adhere() { GlueMaterial:0.006; Mount:0.01; Wall:0.01; }\npublish rf020 = 31; adhere_message rf020 recruit;");
+        let (mut world, genomes) = equipped("product GlueMaterial = adhesin(Frame); assembly Glue: adhere() { engage_when: peer.message_valid && populated(rf020) && peer.message == rf020; GlueMaterial:0.006; Mount:0.01; Wall:0.01; }\npublish rf020 = 31;");
         let a = &mut world.cells[0];
         a.x = WIDTH - 7.25;
         a.y = 100.0;
@@ -397,7 +527,7 @@ mod tests {
         let mut phases = workspace(&world, &genomes);
         let momentum = |w: &World| w.cells.iter().fold((0.0, 0.0), |(x, y), c| (x + c.inertia()*c.vx, y + c.inertia()*c.vy));
         let before = momentum(&world);
-        world.apply_adhesion_in(&mut phases);
+        world.apply_adhesion_in(&genomes,&mut phases);
         assert!(world.cells[0].vx > -1.0 && world.cells[1].vx < 2.0);
         assert!(world.cells[0].vy < 0.75 && world.cells[1].vy > -0.5);
         let after = momentum(&world);
@@ -409,29 +539,29 @@ mod tests {
         let (mut world, genomes) = pair();
         let mut phases = workspace(&world,&genomes);
         let original = (world.cells[0].vx, world.cells[1].vx);
-        phases.signals[0].recruits=false;
-        for _ in 0..MATURE { world.apply_adhesion_in(&mut phases); }
-        assert!(world.contacts.is_empty(), "a daughters-only founder cannot be recruited");
-        phases.signals[0].recruits=true;
-        for _ in 0..MATURE-1 { world.apply_adhesion_in(&mut phases); }
+        phases.signals[0].registers[0] = None;
+        for _ in 0..MATURE { world.apply_adhesion_in(&genomes,&mut phases); }
+        assert!(world.contacts.is_empty(), "the responding surface must also accept its partner");
+        world.freeze_contact_signals(&genomes,&mut phases.signals);
+        for _ in 0..MATURE-1 { world.apply_adhesion_in(&genomes,&mut phases); }
         assert_eq!(world.contacts.values().copied().collect::<Vec<_>>(), [MATURE-1]);
         assert_eq!(world.bond_pairs().count(),0);
         assert_eq!((world.cells[0].vx,world.cells[1].vx),original);
         assert!(world.cells.iter().all(|c|c.adhered_neighbors==0 && c.junction_net==[0.0;3]));
         assert_eq!(world.move_cell(1,world.cells[0].x,world.cells[0].y,true,&genomes).unwrap(),1);
         world.cells[1].x+=1.25;
-        world.apply_adhesion_in(&mut phases);
+        world.apply_adhesion_in(&genomes,&mut phases);
         assert!(world.contacts.is_empty(), "a partial encounter breaks beyond the acquisition radius");
         world.cells[1].x-=1.25;
-        for _ in 0..MATURE-1 { world.apply_adhesion_in(&mut phases); }
+        for _ in 0..MATURE-1 { world.apply_adhesion_in(&genomes,&mut phases); }
         assert_eq!(world.bond_pairs().count(),0);
-        world.apply_adhesion_in(&mut phases);
+        world.apply_adhesion_in(&genomes,&mut phases);
         assert_eq!(world.bond_pairs().collect::<Vec<_>>(),[(1,2)]);
         world.cells[1].x+=1.25;
-        world.apply_adhesion_in(&mut phases);
+        world.apply_adhesion_in(&genomes,&mut phases);
         assert!(world.has_bond(2,1),"a formed link tolerates a small stretch");
-        phases.signals[1].adhesion=None;
-        world.apply_adhesion_in(&mut phases);
+        phases.signals[1].registers[0] = None;
+        world.apply_adhesion_in(&genomes,&mut phases);
         assert!(!world.has_bond(1,2),"either peer can withdraw immediately");
     }
 
@@ -445,14 +575,14 @@ mod tests {
             match condition {
                 "other marker" => phases.signals[1].published = Some(30.0),
                 "private" => phases.signals[1].published = None,
-                "one-sided" => phases.signals[1].adhesion = None,
+                "one-sided" => phases.signals[1].registers[0] = None,
                 "inactive" => adhesive.activity = 0.0,
                 "damaged" => adhesive.integrity = 0.0,
                 "out of reach" => world.cells[1].x += 2.0,
                 "wall" => { assert!(world.environment.add_barrier(0.0,100.0,30.0,10.0,PI*0.5,false) > 0); }
                 _ => unreachable!(),
             }
-            world.apply_adhesion_in(&mut phases);
+            world.apply_adhesion_in(&genomes,&mut phases);
             assert_eq!((world.cells[0].vx, world.cells[1].vx), (-1.0, 2.0), "{condition}");
         }
     }

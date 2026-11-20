@@ -9,6 +9,10 @@ use std::rc::Rc;
 
 mod cellular;
 mod checkpoint;
+mod contact_guard;
+mod contact_upgrade;
+pub(crate) use contact_guard::PeerContact;
+use contact_guard::PeerField;
 #[cfg(test)]
 mod control_tests;
 mod execution;
@@ -1870,6 +1874,7 @@ enum Op {
     Concentration(usize),
     Built(usize),
     Receptor(usize, ReceptorField),
+    Peer(PeerField),
     Register(Register),
     Populated(Register),
     Reference(usize),
@@ -1888,6 +1893,7 @@ impl Op {
             | Self::Concentration(_)
             | Self::Built(_)
             | Self::Receptor(_, _)
+            | Self::Peer(_)
             | Self::Register(_)
             | Self::Populated(_) => ([0; 3], 0),
             Self::Reference(a) | Self::Negate(a) | Self::Not(a) => ([a, 0, 0], 1),
@@ -1936,6 +1942,16 @@ fn evaluate_operation(
         Op::Receptor(index, field) => field.read(inputs.receptors.get(*index)),
         Op::Register(key) => memory.read(*key),
         Op::Populated(key) => Value::Boolean(memory.entries.contains_key(key)),
+        // Cell-wide evaluation/inspection has no candidate interface.
+        Op::Peer(field) => field.read(PeerContact::default()),
+        _ => return evaluate_pure(op, ty, values),
+    };
+    value.convert(ty)
+}
+
+fn evaluate_pure(op: &Op, ty: Type, values: &[Value]) -> Value {
+    let value = match op {
+        Op::Constant(value) => value.clone(),
         Op::Reference(i) => values[*i].clone(),
         Op::Not(i) => Value::Boolean(!values[*i].boolean()),
         Op::Negate(i) => match &values[*i] {
@@ -1954,6 +1970,7 @@ fn evaluate_operation(
         }]
         .clone(),
         Op::Call(function, args) => function.eval(args, values, ty),
+        _ => unreachable!("input leaves are sampled by their evaluator"),
     };
     value.convert(ty)
 }
@@ -2166,7 +2183,7 @@ pub fn language_schema_json() -> String {
         })
         .collect::<Vec<_>>()
         .join(",");
-    format!("{{\"version\":3,\"signals\":[{signals}],\"outputs\":[{outputs}],\"functions\":[{functions}],\"maxNodes\":{MAX_NODES},\"maxSourceBytes\":{MAX_SOURCE_BYTES},\"registersPerType\":{REGISTER_COUNT},\"cellular\":{cellular}}}")
+    format!("{{\"version\":4,\"signals\":[{signals}],\"outputs\":[{outputs}],\"functions\":[{functions}],\"maxNodes\":{MAX_NODES},\"maxSourceBytes\":{MAX_SOURCE_BYTES},\"registersPerType\":{REGISTER_COUNT},\"cellular\":{cellular}}}")
 }
 #[derive(Debug, Clone)]
 pub struct Program {
@@ -2210,6 +2227,8 @@ pub struct GenomeDiagnostic {
 pub struct GenomeBinding {
     pub name: String,
     pub value_type: &'static str,
+    pub per_contact: bool,
+    pub contact_safe: bool,
     pub from: usize,
     pub to: usize,
 }
@@ -2251,11 +2270,12 @@ impl GenomeAnalysis {
             .iter()
             .map(|item| {
                 format!(
-                    "{{\"name\":{},\"type\":{},\"from\":{},\"to\":{}}}",
+                    "{{\"name\":{},\"type\":{},\"from\":{},\"to\":{}{}{}}}",
                     quote(&item.name),
                     quote(item.value_type),
                     item.from,
-                    item.to,
+                    item.to, if item.per_contact { ",\"perContact\":true" } else { "" },
+                    if item.contact_safe { "" } else { ",\"contactSafe\":false" },
                 )
             })
             .collect::<Vec<_>>()
@@ -2336,6 +2356,12 @@ impl Program {
         Self::compile_source(source, true)
     }
 
+    pub(crate) fn compile_historical_contact_source(source: &str) -> Result<Self, String> {
+        if source.len() > MAX_SOURCE_BYTES { return Err("Historical program exceeds the source limit.".into()); }
+        lex(source).and_then(|tokens| Parser::new(tokens).program_for_contact_upgrade())
+            .map_err(|error| error.to_string())
+    }
+
     fn compile_source(source: &str, stored: bool) -> Result<Self, String> {
         if source.len() > MAX_SOURCE_BYTES {
             return Err(format!(
@@ -2375,12 +2401,15 @@ impl Program {
             Ok(program) => (&program.nodes, &program.bindings),
             Err(_) => (&parser.nodes, &parser.binding_order),
         };
+        let (per_contact, samples_local) = contact_guard::input_dependencies(nodes);
         let bindings = declarations
             .iter()
             .zip(&parser.binding_locations)
             .map(|(binding, location)| GenomeBinding {
                 name: binding.name.clone(),
                 value_type: nodes[binding.node].ty.label(),
+                per_contact: per_contact[binding.node],
+                contact_safe: !parser.cellular_mode || !samples_local[binding.node],
                 from: map.offsets[location.from],
                 to: map.offsets[location.to],
             })
@@ -2430,7 +2459,9 @@ impl Program {
             + std::mem::size_of::<Option<Box<cellular::CellularGraph>>>()
             + self.cellular.as_ref().map_or(0, |graph| graph.definition.derived_bytes()
                 + std::mem::size_of::<Option<Box<cellular::ContactMessages>>>()
-                + graph.messages.as_ref().map_or(0, |m| m.legacy_layout_overhead()))
+                + graph.messages.as_ref().map_or(0, |m| m.legacy_layout_overhead())
+                + std::mem::size_of::<Option<Box<contact_guard::ContactGuards>>>()
+                + graph.engagement.as_ref().map_or(0, |guards| guards.derived_bytes()))
     }
 
     /// Describe the compiler's graph without evaluating it or changing memory.
@@ -2476,6 +2507,7 @@ impl Program {
                         field.name()
                     ),
                 ),
+                Op::Peer(field) => ("sensor", field.name().into()),
                 Op::Register(register) => ("register", register.name()),
                 Op::Populated(register) => ("populated", format!("populated({})", register.name())),
                 Op::Reference(target) => (
@@ -2691,6 +2723,7 @@ impl Program {
         let mut stack: Vec<_> = self.output_indices().into_iter().flatten().collect();
         if let Some(cellular) = &self.cellular {
             stack.extend(cellular.roots());
+            stack.extend(cellular.contact_roots().iter().map(|&(_, root)| root));
         }
         for w in &self.writes {
             stack.extend(w.value);
@@ -2796,6 +2829,7 @@ impl Program {
                 options.push(Op::Reference(b.node));
             }
         }
+        self.contact_reference_options(index,&mut options);
         options
     }
     #[cfg(test)]
@@ -2861,7 +2895,7 @@ impl Program {
                     (text, tokens, nodes)
                 }
                 Op::Sensor(s) => (s.name().to_owned(), 1, 1),
-                Op::Pool(_) | Op::Concentration(_) | Op::Built(_) | Op::Receptor(_, _) => {
+                Op::Pool(_) | Op::Concentration(_) | Op::Built(_) | Op::Receptor(_, _) | Op::Peer(_) => {
                     unreachable!()
                 }
                 Op::Register(r) => (r.name(), 1, 1),
@@ -3285,6 +3319,7 @@ struct Parser {
     write_locations: Vec<Location>,
     message_locations: [Option<Location>; 4],
     cellular_mode: bool,
+    historical_contact: bool,
     count_units: bool,
     product_names: HashMap<String, usize>,
     assembly_names: HashMap<String, usize>,
@@ -3308,6 +3343,7 @@ impl Parser {
             write_locations: Vec::new(),
             message_locations: [None; 4],
             cellular_mode: false,
+            historical_contact: false,
             count_units: false,
             product_names: HashMap::new(),
             assembly_names: HashMap::new(),
@@ -3413,6 +3449,10 @@ impl Parser {
         self.program_for(false)
     }
 
+    fn program_for_contact_upgrade(&mut self) -> Result<Program, CompileError> {
+        self.historical_contact = true;
+        self.program_for(true)
+    }
     fn program_for(&mut self, stored: bool) -> Result<Program, CompileError> {
         if self.peek().kind == Kind::Name("cellular".to_string()) {
             return self.cellular_program(stored);
@@ -3646,6 +3686,9 @@ impl Parser {
             Kind::Name(name) => {
                 if self.peek().kind == Kind::LeftParen {
                     self.call(&name, location, depth + 1)?
+                } else if self.cellular_mode && !self.historical_contact && name.starts_with("peer.") {
+                    let field = PeerField::lookup(&name).ok_or_else(|| location.error(format!("unknown contact-interface field '{name}'.")))?;
+                    self.add(Op::Peer(field), field.ty(), location)?
                 } else if self.cellular_mode && name.starts_with("pool.") {
                     let index = self.product_names.get(&name[5..]).copied().ok_or_else(|| {
                         location.error(format!("unknown product stock '{name}'."))
@@ -3822,6 +3865,8 @@ mod tests {
                 &GenomeBinding {
                     name: name.into(),
                     value_type,
+                    per_contact: false,
+                    contact_safe: true,
                     from,
                     to: from + name.len()
                 }
@@ -4429,7 +4474,7 @@ mod tests {
     #[test]
     fn schema_includes_every_typed_signal_and_output_once() {
         let schema = language_schema_json();
-        assert!(schema.starts_with("{\"version\":3,"));
+        assert!(schema.starts_with("{\"version\":4,"));
         assert!(schema.contains("\"name\":\"target.flagellum.count\",\"type\":\"integer\",\"required\":false,\"default\":0"));
         assert!(schema.contains(
             "\"name\":\"scan.target\",\"type\":\"string\",\"required\":false,\"default\":\"\""
@@ -4705,6 +4750,7 @@ mod tests {
                     assert_eq!(node.ty, Type::Number)
                 }
                 Op::Receptor(_, field) => assert_eq!(node.ty, field.ty()),
+                Op::Peer(field) => assert_eq!(node.ty, field.ty()),
                 Op::Register(register) => assert_eq!(register.ty, node.ty),
                 Op::Populated(_) => assert_eq!(node.ty, Type::Bool),
                 Op::Reference(child) => assert_eq!(node.ty, ty(*child)),

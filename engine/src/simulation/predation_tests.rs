@@ -123,6 +123,10 @@ fn paid_piercing_kill_becomes_a_captured_and_digested_tissue_meal() {
     }
     assert!(saw_nonlethal_damage && saw_tissue && saw_capture && saw_digestion && saw_tissue_digestion);
     assert_eq!(world.predations, 1);
+    let mut census = Vec::new();
+    world.ecology_snapshot(&genomes, &mut census);
+    assert_eq!(census[2+8], 1.0, "the hunter received the kill");
+    assert_eq!(&census[22+1..22+9], &[0.,1.,0.,1.,1.,0.,0.,0.], "the extinct prey retained its cause of death");
     assert!(world.attacks > 0);
     assert!(best_energy_after_meal > initial_energy,
         "The meal must repay hunting/upkeep energy: {best_energy_after_meal} <= {initial_energy}");

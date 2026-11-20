@@ -20,10 +20,11 @@ mod manipulation;
 mod checkpoint;
 mod chemistry;
 mod counted;
+mod ecology;
 #[cfg(test)]
 mod count_tests;
 mod contact;
-use contact::{avoids_contact, CellSignal};
+use contact::CellSignal;
 #[cfg(test)]
 mod contact_tests;
 #[cfg(test)]
@@ -593,6 +594,7 @@ struct PhaseWorkspace {
     junctions: adhesion::JunctionWorkspace,
     /// Cell-indexed public messages and receiver settings from before this tick's writes.
     signals: Vec<CellSignal>,
+    contact_scratch: Vec<crate::genome::Value>,
     geometry: CellGeometry,
     cell_grid: Grid,
     food_grid: Grid,
@@ -609,9 +611,12 @@ struct PhaseWorkspace {
     exudates: Vec<(usize, f64, f64, f64, f64, f64)>,
     emissions: Vec<OrganicEmission>,
     targets: Vec<Option<usize>>,
+    bite_power: Vec<f64>,
+    engulf_targets: Vec<Option<(usize, f64)>>,
     consumed: Vec<bool>,
     order: Vec<usize>,
     events: Vec<AttackEvent>,
+    lethal_hits: Vec<(usize, usize)>,
     primitive_hits: Vec<(usize, usize, f64, f64)>,
     damage: Vec<f64>,
     hit_ranges: Vec<(usize, usize)>,
@@ -676,6 +681,8 @@ impl FounderPlacement {
 
 pub struct World {
     count_flux: counted::Flux,
+    census: ecology::Census,
+    energy_loss: ecology::EnergyLoss,
     photon_credit: Vec<u32>,
     deposits: Vec<counted::LocalDeposit>,
     pub cells: Vec<Cell>,
@@ -715,6 +722,8 @@ impl World {
     pub fn empty(seed: u32) -> Self {
         Self {
             count_flux: Default::default(),
+            census: Default::default(),
+            energy_loss: Default::default(),
             photon_credit: Vec::new(),
             deposits: Vec::new(),
             cells: Vec::new(),
@@ -817,7 +826,7 @@ impl World {
         self.cells.iter().map(Cell::mass).sum()
     }
     pub fn nutrient_total(&self) -> f64 {
-        self.environment.nutrient_total() + self.nutrient_food_total() + self.nutrient_cell_total() + crate::counts::wide_units(self.deposits.iter().map(|d| u64::from(d.quantities[0])).sum())
+        self.dissolved_minerals() + self.nutrient_food_total() + self.nutrient_cell_total()
     }
     pub fn nutrient_input_total(&self) -> f64 {
         self.environment.nutrient_input_total() + self.nutrient_imports
@@ -960,6 +969,7 @@ impl World {
                 let body=u64::from(c.body.count_material());
                 self.count_flux.mineral_in+=body+u64::from(q.mineral);
                 self.count_flux.carbon_in+=body+u64::from(q.carbon);
+                self.energy_loss.fabrication += i64::from(crate::counts::nearest(budget.dissipated_energy));
                 self.count_flux.energy_in+=u64::from(q.atp)+u64::from(c.body.count_investment())
                     +u64::from(crate::counts::nearest(budget.dissipated_energy))+20*(body+u64::from(q.carbon));
             }
@@ -970,6 +980,7 @@ impl World {
             self.next_id += 1;
         }
         if self.uses_count_chemistry() {self.project_flows();}
+        if count > 0 { self.census.events(genome_id).opening += count as u64; }
         Ok(count)
     }
     fn particle(&mut self, kind: OrganicKind, x: f64, y: f64, energy: f64, nutrients: f64) -> bool {
@@ -1608,6 +1619,7 @@ impl World {
             if let Some(q) = cell.counted.as_mut() {
                 let cost = crate::counts::rate(&mut q.rate_credit[6], maintenance).min(q.atp);
                 q.atp -= cost;
+                self.energy_loss.maintenance += u64::from(cost);
                 cell.energy = crate::counts::units(q.atp);
             } else { cell.energy = (cell.energy - maintenance).max(0.0); }
             let stress = (0.15 - temperature).max(temperature - 0.85).max(0.0)
@@ -1631,10 +1643,10 @@ impl World {
         self.resolve_collisions_in(phases);
         self.settle_barriers();
         if !self.environment.barriers.is_empty() { phases.geometry.rebuild(&self.cells,false,false); }
-        self.apply_adhesion_in(phases);
+        self.apply_adhesion_in(genomes, phases);
         self.eat_in(outputs, caps, phases);
         self.photosynthesize_in(outputs, caps, processing, phases);
-        self.resolve_predation_in(outputs, caps, phases);
+        self.resolve_predation_in(outputs, caps, genomes, phases);
         // Phase 3: damage, construction and births use canonical cells. Geometry
         // from the interaction phase is invalid beyond this boundary.
         for (i, cell) in self.cells.iter_mut().enumerate() {
@@ -1644,7 +1656,7 @@ impl World {
             let output = &outputs[i];
             let report = if cell.counted.is_some() {
                 cell.develop_counted(&genomes[(cell.genome_id-1) as usize].program, output, &caps[i],
-                    inputs[i].body_division_ready, cellular_work)
+                    inputs[i].body_division_ready, cellular_work, &mut self.energy_loss.fabrication)
             } else {
                 // Repair the envelope explicitly; organelle repair is handled by the
                 // same paid physical body worker below. Both preserve material.
@@ -1774,6 +1786,7 @@ impl World {
             cell.scale_gut(0.5);
             if cell.counted.is_some() {
                 let fee = DIVISION_COST * (cell.body.area + daughter.body.area);
+                self.energy_loss.work += u64::from(crate::counts::nearest(fee).min(cell.counted.as_ref().unwrap().atp));
                 cell.count_partition(&mut daughter, fee);
             }
             cell.x = wrap(cell.x - dx, self.environment.width);
@@ -1783,6 +1796,9 @@ impl World {
             cell.cooldown = DIVISION_COOLDOWN;
             self.next_id += 1;
             self.births += 1;
+            let events = self.census.events(daughter.genome_id);
+            events.births += 1;
+            events.last_birth = self.ticks + 1;
             // Only division changes bodies between the two spill passes.
             phases.spill_capacities[i] = cell.body.capacities();
             phases.spill_capacities.push(daughter.body.capacities());
@@ -1800,12 +1816,7 @@ impl World {
             // actually inherited by each half. Retention uses one remaining site.
             let parent = &self.cells[i];
             let daughter = &self.cells[daughter_row];
-            let parent_signal = CellSignal::from_cell(parent, &genomes[(parent.genome_id - 1) as usize].program);
-            let daughter_signal = CellSignal::from_cell(daughter, &genomes[(daughter.genome_id - 1) as usize].program);
-            if parent_signal.accepts(daughter_signal)
-                && parent.adhered_neighbors < adhesion::binding_sites(parent)
-                && daughter.adhered_neighbors < adhesion::binding_sites(daughter)
-                && adhesion::working_contact(&self.environment, parent, daughter, adhesion::CONTACT_GAP) {
+            if self.can_retain_cleavage(i, daughter_row, genomes, division_bonds.as_ref()) {
                 self.contacts.insert((parent.id, daughter.id), adhesion::CLONAL);
                 self.cells[i].adhered_neighbors += 1;
                 self.cells[daughter_row].adhered_neighbors += 1;
@@ -1816,7 +1827,7 @@ impl World {
         // Uneven, discrete compartment inheritance can reduce capacity; transfer
         // overflow to the local environment rather than cloning a compartment.
         self.spill_excess_stores_in(phases, false);
-        self.remove_dead_in(phases);
+        self.remove_dead_in(phases, None);
         self.settle_barriers();
         self.prune_contacts(Some(genomes));
         if self.uses_count_chemistry(){self.project_flows();}
@@ -1891,7 +1902,12 @@ impl World {
             let remaining = std::array::from_fn(|k| (demands[k] - independent[k]).max(0.0));
             let mut work = shared_digestive_work(budget, remaining, weights);
             for k in 0..3 { work[k] += independent[k]; }
-            if c.counted.is_some() { c.count_digest(&caps[i], work, residues); continue; }
+            if let Some(q) = &c.counted {
+                let before = q.atp;
+                c.count_digest(&caps[i], work, residues);
+                self.energy_loss.work += u64::from(before - c.counted.as_ref().unwrap().atp);
+                continue;
+            }
             let mut remaining_room = room;
             let mut useful_base = 0.0;
             let mut useful_extra = 0.0;
@@ -1945,14 +1961,14 @@ impl World {
         let spills = &mut workspace.emissions;
         spills.clear();
         for (c, cap) in self.cells.iter_mut().zip(&workspace.spill_capacities) {
-            Self::collect_store_overflow(c, cap, &mut self.environment, spills);
+            self.energy_loss.overflow += u64::from(Self::collect_store_overflow(c, cap, &mut self.environment, spills));
         }
         self.emit_organic_pending(workspace);
     }
     fn collect_store_overflow(c: &mut Cell, cap: &BodyCapacities, environment: &mut Environment,
-        spills: &mut Vec<OrganicEmission>) {
+        spills: &mut Vec<OrganicEmission>) -> u32 {
         if !c.alive() {
-            return;
+            return 0;
         }
         if c.counted.is_some() {return c.count_overflow(cap, spills);}
         let excess = (c.nutrient_stored - cap.minerals).max(0.0);
@@ -1994,6 +2010,7 @@ impl World {
             ).enriched(pool.extra_energy * (1.0 - kept)));
         }
         c.scale_gut(kept);
+        0
     }
     fn photosynthesize_in(
         &mut self, outputs: &[Outputs], caps: &[BodyCapacities], _processing: &mut [f64],
@@ -2056,34 +2073,59 @@ impl World {
         }
         self.emit_organic_pending(workspace);
     }
-    fn physical_targets(&self, caps: &[BodyCapacities], workspace: &mut PhaseWorkspace) {
+    fn physical_targets(
+        &self,
+        outputs: &[Outputs],
+        caps: &[BodyCapacities],
+        genomes: &[Genome],
+        workspace: &mut PhaseWorkspace,
+    ) {
         let PhaseWorkspace {
             geometry,
             cell_grid: grid,
             targets,
+            bite_power,
+            engulf_targets,
+            signals,
+            contact_scratch,
             ..
         } = workspace;
-        grid.configure(self.environment.width,self.environment.height);
+        grid.configure(self.environment.width, self.environment.height);
         let max_radius = grid.index_cells(geometry);
+        targets.clear();
         targets.resize(geometry.ids.len(), None);
-        targets.fill(None);
-        for i in 0..geometry.ids.len() {
+        bite_power.clear();
+        bite_power.resize(geometry.ids.len(), 0.0);
+        engulf_targets.clear();
+        engulf_targets.resize(geometry.ids.len(), None);
+        for (i, cell) in self.cells.iter().enumerate() {
             if !geometry.alive[i] || (caps[i].phagocytosis == 0.0 && caps[i].piercing == 0.0) {
                 continue;
             }
+            let installed = cell.body.cellular.as_ref().map_or(&[][..], |state| state.assemblies.as_slice());
+            let mounted =
+                installed.iter().any(|a| a.recipe.kind == AssemblyKind::Mechanism(MechanismKind::Pierce));
+            let legacy_mass = if mounted { cell.body.functional_mass(Kind::Piercer) } else { caps[i].piercing };
+            let legacy_power = if mounted && outputs[i].cellular.is_some() {
+                installed
+                    .iter()
+                    .filter(|a| a.recipe.kind == AssemblyKind::Organelle(Kind::Piercer))
+                    .map(|a| a.functional_mass() * a.activity)
+                    .sum()
+            } else {
+                legacy_mass * outputs[i].bite
+            };
+            if caps[i].phagocytosis <= 0.0 && legacy_power <= 0.0 {
+                continue;
+            }
+            let program = genomes
+                .get((cell.genome_id - 1) as usize)
+                .map(|g| &g.program)
+                .filter(|p| p.has_contact_guards());
             let [x, y] = geometry.positions[i];
-            // Each primitive weapon has its own attachment/reach query. Its
-            // material cannot extend a legacy weapon on another body surface.
-            let has_primitive = self.cells[i].body.cellular.as_ref().is_some_and(|state|
-                state.assemblies.iter().any(|assembly| assembly.recipe.kind
-                    == AssemblyKind::Mechanism(MechanismKind::Pierce)));
-            let legacy_piercing = if has_primitive {
-                self.cells[i].body.functional_mass(Kind::Piercer)
-            } else { caps[i].piercing };
-            if caps[i].phagocytosis == 0.0 && legacy_piercing == 0.0 { continue; }
-            let reach = 0.75 + 12.0 * legacy_piercing.sqrt();
-            let mut target = None;
-            let mut best = f64::INFINITY;
+            let reach = 0.75 + 12.0 * legacy_mass.sqrt();
+            let mut best_bite = f64::INFINITY;
+            let mut best_engulf = f64::INFINITY;
             for j in grid.nearby_radius(x, y, geometry.radii[i] + max_radius + reach) {
                 if i == j || !geometry.alive[j] {
                     continue;
@@ -2091,38 +2133,67 @@ impl World {
                 let dx = delta(geometry.positions[j][0] - x, self.environment.width);
                 let dy = delta(geometry.positions[j][1] - y, self.environment.height);
                 let gap = dx.hypot(dy) - geometry.radii[i] - geometry.radii[j];
-                if gap > reach || relative_angle(dy.atan2(dx) - geometry.angles[i]).abs() > PI * 0.6
+                if gap > reach
+                    || relative_angle(dy.atan2(dx) - geometry.angles[i]).abs() > PI * 0.6
+                    || self.environment.segment_blocked((x, y), (x + dx, y + dy))
                 {
                     continue;
                 }
-                if avoids_contact(&workspace.signals, i, j) { continue; }
-                if (gap < best
-                    || (gap == best
-                        && target.is_none_or(|old: usize| geometry.ids[j] < geometry.ids[old])))
-                    && !self.environment.segment_blocked((x,y),(x+dx,y+dy))
+                let base = contact::ContactCapacity {
+                    bite: legacy_power,
+                    piercing: legacy_mass,
+                    engulf: caps[i].phagocytosis,
+                    independent: caps[i].independent_engulf,
+                };
+                let contact::ContactCapacity { bite, piercing, engulf, independent } =
+                    program.map_or(base, |p| {
+                        base.for_peer(
+                            cell,
+                            &outputs[i],
+                            p,
+                            &signals[i],
+                            signals[j].peer(self.division_interface(cell.id, self.cells[j].id)),
+                            contact_scratch,
+                        )
+                    });
+                let earlier = |best: f64, old: Option<usize>| {
+                    gap < best || (gap == best && old.is_none_or(|row| geometry.ids[j] < geometry.ids[row]))
+                };
+                if bite > 0.0 && gap <= 0.75 + 12.0 * piercing.max(0.0).sqrt() && earlier(best_bite, targets[i])
                 {
-                    best = gap;
-                    target = Some(j);
+                    best_bite = gap;
+                    targets[i] = Some(j);
+                    bite_power[i] = bite;
+                }
+                if engulf > 0.0
+                    && gap <= 0.75
+                    && (outputs[i].feed > 0.0 || independent > 0.0)
+                    && earlier(best_engulf, engulf_targets[i].map(|(row, _)| row))
+                {
+                    best_engulf = gap;
+                    engulf_targets[i] = Some((j, engulf));
                 }
             }
-            targets[i] = target;
         }
     }
+
     fn resolve_predation_in(
         &mut self,
         outputs: &[Outputs],
         caps: &[BodyCapacities],
+        genomes: &[Genome],
         workspace: &mut PhaseWorkspace,
     ) {
-        self.physical_targets(caps, workspace);
-        self.primitive_piercing_targets(outputs, workspace);
+        self.physical_targets(outputs, caps, genomes, workspace);
+        self.primitive_piercing_targets(outputs, genomes, workspace);
         let PhaseWorkspace {
-            targets,
+            targets, bite_power, engulf_targets,
             consumed,
             order,
             events,
             damage,
             primitive_hits,
+            lethal_hits,
             hit_ranges,
             hits,
             removed,
@@ -2130,6 +2201,7 @@ impl World {
             requests,
             ..
         } = workspace;
+        lethal_hits.clear();
         consumed.resize(self.cells.len(), false);
         consumed.fill(false);
         order.clear();
@@ -2150,7 +2222,7 @@ impl World {
             {
                 continue;
             }
-            let Some(j) = targets[i] else {
+            let Some((j, available_mass)) = engulf_targets[i] else {
                 continue;
             };
             let a = &self.cells[i];
@@ -2158,7 +2230,7 @@ impl World {
             if !b.alive()
                 || b.integrity > 0.35
                 || a.body.area < 1.6 * b.body.area
-                || b.body.area > caps[i].phagocytosis * 40.0
+                || b.body.area > available_mass * 40.0
             {
                 continue;
             }
@@ -2187,12 +2259,14 @@ impl World {
                     u64::from(tissue.mineral)+contents.iter().map(|p|u64::from(p.mineral)).sum::<u64>()>u64::from(minerals){continue;}
                 counted::deposit(&mut self.environment,&mut self.deposits,b.x,b.y,[0,oxygen,dic]);
                 let a=&mut self.cells[i];let aq=a.counted.as_mut().unwrap();
-                aq.atp-=crate::counts::nearest(cost).min(aq.atp);
+                let spent = crate::counts::nearest(cost).min(aq.atp);
+                self.energy_loss.work += u64::from(spent);
+                aq.atp -= spent;
                 aq.gut[OrganicKind::Tissue as usize].join(tissue);
                 for (store,meal) in aq.gut.iter_mut().zip(contents){store.join(meal);}
                 a.project_counts();a.engulf_cooldown=2.0;
                 let b=&mut self.cells[j];b.counted=Some(Default::default());b.project_counts();b.integrity=0.0;
-                consumed[j]=true;self.predations+=1;continue;
+                consumed[j]=true;lethal_hits.push((j,i));self.predations+=1;continue;
             }
             let tissue_energy = potential.body + potential.reserve + potential.atp;
             let tissue_extra = b.tissue_extra_energy();
@@ -2216,6 +2290,7 @@ impl World {
             self.cells[j].internal_inorganic_carbon = 0.0;
             self.cells[j].integrity = 0.0;
             consumed[j] = true;
+            lethal_hits.push((j,i));
             self.predations += 1;
         }
         events.clear();
@@ -2236,20 +2311,14 @@ impl World {
             let has_primitive = self.cells[i].body.cellular.as_ref().is_some_and(|state|
                 state.assemblies.iter().any(|assembly| assembly.recipe.kind
                     == AssemblyKind::Mechanism(MechanismKind::Pierce)));
-            let power = if has_primitive {
-                if outputs[i].cellular.is_some() {
-                    self.cells[i].body.cellular.as_ref().map_or(0.0, |state|
-                        state.assemblies.iter().filter(|assembly|
-                            assembly.recipe.kind == AssemblyKind::Organelle(Kind::Piercer))
-                            .map(|assembly| assembly.functional_mass() * assembly.activity).sum())
-                } else {
-                    self.cells[i].body.functional_mass(Kind::Piercer) * outputs[i].bite
-                }
-            } else { caps[i].piercing * outputs[i].bite };
-            let inflicted = 0.12
-                * (if has_primitive { power / 0.06 } else { caps[i].piercing / 0.06 })
-                * (if has_primitive { 1.0 } else { outputs[i].bite })
-                * (self.cells[i].mass() / self.cells[j].mass()).min(2.0)
+            // Keep the original operation order when every whole-cell piercer
+            // accepts. A filtered target receives only its eligible power.
+            let coefficient = if !has_primitive && bite_power[i] == caps[i].piercing * outputs[i].bite {
+                0.12 * (caps[i].piercing / 0.06) * outputs[i].bite
+            } else {
+                0.12 * (bite_power[i] / 0.06)
+            };
+            let inflicted = coefficient * (self.cells[i].mass() / self.cells[j].mass()).min(2.0)
                 * (1.0 - protection)
                 * DT;
             if inflicted > 0.0 {
@@ -2367,8 +2436,21 @@ impl World {
                 self.environment.emit_organic(c.x, c.y, damage[i] * 2.0);
                 if !c.alive() {
                     self.predations += 1;
+                    // Grouped hits are in stable cell-ID order. Credit the attacker
+                    // that dealt most damage in the killing tick, including all its tools.
+                    let group = &events[from..to];
+                    let mut winner = (group[0].attacker, 0.0);
+                    for hits in group.chunk_by(|a,b| a.attacker == b.attacker) {
+                        let total = hits.iter().map(|hit| hit.damage).sum::<f64>();
+                        if total > winner.1 { winner = (hits[0].attacker, total); }
+                    }
+                    lethal_hits.push((i, winner.0));
                 }
             }
+        }
+        for &(victim,killer) in lethal_hits.iter() {
+            self.census.events(self.cells[victim].genome_id).predation += 1;
+            self.census.events(self.cells[killer].genome_id).kills += 1;
         }
     }
     fn reserve_organic_packets(&mut self, packet_energy: f64, packet_overhead: usize) -> Result<(), String> {
@@ -2389,15 +2471,20 @@ impl World {
         })?;
         Ok(())
     }
-    fn remove_dead_in(&mut self, phases: &mut PhaseWorkspace) {
+    fn remove_dead_in(&mut self, phases: &mut PhaseWorkspace, withdrawn_cell: Option<u32>) {
         phases.emissions.clear();
         // A newborn can immediately lose all usable energy when its inherited
         // storage overflows. Return its tissue too; only pre-birth cells could
         // have been consumed during this tick's predation phase.
         for (i, c) in self.cells.iter().enumerate() {
-            if c.alive() || phases.consumed.get(i).copied().unwrap_or(false) {
-                continue;
+            if c.alive() { continue; }
+            let events = self.census.events(c.genome_id);
+            events.deaths += 1;
+            // Fatal damage and engulfment take precedence over empty stores.
+            if Some(c.id) != withdrawn_cell && c.energy <= 0.0 && c.integrity > 0.0 && c.body.support_mass() > 0.0 {
+                events.depleted += 1;
             }
+            if phases.consumed.get(i).copied().unwrap_or(false) { continue; }
             if let Some(q)=&c.counted {
                 counted::deposit(&mut self.environment,&mut self.deposits,c.x,c.y,[0,q.oxygen,q.dic]);
             } else {
@@ -2731,7 +2818,7 @@ impl World {
     fn resolve_predation(&mut self, outputs: &[Outputs], caps: &[BodyCapacities]) -> Vec<bool> {
         let mut workspace = PhaseWorkspace::default();
         workspace.geometry.rebuild(&self.cells, false, false);
-        self.resolve_predation_in(outputs, caps, &mut workspace);
+        self.resolve_predation_in(outputs, caps, &[], &mut workspace);
         workspace.consumed
     }
     #[cfg(test)]

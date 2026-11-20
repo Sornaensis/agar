@@ -28,7 +28,6 @@ let equipped = powered;
 let surplus = equipped && energy > 550000;
 # Retain a daughter at division using matching markers and active adhesive surfaces.
 publish rf020 = 73;
-adhere_message rf020 daughters;
 let left_peer = sensed.LeftJunction.bonded && sensed.LeftJunction.message_valid && sensed.LeftJunction.message == rf020;
 let right_peer = sensed.RightJunction.bonded && sensed.RightJunction.message_valid && sensed.RightJunction.message == rf020;
 let paired_contact = left_peer || right_peer;
@@ -95,6 +94,7 @@ assembly Adhesin: adhere() {
   Glue: 40;
   start_when: need_Adhesin;
   activity: if energy > 120000 then 1 else 0;
+  engage_when: peer.division_interface && populated(rf020) && peer.message_valid && peer.message == rf020;
 }
 
 assembly LeftJunction: sense(contact) {

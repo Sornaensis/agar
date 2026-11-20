@@ -140,13 +140,13 @@ for (const name of importable) {
 }
 
 // Follow a real division with identical resources, seed and physical recipes.
-// Removing only the reciprocal selector isolates adhesion from ordinary drag.
+// Removing only the contact predicate isolates adhesion from ordinary drag.
 const colonySource = await readFile(new URL('../examples/colony.cell', import.meta.url), 'utf8');
 const pairedGaps = [];
 for (const adhesive of [true, false]) {
   const api = await fresh({ width:400, height:400, ambientLight:0.85, initialNutrients:3,
     gases:{ mode:'open', exchangeRate:0.5 } });
-  const genome = compile(api, adhesive ? colonySource : colonySource.replace('adhere_message rf020 daughters;', ''));
+  const genome = compile(api, adhesive ? colonySource : colonySource.replace(/engage_when:[^;]+;/, ''));
   seed(api, genome, 1, 200, 200);
   let state = snapshot(api);
   while (!state.births && state.seconds < 150) state = advance(api, state.cells[0].area < 1.9 ? 30 : 1);
@@ -252,7 +252,7 @@ for (const preset of PRESETS) {
 
   const firstDivisionSeconds = (state.ticks-startTick)/30;
   const bytes = save(api), resumed = await fresh();
-  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 17);
+  assert.equal(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(8, true), 19);
   assert.equal(restore(resumed, bytes), 1, error(resumed));
   assert.deepEqual(save(resumed), bytes);
   advance(api, 90); advance(resumed, 90);

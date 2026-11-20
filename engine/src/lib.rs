@@ -22,6 +22,7 @@ struct Engine {
     presentation_buffer: Vec<f64>,
     environment_snapshot: Vec<f32>,
     audit_buffer: [u64;12],
+    loss_buffer: [i64;7],
     source_buffer: Vec<u8>,
     memory_buffer: Vec<u8>,
     graph_buffer: Vec<u8>,
@@ -42,6 +43,7 @@ impl Engine {
             presentation_buffer: Vec::new(),
             environment_snapshot: Vec::new(),
             audit_buffer: [0;12],
+            loss_buffer: [0;7],
             source_buffer: Vec::new(),
             memory_buffer: Vec::new(),
             graph_buffer: Vec::new(),
@@ -130,7 +132,7 @@ thread_local! { static ENGINE: RefCell<Engine> = RefCell::new(Engine::new()); }
 
 #[no_mangle]
 pub extern "C" fn abi_version() -> u32 {
-    21
+    22
 }
 
 /// Allocate a writable, zero-initialized byte buffer. The caller must deallocate
@@ -228,6 +230,41 @@ pub unsafe extern "C" fn compile_genome(ptr: *const u8, len: u32) -> u32 {
             Err(_) => {
                 engine.error = "Program must contain valid UTF-8 text.".into();
                 0
+            }
+        }
+    })
+}
+
+/// Return editable source with historical contact directives expanded into local guards.
+/// Uses the genome_source_len buffer convention without registering or changing any genome.
+/// # Safety
+/// ptr..ptr+len must be a readable allocation from alloc.
+#[no_mangle]
+pub unsafe extern "C" fn upgrade_contact_source_ptr(ptr: *const u8, len: u32) -> *const u8 {
+    ENGINE.with(|engine| {
+        let mut engine = engine.borrow_mut();
+        engine.source_buffer.clear();
+        engine.error.clear();
+        let source = if ptr.is_null() || len == 0 || len as usize > MAX_SOURCE_BYTES {
+            Err("Genome source must be nonempty and fit in 256 KiB.".to_owned())
+        } else {
+            std::str::from_utf8(std::slice::from_raw_parts(ptr, len as usize))
+                .map_err(|_| "Genome source must be valid UTF-8.".to_owned())
+        };
+        match source.and_then(|source| {
+            let updated = Program::upgrade_contact_source(source)?;
+            if let Some(code) = updated.as_ref() {
+                Program::compile_stored(code)?;
+            }
+            Ok(updated.unwrap_or_else(|| source.to_owned()))
+        }) {
+            Ok(code) => {
+                engine.source_buffer = code.into_bytes();
+                engine.source_buffer.as_ptr()
+            }
+            Err(error) => {
+                engine.error = error;
+                std::ptr::null()
             }
         }
     })
@@ -507,7 +544,7 @@ pub extern "C" fn nutrient_input_total() -> f64 {
 
 #[no_mangle]
 pub extern "C" fn nutrient_dissolved_total() -> f64 {
-    ENGINE.with(|e| e.borrow().world.environment.nutrient_total())
+    ENGINE.with(|e| e.borrow().world.dissolved_minerals())
 }
 
 #[no_mangle]
@@ -727,9 +764,9 @@ pub extern "C" fn set_gas_exchange(mode:u32,rate:f32,oxygen_equilibrium:f32,carb
         u32::from(ok)})
 }
 #[no_mangle]
-pub extern "C" fn oxygen_dissolved_total()->f64 {ENGINE.with(|e|e.borrow().world.environment.oxygen_total())}
+pub extern "C" fn oxygen_dissolved_total()->f64 {ENGINE.with(|e|e.borrow().world.dissolved_oxygen())}
 #[no_mangle]
-pub extern "C" fn inorganic_carbon_total()->f64 {ENGINE.with(|e|e.borrow().world.environment.inorganic_carbon_total())}
+pub extern "C" fn inorganic_carbon_total()->f64 {ENGINE.with(|e|e.borrow().world.dissolved_carbon())}
 #[no_mangle]
 pub extern "C" fn oxygen_input_total()->f64 {ENGINE.with(|e|e.borrow().world.environment.oxygen_input_total())}
 #[no_mangle]
@@ -970,6 +1007,29 @@ pub extern "C" fn metrics_snapshot_ptr() -> *const f64 {
     })
 }
 
+/// Demography by founder genome; uses the ordinary presentation buffer.
+#[no_mangle]
+pub extern "C" fn ecology_snapshot_ptr() -> *const f64 {
+    ENGINE.with(|engine| {
+        let mut engine = engine.borrow_mut();
+        let Engine { world, genomes, presentation_buffer, .. } = &mut *engine;
+        world.ecology_snapshot(genomes, presentation_buffer);
+        presentation_buffer.as_ptr()
+    })
+}
+
+/// Measured counted-energy expenditures. Returned counts are signed for
+/// prepaid development; a continuous world returns a null pointer.
+#[no_mangle]
+pub extern "C" fn energy_loss_ptr() -> *const i64 {
+    ENGINE.with(|engine| {
+        let mut engine = engine.borrow_mut();
+        let Some(loss) = engine.world.energy_loss_counts() else { return std::ptr::null(); };
+        engine.loss_buffer = loss;
+        engine.loss_buffer.as_ptr()
+    })
+}
+
 #[no_mangle]
 pub extern "C" fn cell_snapshot_ptr(id: u32) -> *const f64 {
     ENGINE.with(|engine| {
@@ -1119,7 +1179,7 @@ mod tests {
         engine.world.cells[0].vy = -1.25;
         engine.world.cells[0].integrity = 0.8;
         engine.world.snapshot(&mut engine.snapshot);
-        assert_eq!(abi_version(), 21);
+        assert_eq!(abi_version(), 22);
         assert_eq!(simulation::CELL_STRIDE, 163);
         assert_eq!(engine.snapshot.len(), 12 + 22 * simulation::CELL_STRIDE);
         assert_eq!(engine.snapshot[7], simulation::WIDTH as f64);

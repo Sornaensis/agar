@@ -147,8 +147,8 @@ impl World {
             flow[1] += cell.digestion_rate;
             flow[2] += cell.exudation_rate;
             cell_material += cell.mass();
-            cell_energy += cell.energy + cell.gut_energy + cell.body.embodied_energy()
-                + (cell.organic_carbon + cell.body.structural_mass() * STRUCTURAL_CARBON_PER_MASS) * CHEMICAL_ENERGY_PER_CARBON
+            cell_energy += cell.energy + cell.gut_energy + cell.chemical_body_investment()
+                + (cell.organic_carbon + cell.chemical_body_mass() * STRUCTURAL_CARBON_PER_MASS) * CHEMICAL_ENERGY_PER_CARBON
                 + cell.reserve_enrichment + cell.structural_enrichment;
             generation = generation.max(cell.generation);
             let group = groups.entry(cell.genome_id).or_default();
@@ -163,7 +163,7 @@ impl World {
             food_material += food.nutrients;
             food_energy += food.energy;
         }
-        let dissolved = self.environment.nutrient_total();
+        let dissolved = self.dissolved_minerals();
         target.clear();
         target.extend_from_slice(&[
             self.ticks as f64,
@@ -204,7 +204,7 @@ impl World {
             groups.len() as f64,
             self.carbon_total(), self.carbon_input_total(), self.organic_cell_total(), self.organic_food_total(),
             self.carbon_fixed_total, self.carbon_respired_total, self.decay_carbon_respired_total, self.legacy_carbon_imports,
-            self.oxygen_cell_total(), self.environment.oxygen_total(), self.environment.inorganic_carbon_total(),
+            self.oxygen_cell_total(), self.dissolved_oxygen(), self.dissolved_carbon(),
             self.environment.oxygen_input_total(), self.environment.oxygen_output_total(), self.environment.carbon_output_total(),
             self.internal_inorganic_carbon_total(), self.energy_withdrawn, self.mineral_withdrawn, food_energy,
         ]);

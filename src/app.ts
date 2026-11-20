@@ -1,6 +1,8 @@
 import './style.css';
 import './player-view.css';
 import './observation.css';
+import './ecology-metrics.css';
+import { ecologyMarkup, budgetStatusMarkup, renderEcology, renderBudgetStatus, recordedEnergyLoss } from './ecology-metrics';
 import './sim-tools.css';
 import './genome-lineage.css';
 import { GenomeLineage } from './genome-lineage';
@@ -12,7 +14,7 @@ import { WorkerEngine, type PresentationOptions } from './worker-engine';
 import { Renderer, genomeColor } from './renderer';
 import { GenomeVisualizer } from './genome-visualizer';
 import { BUILTIN_GENOMES, BUILTIN_ENVIRONMENTS, BUILTIN_SIMULATIONS, simulationStartSettings, isBuiltin, type BuiltinSimulation } from './catalog';
-import { Storage, loadPreferences, savePreferences, newGenome, validateName, parseGenomeImport, parseEnvironmentImport,
+import { Storage, loadPreferences, savePreferences, newGenome, upgradePreviousGenomeDraft, validateName, parseGenomeImport, parseEnvironmentImport,
   exportGenome, exportEnvironment, GENOME_LANGUAGE_VERSION, MAX_GENOME_IMPORT_BYTES, MAX_ENVIRONMENT_IMPORT_BYTES,
   type GenomeDocument, type EnvironmentDocument, type EnvironmentConfig, type SimulationMetadata, type UiPreferences } from './storage';
 import { CatalogUI } from './catalog-ui';
@@ -113,10 +115,26 @@ function persistPreferences(): void { try { savePreferences(prefs); } catch (err
 function upsertMetadata(metadata: SimulationMetadata): void {
   simulations = [metadata, ...simulations.filter(item => item.id !== metadata.id)].sort((a, b) => b.updatedAt - a.updatedAt);
 }
+async function readSavedGenomes(): Promise<GenomeDocument[]> {
+  const documents = await storage.listGenomes();
+  let converter: Engine | undefined;
+  for (let index = 0; index < documents.length; index++) {
+    const item = documents[index];
+    if (item.languageVersion !== 3) continue;
+    let source = item.source;
+    if (source.includes('avoid_message') || source.includes('adhere_message')) {
+      converter ??= await compiler();
+      try { source = converter.upgradeContactSource(source); }
+      catch { continue; } // Keep unconvertible source available for editing and export.
+    }
+    documents[index] = { ...item, source, languageVersion: GENOME_LANGUAGE_VERSION };
+  }
+  return documents;
+}
 let catalogRefreshSerial = 0;
 async function refreshCatalogs(render = true): Promise<void> {
   const serial = ++catalogRefreshSerial;
-  const [genomes, environments, runs] = await Promise.all([storage.listGenomes(), storage.listEnvironments(), storage.listSimulationSummaries()]);
+  const [genomes, environments, runs] = await Promise.all([readSavedGenomes(), storage.listEnvironments(), storage.listSimulationSummaries()]);
   if (serial !== catalogRefreshSerial) return;
   savedGenomes = genomes; savedEnvironments = environments; simulations = runs;
   if (!render || !ready || transitioning) return;
@@ -125,7 +143,7 @@ async function refreshCatalogs(render = true): Promise<void> {
 }
 async function persistGenome(document: GenomeDocument): Promise<void> {
   saveStatus('saving', undefined, 'catalog');
-  try { await storage.putGenome(document); savedGenomes = await storage.listGenomes(); saveStatus('saved', undefined, 'catalog'); libraryChannel?.postMessage('changed'); if (prefs.tab === 'genomes') renderView(); }
+  try { await storage.putGenome(document); savedGenomes = await readSavedGenomes(); saveStatus('saved', undefined, 'catalog'); libraryChannel?.postMessage('changed'); if (prefs.tab === 'genomes') renderView(); }
   catch (error) { saveStatus('error', error, 'catalog'); throw error; }
 }
 async function persistEnvironment(document: EnvironmentDocument): Promise<void> {
@@ -971,12 +989,13 @@ const metricDefinitions = [
 function metricsMarkup(): string {
   const cards = (definitions: ReadonlyArray<readonly [string,string]>): string => definitions.map(([key,label]) => `<article class="metric-card"><span>${label}</span><strong id="metric-${key}">—</strong>${key === 'food' ? '<small id="mean-particle-carbon" title="Organic carbon remaining across all particles divided by their count. Particles lose carbon as they decay."></small>' : ''}</article>`).join('');
   return `<div class="page metrics-page"><div class="metrics-grid">${cards(metricDefinitions.slice(0,4))}</div>
-    <section class="chart-panel"><div class="section-heading"><h2>Population</h2><span id="history-duration"></span></div><svg class="metrics-chart" id="history-chart" viewBox="0 0 1000 240" preserveAspectRatio="none" role="img" aria-label="Population history"></svg></section>
+    ${ecologyMarkup()}
+    ${budgetStatusMarkup()}
     <section class="trophic-panel"><div class="section-heading"><h2>Feeding capabilities</h2><span>Living organisms</span></div><div class="metrics-grid">${cards([['autotrophs','Light feeders'],['heterotrophs','Organic feeders'],['mixotrophs','Mixed feeders'],['hunters','Can attack']])}</div></section>
     ${active?.counted ? `<details class="metrics-secondary"><summary>Exact count budgets</summary>
       <div class="count-budget-scroll"><table class="count-budget-table"><thead><tr><th>Pool</th><th>Held</th><th>Added</th><th>Removed</th><th>Remainder</th></tr></thead>
       <tbody>${(['mineral','carbon','oxygen','energy'] as const).map((key,i) => `<tr><th scope="row">${['Minerals','Carbon','Oxygen','Energy'][i]}</th>${['held','added','removed','difference'].map(field => `<td id="count-${key}-${field}">—</td>`).join('')}</tr>`).join('')}</tbody></table></div>
-      <p class="muted">Oxygen added includes photosynthesis. Oxygen removed includes respiration and decay. For energy, removed records withdrawals and the remainder measures dissipation. The three material rows balance at zero.</p></details>` : ''}
+      <p class="muted">The remainder is added minus held and removed. Minerals, carbon and oxygen should each have zero remainder. The energy remainder should equal the recorded losses under Where energy went. Oxygen flows include photosynthesis, respiration and decay.</p></details>` : ''}
     <details class="metrics-secondary"><summary>Food & energy flow</summary><div class="energy-flow">${[['production','Energy fixed from light'],['digestion','Assimilated substrate'],['exudation','Organic release']].map(([key,label])=>`<div><span>${label}</span><strong id="flow-${key}">—</strong></div>`).join('')}</div><div class="energy-flow">${[['exudate','Exudate'],['tissue','Cell tissue'],['waste','Waste']].map(([key,label])=>`<div><span>${label}</span><strong id="organic-${key}">—</strong></div>`).join('')}</div></details>
     <details class="metrics-secondary"><summary>Gases & minerals${active?.counted ? ' (counts)' : ''}</summary><div class="metrics-grid">${cards([['oxygen-water','Oxygen in water'],['carbon-water','Inorganic carbon in water'],['carbon-cells','Organic carbon in organisms'],['carbon-food','Organic carbon in particles']])}</div><div class="metrics-grid nutrient-metrics">${[['water','Dissolved minerals'],['food','Minerals in particles'],['cells','Minerals in organisms'],['total','Total minerals']].map(([key,label])=>`<div class="metric-card"><span>${label}</span><strong id="nutrient-${key}">—</strong></div>`).join('')}</div></details>
     <details class="metrics-secondary"><summary>Carbon & oxygen accounting${active?.counted ? ' (counts)' : ''}</summary><div class="inspector-metrics">${[
@@ -985,12 +1004,13 @@ function metricsMarkup(): string {
     <details class="metrics-secondary"><summary>Resource accounting${active?.counted ? ' (counts)' : ''}</summary><div class="inspector-metrics">${[
       ['introduced-material','Minerals introduced'],['removed-material','Minerals absorbed'],['withdrawn-material','Minerals withdrawn from cells'],
       ['introduced-energy','Energy introduced from outside'],['light-energy','Energy fixed from light'],['withdrawn-energy','ATP withdrawn from cells'],
-      ['held-energy','Total energy still held'],['packet-energy','Held in food particles'],['dissipated-energy','Energy dissipated (by difference)'],
+      ['held-energy','Total energy still held'],['packet-energy','Held in food particles'],['dissipated-energy','<span id="dissipated-energy-label">Dissipated energy</span>'],
     ].map(([id,label])=>metricRow(label,`<span id="${id}">—</span>`)).join('')}</div><p class="muted">Energy supplied from outside and fixed from light is either still held, withdrawn, or dissipated through construction, metabolism and decay.</p></details>
     <details class="metrics-secondary"><summary>Evolution & interactions</summary><div class="metrics-grid">${cards(metricDefinitions.slice(4))}</div></details></div>`;
 }
 function renderMetrics(world: MetricsSnapshot): void {
   const audit = world.countAudit;
+  const mineralAbsorbed = world.mineralAbsorbedTotal ?? active!.world.environment.nutrientRemovedTotal;
   const amount = (value: number, digits: number): string => audit
     ? String(Math.round(value * COUNT_SCALE)) : value.toFixed(digits);
   const residual = (entry: { held: string; added: string; removed: string }): bigint =>
@@ -1027,27 +1047,26 @@ function renderMetrics(world: MetricsSnapshot): void {
       ? Math.abs(value) < 1e-7 ? '0.000000' : value.toExponential(3) : amount(value,3));
   }
   $('introduced-material').textContent = audit?.mineral.added ?? amount(world.nutrientInputTotal,2);
-  $('removed-material').textContent = amount(active!.world.environment.nutrientRemovedTotal,2);
+  $('removed-material').textContent = amount(mineralAbsorbed, 2);
   $('withdrawn-material').textContent = amount(world.mineralWithdrawnTotal,2);
   $('withdrawn-energy').textContent = audit?.energy.removed ?? amount(world.energyWithdrawnTotal,2);
   $('introduced-energy').textContent = amount(world.energyInputTotal,2);
   $('held-energy').textContent = audit?.energy.held ?? amount(world.energyTotal,2);
   $('packet-energy').textContent = amount(world.packetEnergyTotal,2);
   const dissipated = world.energyInputTotal + world.photosynthesisTotal - world.energyWithdrawnTotal - world.energyTotal;
-  $('dissipated-energy').textContent = audit ? residual(audit.energy).toString() : (Math.abs(dissipated) < 1e-7 ? 0 : dissipated).toFixed(2);
+  if (world.energyLoss) {
+    $('dissipated-energy-label').textContent = BigInt(world.energyLoss.opening)
+      ? 'Dissipated energy (includes opening balance)' : 'Dissipated energy (measured)';
+    $('dissipated-energy').textContent = recordedEnergyLoss(world.energyLoss).toString();
+  } else {
+    $('dissipated-energy-label').textContent = 'Dissipated energy (by difference)';
+    $('dissipated-energy').textContent = audit ? residual(audit.energy).toString()
+      : (Math.abs(dissipated) < 1e-7 ? 0 : dissipated).toFixed(2);
+  }
   $('light-energy').textContent = amount(world.photosynthesisTotal,2);
   $('nutrient-total').title = (audit ? audit.mineral.added + ' mineral counts' : world.nutrientInputTotal.toFixed(1) + ' mineral units') + ' introduced since this simulation began.';
-  const history = [...active!.metadata.history.filter(point=>point.time<world.time),{time:world.time,population:world.population}];
-  const first = history[0]?.time ?? 0, span=Math.max(1,world.time-first);
-  const peak = history.reduce((largest,point)=>Math.max(largest,point.population),1);
-  const unit = 10 ** Math.floor(Math.log10(Math.max(1,peak/4)));
-  const step = [1,2,5,10].map(factor=>factor*unit).find(value=>value>=peak/4)!;
-  const intervals = Math.max(2,Math.ceil(peak/step)), max = intervals*step;
-  const points=history.map(point=>`${((point.time-first)/span*930+50).toFixed(2)},${(214-point.population/max*190).toFixed(2)}`);
-  if(points.length===1) points.push('980,'+(214-history[0].population/max*190).toFixed(2));
-  const ticks=Array.from({length:intervals+1},(_,i)=>i*step).map(value=>{const y=214-value/max*190;return `<path d="M50 ${y}H980" stroke="#29373b" stroke-dasharray="3 7"/><text x="36" y="${y+4}" text-anchor="end" fill="#809697" font-size="11">${value}</text>`;}).join('');
-  $('history-chart').innerHTML = `${ticks}${points.length?`<path d="M50 214L${points.join(' L')}L${points[points.length-1].split(',')[0]} 214Z" fill="rgba(130,226,192,.06)"/><path d="M${points.join(' L')}" fill="none" stroke="#8be2c5" stroke-width="2.5" vector-effect="non-scaling-stroke"/>`:''}`;
-  $('history-duration').textContent = clock(first)+' – '+clock(world.time);
+  renderEcology($('ecology-panel'), world, active!.metadata);
+  renderBudgetStatus($('ecology-balance'), world, mineralAbsorbed);
 }
 function rangeField(key: string,label: string,value: number,min: number,max: number,step: number,suffix=''): string {
   return `<div class="form-field"><label for="setting-${key}">${label}<output id="value-${key}">${value}${suffix}</output></label><input id="setting-${key}" data-setting="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${value}"></div>`;
@@ -1122,7 +1141,7 @@ function deleteItem(kind:'genome'|'environment'|'simulation',id:string):void{
       let release:(()=>void)|null=null;
       try{
         saveStatus('saving',undefined,'catalog');
-        if(kind==='genome'){await storage.deleteGenome(id);savedGenomes=await storage.listGenomes();}
+        if(kind==='genome'){await storage.deleteGenome(id);savedGenomes=await readSavedGenomes();}
         else if(kind==='environment'){await storage.deleteEnvironment(id);savedEnvironments=await storage.listEnvironments();}
         else{
           release=await claimSimulation(id);await storage.deleteSimulation(id);simulations=await storage.listSimulationSummaries();
@@ -1144,8 +1163,13 @@ $<HTMLInputElement>('import-file').addEventListener('change',()=>{
       if(file.size>(kind==='genome'?MAX_GENOME_IMPORT_BYTES:MAX_ENVIRONMENT_IMPORT_BYTES))throw new Error('This import file is too large.');
       const text=await file.text();
       if(kind==='genome'){
-        const document=file.name.toLowerCase().endsWith('.cell')?newGenome(file.name.replace(/\.cell$/i,'').slice(0,80),text):parseGenomeImport(text);
-        (await compiler()).compile(document.source);await persistGenome(document);await navigate('genomes');toast('Genome imported.');
+        const raw=file.name.toLowerCase().endsWith('.cell');
+        const document=raw?newGenome(file.name.replace(/\.cell$/i,'').slice(0,80),text):parseGenomeImport(text);
+        const engine=await compiler();
+        if(raw || document.languageVersion===3) document.source=engine.upgradeContactSource(document.source);
+        engine.compile(document.source);
+        document.languageVersion=GENOME_LANGUAGE_VERSION;
+        await persistGenome(document);await navigate('genomes');toast('Genome imported.');
       }else{await persistEnvironment(parseEnvironmentImport(text));await navigate('environments');toast('Environment imported.');}
     }catch(error){toast(readableError(error));}
   })();
@@ -1375,14 +1399,17 @@ async function recoverPreviousDraft():Promise<void>{
   if(!source)return;
   if(allGenomes().some(item=>item.source===source)){try{localStorage.removeItem('cellarium.genome.v1');}catch{}return;}
   try{
-    (await compiler()).compile(source);await persistGenome(newGenome('Recovered genome',source));
+    const engine=await compiler();source=engine.upgradeContactSource(source);
+    engine.compile(source);await persistGenome(newGenome('Recovered genome',source));
     localStorage.removeItem('cellarium.genome.v1');toast('Your previous genome was added to Genomes.');
   }catch{toast('Your previous draft remains saved; it could not be imported automatically.');}
 }
 async function start():Promise<void>{
   try{
     storage=await Storage.open();
-    [savedGenomes,savedEnvironments,simulations]=await Promise.all([storage.listGenomes(),storage.listEnvironments(),storage.listSimulationSummaries()]);
+    [savedGenomes,savedEnvironments,simulations]=await Promise.all([readSavedGenomes(),storage.listEnvironments(),storage.listSimulationSummaries()]);
+    try { await upgradePreviousGenomeDraft(async source => (await compiler()).upgradeContactSource(source)); }
+    catch { /* Preserve incomplete drafts so the editor can show their diagnostics. */ }
     await recoverPreviousDraft();
     ready=true;saveStatus('saved');if(preferenceWarning)toast('Preferences could not be loaded. '+readableError(preferenceWarning));
     const tab=prefs.tab,view=prefs.simulationView,id=prefs.activeSimulationId;

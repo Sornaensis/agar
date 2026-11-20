@@ -24,6 +24,9 @@ const settle = async () => { for (let i = 0; i < 16; i++) await Promise.resolve(
     tick(steps) { this.tickValue += this.fail ? 2 : steps; if (this.fail) throw new Error('Partial tick failure'); },
     renderSnapshotData() { calls.frame++; const data = new Float64Array(12); data[0] = this.tickValue; data[1] = this.tickValue / 30; data[4] = 2; data[5] = 2; data[11] = 1; return data; },
     countAudit() { return undefined; },
+    mineralAbsorbedTotal() { return 0; },
+    energyLoss() { return undefined; },
+    ecologySnapshotData() { return Float64Array.of(0, 0); },
     metricsSnapshotData() { calls.metrics++; return Float64Array.of(this.tickValue); },
     environmentMetadata() { calls.metadata++; return { sources: [], barriers: [], columns: 1, rows: 1 }; },
     environment() { calls.fields++; return { sources: [], barriers: [], columns: 1, rows: 1, samples: new Float32Array(7) }; },
@@ -46,9 +49,9 @@ const settle = async () => { for (let i = 0; i < 16; i++) await Promise.resolve(
   engine.fail = true;
   response = await request('advance', [8, { frame: false, metrics: true }]);
   assert.equal(response.reply.value.tick, 10); assert.match(response.reply.value.error, /Partial/);
-  assert.equal(calls.frame, 0); assert.equal(response.transfers, 1);
+  assert.equal(calls.frame, 0); assert.equal(response.transfers, 2);
   response = await request('presentation', [{ metrics: true, environment: true }]);
-  assert.equal(response.transfers, 3); assert.equal(calls.frame, 1); assert.equal(calls.fields, 1);
+  assert.equal(response.transfers, 4); assert.equal(calls.frame, 1); assert.equal(calls.fields, 1);
   assert.deepEqual(response.reply.value.summary, engine.summary());
 }
 
@@ -66,12 +69,24 @@ const appFunction = name => {
   const ast = ts.createSourceFile('engine.ts',source,ts.ScriptTarget.ES2022,true);
   const fn = ast.statements.find(node=>ts.isFunctionDeclaration(node) && node.name?.text==='decodeCountAudit');
   const {decodeCountAudit} = await import(url(fn.getText(ast)));
+  const census = ast.statements.find(node=>ts.isFunctionDeclaration(node) && node.name?.text==='decodeEcologySnapshot');
+  const {decodeEcologySnapshot} = await import(url(census.getText(ast)));
+  const row = new Array(19).fill(0);
+  row[0] = 4; row[9] = -1;
+  row[1] = 7;
+  const second = [...row]; second[0] = 9;
+  const legacy = decodeEcologySnapshot(Float64Array.of(0, 2, ...row, ...second));
+  const extended = decodeEcologySnapshot(Float64Array.of(0, 2, ...row, 3, ...second, 1));
+  assert.equal(legacy.lineages[1].lowAtpWithReserveFuel, undefined);
+  assert.deepEqual(extended.lineages, legacy.lineages.map((record, index) =>
+    ({...record,lowAtpWithReserveFuel:[3,1][index]})));
+  assert.throws(() => decodeEcologySnapshot(Float64Array.of(0, 1, ...row, 1, 2)), /invalid layout/);
   const large = 9007199254740993n;
   const audit = decodeCountAudit(BigUint64Array.of(large,large+1n,1n,large,large,0n,large,large+3n,3n,large,large+8n,7n));
   assert.equal(audit.carbon.held,'9007199254740993');
   assert.throws(()=>decodeCountAudit(new BigUint64Array(11)),/four budgets/);
   const elements = new Map();
-  const context = vm.createContext({COUNT_SCALE:10000,metricDefinitions:[],clock:String,
+  const context = vm.createContext({COUNT_SCALE:10000,metricDefinitions:[],clock:String, renderEcology() {}, renderBudgetStatus() {},
     active:{world:{environment:{nutrientRemovedTotal:0}},metadata:{history:[]}},
     $:id=>{if(!elements.has(id)) elements.set(id,{});return elements.get(id);}
   });
@@ -84,6 +99,34 @@ const appFunction = name => {
   assert.equal(elements.get('dissipated-energy').textContent,'1');
   assert.equal(elements.get('introduced-material').textContent,'9007199254740994');
   assert.equal(elements.get('flow-production').textContent,'1 energy counts/s');
+
+  // Reconcile independent energy loss counters at values larger than f64
+  // can distinguish. Fabrication may recover a prepaid fraction of a count.
+  const ecologySource = await readFile(new URL('../src/ecology-metrics.ts', import.meta.url), 'utf8');
+  const ecology = ts.createSourceFile('ecology-metrics.ts', ecologySource, ts.ScriptTarget.ES2022, true);
+  const budget = ecology.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === 'renderBudgetStatus');
+  const labels = ecology.statements.find(n => ts.isVariableStatement(n) && n.declarationList.declarations[0].name.getText(ecology) === 'energyLabels');
+  const recorded = ecology.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === 'recordedEnergyLoss');
+  const {renderBudgetStatus, recordedEnergyLoss} = await import(url('const count = String;\n'
+    + [labels,recorded,budget].map(n => n.getText(ecology)).join('\n')));
+  const status = {classList:{toggle(){}}};
+  const target = {querySelector: selector => selector === '[data-budget-status]' ? status : {}};
+  const losses = { opening:'0', maintenance:'2', fabrication:'-1', respiration:'0',
+    decomposition:'0', feedingAndDivision:'0', overflow:'0' };
+  renderBudgetStatus(target, {countAudit:audit, energyLoss:losses}, 0);
+  assert.equal(status.textContent, 'Minerals, carbon, oxygen and energy balance.');
+  renderBudgetStatus(target, {countAudit:{...audit,carbon:{...audit.carbon,held:String(large-1n)}},
+    energyLoss:{...losses,maintenance:'1'}}, 0);
+  assert.equal(status.textContent, 'Carbon difference 1 · Energy difference 1');
+  context.recordedEnergyLoss = recordedEnergyLoss;
+  metrics.energyLoss = {...losses, maintenance:'1'};
+  context.renderMetrics(metrics);
+  assert.equal(elements.get('count-energy-difference').textContent, '1', 'Raw energy remainder stays visible');
+  assert.equal(elements.get('dissipated-energy').textContent, '0', 'Measured loss is independent of the remainder');
+  assert.equal(elements.get('dissipated-energy-label').textContent, 'Dissipated energy (measured)');
+  const continuous = new Proxy({nutrientInputTotal:20,nutrientTotal:19}, {get:(target, key)=>target[key] ?? 0});
+  renderBudgetStatus(target, continuous, 0);
+  assert.equal(status.textContent, 'Minerals difference 1.00', 'Supply minus inventory has the same sign in both arithmetic modes');
 }
 
 // The actual inspector refresh paints once after fresh data, never once before

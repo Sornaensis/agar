@@ -5,7 +5,7 @@ import { advance, body, catalog, compile, error, fresh, restore, save, snapshot 
 const { BUILTIN_ENVIRONMENTS, PRESETS } = await catalog();
 const pool = BUILTIN_ENVIRONMENTS.find(env => env.id.endsWith(':colony-pool')).config;
 const nurse = PRESETS.find(genome => genome.name === 'Nurse rosette').source;
-const recruit = nurse.replace('adhere_message rf020 daughters;', 'adhere_message rf020 recruit;');
+const recruit = nurse.replace('peer.division_interface && ', '');
 assert.notEqual(nurse, recruit);
 
 const degree = (api, id) => body(api, id).colony.neighbors;
@@ -85,7 +85,7 @@ for (const [file,version] of [['independent-founders-v14.bin',14],['family-v14.b
     }
   }
   const upgraded = save(api), copy = await fresh();
-  assert.equal(new DataView(upgraded.buffer).getUint32(8,true),17);
+  assert.equal(new DataView(upgraded.buffer).getUint32(8,true),19);
   assert.equal(restore(copy,upgraded),1,error(copy));
   advance(api,1); advance(copy,1);
   assert.equal(degree(api,1),0);

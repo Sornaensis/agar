@@ -215,7 +215,7 @@ assert.equal(BUILTIN_SIGNALS.length, 174);
 assert.equal(BUILTIN_OUTPUTS.length, 81);
 const schemaPointer = api.language_schema_ptr();
 const schema = JSON.parse(decode(schemaPointer,api.language_schema_len()));
-assert.equal(schema.version,3);
+assert.equal(schema.version,4);
 for (const organ of ORGANELLE_CATALOG) {
   assert.equal(schema.outputs.find(output=>output.name===`target.${organ.kind}.size`).default,organ.minimumMass,`${organ.kind} minimum mass documentation matches Rust`);
 }

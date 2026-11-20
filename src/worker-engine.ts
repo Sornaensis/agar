@@ -1,4 +1,4 @@
-import { decodeMetricsSnapshot, decodeRenderSnapshot } from './engine';
+import { decodeEcologySnapshot, decodeMetricsSnapshot, decodeRenderSnapshot } from './engine';
 import type { BodyInspection, Cell, EnvironmentMetadata, EnvironmentSnapshot, GasExchangeConfig, GenomeAnalysis, GenomeEvaluation, GenomeGraph, GenomeLineageEntry, GenomeRecord, LanguageSchema, MetricsSnapshot, MutationKind, MutationResult, RegisterEntry, RenderSnapshot, SimulationSummary, SourceKind, WorldSnapshot } from './engine';
 import type { CapturedCheckpoint, Presentation, PresentationOptions, WirePresentation, WorkerMethod, WorkerRequest, WorkerResponse } from './simulation-protocol';
 export type { CapturedCheckpoint, Presentation, PresentationOptions } from './simulation-protocol';
@@ -71,9 +71,13 @@ export class WorkerEngine {
   private decodePresentation(value: WirePresentation): Presentation {
     const result: Presentation = { tick: value.tick, summary: value.summary };
     if (value.frame) result.frame = decodeRenderSnapshot(value.frame);
+    if (value.ecology) result.ecology = decodeEcologySnapshot(value.ecology);
     if (value.metrics) {
       result.metrics = decodeMetricsSnapshot(value.metrics);
+      result.metrics.mineralAbsorbedTotal = value.mineralAbsorbedTotal;
+      if (result.ecology) result.metrics.ecology = result.ecology;
       if (value.countAudit) result.metrics.countAudit = value.countAudit;
+      if (value.energyLoss) result.metrics.energyLoss = value.energyLoss;
     }
     if (value.environment) result.environment = value.environment;
     if (value.error) result.error = value.error;

@@ -29,48 +29,94 @@ impl World {
         }
     }
 
-    pub(super) fn primitive_piercing_targets(&self, outputs: &[Outputs], workspace: &mut PhaseWorkspace) {
+    pub(super) fn primitive_piercing_targets(
+        &self,
+        outputs: &[Outputs],
+        genomes: &[Genome],
+        workspace: &mut PhaseWorkspace,
+    ) {
         let PhaseWorkspace { geometry, cell_grid, primitive_hits, .. } = workspace;
         primitive_hits.clear();
         let max_radius = geometry.radii.iter().copied().fold(0.0_f64, f64::max);
         for (attacker, cell) in self.cells.iter().enumerate() {
-            if !cell.alive() { continue; }
-            let Some(state) = &cell.body.cellular else { continue; };
-            for assembly in &state.assemblies {
-                if assembly.recipe.kind != AssemblyKind::Mechanism(MechanismKind::Pierce) { continue; }
+            if !cell.alive() {
+                continue;
+            }
+            let Some(state) = &cell.body.cellular else {
+                continue;
+            };
+            for (instance, assembly) in state.assemblies.iter().enumerate() {
+                if assembly.recipe.kind != AssemblyKind::Mechanism(MechanismKind::Pierce) {
+                    continue;
+                }
                 let mass = assembly.functional_mass();
-                let activity = if outputs[attacker].cellular.is_some() { assembly.activity }
-                    else { outputs[attacker].bite * assembly.activity };
+                let activity = if outputs[attacker].cellular.is_some() {
+                    assembly.activity
+                } else {
+                    outputs[attacker].bite * assembly.activity
+                };
                 let power = mass * activity;
-                if power <= 0.0 { continue; }
+                if power <= 0.0 {
+                    continue;
+                }
                 let at = cell.angle + assembly.recipe.at;
                 let outward = [at.cos(), at.sin()];
                 let x = wrap(cell.x + cell.radius() * outward[0], self.environment.width);
                 let y = wrap(cell.y + cell.radius() * outward[1], self.environment.height);
                 let reach = 0.75 + 12.0 * mass.sqrt();
+                let guard = genomes.get((cell.genome_id - 1) as usize).and_then(|g| {
+                    if !g.program.has_contact_guards() {
+                        return None;
+                    }
+                    let def = cell.body.recipe_definition(g.program.cellular()?, instance)?;
+                    g.program.has_contact_guard(def).then_some((&g.program, def))
+                });
                 let mut best: Option<(usize, f64)> = None;
                 for victim in cell_grid.nearby_radius(x, y, reach + max_radius) {
-                    if victim == attacker || !self.cells[victim].alive() { continue; }
-                    let dx = delta(geometry.positions[victim][0] - x, self.environment.width);
-                    let dy = delta(geometry.positions[victim][1] - y, self.environment.height);
-                    if self.environment.segment_blocked((x,y),(x+dx,y+dy)) {continue;}
-                    let gap = dx.hypot(dy) - geometry.radii[victim];
-                    if gap > reach || dx * outward[0] + dy * outward[1] < -1e-9
-                        || relative_angle(dy.atan2(dx) - cell.angle - assembly.recipe.direction).abs() > PI * 0.4 {
+                    if victim == attacker || !self.cells[victim].alive() {
                         continue;
                     }
-                    if avoids_contact(&workspace.signals, attacker, victim) { continue; }
-                    if best.is_none_or(|(old, distance)| gap < distance
-                        || (gap == distance && geometry.ids[victim] < geometry.ids[old])) {
+                    let dx = delta(geometry.positions[victim][0] - x, self.environment.width);
+                    let dy = delta(geometry.positions[victim][1] - y, self.environment.height);
+                    if self.environment.segment_blocked((x, y), (x + dx, y + dy)) {
+                        continue;
+                    }
+                    let gap = dx.hypot(dy) - geometry.radii[victim];
+                    if gap > reach
+                        || dx * outward[0] + dy * outward[1] < -1e-9
+                        || relative_angle(dy.atan2(dx) - cell.angle - assembly.recipe.direction).abs()
+                            > PI * 0.4
+                    {
+                        continue;
+                    }
+                    if let Some((program, def)) = guard {
+                        if !program.allows_contact(
+                            def,
+                            &workspace.signals[attacker].registers,
+                            workspace.signals[victim]
+                                .peer(self.division_interface(cell.id, self.cells[victim].id)),
+                            &mut workspace.contact_scratch,
+                        ) {
+                            continue;
+                        }
+                    }
+                    if best.is_none_or(|(old, distance)| {
+                        gap < distance || (gap == distance && geometry.ids[victim] < geometry.ids[old])
+                    }) {
                         best = Some((victim, gap));
                     }
                 }
                 if let Some((victim, _)) = best {
-                    let angle = relative_angle(delta(y - geometry.positions[victim][1], self.environment.height)
-                        .atan2(delta(x - geometry.positions[victim][0], self.environment.width)) - geometry.angles[victim]);
+                    let angle = relative_angle(
+                        delta(y - geometry.positions[victim][1], self.environment.height)
+                            .atan2(delta(x - geometry.positions[victim][0], self.environment.width))
+                            - geometry.angles[victim],
+                    );
                     primitive_hits.push((attacker, victim, power, angle));
                 }
             }
         }
     }
+
+
 }

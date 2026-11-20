@@ -113,7 +113,7 @@ mod tests {
         let held = w.energy_total();
         let carbon = w.carbon_total();
         assert!(w.particle(OrganicKind::Tissue,x,y,1.0,0.0));
-        w.remove_dead_in(&mut PhaseWorkspace::default());
+        w.remove_dead_in(&mut PhaseWorkspace::default(), None);
         close(w.energy_total(),held+1.0);
         close(w.carbon_total(),carbon+1.0/20.0);
         close(w.food.iter().map(|f|f.energy).sum(),expected.total()+1.0);

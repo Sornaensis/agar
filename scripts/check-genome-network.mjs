@@ -46,13 +46,13 @@ function project(source) {
   assert.equal(JSON.stringify(graph), before, 'Projection does not mutate its compiler graph');
   validate(network,graph.roots.filter(root=>root.kind==='output').length);
   if(graph.mode==='cellular') {
-    assert.ok(network.nodes.filter(node=>node.kind==='output').every(node=>/^(gene|activity|start_when|recycle)\./.test(node.label)));
+    assert.ok(network.nodes.filter(node=>node.kind==='output').every(node=>/^(gene|activity|start_when|recycle|engage_when)\./.test(node.label)));
     const addresses=new Set(graph.roots.filter(root=>root.kind!=='output').map(root=>root.name));
     for (const node of graph.nodes.filter(node=>node.reachable)) {
       if (node.kind==='register') addresses.add(node.label);
       if (node.kind==='populated') addresses.add(/^populated\((.+)\)$/.exec(node.label)[1]);
     }
-    for (const role of ['publish','avoid','adhere','signal']) if (graph.contactMessages?.[role]) addresses.add(graph.contactMessages[role]);
+    for (const role of ['publish','signal']) if (graph.contactMessages?.[role]) addresses.add(graph.contactMessages[role]);
     assert.deepEqual(new Set(network.nodes.filter(node=>node.kind==='register').map(node=>node.label)),addresses);
   }
   assert.equal(network.expressionCount, graph.nodes.length);
@@ -151,12 +151,12 @@ const occupancyOnly = project(`${legacy} rb001=populated(rf999);`).network;
 assert.equal(occupancyOnly.nodes.find(node => node.id === 'register:rf999').type, 'scalar', 'Occupancy does not change an address to boolean');
 assert.equal(occupancyOnly.nodes.find(node => node.id === 'register:rf999').sourceIds.length, 0, 'An occupancy check is not a value read');
 
-const contact=project('cellular; publish rf999=0; avoid_message rf002; adhere_message rf999; signal rf098=7; rf002=rf001 when populated(rf001);');
-assert.deepEqual(contact.graph.contactMessages,{publish:'rf999',avoid:'rf002',adhere:'rf999',formation:'daughters',initial:0,signal:'rf098',signalInitial:7});
+const contact=project('cellular; publish rf999=0; signal rf098=7; rf002=rf001 when populated(rf001);');
+assert.deepEqual(contact.graph.contactMessages,{publish:'rf999',initial:0,signal:'rf098',signalInitial:7});
 assert.ok(contact.network.nodes.some(node=>node.id==='register:rf999'),'A published address exists even with no reads or tick writes');
 assert.ok(!contact.network.edges.some(edge=>edge.to==='register:rf999'),'A birth initializer creates no tick-update edge');
 assert.ok(contact.network.edges.some(edge=>edge.from==='register:rf001' && edge.to==='register:rf002' && edge.temporal));
-assert.equal(contact.network.nodes.filter(node=>node.id==='register:rf999').length,1,'Publishing and adhering can share one address');
+assert.equal(contact.network.nodes.filter(node=>node.id==='register:rf999').length,1,'A public register appears once in the graph');
 const self = project('rf001=rf001;clear rf001;thrust=rf001;turn=0;divide=false;').network;
 assert.ok(self.edges.some(edge => edge.from === 'register:rf001' && edge.to === edge.from && edge.kind === 'write' && edge.temporal));
 assert.ok(self.nodes.find(node => node.id === 'register:rf001').constants.some(value => value.port === 'clear' && value.value === 'always' && value.rule === 'clear:rf001'));

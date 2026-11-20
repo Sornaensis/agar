@@ -96,14 +96,14 @@ export function validateBodyInspection(value: unknown, expectedCellId: number): 
   return body;
 }
 export interface LanguageSchema {
-  version:3; signals:{name:string;type:GenomeValueType}[]; outputs:{name:string;type:GenomeValueType;required:boolean;default:GenomeValue}[];
+  version:4; signals:{name:string;type:GenomeValueType}[]; outputs:{name:string;type:GenomeValueType;required:boolean;default:GenomeValue}[];
   functions?:{name:string;arity:number}[];
   maxNodes:number;maxSourceBytes:number;registersPerType:number;
   cellular?: { marker:'cellular;'; counts:{marker:'cellular counts;';perUnit:number;integerSignals:string[]}; products:{name:string;arguments:string[]}[]; assemblies:{name:string;requiredRoles:string[]}[];
     mechanisms?:{name:string;constructor:string;target:string|null;requiredRoles:string[];description:string;receptorFields?:{name:string;type:GenomeValueType;requiresValid:boolean}[]}[];
-    recipeControls?:{name:string;type:GenomeValueType;default:GenomeValue}[];
+    recipeControls?:{name:string;type:GenomeValueType;default:GenomeValue;mechanisms?:string[];defaultByMechanism?:Record<string,boolean>}[];
     registers:{prefixes:string[];addressesPerType:number;upkeepPerSecond:number;clearWins:boolean};
-    contactMessages:{declarations:string[];registerType:'scalar';receptor:'sense(contact)';validField:'message_valid';valueField:'message';signalValidField:'signal_valid';signalValueField:'signal';bondedField:'bonded';formationModes:('daughters'|'recruit')[];defaultFormation:'daughters';initializerLimit:number};
+    contactMessages:{declarations:string[];registerType:'scalar';receptor:'sense(contact)';validField:'message_valid';valueField:'message';signalValidField:'signal_valid';signalValueField:'signal';bondedField:'bonded';peerFields:{name:string;type:GenomeValueType}[];initializerLimit:number};
     concentration?:string;userFunctions?:{keyword:'fn';maxParameters:number;parameterType:'scalar';maxFunctions:number;recursive:false};
     reads:{name:string;type:GenomeValueType}[];maxProducts:number;maxAssemblies:number;maxGenes:number };
 }
@@ -160,7 +160,7 @@ export interface GenomeDiagnostic {
   from: number; to: number;
 }
 export interface GenomeBinding {
-  name: string; type: GenomeValueType;
+  name: string; type: GenomeValueType; perContact?: true; contactSafe?: false;
   /** UTF-16 range of the declaration's identifier. */
   from: number; to: number;
 }
@@ -170,14 +170,14 @@ export interface GenomeAnalysis {
 }
 export type GenomeValue = number | boolean | string | [number, number];
 export interface GenomeExpressionEvaluation {
-  id: number; from: number; to: number; type: GenomeValueType; value: GenomeValue;
+  id: number; from: number; to: number; type: GenomeValueType; value: GenomeValue | null; perContact?: true;
 }
 export interface GenomeBindingEvaluation {
-  name: string; from: number; to: number; type: GenomeValueType; value: GenomeValue;
+  name: string; from: number; to: number; type: GenomeValueType; value: GenomeValue | null; perContact?: true;
 }
 export interface GenomeSignalEvaluation { name: string; type: GenomeValueType; value: GenomeValue }
 export interface GenomeOutputEvaluation {
-  name: string; type: GenomeValueType; value: GenomeValue;
+  name: string; type: GenomeValueType; value: GenomeValue | null; perContact?: true;
   /** The expression range, or null for an omitted output's default. */
   from: number | null; to: number | null;
 }
@@ -197,14 +197,13 @@ export interface GenomeEvaluation {
   contactMessageDeclarations?: ContactMessageDeclaration[];
 }
 
-export type ContactMessageRole = 'publish' | 'avoid' | 'adhere' | 'signal';
-export interface ContactMessages { formation?: 'daughters'|'recruit'; publish: string | null; avoid: string | null; adhere: string | null; initial: number | null; signal: string | null; signalInitial: number | null }
+export type ContactMessageRole = 'publish' | 'signal';
+export interface ContactMessages { publish: string | null; initial: number | null; signal: string | null; signalInitial: number | null }
 export interface ContactMessageDeclaration { kind: ContactMessageRole; register: string; value: number | null; from: number; to: number }
-const messageRoles = ['publish', 'avoid', 'adhere', 'signal'] as const;
+const messageRoles = ['publish', 'signal'] as const;
 function validMessagePolicy(policy: ContactMessages): boolean {
   return Boolean(policy && typeof policy === 'object' && messageRoles.some(role => policy[role] !== null)
     && messageRoles.every(role => policy[role] === null || typeof policy[role] === 'string' && /^rf(?!000)\d{3}$/.test(policy[role]!))
-    && (policy.adhere === null ? policy.formation === undefined : policy.formation === 'daughters' || policy.formation === 'recruit')
     && (policy.signal === null || policy.signal !== policy.publish)
     && (policy.signalInitial === null || policy.signal !== null && Number.isFinite(policy.signalInitial) && Math.abs(policy.signalInitial) <= 1e12)
     && (policy.initial === null || policy.publish !== null && Number.isFinite(policy.initial) && Math.abs(policy.initial) <= 1e12));
@@ -236,10 +235,9 @@ export function validateGenomeEvaluation(value: unknown, expectedCellId?: number
   if (trace.contactMessages !== undefined || trace.contactMessageDeclarations !== undefined) {
     const policy = trace.contactMessages, declarations = trace.contactMessageDeclarations;
     const matchesDeclaration = (item: ContactMessageDeclaration): boolean => {
-      const keyword = item.kind === 'publish' || item.kind === 'signal' ? item.kind : item.kind + '_message';
       const text = trace.source.slice(item.from, item.to).replace(/#[^\n]*/g, ' ');
-      const declaration = /^(publish|signal|avoid_message|adhere_message)\s+(rf\d{3})\b/.exec(text);
-      return declaration?.[1] === keyword && declaration[2] === item.register && text.endsWith(';');
+      const declaration = /^(publish|signal)\s+(rf\d{3})\b/.exec(text);
+      return declaration?.[1] === item.kind && declaration[2] === item.register && text.endsWith(';');
     };
     if (!cellular || !policy || !validMessagePolicy(policy) || !Array.isArray(declarations)
       || declarations.length !== messageRoles.filter(role => policy[role] !== null).length
@@ -258,24 +256,29 @@ export function validateGenomeEvaluation(value: unknown, expectedCellId?: number
       case 'vec2': return Array.isArray(item) && item.length === 2 && item.every(scalar);
     }
   };
+  const checkedExpressionValue = (item: GenomeExpressionEvaluation | GenomeBindingEvaluation): boolean =>
+    item.perContact === undefined ? typed(item.type, item.value) : cellular && item.perContact === true && types.has(item.type) && item.value === null;
   const named = (item: GenomeSignalEvaluation): boolean => Boolean(item) && typeof item.name === 'string' && item.name.length > 0 && typed(item.type, item.value);
   let previousExpressionId = -1;
   for (const expression of trace.expressions) {
     // Inlined function internals have graph IDs but no unambiguous authored
     // source value. Their invocation result remains inspectable, leaving gaps.
     if (!expression || !Number.isInteger(expression.id) || expression.id <= previousExpressionId || expression.id >= 8192
-      || !range(expression.from, expression.to) || !typed(expression.type, expression.value)) return fail();
+      || !range(expression.from, expression.to) || !checkedExpressionValue(expression)) return fail();
     previousExpressionId = expression.id;
   }
   for (const binding of trace.bindings) {
-    if (!named(binding) || !range(binding.from, binding.to) || trace.source.slice(binding.from, binding.to) !== binding.name) return fail();
+    if (!binding || typeof binding.name !== 'string' || !binding.name || !checkedExpressionValue(binding) || !range(binding.from, binding.to) || trace.source.slice(binding.from, binding.to) !== binding.name) return fail();
   }
   if (!trace.signals.every(named) || new Set(trace.signals.map(signal => signal.name)).size !== trace.signals.length) return fail();
   const outputNames = new Set<string>();
   for (const output of trace.outputs) {
-    if (!named(output) || outputNames.has(output.name)
-      || (cellular && (!/^(gene|activity|start_when|recycle)\.[A-Za-z_][A-Za-z0-9_]*$/.test(output.name)
-        || output.type !== (output.name.startsWith('start_when.') ? 'boolean' : 'scalar')))
+    if (!output || typeof output.name !== 'string') return fail();
+    const contact = cellular && output.name.startsWith('engage_when.');
+    if ((contact ? output.type !== 'boolean' || output.value !== null || output.perContact !== true
+      : output.perContact !== undefined || !typed(output.type, output.value)) || !output.name || outputNames.has(output.name)
+      || (cellular && (!/^(gene|activity|start_when|recycle|engage_when)\.[A-Za-z_][A-Za-z0-9_]*$/.test(output.name)
+        || output.type !== (contact || output.name.startsWith('start_when.') ? 'boolean' : 'scalar')))
       || !((output.from === null && output.to === null)
         || (typeof output.from === 'number' && typeof output.to === 'number' && range(output.from, output.to)))) return fail();
     outputNames.add(output.name);
@@ -314,7 +317,7 @@ export function validateGenomeGraph(value: unknown): GenomeGraph {
   if (!value || typeof value !== 'object') return fail();
   const graph = value as GenomeGraph;
   if (graph.version !== 1 || (graph.mode!==undefined && graph.mode!=='legacy' && graph.mode!=='cellular') || !Array.isArray(graph.nodes) || graph.nodes.length > 8192
-    || !Array.isArray(graph.roots) || graph.roots.length > 9990 + (graph.mode === 'cellular' ? 256 + 64 * 3 : WRITE_SIGNAL_COUNT)
+    || !Array.isArray(graph.roots) || graph.roots.length > 9990 + (graph.mode === 'cellular' ? 256 + 64 * 4 : WRITE_SIGNAL_COUNT)
     || (graph.contactMessages !== undefined && (graph.mode !== 'cellular' || !validMessagePolicy(graph.contactMessages)))) return fail();
   const types = new Set(['integer', 'count', 'scalar', 'boolean', 'string', 'vec2']);
   const kinds = new Set(['constant', 'sensor', 'register', 'populated', 'reference', 'unary', 'binary', 'conditional', 'call']);
@@ -380,6 +383,55 @@ export interface SimulationStatus { tick: number; summary: SimulationSummary }
 /** Native u64s remain decimal strings across the worker and UI boundary. */
 export type CountBudget = { held: string; added: string; removed: string };
 export type CountAudit = Record<'mineral' | 'carbon' | 'oxygen' | 'energy', CountBudget>;
+export interface EnergyLoss {
+  opening: string; maintenance: string; respiration: string; decomposition: string;
+  fabrication: string; feedingAndDivision: string; overflow: string;
+}
+
+export interface LineageMetrics {
+  rootGenomeId: number;
+  alive: number;
+  introduced: number;
+  births: number;
+  deaths: number;
+  predationDeaths: number;
+  depletedDeaths: number;
+  otherDeaths: number;
+  kills: number;
+  lastBirth: number | null;
+  maxLivingGeneration: number;
+  nearFullAtp: number;
+  meanMaturity: number;
+  digestionRate: number;
+  carbonFixationRate: number;
+  zeroFreeMinerals: number;
+  freeMinerals: number;
+  reserveOrganicCarbon: number;
+  gutEnergy: number;
+  lowAtpWithReserveFuel?: number;
+}
+export interface EcologySnapshot { since: number; lineages: LineageMetrics[] }
+
+export function decodeEcologySnapshot(data: Float64Array): EcologySnapshot {
+  const [since, rows] = data;
+  const stride = rows > 0 ? (data.length - 2) / rows : 20;
+  if (!Number.isFinite(since) || since < 0 || !Number.isSafeInteger(rows) || rows < 0
+    || (stride !== 19 && stride !== 20) || data.length !== 2 + rows * stride) throw new Error('The ecology snapshot has an invalid layout.');
+  const lineages: LineageMetrics[] = [];
+  for (let i = 2; i < data.length; i += stride) {
+    lineages.push({
+      rootGenomeId: data[i], alive: data[i + 1], introduced: data[i + 2], births: data[i + 3],
+      deaths: data[i + 4], predationDeaths: data[i + 5], depletedDeaths: data[i + 6],
+      otherDeaths: data[i + 7], kills: data[i + 8], lastBirth: data[i + 9] < 0 ? null : data[i + 9],
+      maxLivingGeneration: data[i + 10], nearFullAtp: data[i + 11], meanMaturity: data[i + 12],
+      digestionRate: data[i + 13], carbonFixationRate: data[i + 14],
+      zeroFreeMinerals: data[i + 15], freeMinerals: data[i + 16],
+      reserveOrganicCarbon: data[i + 17], gutEnergy: data[i + 18],
+      ...(stride === 20 ? { lowAtpWithReserveFuel: data[i + 19] } : {}),
+    });
+  }
+  return { since, lineages };
+}
 
 export function decodeCountAudit(words: BigUint64Array): CountAudit {
   if (words.length !== 12) throw new Error('The count audit must contain four budgets.');
@@ -390,7 +442,10 @@ export function decodeCountAudit(words: BigUint64Array): CountAudit {
 }
 
 export interface MetricsSnapshot extends SimulationSummary {
+  mineralAbsorbedTotal?: number;
   countAudit?: CountAudit;
+  ecology?: EcologySnapshot;
+  energyLoss?: EnergyLoss;
   tick:number; eaten:number; mutationRate:number; mutatedBirths:number; mutationSkipped:number;
   genomeCount:number; genomeLimit:number; genomeBytes:number; genomeByteLimit:number;
   predationCount:number; attackCount:number; photosynthesisTotal:number; energyTotal:number; energyInputTotal:number;
@@ -516,6 +571,7 @@ interface WasmExports extends WebAssembly.Exports {
   alloc(len: number): number;
   dealloc(ptr: number, len: number): void;
   compile_genome(ptr: number, len: number): number;
+  upgrade_contact_source_ptr(ptr: number, len: number): number;
   analyze_genome(ptr: number, len: number): number;
   genome_analysis_len(): number;
   error_ptr(): number; error_len(): number;
@@ -545,6 +601,8 @@ interface WasmExports extends WebAssembly.Exports {
   snapshot_ptr(): number; snapshot_len(): number;
   render_snapshot_ptr(): number; render_links_snapshot_ptr(): number; metrics_snapshot_ptr(): number; cell_snapshot_ptr(id: number): number;
   count_audit_ptr(): number;
+  ecology_snapshot_ptr(): number;
+  energy_loss_ptr(): number;
   summary_snapshot_ptr(): number; presentation_len(): number;
   set_environment(temperature: number, light: number, current: number): void;
   set_world_size(width: number, height: number): number;
@@ -637,6 +695,21 @@ export class Engine {
       }
       return analysis;
     } finally { if (ptr) this.wasm.dealloc(ptr, allocation); }
+  }
+
+  /** Migrate imported or previously saved source without changing the live genome registry. */
+  upgradeContactSource(source: string): string {
+    if (!source.includes('avoid_message') && !source.includes('adhere_message')) return source;
+    const bytes = new TextEncoder().encode(source);
+    if (bytes.length > MAX_PROGRAM_BYTES) throw new Error('Genome source must fit in 256 KiB of UTF-8 text.');
+    const pointer = this.wasm.alloc(bytes.length);
+    if (!pointer) throw new Error('The engine could not allocate the genome buffer.');
+    try {
+      new Uint8Array(this.wasm.memory.buffer, pointer, bytes.length).set(bytes);
+      const result = this.wasm.upgrade_contact_source_ptr(pointer, bytes.length);
+      if (!result) throw new Error(this.readError() || 'The contact rules could not be converted.');
+      return new TextDecoder().decode(new Uint8Array(this.wasm.memory.buffer, result, this.wasm.genome_source_len()));
+    } finally { this.wasm.dealloc(pointer, bytes.length); }
   }
 
   compile(source: string): number {
@@ -778,7 +851,7 @@ export class Engine {
   languageSchema():LanguageSchema {
     const ptr=this.wasm.language_schema_ptr(), len=this.wasm.language_schema_len();
     const schema=JSON.parse(new TextDecoder().decode(new Uint8Array(this.wasm.memory.buffer,ptr,len))) as LanguageSchema;
-    if (schema.version!==3 || schema.signals?.length!==READ_SIGNAL_COUNT || schema.outputs?.length!==WRITE_SIGNAL_COUNT) throw new Error('The engine language schema is incompatible.');
+    if (schema.version!==4 || schema.signals?.length!==READ_SIGNAL_COUNT || schema.outputs?.length!==WRITE_SIGNAL_COUNT) throw new Error('The engine language schema is incompatible.');
     return schema;
   }
   cellBody(id:number):BodyInspection {
@@ -884,10 +957,27 @@ export class Engine {
     const pointer = this.wasm.count_audit_ptr();
     return pointer ? decodeCountAudit(new BigUint64Array(this.wasm.memory.buffer, pointer, 12)) : undefined;
   }
+  energyLoss(): EnergyLoss | undefined {
+    const ptr = this.wasm.energy_loss_ptr();
+    if (!ptr) return undefined;
+    const words = new BigInt64Array(this.wasm.memory.buffer, ptr, 7);
+    return { opening: String(words[0]), maintenance: String(words[1]), respiration: String(words[2]),
+      decomposition: String(words[3]), fabrication: String(words[4]), feedingAndDivision: String(words[5]),
+      overflow: String(words[6]) };
+  }
+  ecologySnapshotData(): Float64Array {
+    const pointer = this.wasm.ecology_snapshot_ptr();
+    return new Float64Array(this.wasm.memory.buffer, pointer, this.wasm.presentation_len()).slice();
+  }
+  mineralAbsorbedTotal(): number { return this.wasm.nutrient_removed_total(); }
   metricsSnapshot(): MetricsSnapshot {
     const metrics = decodeMetricsSnapshot(this.metricsSnapshotData());
+    metrics.mineralAbsorbedTotal = this.mineralAbsorbedTotal();
+    metrics.ecology = decodeEcologySnapshot(this.ecologySnapshotData());
     const audit = this.countAudit();
     if (audit) metrics.countAudit = audit;
+    const loss = this.energyLoss();
+    if (loss) metrics.energyLoss = loss;
     return metrics;
   }
   cellSnapshot(id: number): Cell | null {

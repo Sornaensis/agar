@@ -1,11 +1,12 @@
 {
-  "abi": 21,
+  "abi": 22,
   "memory": "memory",
   "functions": [
     "abi_version",
     "alloc",
     "dealloc",
     "compile_genome",
+    "upgrade_contact_source_ptr",
     "analyze_genome",
     "genome_analysis_len",
     "error_ptr",
@@ -93,6 +94,8 @@
     "carbon_removed_total",
     "set_count_chemistry",
     "uses_count_chemistry",
-    "count_audit_ptr"
+    "count_audit_ptr",
+    "ecology_snapshot_ptr",
+    "energy_loss_ptr"
   ]
 }

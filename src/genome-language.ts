@@ -17,6 +17,8 @@ export interface GenomeSymbol {
 export interface GenomeBinding {
   readonly name: string;
   readonly type: string;
+  readonly perContact?: true;
+  readonly contactSafe?: false;
   /** UTF-16 source offsets from Engine.analyze(). */
   readonly from: number;
   readonly to: number;
@@ -121,7 +123,7 @@ const sensorRows: ReadonlyArray<readonly [string, PrimitiveType, string]> = [
   ['contact.resistance', 'scalar', 'Measured mechanical resistance of the contacted surface. It does not expose genotype, diet or energy.'],
   ['object.available', 'boolean', 'A functional optical detector is present.'],
   ['object.valid', 'boolean', 'A contrasting object was detected within the current scan and visibility limits. Cells and particles use the same return format.'],
-  ['object.token', 'string', 'Opaque token stable during a continuous observed track. Store it in rs001 to request reacquisition; it cannot reveal an unseen location. Empty when invalid.'],
+  ['object.token', 'string', 'Opaque token stable during a continuous observed track. You can store it in a string register and compare later observations. Empty when invalid.'],
   ['object.offset', 'vec2', 'Estimated body-relative displacement to the selected visible object. angle(object.offset) gives a steering bearing.'],
   ['object.area', 'scalar', 'Estimated apparent area of the visible object, not its exact material mass.'],
   ['object.contrast', 'scalar', 'Measured optical contrast. Selection depends on visibility, angle and distance, never hidden energy.'],
@@ -198,10 +200,14 @@ export const CELLULAR_CONSTRUCTORS: readonly GenomeSymbol[] = Object.freeze(CELL
       ? 'Declares a persistent regulatory product. Its positive half-life is measured in seconds; pool.Name reads its physical stock. Synthesis costs material and energy, and stock partitions at division.'
       : role === 'adhesin' ? 'Finishes a named scaffold precursor into a binding protein. Expression consumes existing precursor stock, usable energy and translation work. Adhesion surfaces install the finished protein together with membrane and anchor material.'
       : `Declares a ${role} product. Genes synthesize its stock; assembly recipes consume it as a physical component. A declaration by itself creates no material.`)));
-const FORMATION_MODES: readonly GenomeSymbol[] = [
-  symbol('daughters','keyword','formation mode','adhere_message rf001 daughters;','Retain a compatible daughter when the cell divides. This is the default.'),
-  symbol('recruit','keyword','formation mode','adhere_message rf001 recruit;','Also form a new bond with a compatible cell on encounter. Both partners must permit recruitment.'),
-];
+export const CONTACT_RECIPE_KINDS = ['pierce()', 'engulf()', 'adhere()', 'piercer', 'phagocyte'] as const;
+export const CONTACT_FIELDS: readonly GenomeSymbol[] = [
+  ['message_valid', 'boolean', 'True when this surface’s current contact partner publishes an occupied marker.'],
+  ['message', 'scalar', 'The marker presented by this physical contact partner. Check peer.message_valid to distinguish an absent marker from zero.'],
+  ['signal_valid', 'boolean', 'True when this contact partner publishes an occupied second channel.'],
+  ['signal', 'scalar', 'The second scalar published by this contact partner. Check peer.signal_valid before reading it.'],
+  ['division_interface', 'boolean', 'True on the interface formed at division, including the retained interface after the cells separate into daughters. False on ordinary encounters.'],
+].map(([name, type, description]) => symbol(`peer.${name}`, 'signal', type, `peer.${name}: ${type}`, description + ' Available inside engage_when.'));
 export const CELLULAR_KEYWORDS: readonly GenomeSymbol[] = Object.freeze([
   { ...symbol('cellular', 'keyword', 'mode', 'cellular counts;', 'Starts a cellular program with whole resource counts. The earlier cellular; header uses continuous units. Declare products, express them with genes, and combine their stocks into physical assemblies.'), insertText: 'cellular counts;\n' },
   { ...symbol('product', 'keyword', 'declaration', 'product Name = motor();', 'Names a typed material product. Product roles determine which physical recipes it can satisfy.'), insertText: 'product ' },
@@ -209,9 +215,8 @@ export const CELLULAR_KEYWORDS: readonly GenomeSymbol[] = Object.freeze([
   { ...symbol('assembly', 'keyword', 'recipe', 'assembly Swim: propel() { components; }', 'Names a physical recipe. Its product masses determine composition; stocks from the start of the tick are consumed as components are installed.'), insertText: 'assembly ' },
   { ...symbol('fn', 'keyword', 'declaration', 'fn response(value, threshold) = expression;', 'Defines a pure function with numeric arguments. It can read earlier bindings and start-of-tick registers. Calls expand into the bounded expression graph.'), insertText: 'fn ' },
   { ...symbol('publish', 'keyword', 'contact message', 'publish rf001 = 17;', 'Exposes one occupied scalar register to a touching cell. The optional initializer sets its value at birth. Later register writes change the message, and clearing it withdraws the message.'), insertText: 'publish ' },
-  { ...symbol('avoid_message', 'keyword', 'contact message', 'avoid_message rf001;', 'Skips an attack on a candidate whose published scalar exactly matches this occupied register. Each candidate is checked separately.'), insertText: 'avoid_message ' },
   { ...symbol('signal', 'keyword', 'contact signal', 'signal rf002 = 0;', 'Exposes a second scalar to a touching receptor. Assign or clear this register to communicate while keeping the recognition marker stable.'), insertText: 'signal ' },
-  { ...symbol('adhere_message', 'keyword', 'contact message', 'adhere_message rf001 daughters;', 'Selects the published value accepted for adhesion. The default daughters mode forms a bond at division. Both cells need active adhesion surfaces and matching registers. Use recruit on both partners to form a bond on encounter.'), insertText: 'adhere_message ' },
+  { ...symbol('engage_when', 'keyword', 'boolean', 'engage_when: condition;', 'Evaluated for each contact partner at a piercing, engulfing or adhesive surface. Both adhesive surfaces must allow a bond. Unguarded weapons engage by default; unguarded adhesive surfaces remain closed.'), insertText: 'engage_when: ' },
   { ...symbol('start_when', 'keyword', 'boolean', 'start_when: condition;', 'Allows another instance of this recipe to start when true; defaults to true. Existing incomplete instances continue paid installation when this becomes false.'), insertText: 'start_when: ' },
   { ...symbol('recycle', 'keyword', 'scalar', 'recycle: expression;', 'Requests paid disassembly of machinery with this recipe name, bounded to 0–1; defaults to zero. Requires a built, active recycle() mechanism. Recovered ingredients keep their original identities and become available on a later tick.'), insertText: 'recycle: ' },
   { ...symbol('activity', 'keyword', 'scalar', 'activity: expression;', 'Controls the activity of this assembly, bounded to 0–1. Activity does not create missing components or substitute for a finished machine.'), insertText: 'activity: ' },
@@ -222,6 +227,7 @@ export const CELLULAR_READ_SIGNALS: readonly GenomeSymbol[] = Object.freeze(BUIL
   ['energy', 'energy.fraction', 'energy.capacity', 'age', 'speed', 'integrity', 'oxygen', 'respiration.rate', 'memory.used', 'memory.cost'].includes(item.name)
   || (item.name.startsWith('body.') && item.name !== 'body.division_ready')
   || /^(nutrient|gut|light|heat|chemical|flow|contact|object|carbon)\./.test(item.name)));
+const cellularReadNames = new Set(CELLULAR_READ_SIGNALS.map(item => item.name));
 export const CELLULAR_ASSEMBLY_KINDS: readonly GenomeSymbol[] = Object.freeze([
   ...ORGANELLE_CATALOG.map(item => symbol(item.kind, 'keyword', 'assembly', `${item.kind} { components; activity: expression; }`, item.description)),
   symbol('membrane', 'keyword', 'assembly', 'membrane { components; activity: expression; }', 'Membrane and enzyme products support paid envelope growth, adding space with finite minerals, energy and core work.'),
@@ -233,7 +239,7 @@ export const CELLULAR_MECHANISMS: readonly GenomeSymbol[] = Object.freeze(MECHAN
 const mechanismConstructorByName = new Map(MECHANISM_CATALOG.map(item => [item.constructor,
   symbol(item.constructor, 'function', 'mechanism', `${item.constructor}(${MECHANISM_CATALOG.filter(other=>other.constructor===item.constructor).flatMap(other=>other.target?[other.target]:[]).join(' | ')})`,
     MECHANISM_CATALOG.filter(other=>other.constructor===item.constructor).map(other=>other.description).join(' '))]));
-const cellularSymbolByName = new Map([...CELLULAR_CONSTRUCTORS, ...CELLULAR_KEYWORDS].map(item => [item.name, item]));
+const cellularSymbolByName = new Map([...CELLULAR_CONSTRUCTORS, ...CELLULAR_KEYWORDS, ...CONTACT_FIELDS].map(item => [item.name, item]));
 
 export interface CellularDeclarations {
   products: { name: string; role: string; precursor?: string; from: number; to: number }[];
@@ -349,7 +355,7 @@ export function lookupCellularSymbol(name: string, source: string): GenomeSymbol
   if (declaredFunction) return declaredFunctionSymbol(declaredFunction);
   const assembly = declarations.assemblies.find(item => item.name === name);
   if (assembly) return symbol(name, 'binding', `${assembly.kind} assembly`, `${name}: ${assembly.kind}`, `Physical recipe with its own composition, activity and placement. Use built.${name} to read the functional mass in completed machinery, after damage.`);
-  return cellularSymbolByName.get(name) ?? FORMATION_MODES.find(item=>item.name===name) ?? CELLULAR_MECHANISMS.find(item=>item.name===name) ?? mechanismConstructorByName.get(name) ?? CELLULAR_ASSEMBLY_KINDS.find(item => item.name === name);
+  return cellularSymbolByName.get(name) ?? CELLULAR_MECHANISMS.find(item=>item.name===name) ?? mechanismConstructorByName.get(name) ?? CELLULAR_ASSEMBLY_KINDS.find(item => item.name === name);
 }
 
 export const GENOME_SYMBOLS: readonly GenomeSymbol[] = Object.freeze([
@@ -406,7 +412,7 @@ export interface GenomeToken {
 }
 
 /** Tolerant highlighting scanner, not a second validator. Ranges use JavaScript/CodeMirror UTF-16 offsets. */
-export function tokenizeGenome(source: string): GenomeToken[] {
+export function tokenizeGenome(source: string, cellular = isCellularSource(source)): GenomeToken[] {
   const counted = usesCountUnits(source);
   const tokens: GenomeToken[] = [];
   let pos = 0;
@@ -440,7 +446,10 @@ export function tokenizeGenome(source: string): GenomeToken[] {
     } else if (/[A-Za-z_]/.test(character)) {
       pos++;
       while (/[A-Za-z0-9_.]/.test(source[pos] ?? '')) pos++;
-      const name = source.slice(start, pos), known = symbolByName.get(name) ?? compatibilityOutputs.get(name) ?? cellularSymbolByName.get(name) ?? mechanismConstructorByName.get(name), register = registerSymbol(name);
+      const name = source.slice(start, pos), shared = symbolByName.get(name), register = registerSymbol(name);
+      const known = cellular ? cellularSymbolByName.get(name) ?? mechanismConstructorByName.get(name)
+        ?? (shared && (shared.category === 'keyword' || shared.category === 'function' || cellularReadNames.has(name)) ? shared : undefined)
+        : shared ?? compatibilityOutputs.get(name);
       let mechanismCall = false;
       if (mechanismConstructorByName.has(name)) {
         const previous: string[] = [];
@@ -484,10 +493,19 @@ export function identifierAt(source: string, position: number): { from: number; 
   return token && identifierKinds.has(token.kind) ? { from: token.from, to: token.to, text: token.text } : null;
 }
 
+export function lookupProgramSymbol(name: string, source: string, bindings: readonly GenomeBinding[] = []): GenomeSymbol | undefined {
+  const shared = lookupGenomeSymbol(name, bindings);
+  if (!isCellularSource(source)) return shared;
+  if (shared?.category === 'binding') return shared;
+  return lookupCellularSymbol(name, source)
+    ?? (shared && ['function','keyword','register'].includes(shared.category) ? shared : undefined)
+    ?? readSignals(source).find(item => item.name === name);
+}
+
 export function symbolAt(source: string, position: number, bindings: readonly GenomeBinding[] = []): { from: number; to: number; symbol: GenomeSymbol } | null {
   const span = identifierAt(source, position);
   if (!span) return null;
-  const found = (isCellularSource(source) ? lookupCellularSymbol(span.text, source) : undefined) ?? lookupGenomeSymbol(span.text, bindings);
+  const found = lookupProgramSymbol(span.text, source, bindings);
   return found ? { from: span.from, to: span.to, symbol: found } : null;
 }
 
@@ -539,8 +557,11 @@ export function searchGenomeSymbols(query: string, bindings: readonly GenomeBind
 }
 
 export interface GenomeCompletionContext {
-  kind: 'statement' | 'expression' | 'register' | 'none' | 'constructor' | 'product' | 'assembly-kind' | 'component' | 'mechanism-target' | 'formation-mode' | 'scaffold-precursor';
+  kind: 'statement' | 'expression' | 'register' | 'none' | 'constructor' | 'product' | 'assembly-kind' | 'component' | 'mechanism-target' | 'scaffold-precursor';
   mechanismConstructor?: string;
+  contactGuard?: boolean;
+  definition?: boolean;
+  contactRecipe?: boolean;
   /** A useful editing hint, never a substitute for the Rust type checker. */
   expected?: PrimitiveType | 'number' | 'register' | 'vec2 | string';
 }
@@ -556,7 +577,7 @@ function cellularCompletionContext(source: string, position: number): GenomeComp
   const preceding = all.filter(token => token.kind !== 'comment' && token.from < position);
   const last = preceding.at(-1);
   if (last && last.to >= position && identifierKinds.has(last.kind)
-    && !['cellular', 'product', 'gene', 'assembly', 'fn', 'if', 'then', 'else', 'when', 'clear', 'publish', 'avoid_message', 'adhere_message', 'signal', 'activity', 'start_when', 'recycle', 'at', 'direction'].includes(last.text)) preceding.pop();
+    && !['cellular', 'product', 'gene', 'assembly', 'fn', 'if', 'then', 'else', 'when', 'clear', 'publish', 'signal', 'engage_when', 'activity', 'start_when', 'recycle', 'at', 'direction'].includes(last.text)) preceding.pop();
   const braces: number[] = [];
   for (let index = 0; index < preceding.length; index++) {
     if (preceding[index].text === '{') braces.push(index);
@@ -566,15 +587,24 @@ function cellularCompletionContext(source: string, position: number): GenomeComp
   while (start > 0 && ![';', '{', '}'].includes(preceding[start - 1].text)) start--;
   const tokens = preceding.slice(start);
   if (braces.length) {
-    if (!tokens.length || !tokens.some(token => token.text === ':')) return { kind: 'component' };
+    const brace = braces[braces.length - 1];
+    // The opening brace follows either a named family or a mechanism call.
+    const kind = preceding[brace - 1]?.text === ')' ? preceding[brace - 3]?.text + '()' : preceding[brace - 1]?.text;
+    const contactRecipe = CONTACT_RECIPE_KINDS.some(candidate => candidate === kind);
+    if (!tokens.length || !tokens.some(token => token.text === ':')) return { kind: 'component', contactRecipe };
+    if (tokens[0].text === 'engage_when') {
+      if (!contactRecipe) return { kind: 'none' };
+      const rhs = source.slice(tokens.find(token => token.text === ':')!.to, position);
+      const expression = 'divide = ' + rhs;
+      return { ...genomeCompletionContext(expression, expression.length), contactGuard: true };
+    }
     if (!['activity', 'start_when', 'recycle'].includes(tokens[0].text)) return { kind: 'none' };
     const expression = `${tokens[0].text === 'start_when' ? 'divide' : 'thrust'} = ${source.slice(tokens.find(token=>token.text===':')!.to,position)}`;
     return genomeCompletionContext(expression,expression.length);
   }
   if (!tokens.length) return { kind: 'statement' };
   const assignment = tokens.some(token => token.text === '='), colon = tokens.some(token => token.text === ':');
-  if (['publish', 'avoid_message', 'adhere_message', 'signal'].includes(tokens[0].text)) {
-    if (tokens[0].text==='adhere_message' && tokens.length===2 && tokens[1].kind==='register') return {kind:'formation-mode'};
+  if (['publish', 'signal'].includes(tokens[0].text)) {
     return tokens.length === 1 ? { kind: 'register', expected: 'scalar' } : { kind: 'none' };
   }
   if (tokens[0].text === 'clear' || tokens[0].kind === 'register') {
@@ -599,7 +629,7 @@ function cellularCompletionContext(source: string, position: number): GenomeComp
   if (tokens[0].text === 'let' || tokens[0].text === 'fn') {
     if (!assignment) return { kind: 'none' };
     const expression = 'let value = ' + source.slice(tokens.find(token => token.text === '=')!.to, position);
-    return genomeCompletionContext(expression, expression.length);
+    return { ...genomeCompletionContext(expression, expression.length), definition: true };
   }
   return { kind: 'statement' };
 }
@@ -672,18 +702,18 @@ export function genomeCompletions(source: string, position: number, prefix = '',
   }
   const available = new Map<string, GenomeSymbol>();
   const add = (item: GenomeSymbol): void => { if (!needle || item.name.toLowerCase().startsWith(needle)) available.set(item.name, item); };
-  if (context.kind==='formation-mode') return FORMATION_MODES.filter(item=>item.name.startsWith(needle));
   if (cellular && ['constructor', 'product', 'assembly-kind', 'component', 'mechanism-target', 'scaffold-precursor'].includes(context.kind)) {
     if (context.kind === 'constructor') CELLULAR_CONSTRUCTORS.forEach(add);
     if (context.kind === 'mechanism-target') MECHANISM_CATALOG.filter(item=>item.constructor===context.mechanismConstructor && item.target).forEach(item=>add(symbol(item.target!, 'keyword', 'target', item.kind, item.description)));
-    if (context.kind === 'assembly-kind') [...CELLULAR_MECHANISMS,...CELLULAR_ASSEMBLY_KINDS].forEach(item => add({ ...item, insertText: `${item.name} {\n  activity: 1;\n}` }));
+    if (context.kind === 'assembly-kind') CELLULAR_MECHANISMS.forEach(item => add({ ...item, insertText: `${item.name} {\n  activity: 1;\n}` }));
     if (context.kind === 'product' || context.kind === 'component' || context.kind === 'scaffold-precursor') {
       cellularDeclarations(source).products.forEach(item => {
         if (context.kind === 'scaffold-precursor' && item.role !== 'scaffold') return;
         const product = lookupCellularSymbol(item.name, source)!;
         add(context.kind === 'component' ? { ...product, insertText: `${item.name}: ` } : product);
       });
-      if (context.kind === 'component') CELLULAR_KEYWORDS.filter(item => ['activity', 'start_when', 'recycle', 'at', 'direction'].includes(item.name)).forEach(add);
+      if (context.kind === 'component') CELLULAR_KEYWORDS.filter(item =>
+        ['activity', 'start_when', 'recycle', 'at', 'direction'].includes(item.name) || context.contactRecipe && item.name === 'engage_when').forEach(add);
     }
     return [...available.values()];
   }
@@ -696,16 +726,17 @@ export function genomeCompletions(source: string, position: number, prefix = '',
   }
   if (context.kind === 'statement') {
     if (cellular) {
-      CELLULAR_KEYWORDS.filter(item => ['product', 'gene', 'assembly', 'fn', 'publish', 'avoid_message', 'adhere_message', 'signal'].includes(item.name)).forEach(add);
+      CELLULAR_KEYWORDS.filter(item => ['product', 'gene', 'assembly', 'fn', 'publish', 'signal'].includes(item.name)).forEach(add);
     } else BUILTIN_OUTPUTS.forEach(item => add({ ...item, insertText: `${item.name} = ` }));
     registers.forEach(item => add({ ...item, insertText: `${item.name} = ` }));
     for (const name of ['let', 'clear']) add({ ...lookupGenomeSymbol(name)!, insertText: `${name} ` });
     return [...available.values()];
   }
   (cellular
-    ? [...readSignals(source), ...cellularDynamicSymbols(source), ...BUILTIN_FUNCTIONS, ...registers]
+    ? [...(context.contactGuard ? CONTACT_FIELDS : [...readSignals(source), ...cellularDynamicSymbols(source), ...(context.definition ? CONTACT_FIELDS : [])]), ...BUILTIN_FUNCTIONS, ...registers]
     : [...BUILTIN_SIGNALS, ...BUILTIN_FUNCTIONS, ...registers]).forEach(add);
-  bindings.forEach(binding => add(lookupGenomeSymbol(binding.name, [binding])!));
+  bindings.filter(binding => context.contactGuard ? binding.contactSafe !== false : !binding.perContact || context.definition)
+    .forEach(binding => add(lookupGenomeSymbol(binding.name, [binding])!));
   if (cellular) {
     const functions = cellularDeclarations(source).functions;
     functions.filter(item => item.end <= position).forEach(item => add(declaredFunctionSymbol(item)));
@@ -755,9 +786,13 @@ export function genomeSymbolDocumentation(item: GenomeSymbol, counted = false): 
     return { example: 'publish rf001 = 17;\nsignal rf002 = 0;\nrf002 = if energy.fraction < 0.4 then 1 else 0;',
       notes: ['Contact receptors read signal_valid and signal at the start of the tick. The two public channels use distinct scalar addresses.'] };
   }
-  if (item.name==='adhere_message' || item.type==='formation mode') {
-    const mode=item.name==='recruit'?'recruit':'daughters';
-    return {example:`publish rf001 = 17;\nadhere_message rf001 ${mode};`,notes:['Use sensed.Touch.bonded on a paid contact receptor to check whether the touched cell is directly attached.']};
+  if (item.name === 'engage_when' || CONTACT_FIELDS.some(field => field.name === item.name)) {
+    const mass = counted ? '200' : '0.02';
+    const condition = item.name === 'peer.division_interface' ? 'peer.division_interface'
+      : item.name.startsWith('peer.signal') ? 'peer.signal_valid && peer.signal > 0.5'
+      : '!populated(rf001) || !peer.message_valid || peer.message != rf001';
+    return { example: `publish rf001 = 17;\nproduct Mount = anchor();\nproduct Tail = filament();\nproduct Enzyme = enzyme();\nassembly Needle: pierce() {\n  Mount: ${mass};\n  Tail: ${mass};\n  Enzyme: ${mass};\n  engage_when: ${condition};\n}`,
+      notes: ['The condition can use this candidate’s two public channels, the division interface, local registers and pure expressions. One surface can admit a partner while another excludes it.'] };
   }
   if (item.type === 'contact message') {
     return { example: ['publish rf001 = 17;', ...(item.name === 'publish' ? [] : [`${item.name} rf001;`])].join('\n'),
@@ -819,7 +854,7 @@ export function genomeSymbolDocumentation(item: GenomeSymbol, counted = false): 
 export function genomeSignalCatalog(direction: 'read' | 'write', source = ''): readonly GenomeSymbol[] {
   const registers = REGISTER_FAMILIES.map(family => registerSymbol(`${family.prefix}001`)!);
   if (isCellularSource(source)) return direction === 'read'
-    ? [...cellularDynamicSymbols(source), ...readSignals(source), ...registers]
+    ? [...cellularDynamicSymbols(source), ...readSignals(source), ...CONTACT_FIELDS, ...registers]
     : [...CELLULAR_KEYWORDS.filter(item => item.name !== 'cellular'), ...CELLULAR_CONSTRUCTORS, ...CELLULAR_MECHANISMS, ...registers, lookupGenomeSymbol('clear')!];
   return [...(direction === 'read' ? BUILTIN_SIGNALS : BUILTIN_OUTPUTS), ...registers];
 }

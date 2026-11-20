@@ -95,6 +95,7 @@ impl CellCounts {
             reserve_extra:r.u32()?,structural_extra:r.u32()?,..Default::default()};
         ensure(s.carbon>0||s.reserve_extra==0,"extra energy without counted reserve carbon")?;
         for p in &mut s.gut{*p=CountMeal::read(r)?;}for n in &mut s.rate_credit{*n=r.u32()?;}
-        ensure(s.rate_credit[10..13].iter().all(|&n|n<100)&&s.rate_credit[14]<25 && s.rate_credit[23]<20,"invalid whole-count reaction remainder")?;Ok(s)
+        ensure(s.rate_credit[10..13].iter().all(|&n|n<100)&&s.rate_credit[14]<25 && s.rate_credit[23]<20
+            && s.rate_credit[24..27].iter().all(|&n| n<100) && s.rate_credit[27]<5,"invalid whole-count reaction remainder")?;Ok(s)
     }
 }

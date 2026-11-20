@@ -62,7 +62,7 @@ fn supply(world: &mut World, kind: OrganicKind, x: f64, y: f64) {
 #[test]
 fn shipped_forager_induces_tissue_digestion_and_funds_whole_daughters() {
     let (mut world, mut genomes) = forager(0.0);
-    let essential: Vec<_> = ["Respiration", "Gut", "ExudateEnzyme", "Capture", "TissueEnzyme",
+    let essential: Vec<_> = ["Respiration", "Gut", "ExudateEnzyme", "Capture", "TissueEnzyme", "Minerals",
         "LeftMotor", "RightMotor", "Vision", "Touch"]
         .into_iter().map(|name| {
             let recipe = genomes[0].program.cellular().unwrap().assemblies.iter()
@@ -90,8 +90,16 @@ fn shipped_forager_induces_tissue_digestion_and_funds_whole_daughters() {
         "A supplied tissue meal must fund the authored cell cycle: {:?}", world.cells.iter().map(|c| (c.energy,c.organic_carbon,c.respiration_rate,c.gut_energy,c.body.area,c.body.space(),c.body.cellular.as_ref().map(|s| s.assemblies.iter().map(|a| (a.recipe.name.as_str(),a.mass())).collect::<Vec<_>>()))).collect::<Vec<_>>());
     assert_eq!(world.cells.len(), 2);
     assert!(useful > 100.0);
+    let area_before_split = world.cells.iter().map(|c| c.body.area).sum::<f64>();
     for cell in &world.cells {
         assert!(cell.body.space().used <= cell.body.space().capacity + 1e-8);
+        let meal = cell.gut[OrganicKind::Exudate as usize].energy
+            + cell.gut[OrganicKind::Tissue as usize].energy;
+        // Energy is sensed before this tick's maintenance and growth charges.
+        let whole_atp_after_fission = ((60.0 - DIVISION_COST * area_before_split) * 0.5).floor();
+        assert!(cell.energy >= whole_atp_after_fission, "Underfunded daughter with {} ATP", cell.energy);
+        assert!(meal + cell.organic_carbon * CHEMICAL_ENERGY_PER_CARBON >= (6.0 * area_before_split).floor(),
+            "Both halves need a real food or carbon reserve after the ATP cost of division");
         for (name, mass) in &essential {
             assert!(working(cell, name) + 1e-7 >= 0.9 * mass,
                 "Daughter {} must inherit a working {name}", cell.id);
@@ -291,4 +299,51 @@ fn shipped_forager_pays_to_escape_injury_while_fed_and_preserves_healthy_rest() 
     assert!(escaping.motor_energy > 0.0 && escaping.last_energy < resting.last_energy);
     eprintln!("Paid wound escape: {} vs {} attack ticks; {:.3} ATP motor cost over 60s; {:.3} ATP remains",
         escaping.attacks, passive.attacks, escaping.motor_energy, escaping.last_energy);
+}
+
+#[test]
+fn wounded_grazer_releases_its_feeding_partner_before_swimming() {
+    let program = Program::compile(include_str!("../../../examples/forager.cell")).unwrap();
+    let recipes = &program.cellular().unwrap().assemblies;
+    let index = |name| recipes.iter().position(|recipe| recipe.name == name).unwrap();
+    let mut input = Inputs { integrity: 1.0, ..Inputs::default() };
+    input.receptors.resize(recipes.len(), ReceptorInput::default());
+    input.receptors[index("Touch")] = ReceptorInput {
+        available: true, valid: true, message_valid: true, message: 41.0, bonded: true, ..Default::default()
+    };
+    let mut memory = Registers::default();
+    // The first tick commits the program's recognition marker register.
+    program.evaluate_cell(&input, &mut memory, &mut EvalScratch::default());
+    for (integrity, should_hold) in [(1.0, true), (0.97, false), (1.0, true)] {
+        input.integrity = integrity;
+        let controls = program.evaluate_cell(&input, &mut memory, &mut EvalScratch::default()).cellular.unwrap();
+        assert_eq!(controls.activity[index("Dock")] > 0.0, should_hold);
+        let swimming = controls.activity[index("LeftMotor")] + controls.activity[index("RightMotor")] > 0.0;
+        assert_eq!(swimming, !should_hold);
+    }
+}
+
+#[test]
+fn depleted_grazer_waits_for_a_feeding_link_before_leaving_to_search() {
+    let program = Program::compile(include_str!("../../../examples/forager.cell")).unwrap();
+    let recipes = &program.cellular().unwrap().assemblies;
+    let index = |name| recipes.iter().position(|recipe| recipe.name == name).unwrap();
+    let mut input = Inputs { integrity: 1.0, body_area: 1.0, energy_fraction: 0.9, ..Inputs::default() };
+    input.receptors.resize(recipes.len(), ReceptorInput::default());
+    input.receptors[index("Touch")] = ReceptorInput {
+        available: true, valid: true, message_valid: true, message: 41.0, bonded: true, ..Default::default()
+    };
+    let mut memory = Registers::default();
+    for tick in 0..=16 * 30 {
+        input.age = tick as f64 * DT;
+        if tick >= 30 { input.energy_fraction = 0.3; }
+        let controls = program.evaluate_cell(&input, &mut memory, &mut EvalScratch::default()).cellular.unwrap();
+        let held = controls.activity[index("Dock")] > 0.0;
+        let moving = controls.activity[index("LeftMotor")] + controls.activity[index("RightMotor")] > 0.0;
+        if tick == 6 * 30 || tick == 16 * 30 {
+            assert!(held && !moving, "Wait for delivery and later allow another feeding attempt");
+        } else if tick == 8 * 30 {
+            assert!(!held && moving, "Release the unproductive dock and swim using the real motor controls");
+        }
+    }
 }

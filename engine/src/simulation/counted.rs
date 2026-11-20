@@ -146,7 +146,9 @@ impl World {
             if feasible(high) {low=high;} else {while low<high {let mid=low+(high-low).div_ceil(2);if feasible(mid){low=mid}else{high=mid-1}}}
             if low==0 {continue;}
             let part=source.portion(low);
-            q.atp+=(16*u64::from(low)+u64::from(part.extra)*4/5) as u32;
+            let yield_atp = (16*u64::from(low)+u64::from(part.extra)*4/5) as u32;
+            self.energy_loss.respiration += part.energy() - u64::from(yield_atp);
+            q.atp += yield_atp;
             q.carbon-=low;q.reserve_extra-=part.extra;q.oxygen-=low;q.dic+=low;
             c.respiration_rate=units(low)/DT;
             self.count_flux.respired+=u64::from(low); self.carbon_respired_total+=units(low);
@@ -170,6 +172,7 @@ impl World {
             for &(i,n) in group.iter() {
                 let c=&mut self.cells[i];let q=c.counted.as_mut().unwrap();
                 let actual = grants.next(n as u32);
+                self.energy_loss.work += u64::from(actual);
                 q.mineral+=actual;q.atp-=actual;c.uptake_rate=units(actual)/DT;c.project_counts();
             }
         }
@@ -192,6 +195,7 @@ impl World {
                 let request = grants.next(n as u32);
                 let carbon=q.meal.fitting(request,u64::MAX,u32::MAX-self.environment.mineral_count(patch));
                 let removed=q.meal.take(carbon);used+=carbon;
+                self.energy_loss.decay += removed.energy();
                 self.environment.release_mineral_counts(patch,removed.mineral);
                 self.environment.emit_organic_patch(patch,units(carbon)*20.0*0.08);
                 f.project_counts();
@@ -247,25 +251,35 @@ impl Cell {
         let (x,y)=(self.x-radius*self.angle.cos(),self.y-radius*self.angle.sin());
         let q=self.counted.as_mut().unwrap();let mut assimilated=0_u64;
         for k in 0..3 {
+            // Digesting a carbon costs two fifths of an ATP count. A whole
+            // ATP is paid before work; carry its unused fifths to the next bite.
+            let prepaid = u64::from(q.rate_credit[27]);
+            let affordable = (u64::from(q.atp) * 5 + prepaid) / 2;
             let n=rate(&mut q.rate_credit[7+k],work[k]*DIGESTION_SPEED[k]/20.0)
-                .min(q.gut[k].carbon).min((u64::from(q.atp)*5/2).min(u32::MAX as u64) as u32);
+                .min(q.gut[k].carbon).min(affordable.min(u64::from(u32::MAX)) as u32);
             if n==0 {continue;}
             let meal=q.gut[k].take(n);
             let fraction=[80_u64,65,32][k];
             let div=u64::from(n)*fraction+u64::from(q.rate_credit[10+k]);
-            q.rate_credit[10+k]=(div%100) as u32;
             let room=(floor(cap.energy)/20).saturating_sub(q.carbon);
             let kept=((div/100) as u32).min(room);
             let mut accepted=meal.portion(kept);
-            accepted.mineral=(u64::from(meal.mineral)*[100,80,50][k]/100) as u32;
-            accepted.mineral=accepted.mineral.min(floor(cap.minerals).saturating_sub(q.mineral));
+            // Match the substrate's mineral yield even when a bite contains
+            // only one mineral. Whole overflow still leaves as physical residue.
+            let mineral_share = u64::from(meal.mineral)*[100,80,50][k] + u64::from(q.rate_credit[24+k]);
+            accepted.mineral = ((mineral_share / 100) as u32).min(floor(cap.minerals).saturating_sub(q.mineral));
             accepted.extra=accepted.extra.min(u32::MAX-q.reserve_extra);
             // If all carbon was assimilated, any outgoing energy still needs a carrier.
             if kept==n && accepted.extra!=meal.extra {
                 q.gut[k].join(meal);
                 continue;
             }
-            q.atp-=(u64::from(n)*2).div_ceil(5) as u32;
+            q.rate_credit[10+k] = (div % 100) as u32;
+            q.rate_credit[24+k] = (mineral_share % 100) as u32;
+            let due = 2 * u64::from(n);
+            let paid = due.saturating_sub(prepaid).div_ceil(5);
+            q.rate_credit[27] = (prepaid + paid * 5 - due) as u32;
+            q.atp -= paid as u32;
             q.carbon+=kept;q.mineral+=accepted.mineral;q.reserve_extra+=accepted.extra;
             assimilated+=accepted.energy();
             let waste=CountMeal{carbon:n-kept,mineral:meal.mineral-accepted.mineral,extra:meal.extra-accepted.extra};
@@ -351,10 +365,11 @@ impl CountMeal {
     }
 }
 impl Cell {
-    pub(super) fn count_overflow(&mut self,cap:&BodyCapacities,out:&mut Vec<OrganicEmission>) {
+    pub(super) fn count_overflow(&mut self,cap:&BodyCapacities,out:&mut Vec<OrganicEmission>) -> u32 {
         let q=self.counted.as_mut().unwrap();
         let mineral=q.mineral.saturating_sub(floor(cap.minerals));q.mineral-=mineral;
-        q.atp=q.atp.min(floor(cap.energy));
+        let overflow = q.atp.saturating_sub(floor(cap.energy));
+        q.atp -= overflow;
         let carbon=q.carbon.saturating_sub(floor(cap.energy)/20);
         let extra=proportional(q.reserve_extra,carbon,q.carbon);q.reserve_extra-=extra;q.carbon-=carbon;
         if carbon>0||mineral>0 {out.push(CountMeal{carbon,mineral,extra}.emission(OrganicKind::Exudate,self.x,self.y));}
@@ -367,6 +382,7 @@ impl Cell {
             *p=kept;available-=kept.energy();minerals-=kept.mineral;
         }
         self.project_counts();
+        overflow
     }
 }
 /// Packet formation can combine several u32 stores at death. Split the widened

@@ -23,20 +23,22 @@ let funded = (energy > 100000 || gut.energy > 0) && nutrient.stored > 10;
 let expanding = body.area > body.birth_area * 1.6;
 let powered = enough(built.Solar, 0.12) && enough(built.Respiration, 0.04);
 let equipped = powered;
+# Duplicate the four machines a daughter needs to feed and make proteins.
+let preparing_daughters = body.area > body.birth_area * 1.45;
+let provisioned = enough(built.Respiration, 0.08) && enough(built.Solar, 0.24) && enough(built.Minerals, 0.05) && enough(built.Translation, 0.08);
 let surplus = equipped && energy > 550000;
 # A receptive grazer can share surplus fixed carbon and dissolved minerals.
 publish rf090 = 41;
 rf091 = 72;
-adhere_message rf091 recruit;
 # This stationary producer spends no material on locomotion.
 
-let need_Respiration = funded && (true) && missing(built.Respiration, (if expanding then 0.08 else 0.04), 0.04);
-let need_Solar = funded && (true) && missing(built.Solar, (if expanding then 0.24 else 0.12), 0.12);
+let need_Respiration = funded && (true) && missing(built.Respiration, (if preparing_daughters then 0.08 else 0.04), 0.04);
+let need_Solar = funded && (true) && missing(built.Solar, (if preparing_daughters then 0.24 else 0.12), 0.12);
 let need_Dock = funded && (powered) && missing(built.Dock, (if expanding then 0.04 else 0.02), 0.02);
 let need_CarbonPort = funded && (powered) && missing(built.CarbonPort, (if expanding then 0.1 else 0.05), 0.05);
 let need_MineralPort = funded && (powered) && missing(built.MineralPort, (if expanding then 0.04 else 0.02), 0.02);
-let need_Translation = funded && (powered) && missing(built.Translation, (if expanding then 0.08 else 0.04), 0.04);
-let need_Minerals = funded && (powered) && missing(built.Minerals, (if expanding then 0.05 else 0.025), 0.025);
+let need_Translation = funded && (powered) && missing(built.Translation, (if preparing_daughters then 0.08 else 0.04), 0.04);
+let need_Minerals = funded && (powered || nutrient.stored < 1300) && missing(built.Minerals, (if preparing_daughters then 0.05 else 0.025), 0.025);
 let need_EnergyStore = funded && (powered) && missing(built.EnergyStore, (if expanding || energy.capacity <= 1000000 then 0.08 else 0.04), 0.04);
 let need_MineralStore = funded && (powered && body.area > 1.2) && missing(built.MineralStore, (if expanding then 0.04 else 0.02), 0.02);
 let need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);
@@ -78,6 +80,7 @@ assembly Dock: adhere() {
   Glue: 40;
   start_when: need_Dock;
   activity: 1;
+  engage_when: populated(rf091) && peer.message_valid && peer.message == rf091;
 }
 
 assembly CarbonPort: junction(carbon) {
@@ -151,5 +154,5 @@ assembly Division: constrict() {
   Rotor: 80;
   Ring: 80;
   start_when: need_Division;
-  activity: if body.area + 0.000001 >= body.birth_area * 2 && energy > 1000000 then 1 else 0;
+  activity: if body.area + 0.000001 >= body.birth_area * 2 && provisioned && energy > 1000000 then 1 else 0;
 }

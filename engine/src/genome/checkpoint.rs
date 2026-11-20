@@ -113,6 +113,7 @@ impl Program {
 
     pub(crate) fn write_checkpoint(&self, w: &mut Writer) {
         if let Some(cellular) = &self.cellular {
+            if !cellular.contact_roots().is_empty() { w.u32(u32::MAX - 6); }
             if cellular.count_units { w.u32(u32::MAX - 5); }
             // An impossible legacy node count introduces the v5 extension.
             // Legacy programs retain their original byte representation.
@@ -188,6 +189,10 @@ impl Program {
                     w.count(*index);
                     w.u8(*field as u8);
                 }
+                Op::Peer(field) => {
+                    w.u8(14);
+                    w.u8(*field as u8);
+                }
                 Op::Register(register) => {
                     w.u8(2);
                     write_register(*register, w);
@@ -259,6 +264,10 @@ impl Program {
             for root in &cellular.recycle {
                 w.option(*root);
             }
+            if !cellular.contact_roots().is_empty() {
+                w.count(cellular.contact_roots().len());
+                for &(recipe,root) in cellular.contact_roots() { w.count(recipe); w.count(root); }
+            }
         }
     }
 
@@ -269,6 +278,12 @@ impl Program {
 
     pub(crate) fn read_checkpoint_version(r: &mut Reader<'_>, version: u32) -> Result<Self> {
         let mut header = r.u32()?;
+        let guarded = header == u32::MAX - 6;
+        if guarded {
+            ensure(version >= 19, "contact guards need checkpoint version 19")?;
+            header = r.u32()?;
+            ensure(header >= u32::MAX - 5, "invalid guarded cellular program header")?;
+        }
         let count_units = header == u32::MAX - 5;
         if count_units {
             ensure(version >= 17, "counted cellular programs need checkpoint version 17")?;
@@ -290,6 +305,8 @@ impl Program {
             }
             ensure(messages.addresses.iter().any(Option::is_some), "missing contact declaration")?;
             ensure(!recruits || messages.addresses[2].is_some(), "recruitment needs an adhesion register")?;
+            ensure(version < 19 || messages.addresses[1].is_none() && messages.addresses[2].is_none() && !recruits,
+                "obsolete whole-cell contact policy")?;
             messages.recruits_contacts = recruits;
             if has_signal {
                 ensure(messages.addresses[3].is_some() && messages.addresses[3] != messages.addresses[0],
@@ -460,6 +477,9 @@ impl Program {
                     )?;
                     Op::Receptor(index, field)
                 }
+                14 if version >= 19 && cellular.is_some() => {
+                    Op::Peer(*PeerField::ALL.get(r.u8()? as usize).ok_or("Invalid simulation save: unknown contact field.")?)
+                }
                 _ => return Err("Invalid simulation save: unknown expression operation.".into()),
             };
             let child_type = |child: usize| nodes[child].ty;
@@ -469,6 +489,7 @@ impl Program {
                 Op::Pool(_) if count_units => Some(Type::Count),
                 Op::Pool(_) | Op::Concentration(_) | Op::Built(_) => Some(Type::Number),
                 Op::Receptor(_, field) => Some(field.ty()),
+                Op::Peer(field) => Some(field.ty()),
                 Op::Register(register) => Some(register.ty),
                 Op::Populated(_) => Some(Type::Bool),
                 Op::Reference(child) => Some(child_type(*child)),
@@ -656,6 +677,23 @@ impl Program {
                     }
                 }
             }
+            let mut guards = Vec::new();
+            if guarded {
+                let count = r.count(definition.assemblies.len())?;
+                ensure(count > 0, "empty contact guard set")?;
+                for _ in 0..count {
+                    let recipe = r.index(definition.assemblies.len())?;
+                    let root = r.index(nodes.len())?;
+                    ensure(contact_guard::supports_guard(definition.assemblies[recipe].kind) && nodes[root].ty==Type::Bool
+                        && guards.last().is_none_or(|&(previous,_)| previous < recipe), "invalid contact guard")?;
+                    guards.push((recipe,root));
+                }
+            }
+            let local_roots = genes.iter().map(|g|g.root).chain(activity.iter().chain(&start).chain(&recycle).flatten().copied())
+                .chain(writes.iter().flat_map(|w|w.value.into_iter().chain(w.guard)));
+            contact_guard::validate_contexts(&nodes,&guards,local_roots)
+                .map_err(|(_, message)| format!("Invalid simulation save: {message}"))?;
+            let engagement = contact_guard::ContactGuards::compile(&nodes, guards, &definition);
             return Ok(Self::from_cellular(
                 nodes,
                 bindings,
@@ -668,6 +706,7 @@ impl Program {
                     start,
                     recycle,
                     messages,
+                    engagement,
                 },
             ));
         }

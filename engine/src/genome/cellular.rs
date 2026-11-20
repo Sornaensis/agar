@@ -17,7 +17,7 @@ pub(super) struct GeneRoot {
 }
 
 /// A paid receptor can observe the identity and payload of the same touched
-/// cell. The receiver’s avoidance and adhesion comparisons are private.
+/// cell. Reserved historical comparison slots are decoded solely for checkpoint migration.
 #[derive(Debug, Clone, Default)]
 pub(super) struct ContactMessages {
     // Publish identity, avoid, adhere, publish signal. Slots are scalar register addresses.
@@ -46,15 +46,13 @@ impl ContactMessages {
         }
     }
     pub(super) fn to_json(&self) -> String {
-        let mut fields = Self::ROLES.iter().zip(self.addresses).map(|(role, index)| {
+        let mut fields = [0,3].into_iter().map(|idx| {
+            let (role,index)=(Self::ROLES[idx], self.addresses[idx]);
             let address = index.map_or_else(|| "null".into(), |index| quote(&format!("rf{index:03}")));
             format!("\"{role}\":{address}")
         }).collect::<Vec<_>>();
         fields.push(format!("\"initial\":{}", self.initial.map_or_else(|| "null".into(), |v| v.to_string())));
         fields.push(format!("\"signalInitial\":{}", self.signal_initial.map_or_else(|| "null".into(), |v| v.to_string())));
-        if self.addresses[2].is_some() {
-            fields.push(format!("\"formation\":\"{}\"", if self.recruits_contacts { "recruit" } else { "daughters" }));
-        }
         format!("{{{}}}", fields.join(","))
     }
 }
@@ -68,6 +66,7 @@ pub(super) struct CellularGraph {
     pub start: Vec<Option<usize>>,
     pub recycle: Vec<Option<usize>>,
     pub messages: Option<Box<ContactMessages>>,
+    pub engagement: Option<Box<contact_guard::ContactGuards>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -85,6 +84,12 @@ pub(super) struct GeometryLocation {
 }
 
 impl CellularGraph {
+    pub fn contact_roots(&self) -> &[(usize,usize)] {
+        self.engagement.as_ref().map_or(&[], |g| &*g.roots)
+    }
+    fn guard_root(&self, recipe:usize) -> Option<usize> {
+        self.contact_roots().iter().find(|(index,_)| *index==recipe).map(|&(_,root)|root)
+    }
     pub(super) fn roots(&self) -> Vec<usize> {
         self.genes
             .iter()
@@ -123,6 +128,7 @@ impl CellularGraph {
                 .sum::<usize>()
             + self.genes.iter().map(|g| g.name.capacity()).sum::<usize>()
             + self.messages.as_ref().map_or(0, |_| std::mem::size_of::<ContactMessages>())
+            + self.engagement.as_ref().map_or(0, |guards| guards.allocated_bytes())
             + self.definition.derived_bytes()
     }
 
@@ -205,14 +211,17 @@ impl CellularGraph {
                     .zip(&self.recycle)
                     .map(|(assembly, root)| (format!("recycle.{}", assembly.name), *root)),
             )
+            .chain(self.definition.assemblies.iter().enumerate().filter(|(_, a)| contact_guard::supports_guard(a.kind))
+                .map(|(i,a)| (format!("engage_when.{}",a.name),self.guard_root(i))))
             .collect()
     }
 
     pub(super) fn graph_roots_json(&self) -> String {
         self.named_roots().iter().map(|(name, root)| {
             let value = root.map_or_else(|| "null".to_string(), |i| i.to_string());
-            let ty = if name.starts_with("start_when.") { "boolean" } else { "scalar" };
-            let default = if root.is_some() { "null" } else if name.starts_with("start_when.") { "\"true\"" }
+            let guard = name.strip_prefix("engage_when.").and_then(|recipe| self.definition.assemblies.iter().find(|a| a.name==recipe));
+            let ty = if name.starts_with("start_when.") || guard.is_some() { "boolean" } else { "scalar" };
+            let default = if root.is_some() { "null" } else if let Some(a)=guard { if contact_guard::default_guard(a.kind) { "\"true\"" } else { "\"false\"" } } else if name.starts_with("start_when.") { "\"true\"" }
                 else if name.starts_with("recycle.") { "\"0\"" } else { "\"1\"" };
             format!("{{\"id\":{},\"kind\":\"output\",\"name\":{},\"type\":\"{ty}\",\"value\":{value},\"guard\":null,\"default\":{default}}}",
                 quote(&format!("output:{name}")), quote(name))
@@ -266,15 +275,6 @@ impl Program {
     }
     pub fn published_message(&self, memory: &Registers) -> Option<f64> {
         self.contact_messages()?.value(0, memory)
-    }
-    pub fn recruits_contacts(&self) -> bool {
-        self.contact_messages().is_some_and(|messages| messages.recruits_contacts)
-    }
-    pub fn avoid_message(&self, memory: &Registers) -> Option<f64> {
-        self.contact_messages()?.value(1, memory)
-    }
-    pub fn adhesion_message(&self, memory: &Registers) -> Option<f64> {
-        self.contact_messages()?.value(2, memory)
     }
     pub fn contact_signal(&self, memory: &Registers) -> Option<f64> {
         self.contact_messages()?.value(3, memory)
@@ -534,6 +534,7 @@ impl Parser {
         let mut activity = Vec::new();
         let mut start = Vec::new();
         let mut recycle = Vec::new();
+        let mut guards = Vec::new();
         let mut assembly_locations = Vec::new();
         let mut genes = Vec::new();
         let mut gene_names = HashSet::new();
@@ -614,13 +615,28 @@ impl Parser {
                     while !matches!(self.peek().kind, Kind::RightBrace | Kind::End) {
                         let field = self.take();
                         let Kind::Name(field_name) = &field.kind else { return Err(field.location.error("expected a product name, activity, at, or direction.")); };
-                        if !fields.insert(field_name.clone()) { return Err(field.location.error(format!("assembly field '{field_name}' is already defined."))); }
                         self.expect(Kind::Colon, "':' after assembly field")?;
+                        // A preexisting ingredient can be named engage_when. Its one
+                        // numeric literal is unambiguous beside a boolean guard.
+                        let literal_ingredient = field_name == "engage_when" && self.product_names.contains_key(field_name)
+                            && matches!(self.peek().kind, Kind::Integer(_) | Kind::Number(_))
+                            && self.tokens.get(self.position + 1).is_some_and(|token| token.kind == Kind::Semicolon);
+                        if !fields.insert((field_name.clone(), literal_ingredient)) {
+                            return Err(field.location.error(format!("assembly field '{field_name}' is already defined.")));
+                        }
                         match field_name.as_str() {
                             "activity" => {
                                 let root = self.expression(0, 0)?;
                                 self.assignable(root, Type::Number, field.location)?;
                                 active = Some(root);
+                            }
+                            "engage_when" if !self.historical_contact && !literal_ingredient => {
+                                if !contact_guard::supports_guard(kind) {
+                                    return Err(field.location.error("engage_when requires a piercer, engulfment or adhesive surface."));
+                                }
+                                let root = self.expression(0, 0)?;
+                                self.require(root, Type::Bool, field.location)?;
+                                guards.push((assemblies.len(),root));
                             }
                             "start_when" => {
                                 let root = self.expression(0, 0)?;
@@ -669,6 +685,9 @@ impl Parser {
                     self.geometry_locations.push(GeometryLocation { close, at: at_location, direction: direction_location });
                 }
                 "publish" | "avoid_message" | "adhere_message" | "signal" => {
+                    if !self.historical_contact && matches!(keyword.as_str(), "avoid_message" | "adhere_message") {
+                        return Err(declaration.location.error(format!("'{keyword}' was removed. Use an engage_when expression on the contact assembly.")));
+                    }
                     let role = match keyword.as_str() { "publish" => 0, "avoid_message" => 1, "adhere_message" => 2, _ => 3 };
                     let token = self.take();
                     let Kind::Name(name) = &token.kind else {
@@ -778,6 +797,11 @@ impl Parser {
         }
         validate(&definition)
             .map_err(|error| self.peek().location.error(error))?;
+        let local_roots = genes.iter().map(|gene|gene.root).chain(activity.iter().chain(&start).chain(&recycle).flatten().copied())
+            .chain(writes.iter().flat_map(|write| write.value.into_iter().chain(write.guard)));
+        contact_guard::validate_contexts(&self.nodes, &guards, local_roots)
+            .map_err(|(node, message)| self.node_locations[node].head.error(message))?;
+        let engagement = contact_guard::ContactGuards::compile(&self.nodes, guards, &definition);
         Ok(Program::from_cellular(
             std::mem::take(&mut self.nodes),
             std::mem::take(&mut self.binding_order),
@@ -790,6 +814,7 @@ impl Parser {
                 start,
                 recycle,
                 messages: messages.addresses.iter().any(Option::is_some).then(|| Box::new(messages)),
+                engagement,
             },
         ))
     }
@@ -878,7 +903,9 @@ pub(super) fn schema_json() -> String {
     let count_signals = Sensor::ALL.iter().filter(|s| s.is_resource_amount())
         .map(|s| quote(s.name())).collect::<Vec<_>>().join(",");
     let scale = crate::counts::SCALE;
-    format!("{{\"marker\":\"cellular;\",\"counts\":{{\"marker\":\"cellular counts;\",\"perUnit\":{scale},\"integerSignals\":[{count_signals}]}},\"products\":[{products}],\"assemblies\":[{assemblies}],\"mechanisms\":[{mechanisms}],\"reads\":[{reads}],\"maxProducts\":{MAX_PRODUCTS},\"maxAssemblies\":{MAX_ASSEMBLIES},\"maxGenes\":{MAX_GENES},\"registers\":{{\"prefixes\":[\"ri\",\"rf\",\"rb\",\"rs\",\"rv\"],\"addressesPerType\":{REGISTER_COUNT},\"upkeepPerSecond\":{REGISTER_ENERGY_COST},\"clearWins\":true}},\"contactMessages\":{{\"declarations\":[\"publish\",\"avoid_message\",\"adhere_message\",\"signal\"],\"registerType\":\"scalar\",\"receptor\":\"sense(contact)\",\"validField\":\"message_valid\",\"valueField\":\"message\",\"signalValidField\":\"signal_valid\",\"signalValueField\":\"signal\",\"bondedField\":\"bonded\",\"formationModes\":[\"daughters\",\"recruit\"],\"defaultFormation\":\"daughters\",\"initializerLimit\":{MAX_SIGNAL}}},\"recipeControls\":[{{\"name\":\"activity\",\"type\":\"scalar\",\"default\":1}},{{\"name\":\"start_when\",\"type\":\"boolean\",\"default\":true}},{{\"name\":\"recycle\",\"type\":\"scalar\",\"default\":0}}],\"concentration\":\"pool mass / body.area\",\"userFunctions\":{{\"keyword\":\"fn\",\"maxParameters\":8,\"parameterType\":\"scalar\",\"maxFunctions\":64,\"recursive\":false}}}}")
+    let peer_fields = PeerField::ALL.iter().map(|field| format!("{{\"name\":{},\"type\":{}}}", quote(field.name()),quote(field.ty().label())))
+        .collect::<Vec<_>>().join(",");
+    format!("{{\"marker\":\"cellular;\",\"counts\":{{\"marker\":\"cellular counts;\",\"perUnit\":{scale},\"integerSignals\":[{count_signals}]}},\"products\":[{products}],\"assemblies\":[{assemblies}],\"mechanisms\":[{mechanisms}],\"reads\":[{reads}],\"maxProducts\":{MAX_PRODUCTS},\"maxAssemblies\":{MAX_ASSEMBLIES},\"maxGenes\":{MAX_GENES},\"registers\":{{\"prefixes\":[\"ri\",\"rf\",\"rb\",\"rs\",\"rv\"],\"addressesPerType\":{REGISTER_COUNT},\"upkeepPerSecond\":{REGISTER_ENERGY_COST},\"clearWins\":true}},\"contactMessages\":{{\"declarations\":[\"publish\",\"signal\"],\"registerType\":\"scalar\",\"receptor\":\"sense(contact)\",\"validField\":\"message_valid\",\"valueField\":\"message\",\"signalValidField\":\"signal_valid\",\"signalValueField\":\"signal\",\"bondedField\":\"bonded\",\"peerFields\":[{peer_fields}],\"initializerLimit\":{MAX_SIGNAL}}},\"recipeControls\":[{{\"name\":\"activity\",\"type\":\"scalar\",\"default\":1}},{{\"name\":\"start_when\",\"type\":\"boolean\",\"default\":true}},{{\"name\":\"recycle\",\"type\":\"scalar\",\"default\":0}},{{\"name\":\"engage_when\",\"type\":\"boolean\",\"default\":true,\"defaultByMechanism\":{{\"adhere()\":false}},\"mechanisms\":[\"pierce()\",\"engulf()\",\"adhere()\",\"piercer\",\"phagocyte\"]}}],\"concentration\":\"pool mass / body.area\",\"userFunctions\":{{\"keyword\":\"fn\",\"maxParameters\":8,\"parameterType\":\"scalar\",\"maxFunctions\":64,\"recursive\":false}}}}")
 }
 
 #[cfg(test)]
@@ -1015,11 +1042,12 @@ assembly Swim: flagellum {
     }
 
     #[test]
-    fn recruitment_is_explicit_and_retention_preserves_the_legacy_encoding() {
+    fn historical_recruitment_tags_remain_distinguishable_during_save_validation() {
         for signal in ["", "signal rf002 = 0;"] {
             let encoded = |modifier: &str| {
                 let source = format!("cellular; publish rf001 = 17; adhere_message rf001{modifier}; {signal}");
-                let program = Program::compile(&source).unwrap();
+                assert!(Program::compile(&source).is_err());
+                let program = Program::compile_historical_contact_source(&source).unwrap();
                 let mut writer = Writer::new();
                 program.write_checkpoint(&mut writer);
                 writer.0
@@ -1027,16 +1055,16 @@ assembly Swim: flagellum {
             let legacy = encoded("");
             assert_eq!(legacy, encoded(" daughters"));
             let old = Program::read_checkpoint_version(&mut Reader::new(&legacy), 14).unwrap();
-            assert!(!old.recruits_contacts());
+            assert!(!old.contact_messages().unwrap().recruits_contacts);
             let mut memory = Registers::default();
             old.initialize_message(&mut memory);
-            assert_eq!(old.adhesion_message(&memory), Some(17.0));
+            assert_eq!(old.contact_messages().unwrap().value(2,&memory), Some(17.0));
             let recruit = encoded(" recruit");
             assert_ne!(recruit, legacy);
             assert!(Program::read_checkpoint_version(&mut Reader::new(&recruit), 14).is_err());
             let restored = Program::read_checkpoint_version(&mut Reader::new(&recruit), 15).unwrap();
-            assert!(restored.recruits_contacts());
-            assert_eq!(restored.adhesion_message(&memory), Some(17.0));
+            assert!(restored.contact_messages().unwrap().recruits_contacts);
+            assert_eq!(restored.contact_messages().unwrap().value(2,&memory), Some(17.0));
         }
         for declaration in ["adhere_message rf002 any;", "adhere_message rf001 recruit daughters;",
             "publish rf001 recruit;", "avoid_message rf001 daughters;", "adhere_message rb001 recruit;"] {
@@ -1069,8 +1097,6 @@ assembly Swim: flagellum {
         let source = r#"cellular;
 # 🌿
 publish rf001 = 0;
-avoid_message rf002;
-adhere_message rf001;
 fn increment(x) = x + rf001;
 ri001 = ri001 + 1;
 rf001 = increment(1) when ri001 < 2;
@@ -1086,13 +1112,10 @@ clear rf001 when ri001 == 1;
         assert_eq!(p.published_message(&memory), None);
         p.initialize_message(&mut memory);
         assert_eq!(p.published_message(&memory), Some(0.0));
-        assert_eq!(p.avoid_message(&memory), None);
-        assert_eq!(p.adhesion_message(&memory), Some(0.0));
         let inputs = Inputs::default();
         let mut scratch = EvalScratch::default();
         p.evaluate_cell(&inputs, &mut memory, &mut scratch);
         assert_eq!(p.published_message(&memory), Some(1.0));
-        assert_eq!(p.avoid_message(&memory), Some(0.0));
         assert_eq!(memory.value("rb001"), Some(&Value::Boolean(true)));
         assert_eq!(memory.value("rs001"), Some(&Value::Text(Rc::from("private"))));
         assert_eq!(memory.value("rv001"), Some(&Value::Vector([0.0, 0.0])));
@@ -1104,11 +1127,9 @@ clear rf001 when ri001 == 1;
         let to = from + "publish rf001 = 0;".len();
         assert!(trace.contains(&format!(r#"{{"kind":"publish","register":"rf001","value":1,"from":{from},"to":{to}}}"#)));
         assert!(p.graph_json().contains(r#""roots":[{"id":"write:ri001""#));
-        assert!(p.graph_json().contains(r#""contactMessages":{"publish":"rf001","avoid":"rf002","adhere":"rf001","signal":null,"initial":0,"signalInitial":null,"formation":"daughters"}"#));
+        assert!(p.graph_json().contains(r#""contactMessages":{"publish":"rf001","signal":null,"initial":0,"signalInitial":null}"#));
         p.evaluate_cell(&inputs, &mut memory, &mut scratch);
         assert_eq!(p.published_message(&memory), None);
-        assert_eq!(p.adhesion_message(&memory), None);
-        assert_eq!(p.avoid_message(&memory), Some(1.0));
         assert_eq!(memory.value("rv001"), Some(&Value::Vector([1.0, 0.0])));
         let mut w = Writer::new();
         p.write_checkpoint(&mut w);
@@ -1128,7 +1149,7 @@ clear rf001 when ri001 == 1;
 
     #[test]
     fn independent_payload_keeps_identity_and_checked_source_spans_through_replay() {
-        let source = "cellular; # 🌱\npublish rf001=17; signal rf002 = 0; avoid_message rf001; adhere_message rf001; rf002=rf002-0.5; clear rf002 when ri001==1; ri001=ri001+1;";
+        let source = "cellular; # 🌱\npublish rf001=17; signal rf002 = 0; rf002=rf002-0.5; clear rf002 when ri001==1; ri001=ri001+1;";
         let program = Program::compile(source).unwrap();
         let mut memory = Registers::default();
         program.initialize_message(&mut memory);
@@ -1143,8 +1164,6 @@ clear rf001 when ri001 == 1;
         assert_eq!(program.contact_signal(&memory),Some(-0.5));
         program.evaluate_cell(&Inputs::default(),&mut memory,&mut scratch);
         assert_eq!(program.contact_signal(&memory), None);
-        assert_eq!(program.avoid_message(&memory), Some(17.0));
-        assert_eq!(program.adhesion_message(&memory), Some(17.0));
         let mut writer = Writer::new();
         program.write_checkpoint(&mut writer);
         assert!(Program::read_checkpoint_version(&mut Reader::new(&writer.0),10).is_err());

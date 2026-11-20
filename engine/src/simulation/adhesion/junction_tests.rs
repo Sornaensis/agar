@@ -4,12 +4,11 @@ use crate::checkpoint::{self, Reader, Writer};
 
 const CHANNELS: &str = r#"
 product Carrier = transporter();
-product GlueMaterial = adhesin(Frame); assembly Glue: adhere() { GlueMaterial:0.006; Mount:0.01; Wall:0.01; activity:1; }
+product GlueMaterial = adhesin(Frame); assembly Glue: adhere() { engage_when: peer.message_valid && populated(rf020) && peer.message == rf020; GlueMaterial:0.006; Mount:0.01; Wall:0.01; activity:1; }
 assembly PoreE: junction(energy) { Wall:0.01; Carrier:0.01; activity:1; }
 assembly PoreM: junction(mineral) { Wall:0.01; Carrier:0.01; activity:1; }
 assembly PoreC: junction(carbon) { Wall:0.01; Carrier:0.01; activity:1; }
 publish rf020 = 31;
-adhere_message rf020 recruit;
 "#;
 
 fn close(a: f64, b: f64) {
@@ -52,7 +51,7 @@ fn phase(world: &mut World, genomes: &[Genome]) {
     let mut ws = PhaseWorkspace::default();
     world.freeze_contact_signals(genomes, &mut ws.signals);
     ws.geometry.rebuild(&world.cells, false, true);
-    world.apply_adhesion_in(&mut ws);
+    world.apply_adhesion_in(genomes,&mut ws);
 }
 
 #[test]
@@ -262,14 +261,14 @@ fn isolated_peers_allocate_no_transfer_account_and_dead_neighbors_drop_out() {
     let mut phases = PhaseWorkspace::default();
     world.freeze_contact_signals(&genomes,&mut phases.signals);
     phases.geometry.rebuild(&world.cells,false,true);
-    world.apply_adhesion_in(&mut phases);
+    world.apply_adhesion_in(&genomes,&mut phases);
     assert_eq!(phases.junctions.accounts.len(),2);
     assert_eq!(world.cells[2].adhered_neighbors,0);
     world.cells[0].energy=0.0;
     world.cells.retain(Cell::alive);
     world.freeze_contact_signals(&genomes,&mut phases.signals);
     phases.geometry.rebuild(&world.cells,false,true);
-    world.apply_adhesion_in(&mut phases);
+    world.apply_adhesion_in(&genomes,&mut phases);
     assert_eq!(phases.junctions.accounts.len(),0);
     assert!(!world.had_adhesive_contacts);
     assert!(world.cells.iter().all(|c| c.adhered_neighbors == 0 && c.junction_net == [0.0;3]));
@@ -301,7 +300,7 @@ fn save_one_tick_before_recruitment_and_reject_invalid_bond_state() {
 
 #[test]
 fn fission_passes_one_existing_interface_to_the_touching_daughter_and_persists_it() {
-    let daughters=CHANNELS.replace("rf020 recruit;","rf020 daughters;");
+    let daughters=CHANNELS.replace("engage_when: peer.message_valid","engage_when: peer.division_interface && peer.message_valid");
     let (mut world, genomes)=colony_with(&[(200.0,200.0),(228.2,200.0),(214.0,200.0),(214.0,214.0)],&daughters);
     // Two daughters of the same living mother. After a second split the new
     // daughter occupies the mother's old interface; the other neighbor is
@@ -333,7 +332,7 @@ fn fission_passes_one_existing_interface_to_the_touching_daughter_and_persists_i
 #[test]
 fn recruited_interface_handoff_requires_matching_recruiter_hardware_on_the_new_half() {
     let (mut world,mut genomes)=colony(&[(200.0,200.0),(228.2,200.0),(214.0,200.0)]);
-    let source=genomes[0].source.replace("rf020 recruit;","rf020 daughters;");
+    let source=genomes[0].source.replace("engage_when: peer.message_valid","engage_when: peer.division_interface && peer.message_valid");
     genomes.push(Genome::new(source.clone(),Program::compile(&source).unwrap(),0,0));
     world.cells[2].genome_id=2;
     world.contacts.clear();world.contacts.insert((1,2),MATURE);
@@ -411,3 +410,43 @@ fn binding_sites_are_paid_finite_and_reused_after_release() {
     assert!(world.contacts.is_empty());
     assert_eq!(world.cells.iter().map(|c| c.adhered_neighbors).sum::<u32>(), 0);
 }
+
+#[test]
+fn surface_predicates_can_be_asymmetric_and_share_only_eligible_material() {
+    let source = r#"
+        product GlueMaterial=adhesin(Frame);
+        assembly Small: adhere() { GlueMaterial:0.002; Mount:0.009; Wall:0.009;
+            engage_when: peer.signal_valid && peer.signal <= 2; }
+        assembly Large: adhere() { GlueMaterial:0.006; Mount:0.01; Wall:0.01;
+            engage_when: peer.signal_valid && peer.signal > 2; }
+    "#;
+    let (mut world, mut genomes) = equipped(source);
+    // Publisher-free central cell, two identical peers with unconditional glue.
+    let (mut donors, others) = equipped(
+        r#"
+        product GlueMaterial=adhesin(Frame);
+        assembly Glue: adhere() { GlueMaterial:0.006; Mount:0.01; Wall:0.01; engage_when: true; }
+        signal rf001=1;
+    "#,
+    );
+    genomes.extend(others);
+    let mut donor = donors.cells.pop().unwrap();
+    donor.genome_id = 2;
+    genomes[1].program.initialize_message(&mut donor.memory);
+    world.cells[0].x = 200.0;
+    world.cells[0].y = 200.0;
+    for x in [186.0, 214.0] {
+        donor.id = world.next_id;
+        world.next_id += 1;
+        donor.x = x;
+        donor.y = 200.0;
+        world.cells.push(donor.clone());
+    }
+    advance_contact_phases(&mut world, &genomes, MATURE);
+    assert_eq!(world.bond_pairs().count(), 1, "only one site of the small matching patch is available");
+    assert_eq!(world.contacts.len(), 1, "the other patch cannot host even a pending claim from these peers");
+    assert!(world.has_bond(world.cells[0].id, world.cells[1].id));
+    world.prune_contacts(Some(&genomes));
+    assert_eq!(world.bond_pairs().count(), 1);
+}
+

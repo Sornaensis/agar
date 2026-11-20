@@ -95,12 +95,12 @@ assert.equal(language.tokenizeGenome(source).some(token=>token.kind==='invalid')
 assert.deepEqual(names(language.cellularDeclarations(source).products),['Anchor','Rotor','Tail','Memory']);
 assert.deepEqual(names(language.cellularDeclarations(source+'\n# product Hidden = motor();').products),['Anchor','Rotor','Tail','Memory']);
 const statements = complete('cellular;\n');
-for (const name of ['product','gene','assembly','fn','let','clear','publish','avoid_message','adhere_message','signal','ri001','rf001','rb001','rs001','rv001']) {
+for (const name of ['product','gene','assembly','fn','let','clear','publish','signal','ri001','rf001','rb001','rs001','rv001']) {
   assert.ok(names(statements).includes(name), 'Cellular statement offers '+name);
 }
 assert.equal(statements.find(item=>item.name==='rb001').insertText,'rb001 = ');
 assert.ok(!names(statements).includes('thrust'));
-for (const keyword of ['publish','avoid_message','adhere_message','signal']) {
+for (const keyword of ['publish','signal']) {
   const addresses=complete('cellular; '+keyword+' ');
   assert.ok(addresses.length && addresses.every(item=>item.category==='register' && item.type==='scalar'));
   assert.ok(names(complete('cellular; '+keyword+' rf21','rf21')).includes('rf210'));
@@ -120,7 +120,8 @@ for (const [part,expected] of [['rb001 = ','boolean'],['rs001 = ','string'],['rv
 assert.deepEqual(names(complete('cellular; product X = ')),[...language.CELLULAR_PRODUCT_ROLES]);
 assert.deepEqual(names(complete('cellular; product Coat = scaffold(); product Wall = membrane(); product Glue = adhesin(')), ['Coat']);
 assert.deepEqual(names(complete(source+'\ngene new_gene: ')),['Anchor','Rotor','Tail','Memory']);
-assert.ok(names(complete(source+'\nassembly Other: ')).includes('replicator'),'Legacy recipe remains available');
+assert.ok(!names(complete(source+'\nassembly Other: ')).includes('replicator'),'New recipe completion offers explicit mechanisms');
+assert.equal(language.lookupCellularSymbol('replicator',source).category,'keyword','The editor can still explain an existing combined recipe');
 for (const name of ['store(food)','digest(tissue)','translate()','propel()']) assert.ok(names(complete(source+'\nassembly Other: ')).includes(name));
 assert.deepEqual(names(complete(source+'\nassembly Other: store(')),['energy','mineral','food']);
 assert.deepEqual(names(complete(source+'\nassembly Other: digest(ti','ti')),['tissue']);
@@ -143,8 +144,8 @@ const schema = engine.languageSchema();
 assert.equal(schema.cellular.marker,'cellular;');
 assert.deepEqual(schema.cellular.registers,{prefixes:['ri','rf','rb','rs','rv'],addressesPerType:999,upkeepPerSecond:0.0025,clearWins:true});
 assert.deepEqual(schema.cellular.contactMessages,{
-  declarations:['publish','avoid_message','adhere_message','signal'],registerType:'scalar',receptor:'sense(contact)',
-  validField:'message_valid',valueField:'message',signalValidField:'signal_valid',signalValueField:'signal',bondedField:'bonded',formationModes:['daughters','recruit'],defaultFormation:'daughters',initializerLimit:1e12,
+  declarations:['publish','signal'],registerType:'scalar',receptor:'sense(contact)',
+  validField:'message_valid',valueField:'message',signalValidField:'signal_valid',signalValueField:'signal',bondedField:'bonded',peerFields:language.CONTACT_FIELDS.map(({name,type})=>({name,type})),initializerLimit:1e12,
 });
 assert.deepEqual(schema.cellular.reads,language.CELLULAR_READ_SIGNALS.map(item=>({name:item.name,type:item.type})));
 assert.deepEqual(names(schema.cellular.products),[...language.CELLULAR_PRODUCT_ROLES]);
@@ -285,11 +286,13 @@ assert.throws(()=>validateGenomeEvaluation(badControl,controlId));
 const contactSource=`# café 🌱 — stable UTF-16 ranges
 cellular;
 publish rf001 = 0;
-avoid_message rf002;
-adhere_message rf001 recruit;
 signal rf003 = -2;
 product Mount = anchor(); product Port = receptor(); product Fiber = filament();
 assembly Touch: sense(contact) { Mount: 0.01; Port: 0.01; Fiber: 0.01; }
+product Catalyst = enzyme();
+let ready = energy > 0;
+let have_signal = peer.signal_valid;
+assembly Needle: pierce() { Mount: 0.02; Fiber: 0.02; Catalyst: 0.02; engage_when: have_signal && peer.signal >= 2; }
 ri001 = ri001 + 1;
 rf002 = rf001 when populated(rf001);
 rb001 = sensed.Touch.message_valid;
@@ -298,12 +301,20 @@ rv001 = vec(1 + sensed.Touch.message, -1);
 clear rf001 when ri001 >= 1;`;
 assert.equal(language.lookupCellularSymbol('sensed.Touch.bonded',contactSource).type,'boolean');
 assert.equal(language.lookupCellularSymbol('sensed.Eye.bonded',controlled),undefined);
-for(const modifier of schema.cellular.contactMessages.formationModes){
-  assert.ok(complete('cellular; adhere_message rf001 ').some(option=>option.name===modifier));
-  assert.ok(!complete('cellular; publish rf001 ').some(option=>option.name===modifier));
-  const id=engine.compile(`cellular; adhere_message rf001 ${modifier};`);
-  assert.equal(engine.getGenomeGraph(id).contactMessages.formation,modifier);
+for (const kind of language.CONTACT_RECIPE_KINDS) {
+  const block = 'cellular; assembly Tip: ' + kind + ' { ';
+  assert.ok(names(complete(block)).includes('engage_when'));
+  assert.deepEqual(names(complete(block + 'engage_when: peer.', 'peer.')).sort(), names(language.CONTACT_FIELDS).sort());
+  assert.deepEqual(names(complete(block + 'activity: peer.', 'peer.')), []);
+  assert.deepEqual(names(complete(block + 'engage_when: energy', 'energy')), []);
 }
+assert.ok(!names(complete('cellular; assembly Eye: sense(optical) { ')).includes('engage_when'));
+for (const old of ['avoid_message','adhere_message']) {
+  assert.ok(!names(statements).includes(old));
+  assert.equal(engine.analyze('cellular; ' + old + ' rf001;').valid,false);
+}
+assert.ok(!names(complete('cellular; assembly New: ')).includes('digestive'));
+assert.equal(language.symbolAt('cellular; let x = feed;',18),null);
 assert.equal(language.lookupCellularSymbol('sensed.Touch.message_valid',contactSource).type,'boolean');
 assert.equal(language.lookupCellularSymbol('sensed.Touch.message',contactSource).type,'scalar');
 assert.equal(language.lookupCellularSymbol('sensed.Touch.message',contactSource.replace('sense(contact)','mechanoreceptor')).type,'scalar');
@@ -312,6 +323,15 @@ for (const keyword of schema.cellular.contactMessages.declarations) {
   const symbol=language.lookupCellularSymbol(keyword,contactSource);
   engine.compile('cellular;\n'+language.genomeSymbolDocumentation(symbol).example);
 }
+const aliases = engine.analyze(contactSource).bindings;
+assert.equal(aliases.find(item=>item.name==='ready').contactSafe,false);
+assert.equal(aliases.find(item=>item.name==='have_signal').perContact,true);
+const guardCursor = contactSource.indexOf('engage_when: ') + 'engage_when: '.length;
+const allowedAliases = names(language.genomeCompletions(contactSource, guardCursor, '', aliases));
+assert.ok(allowedAliases.includes('have_signal') && !allowedAliases.includes('ready'));
+const ordinaryProgram = contactSource + '\nrb007 = ';
+const normalAliases = names(language.genomeCompletions(ordinaryProgram, ordinaryProgram.length, '', aliases));
+assert.ok(!normalAliases.includes('have_signal') && normalAliases.includes('ready'));
 const contactId=engine.compile(contactSource);
 engine.resetEmpty(72,0); engine.seed(contactId,1);
 const founder=engine.snapshot().cells[0].id;
@@ -343,10 +363,13 @@ for (const neighborIds of [[7],[9,7,11],[7,7,11],[founder,9,11]]) {
 }
 const checkpoint=engine.saveState();
 const preview=engine.getCellEvaluation(founder);
-assert.deepEqual(preview.contactMessages,{publish:'rf001',avoid:'rf002',adhere:'rf001',initial:0,signal:'rf003',signalInitial:-2,formation:'recruit'});
+assert.deepEqual(preview.contactMessages,{publish:'rf001',initial:0,signal:'rf003',signalInitial:-2});
 assert.deepEqual(preview.contactMessageDeclarations.map(item=>[item.kind,item.value,contactSource.slice(item.from,item.to)]),[
-  ['publish',0,'publish rf001 = 0;'],['avoid',null,'avoid_message rf002;'],['adhere',0,'adhere_message rf001 recruit;'],['signal',-2,'signal rf003 = -2;'],
+  ['publish',0,'publish rf001 = 0;'],['signal',-2,'signal rf003 = -2;'],
 ]);
+assert.equal(preview.bindings.find(b=>b.name==='have_signal').value, null);
+assert.equal(preview.bindings.find(b=>b.name==='have_signal').perContact, true);
+assert.equal(preview.outputs.find(row=>row.name==='engage_when.Needle').perContact,true);
 assert.deepEqual(preview.signals.filter(item=>item.name.startsWith('sensed.Touch.message')).map(item=>[item.name,item.value]),[
   ['sensed.Touch.message_valid',false],['sensed.Touch.message',0],
 ]);
@@ -369,7 +392,7 @@ assert.ok(preview.writes.find(item=>item.name==='rf002').applies);
 assert.equal(preview.writes.find(item=>item.name==='rf001').applies,false);
 assert.deepEqual(engine.saveState(),checkpoint,'Register/message previews are read-only');
 for (const corrupt of [
-  trace=>{trace.contactMessages.formation='any';},
+  trace=>{trace.outputs.find(row=>row.perContact).value=true;},
   trace=>{trace.contactMessages.publish='rb001';},
   trace=>{trace.contactMessages.initial=Infinity;},
   trace=>{trace.contactMessages.signal=trace.contactMessages.publish;},
@@ -384,7 +407,7 @@ for (const corrupt of [
 }
 engine.tick(1);
 assert.deepEqual(memory(),{ri001:1,rf001:0,rf002:0,rf003:-2,rb001:false,rs001:'private',rv001:[1,-1]});
-assert.equal(engine.getCellEvaluation(founder).contactMessageDeclarations.find(item=>item.kind==='avoid').value,0);
+assert.equal(engine.getCellEvaluation(founder).outputs.find(item=>item.name==='engage_when.Needle').value,null);
 engine.tick(1);
 assert.equal(memory().rf001,undefined);
 assert.equal(engine.getCellEvaluation(founder).contactMessageDeclarations.find(item=>item.kind==='publish').value,null);

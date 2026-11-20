@@ -26,11 +26,16 @@ let equipped = powered && enough(built.LeftMotor, 0.025) && enough(built.RightMo
 let surplus = equipped && energy > 550000 && (gut.energy > 20000 || carbon.organic > 6500 * body.area) && carbon.organic > 3000 * body.area;
 # Advertise a contact marker from birth. Spare matching targets of either weapon.
 publish rf001 = 17;
-avoid_message rf001;
+let may_strike = !populated(rf001) || !peer.message_valid || peer.message != rf001;
 let peer = sensed.Touch.message_valid && sensed.Touch.message == rf001;
+# After a kin encounter, feed when stored fuel is low and leave room for neighbours before dividing.
+rf004 = age when peer;
+let recent_peer = populated(rf004) && age - rf004 < 240;
+let crowded = peer || recent_peer;
 let leave_peer = if angle(sensed.Touch.offset) >= 0 then -0.8 else 0.8;
 let firm_contact = sensed.Touch.valid && sensed.Touch.resistance > 0.1;
 let meal = gut.tissue.energy + gut.exudate.energy;
+let hunting_budget = !recent_peer || energy + carbon.organic * 20 + meal < energy.capacity * 1.05;
 let prey_cue = !peer && (firm_contact || sensed.Vision.valid && sensed.Vision.area >= 0.35);
 rf003 = age when prey_cue;
 let hunting = prey_cue || populated(rf003) && age - rf003 < 18;
@@ -72,7 +77,7 @@ let need_Piercer = funded && (powered) && missing(built.Piercer, (if expanding t
 let need_Engulfment = funded && (surplus && body.area > 1.2) && missing(built.Engulfment, 0.025, 0.025);
 let need_Repair = funded && (integrity < 0.995) && missing(built.Repair, (if expanding then 0.05 else 0.025), 0.025);
 let need_Support = funded && (equipped && energy > 650000 && (gut.energy > 20000 || carbon.organic > 6500 * body.area) && carbon.organic > 3000 * body.area) && missing(built.Support, max(0.12, body.birth_area * 0.12), 0.06);
-let need_Envelope = funded && (enough(built.Support, 0.12)) && missing(built.Envelope, 0.02, 0.02);
+let need_Envelope = funded && (enough(built.Support, 0.06)) && missing(built.Envelope, (if expanding then 0.04 else 0.02), 0.02);
 let need_Replication = funded && (enough(built.Support, 0.12)) && missing(built.Replication, 0.02, 0.02);
 let need_Division = funded && (expanding) && missing(built.Division, 0.02, 0.02);
 let need_LeftHeat = funded && (powered) && missing(built.LeftHeat, (if expanding then 0.02 else 0.01), 0.01);
@@ -211,7 +216,8 @@ assembly Piercer: pierce() {
   Tail: 300;
   Catalyst: 100;
   start_when: need_Piercer;
-  activity: if !heat_escape && firm_contact && meal < 300000 * body.area then 0.8 else 0;
+  activity: if !heat_escape && hunting_budget && firm_contact && meal < 300000 * body.area && (energy.fraction < 0.85 || carbon.organic * 20 < energy.capacity * 0.65 || meal < 20000) then 0.8 else 0;
+  engage_when: may_strike;
 }
 
 assembly Engulfment: engulf() {
@@ -219,7 +225,8 @@ assembly Engulfment: engulf() {
   Rotor: 100;
   Wall: 100;
   start_when: need_Engulfment;
-  activity: if gut.fraction < 0.5 then 1 else 0;
+  activity: if hunting_budget && gut.fraction < 0.5 then 1 else 0;
+  engage_when: may_strike;
 }
 
 assembly Repair: repair() {
@@ -238,7 +245,7 @@ assembly Envelope: grow() {
   Wall: 150;
   Catalyst: 50;
   start_when: need_Envelope;
-  activity: if energy > 600000 && body.area < body.birth_area * 2 then 0.8 else 0;
+  activity: if energy > 600000 && body.area < body.birth_area * 2 then (if crowded then 0.04 else 0.2 + 0.6 * clamp((gut.tissue.energy - 300000 * body.area) / 200000, 0, 1)) else 0;
 }
 
 assembly Replication: replicate() {
@@ -253,7 +260,7 @@ assembly Division: constrict() {
   Rotor: 80;
   Ring: 80;
   start_when: need_Division;
-  activity: if body.area + 0.000001 >= body.birth_area * 2 && enough(built.Translation,0.08) && enough(built.EnergyStore,0.08) && enough(built.MineralStore,0.04) && enough(built.Respiration,0.08) && energy > 580000 then 1 else 0;
+  activity: if body.area + 0.000001 >= body.birth_area * 2 && enough(built.Envelope,0.04) && enough(built.Translation,0.08) && enough(built.EnergyStore,0.08) && enough(built.MineralStore,0.04) && enough(built.Respiration,0.08) && !crowded && energy > 580000 then 1 else 0;
 }
 
 assembly LeftHeat: sense(heat) {

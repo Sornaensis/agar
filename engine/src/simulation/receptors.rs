@@ -75,15 +75,14 @@ impl World {
                     if !(reads(ReceptorField::Valid) || reads(ReceptorField::Value) || reads(ReceptorField::Count)) {
                         continue;
                     }
-                    let Some(&local) = signals.get(index) else { continue; };
-                    if local.adhesion.is_none() || local.published.is_none() { continue; }
+                    if signals.is_empty() { continue; }
                     let mut contributors = Vec::new();
                     for peer in cell_grid.nearby_radius(cell.x, cell.y, cell.radius() + max_radius + adhesion::RELEASE_GAP) {
                         if peer == index || capacities[peer].signal_junction <= 0.0 { continue; }
-                        let remote = signals[peer];
+                        let remote = &signals[peer];
                         if let Some(value) = remote.signal {
                             let other = &self.cells[peer];
-                            if self.has_bond(cell.id, other.id) && local.accepts(remote)
+                            if self.has_bond(cell.id, other.id)
                                 && adhesion::working_contact(&self.environment, cell, other, adhesion::RELEASE_GAP) {
                                 contributors.push((other.id, value));
                             }

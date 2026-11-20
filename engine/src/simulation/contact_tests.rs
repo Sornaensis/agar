@@ -98,7 +98,7 @@ fn contact_reads_last_committed_values_across_cell_evaluation_order() {
 #[test]
 fn payload_reads_frozen_selected_peer_while_identity_stays_constant() {
     let (mut world, mut genomes) = equipped(&format!("{TOUCH}
-publish rf001=17; signal rf009=0; avoid_message rf001;
+publish rf001=17; signal rf009=0;
 rf009=rf009+2; rf004=if sensed.Touch.signal_valid then sensed.Touch.signal else -99;"));
     genomes[0].program.initialize_message(&mut world.cells[0].memory);
     let mut second = world.cells[0].clone();
@@ -198,9 +198,9 @@ fn founders_and_new_daughters_initialize_only_the_authored_public_slot() {
 fn primitive_and_legacy_piercers_exclude_only_matching_reachable_victims() {
     let weapons = r#"
 product Barb = filament();
-assembly Sting: pierce() { Mount:0.01; Barb:0.04; Catalyst:0.01; at:0; direction:0; }
-assembly Old: piercer { Mount:0.01; Barb:0.04; Catalyst:0.01; }
-publish rf001 = 17; avoid_message rf001;
+assembly Sting: pierce() { engage_when: !(populated(rf001) && peer.message_valid && peer.message == rf001); Mount:0.01; Barb:0.04; Catalyst:0.01; at:0; direction:0; }
+assembly Old: piercer { engage_when: !(populated(rf001) && peer.message_valid && peer.message == rf001); Mount:0.01; Barb:0.04; Catalyst:0.01; }
+publish rf001 = 17;
 "#;
     for marked in [true, false] {
         let (mut world, mut genomes) = equipped(weapons);
@@ -216,7 +216,7 @@ publish rf001 = 17; avoid_message rf001;
         workspace.geometry.rebuild(&world.cells, false, true);
         let mut outputs = vec![Outputs::default(); 3];
         outputs[0].bite = 1.0;
-        world.resolve_predation_in(&outputs, &caps, &mut workspace);
+        world.resolve_predation_in(&outputs,&caps,&genomes,&mut workspace);
         let victim = if marked { prey } else { closer };
         let untouched = if marked { closer } else { prey };
         assert_eq!(workspace.targets[0], Some(victim), "whole-cell weapon");
@@ -231,8 +231,8 @@ publish rf001 = 17; avoid_message rf001;
 fn engulf_uses_actual_victim_prior_message_even_after_an_authorized_change() {
     let (mut world, mut genomes) = equipped(r#"
 assembly Gut: store(food) { Wall:0.2; }
-assembly Mouth: engulf() { Mount:0.03; Rotor:0.03; Wall:0.04; }
-publish rf001 = 0; avoid_message rf001;
+assembly Mouth: engulf() { engage_when: !(populated(rf001) && peer.message_valid && peer.message == rf001); Mount:0.03; Rotor:0.03; Wall:0.04; }
+publish rf001 = 0; rf001=3;
 "#);
     genomes[0].program.initialize_message(&mut world.cells[0].memory);
     genomes.push(genome("cellular; publish rf001 = 0; rf001 = 3;"));
@@ -252,19 +252,25 @@ publish rf001 = 0; avoid_message rf001;
     let caps: Vec<_> = world.cells.iter().map(|cell| cell.body.capacities()).collect();
     let mut workspace = PhaseWorkspace::default();
     world.freeze_contact_signals(&genomes, &mut workspace.signals);
+    genomes[0].program.evaluate_cell(&Inputs::default(), &mut world.cells[0].memory, &mut EvalScratch::default());
+    assert_eq!(genomes[0].program.published_message(&world.cells[0].memory), Some(3.0));
     genomes[1].program.evaluate_cell(&Inputs::default(), &mut world.cells[marked].memory, &mut EvalScratch::default());
     assert_eq!(genomes[1].program.published_message(&world.cells[marked].memory), Some(3.0));
     workspace.geometry.rebuild(&world.cells, false, true);
     let mut outputs = vec![Outputs::default(); 3];
     outputs[0].engulf = true;
-    world.resolve_predation_in(&outputs, &caps, &mut workspace);
+    world.resolve_predation_in(&outputs,&caps,&genomes,&mut workspace);
     assert_eq!(world.predations, 1);
     assert!(world.cells[marked].alive());
     assert!(workspace.consumed[prey]);
 }
 
-#[test]
-fn shipped_predator_spares_a_newborn_peer_and_can_strike_adjacent_unmarked_prey() {
+fn predator_contact_position(degrees: f64) -> (f64, f64) {
+    let angle = degrees.to_radians();
+    (600.0 + 14.05 * angle.cos(), 380.0 + 14.05 * angle.sin())
+}
+
+fn equipped_predator_beside_newborn_peer() -> (World, Vec<Genome>, usize) {
     // Install only the two paid surface devices needed for this encounter.
     // Geometry, activity expressions, publication and matching use the shipped
     // programs. Three unit-radius bodies start clear of all overlaps.
@@ -273,18 +279,23 @@ product Tail = filament();
 assembly Touch: sense(contact) { Mount:0.002; Detector:0.006; Tail:0.002; }
 assembly Piercer: pierce() { Mount:0.01; Tail:0.03; Catalyst:0.01; }
 "#);
-    let mut genomes = vec![genome(include_str!("../../../examples/predator.cell")),
+    let genomes = vec![genome(include_str!("../../../examples/predator.cell")),
         genome(include_str!("../../../examples/forager.cell"))];
     let predator = &genomes[0].program;
     predator.initialize_message(&mut world.cells[0].memory);
     let marker = predator.published_message(&world.cells[0].memory);
     assert!(marker.is_some());
-    assert_eq!(marker, predator.avoid_message(&world.cells[0].memory));
+    assert!(predator.has_contact_guards());
     place(&mut world.cells[0], 600.0, 380.0, 0.0);
-    let position = |angle: f64| (600.0 + 14.05 * angle.to_radians().cos(), 380.0 + 14.05 * angle.to_radians().sin());
-    let (x, y) = position(20.0);
+    let (x, y) = predator_contact_position(20.0);
     let peer = seed(&mut world, &genomes, 1, x, y);
-    let (x, y) = position(-40.0);
+    (world, genomes, peer)
+}
+
+#[test]
+fn shipped_predator_spares_a_newborn_peer_and_can_strike_adjacent_unmarked_prey() {
+    let (mut world, mut genomes, peer) = equipped_predator_beside_newborn_peer();
+    let (x, y) = predator_contact_position(-40.0);
     let prey = seed(&mut world, &genomes, 2, x, y);
     world.step(&mut genomes);
     assert_eq!(world.cells[peer].integrity, 1.0, "the marker protects a first-contact peer");
@@ -292,10 +303,32 @@ assembly Piercer: pierce() { Mount:0.01; Tail:0.03; Catalyst:0.01; }
     assert_eq!(world.attacks, 1);
 }
 
+#[test]
+fn shipped_predator_rations_prey_after_recognizing_kin_until_fuel_is_needed() {
+    for hungry in [false, true] {
+        let (mut world, mut genomes, peer) = equipped_predator_beside_newborn_peer();
+        world.step(&mut genomes);
+        assert!(world.cells[0].memory.value("rf004").is_some(), "the previous kin contact was registered");
+        if hungry {
+            world.cells[0].energy = 5.0;
+            world.cells[0].organic_carbon = 0.1;
+        }
+        place(&mut world.cells[0], 600.0, 380.0, 0.0);
+        let (x, y) = predator_contact_position(20.0);
+        place(&mut world.cells[peer], x, y, 0.0);
+        let (x, y) = predator_contact_position(-40.0);
+        let prey = seed(&mut world, &genomes, 2, x, y);
+        world.step(&mut genomes);
+        assert_eq!(world.cells[peer].integrity, 1.0);
+        assert_eq!(world.cells[prey].integrity < 1.0, hungry);
+        assert_eq!(world.attacks, u64::from(hungry));
+    }
+}
+
 const PORT: &str = r#"
-product GlueMaterial = adhesin(Frame); assembly Glue: adhere() { GlueMaterial:0.006; Mount:0.01; Wall:0.01; }
+product GlueMaterial = adhesin(Frame); assembly Glue: adhere() { engage_when: peer.message_valid && populated(rf001) && peer.message == rf001; GlueMaterial:0.006; Mount:0.01; Wall:0.01; }
 assembly Bus: junction(signal) { Detector:0.01; Wall:0.01; }
-publish rf001=83; adhere_message rf001 recruit;
+publish rf001=83;
 signal rf003=0;
 rf006=sensed.Bus.count; rb005=sensed.Bus.valid; rf004=sensed.Bus.value;
 "#;
@@ -309,7 +342,10 @@ fn read_bus(world: &World, genomes: &[Genome], id: u32) -> ReceptorInput {
 
 #[test]
 fn signal_junction_averages_only_attached_paid_publishers_and_accepts_zero() {
-    let (mut world, mut genomes) = equipped(PORT);
+    let unmarked = PORT.replace("publish rf001=83;", "")
+        .replace("peer.message_valid && populated(rf001) && peer.message == rf001", "true");
+    let (mut world, mut genomes) = equipped(&unmarked);
+    assert!(genomes[0].program.published_message(&world.cells[0].memory).is_none());
     let original = genomes[0].source.clone();
     place(&mut world.cells[0], 200.0, 200.0, 0.0);
     genomes[0].program.initialize_message(&mut world.cells[0].memory);
@@ -373,8 +409,8 @@ fn signal_junction_relays_one_frozen_hop_per_tick() {
 #[test]
 fn touch_reports_only_the_confirmed_bond_to_the_selected_surface() {
     let (mut world, genomes) = equipped(&format!("{TOUCH}
-        product GlueMaterial = adhesin(Frame); assembly Glue: adhere() {{ GlueMaterial:0.006; Mount:0.01; Wall:0.01; }}
-        publish rf020=41; adhere_message rf020 recruit; rb101=sensed.Touch.bonded;"));
+        product GlueMaterial = adhesin(Frame); assembly Glue: adhere() {{ engage_when: peer.message_valid && populated(rf020) && peer.message == rf020; GlueMaterial:0.006; Mount:0.01; Wall:0.01; }}
+        publish rf020=41; rb101=sensed.Touch.bonded;"));
     place(&mut world.cells[0],100.0,100.0,0.0);
     genomes[0].program.initialize_message(&mut world.cells[0].memory);
     let mut partner=world.cells[0].clone();
@@ -392,3 +428,70 @@ fn touch_reports_only_the_confirmed_bond_to_the_selected_surface() {
     assert!(read.valid && read.message_valid && !read.bonded);
     assert_eq!(read.message,41.0);
 }
+
+#[test]
+fn installed_piercers_apply_separate_predicates_to_each_reachable_surface() {
+    let (mut world, mut genomes) = equipped(
+        r#"
+        product Barb = filament();
+        assembly Low: pierce() { Mount:0.01; Barb:0.04; Catalyst:0.01;
+            engage_when: !peer.division_interface && peer.signal_valid && peer.signal < 2; }
+        assembly High: pierce() { Mount:0.01; Barb:0.04; Catalyst:0.01;
+            engage_when: peer.signal_valid && peer.signal >= 2; }
+    "#,
+    );
+    genomes.push(genome("cellular; signal rf010=0;"));
+    genomes.push(genome("cellular; signal rf010=3;"));
+    place(&mut world.cells[0], 200.0, 200.0, 0.0);
+    let low = seed(&mut world, &genomes, 2, 214.0, 200.0);
+    let high = seed(&mut world, &genomes, 3, 214.0, 203.0);
+    let caps: Vec<_> = world.cells.iter().map(|cell| cell.body.capacities()).collect();
+    let mut ws = PhaseWorkspace::default();
+    world.freeze_contact_signals(&genomes, &mut ws.signals);
+    ws.geometry.rebuild(&world.cells, false, true);
+    let mut outputs = vec![Outputs::default(); 3];
+    outputs[0].bite = 1.0;
+    world.resolve_predation_in(&outputs, &caps, &genomes, &mut ws);
+    assert_eq!(ws.primitive_hits.iter().map(|hit| hit.1).collect::<Vec<_>>(), [low, high]);
+    assert_eq!(world.attacks, 2);
+    let a = world.cells[0].id;
+    let b = world.cells[low].id;
+    world.contacts.insert((a.min(b), a.max(b)), adhesion::CLONAL);
+    world.resolve_predation_in(&outputs, &caps, &genomes, &mut ws);
+    assert_eq!(ws.primitive_hits.iter().map(|hit| hit.1).collect::<Vec<_>>(), [high],
+        "a retained division interface is visible only on that physical pair");
+
+}
+
+#[test]
+fn independently_gated_engulfers_contribute_only_their_accepted_capacity() {
+    let (mut world, mut genomes) = equipped(
+        r#"
+        assembly Gut: store(food) { Wall:0.20; }
+        assembly Small: engulf() { Mount:0.008; Rotor:0.008; Wall:0.009; engage_when: peer.signal_valid; }
+        assembly Large: engulf() { Mount:0.03; Rotor:0.03; Wall:0.04; engage_when: peer.signal > 2; }
+    "#,
+    );
+    genomes.push(genome("cellular; signal rf003=1;"));
+    world.cells[0].body.area = 2.0;
+    let x = world.cells[0].x + world.cells[0].radius() + CELL_RADIUS;
+    let y = world.cells[0].y;
+    let target = seed(&mut world, &genomes, 2, x, y);
+    world.cells[target].body.area = 1.1;
+    world.cells[target].integrity = 0.2;
+    world.cells[target].organic_carbon = 0.25;
+    world.cells[target].energy = 5.0;
+    let caps: Vec<_> = world.cells.iter().map(|c| c.body.capacities()).collect();
+    let mut outputs = vec![Outputs::default(); 2];
+    outputs[0].engulf = true;
+    let mut ws = PhaseWorkspace::default();
+    world.freeze_contact_signals(&genomes, &mut ws.signals);
+    ws.geometry.rebuild(&world.cells, false, true);
+    world.resolve_predation_in(&outputs, &caps, &genomes, &mut ws);
+    assert_eq!(ws.engulf_targets[0].map(|v| v.0), Some(target));
+    assert_eq!(world.predations, 0, "only the 0.025-mass surface accepts this partner");
+    ws.signals[target].signal = Some(3.0);
+    world.resolve_predation_in(&outputs, &caps, &genomes, &mut ws);
+    assert_eq!(world.predations, 1, "both surfaces now supply sufficient engulfing material");
+}
+

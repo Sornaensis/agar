@@ -46,7 +46,7 @@ impl World {
                 Self::collect_store_overflow(&mut self.cells[row], &caps, &mut self.environment, &mut phases.emissions);
             }
             self.emit_organic_pending(&mut phases);
-            self.remove_dead_in(&mut phases);
+            self.remove_dead_in(&mut phases, None);
         }
         Ok(())
     }
@@ -173,6 +173,8 @@ impl World {
             w.count(self.deposits.len());
             for d in &self.deposits {w.f64(d.x);w.f64(d.y);for n in d.quantities {w.u32(n);}}
         }
+        self.census.write(w);
+        if self.uses_count_chemistry() { self.energy_loss.write(w); }
     }
     pub(crate) fn read_checkpoint(
         r: &mut Reader<'_>,
@@ -514,8 +516,12 @@ impl World {
                 deposits.push(counted::LocalDeposit{x,y,quantities});
             }
         }
+        let census = if version >= 18 { ecology::Census::read(r, genome_count, counts[0], &cells)? }
+            else { ecology::Census::from_opening(counts[0], &cells) };
+        let energy_loss = if version >= 18 && environment.uses_count_chemistry() { ecology::EnergyLoss::read(r)? }
+            else { ecology::EnergyLoss::default() };
         let mut world = Self {
-            count_flux, deposits, photon_credit,
+            count_flux, deposits, photon_credit, census, energy_loss,
             contacts,
             had_adhesive_contacts: cells.iter().any(|c| c.adhered_neighbors != 0),
             cells,
@@ -555,7 +561,7 @@ impl World {
             "carbon ledger does not match recorded inventories and exchange")?;
         let oxygen_expected = world.environment.oxygen_input_total() + world.carbon_fixed_total
             - world.carbon_respired_total - world.decay_carbon_respired_total - world.environment.oxygen_output_total();
-        let oxygen_error = world.environment.oxygen_total() + world.oxygen_cell_total() - oxygen_expected;
+        let oxygen_error = world.dissolved_oxygen() + world.oxygen_cell_total() - oxygen_expected;
         ensure(oxygen_error.abs() <= 1e-6 + (world.environment.oxygen_input_total() + world.carbon_fixed_total) * 1e-9,
             "oxygen ledger does not match recorded reactions and exchange")?;
         // Individual compartment bounds cannot detect a forged but locally
@@ -583,6 +589,10 @@ impl World {
         if let Some(a)=world.count_audit(){
             for axis in [0,3,6] {ensure(a[axis].checked_add(a[axis+2])==Some(a[axis+1]),"integer chemical inventory does not balance")?;}
             ensure(a[9].checked_add(a[11]).is_some_and(|held|held<=a[10]),"integer energy exceeds its inputs")?;
+            if version < 18 { world.energy_loss.opening = a[10] - a[11] - a[9]; }
+            let losses: i128 = world.energy_loss.counts().iter().copied().map(i128::from).sum();
+            ensure(i128::from(a[9])+i128::from(a[11])+losses==i128::from(a[10]),
+                "integer energy inventory and measured losses do not balance")?;
             let f=world.count_flux;
             for (n,v) in [(f.mineral_in,world.nutrient_imports),(f.carbon_in,world.carbon_imports),(f.energy_in,world.energy_imports),
                 (f.energy_out,world.energy_withdrawn),(f.mineral_out,world.mineral_withdrawn),(f.fixed,world.carbon_fixed_total),
@@ -658,6 +668,9 @@ mod tests {
             let offset = world.0.windows(env.0.len()).position(|w| w == env.0).unwrap();
             let position = bytes.len() - world.0.len() + offset;
             assert_eq!(bytes.remove(position), 0);
+            let mut census = Writer::new();
+            engine.world.census.write(&mut census);
+            bytes.truncate(bytes.len() - census.0.len());
             bytes[8..12].copy_from_slice(&15_u32.to_le_bytes());
             let length = bytes.len() as u32;
             bytes[12..16].copy_from_slice(&length.to_le_bytes());

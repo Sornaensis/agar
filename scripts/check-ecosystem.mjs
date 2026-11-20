@@ -8,14 +8,15 @@ import { bytes, fresh, compile, seed, snapshot, advance, body, save, catalog } f
 
 // Measure the actual shipped mixed scenario, without the supplied-food or
 // stationary-organism shortcuts used by isolated pathway tests.
-const options = { seeds: [42], duration: 600, mutation: undefined, output: null, wasm: null, assert: false };
+const options = { seeds: [42], duration: 600, birthsAfter: null, mutation: undefined, output: null, wasm: null, assert: false };
 for (let i = 2; i < process.argv.length; i++) {
   const key = process.argv[i];
   if (key === '--assert') { options.assert = true; continue; }
   const value = process.argv[++i];
-  assert.ok(value && ['--seed', '--duration', '--mutation', '--output', '--wasm'].includes(key), `Unknown or missing argument: ${key}`);
+  assert.ok(value && ['--seed', '--duration', '--births-after', '--mutation', '--output', '--wasm'].includes(key), `Unknown or missing argument: ${key}`);
   if (key === '--seed') options.seeds = value.split(',').map(Number);
   if (key === '--duration') options.duration = Number(value);
+  if (key === '--births-after') options.birthsAfter = Number(value);
   if (key === '--mutation') options.mutation = Number(value);
   if (key === '--output') options.output = value;
   if (key === '--wasm') options.wasm = value;
@@ -23,6 +24,8 @@ for (let i = 2; i < process.argv.length; i++) {
 assert.ok(options.seeds.every(n => Number.isInteger(n) && n >= 0 && n <= 0xffffffff));
 assert.ok(Number.isSafeInteger(options.duration) && options.duration > 0);
 assert.ok(!options.assert || options.duration >= 300, 'Ecological regression checks require at least 300 simulated seconds');
+assert.ok(options.birthsAfter === null || options.assert && Number.isFinite(options.birthsAfter) && options.birthsAfter >= 0 && options.birthsAfter < options.duration,
+  '--births-after needs --assert and a time before the end of the run');
 const binary = options.wasm ? await readFile(options.wasm) : bytes;
 const customModule = options.wasm ? await WebAssembly.compile(binary) : undefined;
 const { BUILTIN_ENVIRONMENTS, BUILTIN_GENOMES, BUILTIN_SIMULATIONS, simulationStartSettings } = await catalog();
@@ -80,7 +83,7 @@ for (const randomSeed of options.seeds) {
   let ticks = 0;
   for (const seconds of samplesAt) {
     let state;
-    if (options.assert) {
+    if (options.assert && !api.ecology_snapshot_ptr) {
       // Observe descendants every second so a birth need not coincide with the
       // sparse diagnostic samples. These remain observed IDs, not an exact
       // lifetime birth counter: an organism could be born and die between reads.
@@ -95,6 +98,19 @@ for (const randomSeed of options.seeds) {
     }
     const metricsPointer = api.metrics_snapshot_ptr();
     const metrics = new Float64Array(api.memory.buffer, metricsPointer, 51).slice();
+    const census = new Map();
+    if (api.ecology_snapshot_ptr) {
+      const pointer = api.ecology_snapshot_ptr();
+      const data = new Float64Array(api.memory.buffer, pointer, api.presentation_len());
+      const stride = data[1] ? (data.length - 2) / data[1] : 19;
+      for (let offset = 2; offset < data.length; offset += stride) {
+        const [, alive, introduced, births, deaths, killed, depleted, other, kills, lastBirth] = data.subarray(offset, offset + 10);
+        const name = lineage(data[offset]);
+        assert.equal(alive, introduced + births - deaths, `Unbalanced census for ${name}`);
+        assert.equal(deaths, killed + depleted + other, `Unclassified deaths for ${name}`);
+        census.set(name, { alive, introduced, births, deaths, kills, killed, depleted, other, lastBirth: lastBirth < 0 ? null : lastBirth });
+      }
+    }
     const carbonDelta = metrics[36] + metrics[49] - metrics[37];
     const oxygenDelta = metrics[44] + metrics[45] + metrics[48] + metrics[41] + metrics[42] - metrics[40] - metrics[47];
     // Historical comparison engines predate player withdrawals.
@@ -114,8 +130,17 @@ for (const randomSeed of options.seeds) {
       oxygenTolerance: Math.max(1e-7, (metrics[47] + metrics[40]) * 1e-10),
       carbonFixed: metrics[40], carbonRespired: metrics[41], carbonDecayed: metrics[42],
     };
+    if (api.energy_loss_ptr && api.uses_count_chemistry()) {
+      const losses = new BigInt64Array(api.memory.buffer, api.energy_loss_ptr(), 7).slice();
+      const audit = new BigUint64Array(api.memory.buffer, api.count_audit_ptr(), 12);
+      const dissipation = losses.reduce((total, loss) => total + loss, 0n);
+      accounting.energyClosureCounts = (audit[10] - audit[11] - audit[9] - dissipation).toString();
+      accounting.energyLossCounts = Object.fromEntries(['opening', 'maintenance', 'respiration', 'decomposition',
+        'fabrication', 'feedingAndDivision', 'overflow'].map((key, index) => [key, losses[index].toString()]));
+    }
     const materialAccounted = Math.abs(accounting.materialDelta) < accounting.materialTolerance;
-    const energyAccounted = accounting.energy + accounting.energyWithdrawn <= accounting.energyIntroduced + accounting.photosynthesis + accounting.energyTolerance;
+    const energyAccounted = (accounting.energyClosureCounts === undefined || accounting.energyClosureCounts === '0')
+      && accounting.energy + accounting.energyWithdrawn <= accounting.energyIntroduced + accounting.photosynthesis + accounting.energyTolerance;
     const carbonAccounted = Math.abs(accounting.carbonDelta) < accounting.carbonTolerance;
     const oxygenAccounted = Math.abs(accounting.oxygenDelta) < accounting.oxygenTolerance;
     const producers = state.cells.filter(cell => lineage(cell.genome) === 'Phototroph');
@@ -131,7 +156,7 @@ for (const randomSeed of options.seeds) {
       }
       const totalKeys = ['area', 'mass', 'energy', 'nutrients', 'gutEnergy', 'photosynthesisRate', 'digestionRate', 'growthRate', 'exudationRate', 'upkeep', 'metabolism', 'expressionRate', 'organicCarbon', 'internalOxygen', 'internalInorganicCarbon', 'respirationRate', 'carbonFixationRate'];
       return {
-        name, count: cells.length, ...Object.fromEntries(totalKeys.map(key => [key, round(sum(cells, key))])),
+        name, count: cells.length, census: census.get(name), ...Object.fromEntries(totalKeys.map(key => [key, round(sum(cells, key))])),
         meanEnergyFraction: cells.length ? round(cells.reduce((total, cell) => total + cell.energy / cell.capacity, 0) / cells.length) : null,
         maxGeneration: cells.length ? Math.max(...cells.map(cell => cell.generation)) : null,
         gutByKind: Object.fromEntries(kindNames.map((kind, i) => [kind, round(cells.reduce((total, cell) => total + cell.gutEnergyByKind[i], 0))])),
@@ -174,7 +199,7 @@ for (const randomSeed of options.seeds) {
       lineages: lineages.map(({ name, count, meanEnergyFraction, gutEnergy, digestionRate, maxGeneration }) => ({ name, count, meanEnergyFraction, gutEnergy, digestionRate, maxGeneration })), wallSeconds: result.wallSeconds }));
     if (options.output) await writeFile(options.output, JSON.stringify(study, null, 2) + '\n');
     assert.ok(materialAccounted, `Material accounting at ${state.seconds}s: delta ${accounting.materialDelta}, introduced ${accounting.materialIntroduced}, tolerance ${accounting.materialTolerance}`);
-    assert.ok(energyAccounted, `Energy accounting at ${state.seconds}s: excess ${accounting.energyExcess}, tolerance ${accounting.energyTolerance}`);
+    assert.ok(energyAccounted, `Energy accounting at ${state.seconds}s: excess ${accounting.energyExcess}, unaccounted counts ${accounting.energyClosureCounts}`);
     assert.ok(carbonAccounted, `Carbon accounting at ${state.seconds}s: delta ${accounting.carbonDelta}, tolerance ${accounting.carbonTolerance}`);
     assert.ok(oxygenAccounted, `Oxygen accounting at ${state.seconds}s: delta ${accounting.oxygenDelta}, tolerance ${accounting.oxygenTolerance}`);
   }
@@ -190,6 +215,9 @@ for (const randomSeed of options.seeds) {
       attacksOccur: last.attacks > 0,
       predationOccurs: last.predations > 0,
     };
+    if (options.birthsAfter !== null) for (const item of last.lineages) {
+      result.assertions[`${item.name} birth after ${options.birthsAfter}s`] = item.census?.lastBirth > options.birthsAfter;
+    }
     if (options.output) await writeFile(options.output, JSON.stringify(study, null, 2) + '\n');
   }
 }

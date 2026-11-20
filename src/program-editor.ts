@@ -18,7 +18,7 @@ import { tags } from '@lezer/highlight';
 import type { Engine, GenomeAnalysis, GenomeBinding, GenomeDiagnostic, GenomeEvaluation } from './engine';
 import {
   cellularDeclarations, genomeCompletions, genomeSignalCatalog, genomeSymbolDocumentation, isCellularSource, usesCountUnits,
-  lookupCellularSymbol, lookupGenomeSymbol, tokenizeGenome, unwrapGenomeSelection,
+  lookupProgramSymbol, lookupGenomeSymbol, tokenizeGenome, unwrapGenomeSelection,
   type GenomeSymbol, type GenomeToken, type GenomeTokenKind,
 } from './genome-language';
 import './program-editor.css';
@@ -44,8 +44,8 @@ export interface ProgramEditorState {
 
 interface LocalDeclaration { name: string; from: number; to: number; scopeFrom: number }
 interface SymbolRange { from: number; to: number; symbol: GenomeSymbol }
-interface StreamState { line: string; tokens: readonly GenomeToken[]; index: number }
-interface EvaluatedPart { from: number; to: number; type: string; value: unknown; label?: string; note?: string }
+interface StreamState { cellular?: boolean; line: string; tokens: readonly GenomeToken[]; index: number }
+interface EvaluatedPart { from: number; to: number; type: string; value: unknown; label?: string; note?: string; perContact?: boolean }
 
 const tokenStyles: Record<GenomeTokenKind, string> = {
   keyword: 'keyword', boolean: 'bool', number: 'number', string: 'string', comment: 'comment',
@@ -53,14 +53,17 @@ const tokenStyles: Record<GenomeTokenKind, string> = {
   function: 'genomeFunction', output: 'genomeOutput', register: 'genomeRegister', invalid: 'invalid',
 };
 
-// Genome strings and comments end at a physical line, so no cross-line lexer state is needed.
+// The header chooses the symbol vocabulary used on subsequent lines.
 const genomeLanguage = StreamLanguage.define<StreamState>({
   name: 'agar-genome',
   startState: () => ({ line: '', tokens: [], index: 0 }),
   copyState: state => ({ ...state }),
   token(stream, state) {
     if (stream.sol() || state.line !== stream.string) {
-      state.line = stream.string; state.tokens = tokenizeGenome(stream.string); state.index = 0;
+      state.line = stream.string;
+      const first = stream.string.trimStart();
+      if (state.cellular === undefined && first && !first.startsWith('#')) state.cellular = /^cellular\b/.test(first);
+      state.tokens = tokenizeGenome(stream.string, state.cellular ?? false); state.index = 0;
     }
     while (state.index < state.tokens.length && state.tokens[state.index].to <= stream.pos) state.index++;
     const token = state.tokens[state.index];
@@ -139,7 +142,7 @@ function evaluationHelp(part: EvaluatedPart, source: string, compact = false): H
   expression.textContent = part.label ?? source.slice(part.from, part.to).trim();
   expression.title = expression.textContent;
   const result = document.createElement('div'); result.className = 'program-evaluation-result';
-  const value = document.createElement('code'); value.textContent = evaluationValue(part.value, part.type);
+  const value = document.createElement('code'); value.textContent = part.perContact ? 'Per contact' : evaluationValue(part.value, part.type);
   const type = document.createElement('span'); type.textContent = part.type;
   result.append(value, type); element.append(expression, result);
   if (part.note) { const note = document.createElement('p'); note.textContent = part.note; element.append(note); }
@@ -423,7 +426,7 @@ export class ProgramEditor {
     const select = document.createElement('select'); select.className = `program-signal-select ${direction}`;
     this.populateSignalSelect(select, direction);
     select.addEventListener('change', () => {
-      const selected = (isCellularSource(this.source) ? lookupCellularSymbol(select.value, this.source) : undefined) ?? lookupGenomeSymbol(select.value);
+      const selected = lookupProgramSymbol(select.value, this.source);
       if (!selected) { this.referenceElement.hidden = true; this.referenceSymbol = null; return; }
       (direction === 'read' ? this.writeSignalSelect : this.readSignalSelect).value = '';
       this.showReference(selected);
@@ -440,7 +443,8 @@ export class ProgramEditor {
     const groups = new Map<string, HTMLOptGroupElement>();
     for (const item of genomeSignalCatalog(direction, this.source)) {
       const groupName = item.category === 'register' || item.name === 'clear' ? 'Memory registers'
-        : item.type === 'contact message' ? 'Contact messages'
+        : item.type === 'contact message' || item.type === 'contact signal' ? 'Public registers'
+        : item.name.startsWith('peer.') || item.name === 'engage_when' ? 'Physical contact'
         : cellular && direction === 'write' ? item.type === 'mechanism' ? 'Mechanisms' : item.category === 'function' ? 'Product roles' : 'Declarations & placement'
         : /^(pool|concentration|built)\./.test(item.name) ? 'This cell’s products & assemblies'
         : item.name.startsWith('sensed.') ? 'Named receptor readings'
@@ -539,7 +543,7 @@ export class ProgramEditor {
         // An operator belongs to its enclosing expression, never to the leaf ending at its left edge.
         start = token.from; end = token.to;
         const declaration = evaluation.bindings.find(binding => binding.from === token.from && binding.to === token.to);
-        if (declaration) return { ...declaration, label: declaration.name, note: 'Local binding value.' };
+        if (declaration) return { ...declaration, label: declaration.name, note: declaration.perContact ? 'The value depends on the physical contact partner.' : 'Local binding value.' };
         if (evaluation.mode==='cellular') {
           const declarations=cellularDeclarations(this.source);
           const gene=declarations.genes.find(item=>item.from===token.from && item.to===token.to);
@@ -563,8 +567,7 @@ export class ProgramEditor {
     }
     const message = evaluation.contactMessageDeclarations?.find(item => item.from <= start && end <= item.to);
     if (message) {
-      const keyword = message.kind === 'publish' || message.kind === 'signal' ? message.kind : message.kind + '_message';
-      return { from: message.from, to: message.to, type: 'scalar', value: message.value, label: `${keyword} ${message.register}`,
+      return { from: message.from, to: message.to, type: 'scalar', value: message.value, label: `${message.kind} ${message.register}`,
         note: message.value === null ? 'This register is empty, so the declaration is inactive.' : 'Current occupied register value at this snapshot.' };
     }
     let found: (typeof evaluation.expressions)[number] | undefined;
@@ -572,7 +575,9 @@ export class ProgramEditor {
       if (expression.from > start || expression.to < end || expression.from === expression.to) continue;
       if (!found || expression.to - expression.from < found.to - found.from) found = expression;
     }
-    return found ? { ...found, ...(selection && (found.from !== start || found.to !== end) ? { note: 'Value of the enclosing complete expression.' } : {}) } : null;
+    if (found) return { ...found, ...(found.perContact ? { note: 'The value depends on the physical contact partner.' }
+      : selection && (found.from !== start || found.to !== end) ? { note: 'Value of the enclosing complete expression.' } : {}) };
+    return null;
   }
 
   private renderEvaluation(): void {
@@ -652,8 +657,7 @@ export class ProgramEditor {
     const bindings = this.visibleBindings(position, true);
     const local = this.declarations.find(item => item.name === token.text && (item.scopeFrom <= position || item.from === token.from));
     const symbol = (local ? this.localSymbol(local) : undefined)
-      ?? (isCellularSource(this.source) ? lookupCellularSymbol(token.text, this.source) : undefined)
-      ?? lookupGenomeSymbol(token.text, bindings);
+      ?? lookupProgramSymbol(token.text, this.source, bindings);
     return symbol ? { from: token.from, to: token.to, symbol } : null;
   }
 
@@ -666,7 +670,7 @@ export class ProgramEditor {
       if (token.text === '(') {
         if (depth) { depth--; continue; }
         const previous = this.codeTokens[index - 1];
-        if (previous?.kind === 'function') return (isCellularSource(this.source) ? lookupCellularSymbol(previous.text, this.source) : undefined) ?? lookupGenomeSymbol(previous.text);
+        if (previous?.kind === 'function') return lookupProgramSymbol(previous.text, this.source);
       }
       if (token.text === ';' && !depth) break;
     }

@@ -12,7 +12,7 @@ function freeze<T>(value: T): T {
 /** Built-ins stay immutable. Saving an edit creates an independently named user copy. */
 export const BUILTIN_GENOMES: readonly GenomeDocument[] = freeze(PRESETS.map(preset => ({
   id: `builtin:genome:${preset.name.toLowerCase().replaceAll(' ', '-')}`, name: preset.name, source: preset.source,
-  description: preset.description, languageVersion: 3, createdAt: 0, updatedAt: 0,
+  description: preset.description, languageVersion: 4, createdAt: 0, updatedAt: 0,
 })));
 
 export const BUILTIN_ENVIRONMENTS: readonly EnvironmentDocument[] = freeze([

@@ -4,6 +4,7 @@ import { ORGANELLE_CATALOG, MECHANISM_CATALOG } from './organelles';
 export function showGuide(): void {
   createDialog('Guide', `
     <p>Start with <b>Hunting ground</b> to follow a hunter, or <b>Sunlit food web</b> to see where its food comes from. In the food web, Foragers can dock with Phototrophs to exchange carbon and minerals. Each preset lists its founders. You can edit the starting populations, environment and seed. Runs save automatically and reopen paused.</p>
+    <p>In <b>Metrics → Food web</b>, select a lineage to compare its births, deaths and kills, or check how many cells have full ATP stores and how far they have grown. <b>Resource balance</b> shows where minerals, carbon, oxygen and energy went.</p>
     <p><b>Add organism</b> lets you choose a genome and click its starting position. Turn on <b>Place several</b> to add more. Press Escape to finish.</p>
     <p>Select a cell to see its reserves, colony membership and feeding links. Drag it to move it, or use <b>Move cell</b> or <b>Move linked group</b> and choose a destination. <b>Edit reserves</b> lets you add or remove energy and minerals while running or paused. Zero energy kills the cell.</p>
     <p><b>Pop out</b> keeps the same player running while you edit elsewhere or background the main tab. It keeps advancing when hidden, subject to browser throttling or system sleep; keep the main tab open. <b>Window</b> is the fallback when always-on-top is unavailable. Explicit Pause still stops playback. Without an open player window, a hidden main tab pauses.</p>
@@ -138,19 +139,21 @@ clear rs001 when !object.valid &amp;&amp; ri001 &gt; 60;</pre>
       <p>Each organism has its own registers. All reads see the start of the tick. Writes commit together afterward, and clear wins when both fire. Empty registers read as zero, false, empty string or zero vector. <code>populated()</code> distinguishes an empty register from a stored zero. Each occupied register costs 25 ATP counts per second in a whole-count world. The Memory tab shows occupied registers alongside regulator stocks.</p>
       <pre class="guide-code">cellular counts;
 publish rf001 = 17;
-avoid_message rf001;
-adhere_message rf001 daughters;
 product Frame = scaffold(); product Glue = adhesin(Frame);
 product Mount = anchor(); product Skin = membrane();
 gene backbone: Frame = if pool.Frame &lt; 100 then 0.2 else 0;
 gene finish: Glue = if pool.Glue &lt; 100 then 0.2 else 0;
 gene mounts: Mount = if pool.Mount &lt; 400 then 0.2 else 0;
 gene skins: Skin = if pool.Skin &lt; 400 then 0.2 else 0;
-assembly Link: adhere() { Mount: 80; Skin: 80; Glue: 40; }</pre>
+assembly Link: adhere() {
+  Mount: 80; Skin: 80; Glue: 40;
+  engage_when: peer.division_interface &amp;&amp; populated(rf001)
+    &amp;&amp; peer.message_valid &amp;&amp; peer.message == rf001;
+}</pre>
       <p><code>publish</code> exposes one scalar register. The optional number sets it once at birth. Writing the register updates the message on the next tick. Clearing it withdraws the message. A working <code>sense(contact)</code> recipe named <code>Touch</code> reads the touched cell’s <code>sensed.Touch.message</code> when <code>sensed.Touch.message_valid</code> is true. A published zero is valid.</p>
       <p><code>signal rf002 = 0;</code> selects a second scalar address. Change it to request supplies or relay a pulse while keeping the recognition marker steady. A receptor reads its contact’s <code>signal_valid</code> and <code>signal</code> from the same tick as the marker.</p>
       <p>Attached cells with matching <code>junction(energy)</code>, <code>junction(mineral)</code> or <code>junction(carbon)</code> machinery exchange that resource toward equal storage fractions. A feeding link forms when cells dock on contact and have matching functional resource ports. Both sides must activate their ports for a transfer. Open <b>Body → Resource exchange</b> to see signed transfers. Try <b>Nurse rosette</b> for resource sharing or <b>Pulse swimmers</b> for relayed movement. In <b>Crown rosette</b>, cells with at least two signaling partners send a beacon. Edge cells that receive it activate an extra light harvester. Open <b>Body → Incoming signals</b> to see what a signal junction reads.</p>
-      <p><code>avoid_message</code> skips an attack on each candidate whose published value exactly matches the chosen occupied register. <code>adhere_message</code> selects a value for adhesion. With <code>daughters</code>, a cell can keep its newly divided daughter attached if both recognize each other and have a free site on a working <code>adhere()</code> surface. Each cell first makes scaffold, finishes it into adhesin, and installs the adhesin with membrane and anchors. With <code>recruit</code>, two free cells can also join after both opt in and stay in compatible contact for 15 consecutive ticks (half a simulation second). Separation interrupts recruitment. A contact receptor’s <code>bonded</code> field tells the program whether that particular neighbor has an established bond.</p>
+      <p>Each <code>pierce()</code>, <code>engulf()</code> or <code>adhere()</code> surface can use an <code>engage_when</code> expression for the cell it physically reaches. The example keeps a matching daughter attached at division. A docking surface can instead test a partner’s marker or signal on an ordinary encounter. Both sides must admit the contact and have free binding sites. New encounter bonds take 15 consecutive ticks (half a simulation second). Separation interrupts recruitment.</p>
     </details>
     <details class="guide-section"><summary>Mutation and dependency graph</summary>
       <p>Each mutation edits one typed node against the inherited source, preserving unrelated code, comments and layout. Constants, equivalent references and typed expression changes remain valid programs. Validity does not guarantee survival.</p>
@@ -168,10 +171,11 @@ assembly Link: adhere() { Mount: 80; Skin: 80; Glue: 40; }</pre>
       <p>Fixed barriers stay in place; floating barriers drift with local currents. Both block organisms, particles and field transport as full-depth obstacles in the wrapping 2D world. Flow is prescribed rather than pressure-solved. Absorbers remove only available dissolved minerals and record the removed amount in resource accounting.</p>
       <p>Scroll to zoom around the pointer; Shift-drag, middle-drag or right-drag to pan. Touch supports pan and pinch. Use Fit to see the whole world. World dimensions change the physical domain and field grid; resizing preserves existing material.</p>
       <p>A new pond starts with zero organic particles. Producers release exudate as gold droplets. Feeding and death release coral tissue fragments, and digestion leaves muted waste grains. The particles and their halos shrink as they lose food value. Chemical emitters can enrich an empty pond. Its first new organic food comes from cells.</p>
-      <p>Minerals circulate through water, bodies and particles. Construction transfers them into structures; recycling and death return them. New body material retains 90% of its construction energy. A kill releases that investment along with remaining reserves. Hunters digest the tissue and use oxygen to convert its food value into usable energy. Metrics includes introduced resources, total held energy and harvested light.</p>
+      <p>Minerals circulate through water, bodies and particles. Construction transfers them into structures; recycling and death return them. New body material retains 90% of its construction energy. A kill releases that investment along with remaining reserves. Hunters digest the tissue and use oxygen to convert its food value into usable energy. In Metrics, the resource balance checks mineral, carbon and oxygen inventories. Whole-count runs also track energy losses by cause and compare them with the supply.</p>
+      <p>The food web table groups mutations with their founding genome. Select a lineage to chart its population and see how recently it reproduced, how it died, how much energy it digests and how far its living cells have grown toward doubling their area. Older saves begin recording these events when opened in this version.</p>
     </details>
     <details class="guide-section"><summary>Saved files and older versions</summary>
-      <p>IndexedDB holds genomes, environments and full simulation checkpoints; local storage keeps preferences and unfinished drafts. Export genomes and environments from their menus. Existing v3 organelle programs remain executable. Saves retain the world, organisms, signals and reserve edits. Checkpoint 14 reads saves from versions 3 through 13. Existing organic matter and resource ledgers carry forward. The retired food supply stops at import. Earlier investment-language documents remain viewable and exportable.</p>
+      <p>IndexedDB holds genomes, environments and full simulation checkpoints; local storage keeps preferences and unfinished drafts. Export genomes and environments from their menus. Existing v3 organelle programs remain executable. Saves retain the world, organisms, signals, reserve edits and observed lineage events. The player can reopen checkpoints from version 3 onward through the current format. Existing organic matter and resource ledgers carry forward. The retired food supply stops at import. Earlier investment-language documents remain viewable and exportable.</p>
     </details>
   `, 'guide-dialog');
 }

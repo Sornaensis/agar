@@ -16,7 +16,8 @@ fn counted_engine() -> Engine {
 fn balanced(w:&World) {
     let a=w.count_audit().unwrap();
     for i in [0,3,6]{assert_eq!(a[i]+a[i+2],a[i+1],"tick {}: {a:?}",w.ticks);}
-    assert!(a[9]+a[11]<=a[10], "tick {}: {a:?}",w.ticks);
+    let lost: i128 = w.energy_loss_counts().unwrap().into_iter().map(i128::from).sum();
+    assert_eq!(i128::from(a[9])+i128::from(a[11])+lost, i128::from(a[10]), "tick {}: {a:?}",w.ticks);
 }
 #[test]
 fn count_living_stores_edits_reactions_and_lysis_replay_exactly() {
@@ -210,4 +211,190 @@ fn equal_membranes_share_repeated_one_quantum_dissolved_offers() {
         assert_eq!(w.environment.inorganic_carbon_count(patch), 1);
     }
     assert!(receipts.iter().flatten().all(|&n| n > 0), "{receipts:?}");
+}
+
+#[test]
+fn small_bites_yield_the_same_minerals_and_cost_as_one_bulk_digestion() {
+    for (kind, expected_minerals) in [(OrganicKind::Tissue, 8), (OrganicKind::Waste, 5)] {
+        let mut e = counted_engine();
+        let index = kind as usize;
+        let mut small = e.world.cells.pop().unwrap();
+        let mut bulk = small.clone();
+        let cap = small.body.capacities();
+        let start = small.counted.as_ref().unwrap().clone();
+        let mut emissions = Vec::new();
+        for (cell, bite, iterations) in [(&mut small,1,10), (&mut bulk,10,1)] {
+            for _ in 0..iterations {
+                cell.counted.as_mut().unwrap().gut[index] = CountMeal {carbon:bite, mineral:bite, extra:0};
+                cell.project_counts();
+                let mut work = [0.0;3];
+                work[index] = units(20*bite) / DIGESTION_SPEED[index];
+                cell.count_digest(&cap,work,&mut emissions);
+            }
+            let q = cell.counted.as_ref().unwrap();
+            assert_eq!(q.mineral - start.mineral, expected_minerals);
+            assert_eq!(start.atp - q.atp, 4);
+            assert_eq!(q.gut[index].carbon, 0);
+        }
+        assert_eq!(small.counted.unwrap().carbon, bulk.counted.unwrap().carbon);
+    }
+}
+
+#[test]
+fn migrated_census_preserves_opening_stocks_without_inventing_history_or_heat() {
+    let mut e = counted_engine();
+    for _ in 0..12 { e.world.step(&mut e.genomes); }
+    let current = checkpoint::save(&e).unwrap();
+    let mut appended = crate::checkpoint::Writer::new();
+    e.world.census.write(&mut appended);
+    e.world.energy_loss.write(&mut appended);
+    let mut prior = current[..current.len()-appended.0.len()].to_vec();
+    prior[8..12].copy_from_slice(&17_u32.to_le_bytes());
+    let size = prior.len() as u32;
+    prior[12..16].copy_from_slice(&size.to_le_bytes());
+    let checksum = checkpoint::checksum(&prior[20..]);
+    prior[16..20].copy_from_slice(&checksum.to_le_bytes());
+    let mut restored = checkpoint::restore(&prior).unwrap();
+    let mut census = Vec::new();
+    restored.world.ecology_snapshot(&restored.genomes, &mut census);
+    assert_eq!(census[0], 12.0 * DT);
+    assert_eq!(&census[1..12], &[1.,1.,1.,1.,0.,0.,0.,0.,0.,0.,-1.]);
+    let losses = restored.world.energy_loss_counts().unwrap();
+    assert!(losses[0] > 0);
+    assert_eq!(&losses[1..], &[0;6]);
+    balanced(&restored.world);
+    restored.world.set_cell_stores(1,Some(0.0),None).unwrap();
+    restored.world.ecology_snapshot(&restored.genomes,&mut census);
+    assert_eq!(&census[3..10], &[0.,1.,0.,1.,0.,0.,1.], "manual withdrawal is a separate non-starvation loss");
+    let bytes = checkpoint::save(&restored).unwrap();
+    assert_eq!(bytes,checkpoint::save(&checkpoint::restore(&bytes).unwrap()).unwrap());
+}
+
+#[test]
+fn checkpoint_rejects_single_count_of_unexplained_energy_loss() {
+    let mut e = counted_engine();
+    e.world.cells[0].counted.as_mut().unwrap().atp -= 1;
+    e.world.cells[0].project_counts();
+    let bytes = checkpoint::save(&e).unwrap();
+    assert!(checkpoint::restore(&bytes).err().unwrap().contains("measured losses"));
+}
+
+#[test]
+fn aggregate_metrics_include_paid_inventory_and_pending_extracellular_deposits() {
+    let mut e = counted_engine();
+    for _ in 0..120 { e.world.step(&mut e.genomes); }
+    let w = &mut e.world;
+    let patch = w.environment.patch_index(100.0,100.0);
+    let quantities = [w.environment.take_mineral_counts(patch,17),
+        w.environment.take_oxygen_counts(patch,13), w.environment.take_inorganic_carbon_counts(patch,19)];
+    assert_eq!(quantities,[17,13,19]);
+    w.deposits.push(counted::LocalDeposit {x:100.0,y:100.0,quantities});
+    let mut metrics = Vec::new();
+    w.metrics_snapshot(&e.genomes,&mut metrics);
+    let a = w.count_audit().unwrap();
+    let counts = |v: f64| (v*f64::from(crate::counts::SCALE)).round() as u64;
+    assert_eq!(counts(metrics[18]),a[9]);
+    assert_eq!(counts(metrics[20]),a[0]);
+    assert_eq!(counts(metrics[22]+metrics[23]+metrics[24]),a[0]);
+    assert_eq!(counts(metrics[38]+metrics[39]+metrics[46]+metrics[50]),a[3]);
+    assert_eq!(counts(metrics[44]+metrics[45]),a[6]);
+    assert_eq!(counts(metrics[44]),u64::from(w.cells[0].counted.as_ref().unwrap().oxygen));
+}
+
+#[test]
+fn census_groups_mutant_introductions_and_remembers_the_extinct_root() {
+    let mut e = counted_engine();
+    let source = "cellular; product Blank=scaffold(); gene make: Blank=0;";
+    e.genomes.push(Genome::new(source.into(),Program::compile(source).unwrap(),1,1));
+    let mutant = e.world.place_cell(2,140.0,100.0,&e.genomes).unwrap();
+    e.world.set_cell_stores(mutant,None,Some(0.0)).unwrap();
+    let mut living = Vec::new();
+    e.world.ecology_snapshot(&e.genomes,&mut living);
+    let founder = &e.world.cells[0];
+    assert_eq!(living.len(), 2+20);
+    assert_eq!(&living[2+15..], &[1., founder.nutrient_stored, 2.0*founder.organic_carbon, 0., 0.]);
+    e.world.set_cell_stores(mutant,Some(0.0),None).unwrap();
+    e.world.set_cell_stores(1,Some(0.0),None).unwrap();
+    let mut data = Vec::new();
+    e.world.ecology_snapshot(&e.genomes,&mut data);
+    assert_eq!(&data[..12], &[0.,1.,1.,0.,2.,0.,2.,0.,0.,2.,0.,-1.]);
+    let bytes = checkpoint::save(&e).unwrap();
+    let loaded = checkpoint::restore(&bytes).unwrap();
+    let mut replay = Vec::new();
+    loaded.world.ecology_snapshot(&loaded.genomes,&mut replay);
+    assert_eq!(data,replay);
+}
+
+
+#[test]
+fn low_atp_with_reserve_fuel_uses_both_inclusive_thresholds() {
+    let mut e = counted_engine();
+    let capacity = crate::counts::floor(e.world.cells[0].energy_capacity());
+    let atp_limit = capacity / 10;
+    let min_carbon = capacity.div_ceil(4 * CHEMICAL_ENERGY_PER_CARBON as u32);
+    let mut row = Vec::new();
+    for (atp, carbon, expected) in [
+        (atp_limit, min_carbon, 1.0),
+        (atp_limit + 1, min_carbon, 0.0),
+        (atp_limit, min_carbon - 1, 0.0),
+    ] {
+        let cell = &mut e.world.cells[0];
+        let q = cell.counted.as_mut().unwrap();
+        q.atp = atp;
+        q.carbon = carbon;
+        cell.project_counts();
+        e.world.ecology_snapshot(&e.genomes, &mut row);
+        assert_eq!(row[2 + 19], expected);
+    }
+    // Continuous worlds use the same thresholds. Enriched gut and stored
+    // tissue energy do not stand in for the required reserve carbon.
+    let cell = &mut e.world.cells[0];
+    cell.counted = None;
+    let capacity = cell.energy_capacity();
+    cell.energy = capacity / 10.0;
+    cell.organic_carbon = capacity / (4.0 * CHEMICAL_ENERGY_PER_CARBON);
+    e.world.ecology_snapshot(&e.genomes, &mut row);
+    assert_eq!(row[2 + 19], 1.0);
+    let cell = &mut e.world.cells[0];
+    cell.organic_carbon = 0.0;
+    cell.gut_energy = capacity;
+    cell.reserve_enrichment = capacity;
+    e.world.ecology_snapshot(&e.genomes, &mut row);
+    assert_eq!(row[2 + 19], 0.0);
+}
+
+#[test]
+fn phototroph_fission_requires_two_working_copies_of_each_essential_machine() {
+    let program = Program::compile(include_str!("../../../examples/phototroph.cell")).unwrap();
+    let recipes = &program.cellular().unwrap().assemblies;
+    let index = |name| recipes.iter().position(|r| r.name == name).unwrap();
+    let essential = [
+        ("Solar", 0.12),
+        ("Respiration", 0.04),
+        ("Minerals", 0.025),
+        ("Translation", 0.04),
+    ];
+    let mut input = Inputs {
+        body_area: 2.0,
+        body_birth_area: 1.0,
+        energy: 110.0,
+        ..Inputs::default()
+    };
+    input.assemblies.resize(recipes.len(), 0.0);
+    let active = |input: &Inputs| {
+        program
+            .evaluate_cell(input, &mut Registers::default(), &mut EvalScratch::default())
+            .cellular
+            .unwrap()
+            .activity[index("Division")] > 0.0
+    };
+    for (name, mass) in essential {
+        input.assemblies[index(name)] = 2.0 * mass;
+    }
+    assert!(active(&input));
+    for (name, mass) in essential {
+        input.assemblies[index(name)] = mass;
+        assert!(!active(&input), "a single working {name} cannot feed both halves");
+        input.assemblies[index(name)] = 2.0 * mass;
+    }
 }

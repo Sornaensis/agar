@@ -139,6 +139,7 @@ impl Program {
                         | Op::Pool(_)
                         | Op::Concentration(_)
                         | Op::Built(_)
+                        | Op::Peer(_)
                         | Op::Receptor(_, _)
                         | Op::Register(_)
                         | Op::Populated(_)
@@ -247,6 +248,7 @@ impl Program {
                     }
                     let replacement = match &choices[rng.index(choices.len())] {
                         Op::Sensor(sensor) => sensor.name().to_string(),
+                        Op::Peer(field) => field.name().to_string(),
                         Op::Pool(index) => {
                             format!("pool.{}", program.cellular().unwrap().products[*index].name)
                         }
@@ -439,6 +441,12 @@ impl Program {
         let map = SourceMap::new(source);
         let mut values = Vec::new();
         program.evaluate_nodes(inputs, memory, &mut values);
+        let (per_contact,_) = contact_guard::input_dependencies(&program.nodes);
+        let inspected = |idx: usize| if per_contact[idx] {
+            "null,\"perContact\":true".to_owned()
+        } else {
+            values[idx].json()
+        };
         let range = |from: usize, to: usize| {
             format!("\"from\":{},\"to\":{}", map.offsets[from], map.offsets[to])
         };
@@ -461,7 +469,7 @@ impl Program {
                 "{{\"id\":{index},{},\"type\":{},\"value\":{}}}",
                 range(location.from, location.to),
                 quote(node.ty.label()),
-                values[index].json()
+                inspected(index)
             ));
         }
         json.push_str("],\"bindings\":[");
@@ -475,7 +483,7 @@ impl Program {
                 quote(&binding.name),
                 range(location.from, location.to),
                 quote(program.nodes[binding.node].ty.label()),
-                values[binding.node].json()
+                inspected(binding.node)
             ));
         }
         json.push_str("],\"signals\":[");
@@ -603,21 +611,17 @@ impl Program {
                 if index > 0 {
                     json.push(',');
                 }
-                let boolean = name.starts_with("start_when.");
+                let per_contact = name.starts_with("engage_when.");
+                let boolean = name.starts_with("start_when.") || per_contact;
                 let ty = if boolean { "boolean" } else { "scalar" };
-                let value = if boolean {
-                    Value::Boolean(root.is_none_or(|root| values[root].boolean()))
+                let value = if per_contact {
+                    "null".into()
+                } else if boolean {
+                    Value::Boolean(root.is_none_or(|root| values[root].boolean())).json()
                 } else {
-                    Value::Scalar(root.map_or(
-                        if name.starts_with("recycle.") {
-                            0.0
-                        } else {
-                            1.0
-                        },
-                        |root| values[root].number().clamp(0.0, 1.0),
-                    ))
-                }
-                .json();
+                    let default = if name.starts_with("recycle.") { 0.0 } else { 1.0 };
+                    Value::Scalar(root.map_or(default, |root| values[root].number().clamp(0.0, 1.0))).json()
+                };
                 let offsets = root.map_or_else(
                     || "\"from\":null,\"to\":null".to_string(),
                     |root| {
@@ -626,8 +630,8 @@ impl Program {
                     },
                 );
                 json.push_str(&format!(
-                    "{{\"name\":{},\"type\":\"{ty}\",\"value\":{value},{offsets}}}",
-                    quote(name)
+                    "{{\"name\":{},\"type\":\"{ty}\",\"value\":{value},{}{offsets}}}",
+                    quote(name), if per_contact { "\"perContact\":true," } else { "" }
                 ));
             }
         }

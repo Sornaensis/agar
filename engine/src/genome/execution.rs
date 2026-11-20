@@ -25,7 +25,7 @@ impl From<&Value> for ConstantKey {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum OperationKey {
     Constant(ConstantKey), Sensor(Sensor), Pool(usize), Concentration(usize), Built(usize),
-    Receptor(usize, ReceptorField), Register(Register), Populated(Register),
+    Receptor(usize, ReceptorField), Peer(PeerField), Register(Register), Populated(Register),
     Negate(usize), Not(usize), Binary(Binary, usize, usize), Choose(usize, usize, usize),
     Call(Function, [usize; 3]),
 }
@@ -35,7 +35,7 @@ impl From<&Op> for OperationKey {
             Op::Constant(value) => Self::Constant(value.into()),
             Op::Sensor(v) => Self::Sensor(*v), Op::Pool(v) => Self::Pool(*v),
             Op::Concentration(v) => Self::Concentration(*v), Op::Built(v) => Self::Built(*v),
-            Op::Receptor(i,f) => Self::Receptor(*i,*f), Op::Register(v) => Self::Register(*v),
+            Op::Receptor(i,f) => Self::Receptor(*i,*f), Op::Peer(f) => Self::Peer(*f), Op::Register(v) => Self::Register(*v),
             Op::Populated(v) => Self::Populated(*v), Op::Negate(v) => Self::Negate(*v),
             Op::Not(v) => Self::Not(*v), Op::Binary(op,a,b) => Self::Binary(*op,*a,*b),
             Op::Choose(c,a,b) => Self::Choose(*c,*a,*b), Op::Call(f,args) => Self::Call(*f,*args),
@@ -45,14 +45,14 @@ impl From<&Op> for OperationKey {
 }
 
 #[derive(Debug, Clone)]
-struct ExecutableNode {
-    op: Op,
-    ty: Type,
+pub(super) struct ExecutableNode {
+    pub(super) op: Op,
+    pub(super) ty: Type,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct ExecutionPlan {
-    nodes: Box<[ExecutableNode]>,
+    pub(super) nodes: Box<[ExecutableNode]>,
     pub(super) output_roots: [Option<usize>; OUTPUT_COUNT],
     pub(super) writes: Box<[WriteRule]>,
     pub(super) extra_roots: Box<[usize]>,
@@ -85,6 +85,7 @@ impl ExecutionPlan {
                     | Op::Concentration(_)
                     | Op::Built(_)
                     | Op::Receptor(_, _)
+                    | Op::Peer(_)
                     | Op::Register(_)
                     | Op::Populated(_)
             ) && children[..count].iter().all(|&child| constant[child]);
@@ -142,6 +143,7 @@ impl ExecutionPlan {
                     Op::Concentration(index) => Op::Concentration(*index),
                     Op::Built(index) => Op::Built(*index),
                     Op::Receptor(index, field) => Op::Receptor(*index, *field),
+                    Op::Peer(field) => Op::Peer(*field),
                     Op::Register(key) => Op::Register(*key),
                     Op::Populated(key) => Op::Populated(*key),
                     Op::Negate(child) => Op::Negate(slot(*child)),

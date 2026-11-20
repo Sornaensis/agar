@@ -281,7 +281,7 @@ assembly Armour:shield() {{ Frame:0.04; at:{shield_at}; }}
         outputs[1].bite = 0.0;
         let mut workspace = PhaseWorkspace::default();
         workspace.geometry.rebuild(&world.cells, false, true);
-        world.resolve_predation_in(&outputs, &capacities, &mut workspace);
+        world.resolve_predation_in(&outputs, &capacities, &[], &mut workspace);
         assert!(world.attacks > 0, "A rear-mounted weapon must reach a rear target");
         assert_eq!(world.cells[0].gut_energy, 0.0, "Primitive piercing cannot extract living reserves");
         let integrity = world.cells[1].integrity;
@@ -335,11 +335,11 @@ assembly Rear:pierce() { Mount:0.01; Barb:0.04; Catalyst:0.01; at:3.141592653589
     let outputs = vec![output, Outputs::default()];
     let mut workspace = PhaseWorkspace::default();
     workspace.geometry.rebuild(&world.cells, false, true);
-    world.resolve_predation_in(&outputs, &caps, &mut workspace);
+    world.resolve_predation_in(&outputs, &caps, &[], &mut workspace);
     assert_eq!(world.attacks, 0, "Inactive primitive material must not extend the old weapon's range");
     world.cells[1].x = 617.5;
     workspace.geometry.rebuild(&world.cells, false, true);
-    world.resolve_predation_in(&outputs, &caps, &mut workspace);
+    world.resolve_predation_in(&outputs, &caps, &[], &mut workspace);
     assert!(world.attacks > 0, "The paid old weapon still works at its own range");
 }
 

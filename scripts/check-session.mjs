@@ -26,6 +26,7 @@ function setup() {
       const result = { tick: this.time * 30, summary: this.summary() };
       if (options.frame !== false) result.frame = { ...this.summary(), tick: this.time * 30, cells: [{ id: 1, generation: 0 }], food: [], mutationRate: this.mutationRate };
       if (options.metrics) result.metrics = { tick: this.time * 30, population: 1 };
+      if (options.ecology || options.metrics) result.ecology = { since: 0, lineages: [{ rootGenomeId: 1, alive: 1 }] };
       if (options.environment) result.environment = { columns: 1, rows: 1, ambientTemperature: .5, ambientLight: .2, currentStrength: 0, sources: [], barriers: [] };
       if (options.environment === true) result.environment.samples = new Float32Array(7);
       return result;
@@ -63,6 +64,22 @@ function setup() {
   const session = new SimulationSession(engine, metadata, initial, storage,
     (status, error) => statuses.push({ status, error }), value => committed.push(structuredClone(value)));
   return { engine, session, metadata, storage, writes, committed, statuses };
+}
+
+// Unobserved runs save a sparse census without requesting frame or full metrics.
+{
+  const { session, writes, engine } = setup();
+  engine.advance = async function (steps, options) {
+    this.time += steps / 30;
+    return this.presentation(options);
+  };
+  await session.refresh({ frame: false, ecology: true });
+  for (let i = 0; i < 10; i++) await session.advance(90, { frame: false });
+  const write = session.checkpoint();
+  await until(() => writes.length === 1, 'Background census reaches saved metadata');
+  assert.deepEqual(writes[0].record.ecologyHistory, [0, 15, 30].map(time => ({ time, populations: [[1, 1]], events: [] })));
+  assert.equal(session.metrics.ecology, undefined, 'Hidden player did not request full metrics');
+  writes[0].resolve(); await write;
 }
 
 // Capture is queued behind outstanding advancement, and before later commands.

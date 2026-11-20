@@ -14,7 +14,7 @@ const stable=save(api);
 for(const source_ of ['thrust=true;turn=0;divide=false;','thrust=food.angle;turn=0;divide=false;',idle+'target.flagellum.count=.5;',idle+'scan.target=5;']){
   const b=new TextEncoder().encode(source_),p=api.alloc(b.length);new Uint8Array(api.memory.buffer,p,b.length).set(b);assert.equal(api.compile_genome(p,b.length),0);assert.ok(error(api));api.dealloc(p,b.length);assert.deepEqual(save(api),stable);
 }
-const schema=json(api,'language_schema_ptr','language_schema_len');assert.equal(schema.version,3);assert.equal(schema.signals.length,174);assert.equal(schema.outputs.length,81);
+const schema=json(api,'language_schema_ptr','language_schema_len');assert.equal(schema.version,4);assert.equal(schema.signals.length,174);assert.equal(schema.outputs.length,81);
 const cell=snapshot(api).cells[0];const b=body(api,cell.id);assert.ok(b.organs.length>0);assert.equal(b.requested.length,16);
 assert.equal(evaluation(api,cell.id).signals.length,174);assert.equal(evaluation(api,cell.id).outputs.length,81);assert.deepEqual(save(api),stable,'Inspection does not advance or commit');
 const empty=await fresh();const idleId=compile(empty,idle);seed(empty,idleId,1);
@@ -53,7 +53,7 @@ const previous=await fresh();
 const previousSave=new Uint8Array(await readFile(new URL('../engine/fixtures/organelle-v3.bin',import.meta.url)));
 
 assert.equal(restore(previous,previousSave),1,error(previous));
-const migrated=save(previous);assert.equal(new DataView(migrated.buffer,migrated.byteOffset,migrated.byteLength).getUint32(8,true),17);
+const migrated=save(previous);assert.equal(new DataView(migrated.buffer,migrated.byteOffset,migrated.byteLength).getUint32(8,true),19);
 assert.equal(source(previous,1),JSON.parse(await readFile(new URL('../engine/fixtures/organelle-v3.json',import.meta.url),'utf8')).source);
 const priorCell=snapshot(previous).cells[0];
 assert.ok(priorCell.organs.photosynthetic.mass>0 && priorCell.organs.digestive.mass>0,'Restoring an existing cell never reconstructs it from the minimal founder');
@@ -98,5 +98,5 @@ const older=advance(longLived,10800);assert.equal(older.population,1,'A funded, 
 assert.ok(older.cells[0].age>359);assert.equal(older.cells[0].lifespan,0);
 const olderState=save(longLived),olderCopy=await fresh();assert.equal(restore(olderCopy,olderState),1,error(olderCopy));
 assert.deepEqual(save(olderCopy),olderState,'Older organisms remain valid saved state');
-console.log(`WASM organelle integration passed: ABI21, typed schema, five register banks, original-source mutations, genome-grown bodies, closed material, checkpoint17 replay and v3/v4 compatibility, uncapped2,049-organism restore, ${state.births} producer births.`);
+console.log(`WASM organelle integration passed: ABI22, typed schema, five register banks, original-source mutations, genome-grown bodies, closed material, checkpoint19 replay and v3/v4 compatibility, uncapped2,049-organism restore, ${state.births} producer births.`);
 await checkEngineLoader();

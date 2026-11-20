@@ -76,9 +76,12 @@ async function run(template, worldSeed) {
     if (settings.countChemistry) {
       const pointer=api.count_audit_ptr();
       assert.ok(pointer);
-      const ledger=new BigUint64Array(api.memory.buffer,pointer,12);
+      const ledger=new BigUint64Array(api.memory.buffer,pointer,12).slice();
       for(const i of [0,3,6]) assert.equal(ledger[i]+ledger[i+2],ledger[i+1],`${id} count ledger ${i} at tick ${state.ticks}`);
       assert.ok(ledger[9]+ledger[11]<=ledger[10],`${id} energy budget at tick ${state.ticks}`);
+      const losses = new BigInt64Array(api.memory.buffer, api.energy_loss_ptr(), 7);
+      const dissipated = losses.reduce((total, value) => total + value, 0n);
+      assert.equal(ledger[9] + ledger[11] + dissipated, ledger[10], `${id} energy losses at tick ${state.ticks}`);
     }
     if (crown) sampleCrown(api,state,crown);
     if (firstBirth === null && state.births) firstBirth = state.seconds;

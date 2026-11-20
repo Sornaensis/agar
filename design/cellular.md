@@ -167,17 +167,37 @@ Each cell has five private register banks for integers, scalars, booleans, strin
 
 ```text
 publish rf001 = 17;
-avoid_message rf001;
+signal rf021 = 0;
 rf002 = sensed.Touch.message when sensed.Touch.message_valid;
 ```
 
-| Declaration | Effect |
+A weapon or adhesive surface can evaluate a boolean expression for each partner it physically reaches. The hunter defines a contact condition once and uses it in its piercing and engulfing recipes.
+
+```text
+let may_strike = !populated(rf001) || !peer.message_valid || peer.message != rf001;
+```
+
+Both recipes contain `engage_when: may_strike;`.
+
+The first term allows engagement when the hunter has cleared its own marker. The second admits a silent partner. The third compares the two occupied values. A silent partner and a partner publishing zero are distinguishable. Different weapons can use different expressions, even while touching several cells in the same tick.
+
+| Contact operand | Value |
 | --- | --- |
-| `publish rf001 = 17;` | Initializes the cell’s outbound scalar to 17 at birth. Assigning or clearing it later changes what neighbors can read next tick. Omit the initializer to begin silent. |
-| `avoid_message rf001;` | Excludes a potential victim when its occupied publication equals this cell’s occupied selector. Piercing, biting and engulfment check each reachable candidate individually. |
-| `signal rf021 = 0;` | Exposes a separate scalar payload on contact. An optional initial value applies at birth. Assignments and clears take effect on the next contact sample. |
-| `adhere_message rf020 daughters;` | Retains a matching daughter at division when both cells have functional adhesion surfaces. Omitting the modifier selects this mode. |
-| `adhere_message rf020 recruit;` | Also permits a new bond on encounter. Both partners must declare recruitment and each must accept the other’s published marker. |
+| `peer.message_valid`, `peer.message` | Occupancy and value of the candidate's first public scalar |
+| `peer.signal_valid`, `peer.signal` | Occupancy and value of its independent second public scalar |
+| `peer.division_interface` | Whether this contact originated at division, including a retained interface |
+| `rf091`, `populated(rf091)` | Value and occupancy of the acting cell's own register |
+
+Use `activity` for cell-wide effort and `engage_when` for partner-specific eligibility. For example, a cell can spend its current ATP on a weapon when hungry, then use an independent threshold on the partner’s signal.
+
+```text
+activity: if energy.fraction < 0.4 then 0.8 else 0;
+engage_when: peer.signal_valid && peer.signal > rf007;
+```
+
+Guards can reuse pure functions and local bindings over registers, constants and contact inputs. To remember a physiological observation for future contact decisions, write it to a register on a tick. The guard reads that register from the next tick’s snapshot.
+
+An adhesive surface might open on `peer.signal_valid && peer.signal >= 2` or require `peer.division_interface` for daughter retention. A bond needs physically active surfaces with free binding sites at both ends. Both surface expressions must allow the partner. Ordinary encounters also need 15 consecutive ticks of contact. The default for an omitted condition is open on weapons and closed on adhesion. The Graph view shows the dependencies of each contact condition. Its value is specific to a physical cell pair.
 
 Each declaration accepts one scalar address. The recognition marker and signal payload have distinct addresses. Each can be used independently. All other slots are private. A working named contact receptor reports `message_valid` and `message` for its particular contact. Particles, silent cells and missing contacts return false and zero. A cell publishing zero returns true and zero. All cells exchange values from the same start-of-tick snapshot. The same receptor reports an independently valid payload through `signal_valid` and `signal` for that very same contact. A daughter initializes any declared marker and signal from its inherited program. Other registers start empty. Restoring a world preserves the actual registers, including a cleared publication.
 
@@ -395,12 +415,14 @@ construction; inherited machinery retains its actual recipe and ingredient
 identities. A same-named recycling request can dismantle that earlier machinery
 without reinterpreting its components.
 
-Checkpoint format 7 retains mechanism identities as well as pools, unfinished
-ingredients, assembly identities, activities and genetic progress. Formats 3, 4,
-5 and 6 remain readable. Existing sources default to unrestricted initiation and
-zero recycling. Corrected optical coverage and directional primitive interactions
-can change affected trajectories. Save/restore replay is deterministic within the
-current engine. The current WASM ABI is 18. Checkpoint 14 stores the energy carried by food, gut contents and organic reserves above their base carbon potential. It reads checkpoints 3 through 13, preserves recorded construction energy and existing organic particles, and discards the retired external food schedule. Language schema 3 describes register access and contact messaging in its cellular metadata.
+The current WASM ABI is 22. Checkpoint format 19 stores each bond’s physical
+origin so a restored genome can distinguish a retained division interface from
+an encounter. Earlier checkpoints retain their machinery, pools, construction
+energy and organic particles on import. The engine translates the old
+genome-wide contact directives into conditions on the affected recipes.
+Language schema 4 describes public registers, the candidate’s contact fields
+and the recipe controls that can read those fields. Save/restore replay is
+deterministic within the current engine.
 
 This is a coarse cellular language: named aggregate material pools and discrete
 machines implementing a fixed set of small physical operations. There is no

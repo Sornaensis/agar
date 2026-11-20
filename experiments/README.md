@@ -2,6 +2,25 @@
 
 [Curated ecology](curated-ecology.md) records earlier predator and preset investigations. Older runs below used the catalogs and engines identified in each section.
 
+## Predator reproduction and ecological accounting
+
+In a 75-minute save of the earlier Sunlit food web, seven hunters remained. Their last birth was at 6:26. All seven were at least 95% full of ATP and together held 1,586,466 counts of gut energy. Their mean progress toward doubling their area was 7.1%. Inspection of six hunters found too little interior space for the growth machinery they needed after division.
+
+The current hunter builds duplicate growth machinery before constricting. A fed mother and its daughter can each divide again on accounted prey. The grazer provisions both halves with feeding reserves and mineral uptake. The producer duplicates its light harvesting, respiration, mineral uptake and protein synthesis equipment. On the same pond seed, earlier producers recorded 46 deaths with depleted ATP by minute twenty. With the duplicate equipment, there were zero producer deaths from depleted ATP at that point.
+
+In whole-count runs with the stock founders and habitat, the first 30 minutes gave the following results. All four balances closed at every 30-second observation.
+
+| Seed | Producers alive | Grazers alive | Hunters alive | Producer deaths from predation | Producer deaths with depleted ATP |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 42 | 171 | 43 | 39 | 197 | 1 |
+| 7 | 185 | 56 | 30 | 204 | 0 |
+
+At minute 75 on seed 42, 68 producers, 107 grazers and 32 hunters were alive. The hunter lineage had 123 births and 92 deaths; its latest birth was at 74:46. Producer deaths comprised 658 kills and two deaths with depleted ATP. The counts for minerals, carbon, oxygen and energy reconciled at all 151 observations. The pond had received 13,701,939,580 energy counts. It retained 584,870,144 and recorded 13,117,069,436 in process losses. Seed 7 ended its separate 45-minute run with 80 producers, 97 grazers and 37 hunters and zero discrepancies at all 91 observations.
+
+To measure the same habitat over 75 simulated minutes, run `node --no-liftoff scripts/check-ecosystem.mjs --seed 42 --duration 4500 --output experiments/pond-75min.json`. The report includes the engine hash, founder programs, feeding, births, deaths and energy balance.
+
+The small-bite accounting test feeds tissue containing ten carbon counts and ten mineral counts, once as ten equal bites and once as a single portion. Both cost four ATP counts and retain eight mineral counts. In the older model, the ten single bites cost ten ATP counts and retained zero minerals.
+
 ## Whole-count chemistry
 
 Run `npm run test:integer-chemistry` for a one-count-per-second emitter, staged adhesin production, conservation through death, migration of a genuine v16 save and exact continuation of a hunting run. The comparison uses the same seed, habitat and genome sources with each resource model. Timings cover engine stepping only and the two populations can diverge. [Whole-count comparison](integer-chemistry.json) · [Seeded preset trials](scenarios.json)
@@ -130,7 +149,7 @@ These commands use the current bundled WASM and programs. They do not reproduce 
 
 A separate native lifecycle test supplies a stationary scavenger with accounted organic particles in darkness. It captures and digests meals, grows a paid body and produces a daughter; the identical unfed control has no births. This verifies the heterotrophic growth pathway independently of the mixed preset's navigation and food availability.
 
-`--duration` accepts positive whole simulated seconds and defaults to 600. Standard sample times are 0, 15, 30, 60, 120, 180, 300, 600 and 900 seconds, filtered to the requested interval; the requested endpoint is always included. Reports retain complete sources, WASM hash, configuration, lineage diagnostics and conservation checks. `--assert` requires at least 300 simulated seconds and writes its report before reporting failures.
+`--duration` accepts positive whole simulated seconds and defaults to 600. Standard sample times are 0, 15, 30, 60, 120, 180, 300, 600 and 900 seconds, filtered to the requested interval; the requested endpoint is always included. Reports retain complete sources, WASM hash, configuration, lineage diagnostics and conservation checks. `--assert` requires at least 300 simulated seconds and writes its report before reporting failures. With `--assert --births-after 600`, every founding lineage must record a birth after minute ten. The report includes exact lineage events and an independent check of the energy lost to each process in whole-count worlds.
 
 ## Historical allocation-model experiments — ABI 4–6
 

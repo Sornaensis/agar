@@ -27,7 +27,6 @@ let equipped = powered;
 let surplus = equipped && energy > 550000;
 # Keep a direct daughter at division when both cells have functioning adhesive surfaces.
 publish rf020 = 87;
-adhere_message rf020 daughters;
 signal rf021 = 0;
 let paired_contact = sensed.Bus.valid;
 let partners = sensed.Bus.count;
@@ -86,6 +85,7 @@ assembly Adhesin: adhere() {
   Glue: 40;
   start_when: need_Adhesin;
   activity: if energy > 120000 then 1 else 0;
+  engage_when: peer.division_interface && populated(rf020) && peer.message_valid && peer.message == rf020;
 }
 
 assembly Bus: junction(signal) {

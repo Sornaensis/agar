@@ -177,7 +177,7 @@ export function buildGenomeNetwork(graph: GenomeGraph): GenomeNetwork {
   }
   // A birth-initialized marker can serve its whole lifetime without appearing
   // in an expression or a write rule. It is still a visible register node.
-  if (graph.contactMessages) for (const key of ['publish', 'avoid', 'adhere', 'signal'] as const) {
+  if (graph.contactMessages) for (const key of ['publish', 'signal'] as const) {
     const address = graph.contactMessages[key];
     if (address) register(address);
   }
