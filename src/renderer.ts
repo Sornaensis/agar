@@ -1,4 +1,5 @@
 import { ORGANELLE_CATALOG } from './organelles';
+import { GpuWorld } from './gpu-world';
 import { WorldCamera } from './world-camera';
 import { PeriodicVisibility } from './periodic-visibility';
 import type { BodyInspection, Cell, Food, RenderCell, EnvironmentSnapshot, EnvironmentSource, EnvironmentBarrier } from './engine';
@@ -10,6 +11,50 @@ const BOND_STYLES = [
   {kind:'feeding', color:'#e8b871', width:1.15},
   {kind:'colony', color:'#60c7ba', width:2.2},
 ] as const;
+const PARTICLE_COLORS = ['rgba(237,198,108,0.86)', 'rgba(225,137,122,0.9)', 'rgba(158,151,130,0.72)'];
+const HALO_COLORS = ['rgba(237,198,108,0.07)', 'rgba(225,137,122,0.08)', 'rgba(158,151,130,0.035)'];
+const PARTICLE_TILE_PIXELS = 96;
+
+class ParticlePaths {
+  private readonly shapes: Path2D[] = [];
+  private readonly halos: Path2D[] = [];
+  private rings?: Path2D;
+
+  add(kind: Food['kind'], x: number, y: number, radius: number, haloRadius: number, ringRadius: number): void {
+    const halo = this.halos[kind] ??= new Path2D();
+    halo.moveTo(x + haloRadius, y);
+    halo.arc(x, y, haloRadius, 0, Math.PI * 2);
+    const shape = this.shapes[kind] ??= new Path2D();
+    if (kind === 1) {
+      shape.moveTo(x, y - radius); shape.lineTo(x + radius, y);
+      shape.lineTo(x, y + radius); shape.lineTo(x - radius, y); shape.closePath();
+    } else if (kind === 2) {
+      shape.rect(x - radius * 0.7, y - radius * 0.7, radius * 1.4, radius * 1.4);
+    } else {
+      shape.moveTo(x + radius, y);
+      shape.arc(x, y, radius, 0, Math.PI * 2);
+    }
+    if (ringRadius > 0) {
+      const rings = this.rings ??= new Path2D();
+      rings.moveTo(x + ringRadius, y);
+      rings.arc(x, y, ringRadius, 0, Math.PI * 2);
+    }
+  }
+
+  draw(context: CanvasRenderingContext2D): void {
+    for (let kind = 0; kind < this.shapes.length; kind++) {
+      if (!this.shapes[kind]) continue;
+      context.fillStyle = HALO_COLORS[kind]; context.fill(this.halos[kind]);
+      context.fillStyle = PARTICLE_COLORS[kind]; context.fill(this.shapes[kind]);
+    }
+    if (this.rings) {
+      context.strokeStyle = 'rgba(191,155,234,0.72)';
+      context.lineWidth = 0.6;
+      context.stroke(this.rings);
+    }
+  }
+}
+
 const clamp = (value: number, low: number, high: number): number => Math.max(low, Math.min(high, value));
 
 /** A genome keeps its visual identity across all of its descendants. */
@@ -40,6 +85,8 @@ interface CameraPointer { x: number; y: number; startX: number; startY: number; 
 /** Draws snapshots only. Rust owns every position, velocity, and biological state. */
 export class Renderer {
   private readonly context: CanvasRenderingContext2D;
+  private readonly gpu: GpuWorld | null;
+  private backdropRevision = -1;
   private readonly camera = new WorldCamera();
   private readonly visibility = new PeriodicVisibility();
   private readonly input = new AbortController();
@@ -78,7 +125,7 @@ export class Renderer {
   private resizeVersion = 0;
   private renderedResize = -1;
 
-  constructor(private readonly canvas: HTMLCanvasElement, private readonly drags?: DragHandlers) {
+  constructor(private readonly canvas: HTMLCanvasElement, private readonly drags?: DragHandlers, surface: 'gpu' | '2d' = '2d') {
     const context = canvas.getContext('2d', { alpha: false });
     if (!context) throw new Error('This browser does not support the 2D simulation view.');
     this.context = context;
@@ -86,6 +133,12 @@ export class Renderer {
     this.originalTouchAction = canvas.style.touchAction;
     this.originalCursor = canvas.style.cursor;
     canvas.style.touchAction = 'none';
+    this.gpu = surface === 'gpu' ? GpuWorld.attach(canvas, genomeColor, () => {
+      this.canvas.dataset.renderBackend = this.gpu?.ready ? 'webgl2' : 'canvas2d';
+      this.resizeVersion++;
+      this.requestRedraw();
+    }) : null;
+    canvas.dataset.renderBackend = this.gpu?.ready ? 'webgl2' : 'canvas2d';
     this.bindCameraInput();
     this.observer = new this.renderWindow.ResizeObserver(() => this.resize());
     this.observer.observe(canvas);
@@ -113,6 +166,7 @@ export class Renderer {
     const height = Math.max(1, Math.round(this.cssHeight * this.pixelRatio));
     if (this.canvas.width !== width) this.canvas.width = width;
     if (this.canvas.height !== height) this.canvas.height = height;
+    this.gpu?.resize(width, height);
     this.camera.setViewport(this.cssWidth, this.cssHeight);
     this.updateTransform();
     this.requestRedraw();
@@ -305,14 +359,18 @@ export class Renderer {
   pickFood(world: RenderWorldSnapshot, clientX: number, clientY: number): Food | null {
     const point = this.toWorld(clientX,clientY);
     if (!point) return null;
-    let nearest: Food | null = null, best = (2.5 + 6 / this.scale) ** 2;
-    for (const food of world.food) {
+    let nearest = -1, best = (2.5 + 6 / this.scale) ** 2;
+    const particles = world.food;
+    const row: Food = { x: 0, y: 0, energy: 0, nutrients: 0, kind: 0, ligandFraction: 0 };
+    for (let index = 0; index < particles.length; index++) {
+      const food = Array.isArray(particles) ? particles[index] : particles.read(index, row);
       const rawX = Math.abs(food.x-point.x), rawY = Math.abs(food.y-point.y);
       const dx = Math.min(rawX,world.width-rawX), dy = Math.min(rawY,world.height-rawY);
       const distance = dx*dx + dy*dy;
-      if (distance < best) { nearest = food; best = distance; }
+      if (distance < best) { nearest = index; best = distance; }
     }
-    return nearest;
+    if (nearest < 0) return null;
+    return Array.isArray(particles) ? particles[nearest] : particles.read(nearest, row);
   }
 
   pickTarget(world: RenderWorldSnapshot, x:number, y:number, preferEnvironment:boolean): CanvasTarget | null {
@@ -366,6 +424,7 @@ export class Renderer {
       this.worldWidth = world.width;
       this.worldHeight = world.height;
       this.background = null;
+      this.resizeVersion++;
       this.camera.setWorld(world.width, world.height);
       this.updateTransform();
     }
@@ -375,92 +434,61 @@ export class Renderer {
       && this.lastOptions === optionsKey && this.renderedResize === this.resizeVersion) return;
     this.lastWorld = world; this.lastSelected = selectedId; this.lastDetails = details; this.lastBody = body;
     this.lastOptions = optionsKey; this.renderOptions = { ...options }; this.renderedResize = this.resizeVersion;
-    const context = this.context;
-    context.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0);
-    context.globalAlpha = 1;
-    context.fillStyle = '#080f12';
-    context.fillRect(0, 0, this.cssWidth, this.cssHeight);
-    context.save();
-    context.translate(this.offsetX, this.offsetY);
-    context.scale(this.scale, this.scale);
-    context.beginPath();
-    context.rect(0, 0, this.worldWidth, this.worldHeight);
-    context.clip();
-    this.drawBackground();
+    const gpu = this.gpu?.ready ? this.gpu : null;
     const overlay = options.overlay ?? 'none';
-    if (overlay !== 'none') this.drawEnvironment(world.environment, overlay);
-
-    if (world.tick < this.lastTick) this.trails.clear();
-    if (options.trails) {
-      if (world.tick !== this.lastTick) this.recordTrails(world);
-      this.drawTrails(world);
-    } else {
-      this.trails.clear();
-    }
+    const selected = selectedId === null ? undefined : world.cells.find(cell => cell.id === selectedId);
+    const inspected = selected && details?.id === selected.id && options.sensors !== false ? details : null;
+    if (!options.trails || world.tick < this.lastTick) this.trails.clear();
+    if (options.trails && world.tick !== this.lastTick) this.recordTrails(world);
     this.lastTick = world.tick;
 
-    const selected = selectedId === null ? undefined : world.cells.find((cell) => cell.id === selectedId);
-    if (selected && details?.id === selected.id && options.sensors !== false) {
-      const count = this.visibility.collect(selected.x, selected.y, selected.radius + 16);
-      for (let image = 0; image < count; image += 2) {
-        this.drawBodyDetails(details, this.visibility.points[image], this.visibility.points[image + 1]);
-      }
-    }
-
-    // Three batched material paths keep large particle populations cheap to draw.
-    const organicPaths = [new Path2D(),new Path2D(),new Path2D()];
-    const organicHalos = [new Path2D(),new Path2D(),new Path2D()];
-    const ligandRings = new Path2D();
-    for (const food of world.food) {
-      const count = this.visibility.collect(food.x, food.y, 6);
-      if (!count) continue;
-      // Area tracks remaining chemical energy up to one freshly supplied packet.
-      const fullness = Math.sqrt(clamp(food.energy / 24, 0, 1));
-      const radius = 0.25 + (food.kind === 1 ? 2.25 : 1.65) * fullness;
-      const haloRadius = 0.5 + 4.5 * fullness;
-      const path = organicPaths[food.kind], halo = organicHalos[food.kind];
-      for (let image = 0; image < count; image += 2) {
-        const x = this.visibility.points[image], y = this.visibility.points[image + 1];
-        if (food.ligandFraction > 0) {
-          const ringRadius = radius + 0.65 + 1.5 * food.ligandFraction;
-          ligandRings.moveTo(x + ringRadius,y);
-          ligandRings.arc(x,y,ringRadius,0,Math.PI * 2);
-        }
-        halo.moveTo(x + haloRadius,y); halo.arc(x,y,haloRadius,0,Math.PI * 2);
-        if (food.kind === 1) {
-          path.moveTo(x,y-radius); path.lineTo(x+radius,y);
-          path.lineTo(x,y+radius); path.lineTo(x-radius,y); path.closePath();
-        } else if (food.kind === 2) {
-          path.rect(x-radius*0.7,y-radius*0.7,radius*1.4,radius*1.4);
-        } else {
-          path.moveTo(x+radius,y); path.arc(x,y,radius,0,Math.PI * 2);
+    // A static field can stay on its own composited layer while the entities move.
+    const staticBackdrop = gpu && overlay === 'none' && !options.trails && !inspected;
+    const base = this.context;
+    if (!staticBackdrop || this.backdropRevision !== this.resizeVersion) {
+      base.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0);
+      base.globalAlpha = 1;
+      base.fillStyle = '#080f12';
+      base.fillRect(0, 0, this.cssWidth, this.cssHeight);
+      this.beginWorldLayer(base);
+      this.drawBackground();
+      if (overlay !== 'none') this.drawEnvironment(world.environment, overlay);
+      if (options.trails) this.drawTrails(world);
+      if (inspected && selected) {
+        const count = this.visibility.collect(selected.x, selected.y, selected.radius + 16);
+        for (let image = 0; image < count; image += 2) {
+          this.drawBodyDetails(inspected, this.visibility.points[image], this.visibility.points[image + 1]);
         }
       }
+      // The single-canvas path keeps this clip through the entity and annotation passes.
+      if (gpu) base.restore();
+      this.backdropRevision = staticBackdrop ? this.resizeVersion : -1;
     }
-    const organicColors = ['rgba(237,198,108,0.86)','rgba(225,137,122,0.9)','rgba(158,151,130,0.72)'];
-    const haloColors = ['rgba(237,198,108,0.07)','rgba(225,137,122,0.08)','rgba(158,151,130,0.035)'];
-    for (let kind=0;kind<3;kind++) {
-      context.fillStyle=haloColors[kind]; context.fill(organicHalos[kind]);
-      context.fillStyle=organicColors[kind]; context.fill(organicPaths[kind]);
-    }
-    context.strokeStyle = 'rgba(191,155,234,0.72)';
-    context.lineWidth = 0.6;
-    context.stroke(ligandRings);
 
-    for (const cell of world.cells) {
-      const margin = Math.max(cell.radius * 2.4 + 5, cell.id === selectedId ? cell.radius + 8 / this.scale : 0);
-      const count = this.visibility.collect(cell.x, cell.y, margin);
-      for (let image = 0; image < count; image += 2) {
-        this.drawCell(cell, this.visibility.points[image], this.visibility.points[image + 1], cell.id === selectedId);
+    const context = gpu?.annotations ?? base;
+    if (gpu) {
+      gpu.draw(world, selectedId, options.colonyActivity !== false, this.visibility,
+        this.scale, this.offsetX, this.offsetY, this.pixelRatio);
+      context.resetTransform();
+      context.clearRect(0, 0, context.canvas.width, context.canvas.height);
+      this.beginWorldLayer(context);
+    } else {
+      this.drawParticles(world);
+      for (const cell of world.cells) {
+        const margin = Math.max(cell.radius * 2.4 + 5, cell.id === selectedId ? cell.radius + 8 / this.scale : 0);
+        const count = this.visibility.collect(cell.x, cell.y, margin);
+        for (let image = 0; image < count; image += 2) {
+          this.drawCell(cell, this.visibility.points[image], this.visibility.points[image + 1], cell.id === selectedId);
+        }
       }
     }
-    if (options.colonyActivity !== false && world.bonds.length) this.drawBonds(world);
+    if (options.colonyActivity !== false && world.bonds.length) this.drawBonds(world, context);
     if (selected && details?.id===selected.id && body?.cellId===selected.id && body.cellular && options.sensors!==false) {
       const count = this.visibility.collect(selected.x,selected.y,selected.radius+32/this.scale);
-      for (let image = 0; image < count; image += 2) this.drawCellularDetails(details,body,this.visibility.points[image],this.visibility.points[image + 1]);
+      for (let image = 0; image < count; image += 2) this.drawCellularDetails(details,body,this.visibility.points[image],this.visibility.points[image + 1],context);
     }
-    this.drawBarriers(world.environment.barriers ?? []);
-    this.drawSources(world.environment.sources, overlay);
+    this.drawBarriers(world.environment.barriers ?? [], context);
+    this.drawSources(world.environment.sources, overlay, context);
     const drag = this.drag;
     if (drag?.active && drag.target && drag.item.kind === 'cell') {
       const cell = drag.item.object;
@@ -473,6 +501,74 @@ export class Renderer {
       context.restore();
     }
     context.restore();
+  }
+
+  private beginWorldLayer(context: CanvasRenderingContext2D): void {
+    context.save();
+    const scale = this.scale * this.pixelRatio;
+    context.setTransform(scale, 0, 0, scale, this.offsetX * this.pixelRatio, this.offsetY * this.pixelRatio);
+    context.beginPath();
+    context.rect(0, 0, this.worldWidth, this.worldHeight);
+    context.clip();
+  }
+
+  private drawParticles(world: RenderWorldSnapshot): void {
+    const particles = world.food;
+    if (!particles.length) return;
+    // Keep small and zoomed-in views on one compound path per material.
+    const visibleFraction = Math.min(1, this.cssWidth / (this.scale * world.width))
+      * Math.min(1, this.cssHeight / (this.scale * world.height));
+    const single = particles.length * visibleFraction < 3072 ? new ParticlePaths() : null;
+    const tiles: ParticlePaths[] = [];
+    const tilePixels = PARTICLE_TILE_PIXELS, pixelsPerUnit = this.pixelRatio * this.scale;
+    const offsetX = this.offsetX * this.pixelRatio, offsetY = this.offsetY * this.pixelRatio;
+    const columns = Math.ceil(this.canvas.width / tilePixels), rows = Math.ceil(this.canvas.height / tilePixels);
+    const row: Food = { x: 0, y: 0, energy: 0, nutrients: 0, kind: 0, ligandFraction: 0 };
+    for (let index = 0; index < particles.length; index++) {
+      const food = Array.isArray(particles) ? particles[index] : particles.read(index, row);
+      const count = this.visibility.collect(food.x, food.y, 6);
+      if (!count) continue;
+      const fullness = Math.sqrt(clamp(food.energy / 24, 0, 1));
+      const radius = 0.25 + (food.kind === 1 ? 2.25 : 1.65) * fullness;
+      const halo = 0.5 + 4.5 * fullness;
+      const ring = food.ligandFraction > 0 ? radius + 0.65 + 1.5 * food.ligandFraction : 0;
+      for (let image = 0; image < count; image += 2) {
+        const x = this.visibility.points[image], y = this.visibility.points[image + 1];
+        if (single) {
+          single.add(food.kind, x, y, radius, halo, ring);
+          continue;
+        }
+        // Duplicate a crossing shape in both tiles. Integer device-pixel clips
+        // composite each pixel once, including translucent overlapping halos.
+        const px = x * pixelsPerUnit + offsetX, py = y * pixelsPerUnit + offsetY;
+        const margin = Math.max(halo, ring + 0.3) * pixelsPerUnit + 1;
+        const left = Math.max(0, Math.floor((px - margin) / tilePixels));
+        const right = Math.min(columns - 1, Math.floor((px + margin) / tilePixels));
+        const top = Math.max(0, Math.floor((py - margin) / tilePixels));
+        const bottom = Math.min(rows - 1, Math.floor((py + margin) / tilePixels));
+        for (let tileY = top; tileY <= bottom; tileY++) {
+          for (let tileX = left; tileX <= right; tileX++) {
+            const tile = tiles[tileY * columns + tileX] ??= new ParticlePaths();
+            tile.add(food.kind, x, y, radius, halo, ring);
+          }
+        }
+      }
+    }
+    const context = this.context;
+    if (single) { single.draw(context); return; }
+    const transform = context.getTransform();
+    for (let index = 0; index < tiles.length; index++) {
+      const tile = tiles[index];
+      if (!tile) continue;
+      context.save();
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      context.beginPath();
+      context.rect((index % columns) * tilePixels, Math.floor(index / columns) * tilePixels, tilePixels, tilePixels);
+      context.clip();
+      context.setTransform(transform);
+      tile.draw(context);
+      context.restore();
+    }
   }
 
   private drawEnvironment(environment: EnvironmentSnapshot, mode: FieldOverlay): void {
@@ -551,8 +647,7 @@ export class Renderer {
     context.restore();
   }
 
-  private drawSources(sources: EnvironmentSource[], overlay: FieldOverlay): void {
-    const context = this.context;
+  private drawSources(sources: EnvironmentSource[], overlay: FieldOverlay, context: CanvasRenderingContext2D): void {
     context.save();
     for (const actual of sources) {
       const moving = this.drag?.active && this.drag.item.kind === 'source' && this.drag.item.object.id === actual.id && this.drag.target;
@@ -582,19 +677,19 @@ export class Renderer {
           context.fill(); context.stroke(); context.setLineDash([]);
           if (directional) {
             const sign = source.strength < 0 ? -1 : 1;
-            this.drawArrow(-Math.min(source.length * 0.3, 35 / this.scale) * sign, 0,
+            this.drawArrow(context, -Math.min(source.length * 0.3, 35 / this.scale) * sign, 0,
               Math.min(source.length * 0.3, 35 / this.scale) * sign, 0, color, selected ? 0.85 : 0.6);
           } else if (source.kind === 7) {
             const inward = source.strength < 0;
             for (let index = 0; index < 4; index++) {
               const angle = index * Math.PI / 2, start = source.radius * (inward ? 0.72 : 0.36), end = source.radius * (inward ? 0.36 : 0.72);
-              this.drawArrow(Math.cos(angle) * start, Math.sin(angle) * start, Math.cos(angle) * end, Math.sin(angle) * end, color, 0.6);
+              this.drawArrow(context, Math.cos(angle) * start, Math.sin(angle) * start, Math.cos(angle) * end, Math.sin(angle) * end, color, 0.6);
             }
           } else if (source.kind === 2 && source.radius * this.scale > 24) {
             const radius = source.radius * 0.5, sign = source.strength < 0 ? -1 : 1;
             context.beginPath(); context.arc(0, 0, radius, 0, sign * Math.PI * 1.4, sign < 0); context.stroke();
             const end = sign * Math.PI * 1.4;
-            this.drawArrow(Math.cos(end - sign * 0.16) * radius, Math.sin(end - sign * 0.16) * radius,
+            this.drawArrow(context, Math.cos(end - sign * 0.16) * radius, Math.sin(end - sign * 0.16) * radius,
               Math.cos(end) * radius, Math.sin(end) * radius, color, 0.65);
           }
           context.restore();
@@ -621,8 +716,8 @@ export class Renderer {
     context.restore();
   }
 
-  private drawArrow(fromX: number, fromY: number, toX: number, toY: number, color: string, alpha: number): void {
-    const context = this.context, distance = Math.hypot(toX - fromX, toY - fromY);
+  private drawArrow(context: CanvasRenderingContext2D, fromX: number, fromY: number, toX: number, toY: number, color: string, alpha: number): void {
+    const distance = Math.hypot(toX - fromX, toY - fromY);
     if (distance < 1e-6) return;
     const dx = (toX - fromX) / distance, dy = (toY - fromY) / distance;
     const head = Math.min(5 / this.scale, distance * 0.4);
@@ -633,8 +728,7 @@ export class Renderer {
     context.stroke();
   }
 
-  private drawBarriers(barriers: EnvironmentBarrier[]): void {
-    const context = this.context;
+  private drawBarriers(barriers: EnvironmentBarrier[], context: CanvasRenderingContext2D): void {
     context.save();
     for (const actual of barriers) {
       const moving = this.drag?.active && this.drag.item.kind === 'barrier' && this.drag.item.object.id === actual.id && this.drag.target;
@@ -862,8 +956,7 @@ export class Renderer {
   }
 
   /** Paint the junction across the two surfaces, including both images at a world seam. */
-  private drawBonds(world:RenderWorldSnapshot):void {
-    const ctx=this.context;
+  private drawBonds(world:RenderWorldSnapshot, ctx:CanvasRenderingContext2D):void {
     ctx.save();
     ctx.lineCap='round';
     for (const {kind,color,width} of BOND_STYLES) {
@@ -912,10 +1005,9 @@ export class Renderer {
   }
 
   /** Physical attachment and force direction from the inspected body, with arrow length showing activity. */
-  private drawCellularDetails(cell:Cell,body:BodyInspection,x:number,y:number):void {
+  private drawCellularDetails(cell:Cell,body:BodyInspection,x:number,y:number,context:CanvasRenderingContext2D):void {
     const motors = body.cellular?.assemblies.filter(assembly=>(assembly.kind==='flagellum' || assembly.kind==='propel()') && assembly.mass>0) ?? [];
     if (!motors.length) return;
-    const context = this.context;
     context.save(); context.translate(x,y); context.rotate(cell.angle);
     for (const motor of motors) {
       const px = Math.cos(motor.at)*cell.radius, py = Math.sin(motor.at)*cell.radius;
@@ -985,6 +1077,8 @@ export class Renderer {
   }
 
   dispose(): void {
+    this.gpu?.dispose();
+    delete this.canvas.dataset.renderBackend;
     this.observer.disconnect();
     this.input.abort();
     this.renderWindow.cancelAnimationFrame(this.cameraFrame);

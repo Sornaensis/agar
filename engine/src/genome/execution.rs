@@ -63,6 +63,21 @@ pub(super) struct ExecutionPlan {
     pub(super) allocated_bytes: usize,
 }
 
+impl Program {
+    pub(crate) fn reads_organelle_families(&self) -> bool {
+        const MASK: [u64; SENSOR_WORDS] = {
+            let mut mask = [0; SENSOR_WORDS];
+            let mut n = Sensor::OrganelleCoreCount as usize;
+            while n <= Sensor::OrganelleOpticalBuilding as usize {
+                mask[n / 64] |= 1 << (n % 64);
+                n += 1;
+            }
+            mask
+        };
+        self.execution.sensor_reads.iter().zip(MASK).any(|(reads, mask)| reads & mask != 0)
+    }
+}
+
 impl ExecutionPlan {
     pub(super) fn compile(
         nodes: &[Node],

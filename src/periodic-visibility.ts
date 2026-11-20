@@ -11,6 +11,13 @@ export class PeriodicVisibility {
   collect(x: number, y: number, margin: number): number {
     const left = this.left - margin, right = this.right + margin;
     const top = this.top - margin, bottom = this.bottom + margin;
+    // Most entities can only have their central image in the habitat.
+    if (x >= margin && x <= this.width - margin && y >= margin && y <= this.height - margin) {
+      if (x < left || x > right || y < top || y > bottom) return 0;
+      this.points[0] = x;
+      this.points[1] = y;
+      return 2;
+    }
     let count = 0;
     // Preserve the original painter order: center, positive seam, negative seam.
     for (let ix = 0; ix < 3; ix++) {

@@ -1,0 +1,424 @@
+{
+  "runtime": "v24.22.3",
+  "runtimeFlags": [
+    "--no-liftoff"
+  ],
+  "platform": "linux",
+  "architecture": "x64",
+  "abi": 24,
+  "resourceArithmetic": "restored",
+  "seed": null,
+  "measuredTicks": 40,
+  "samples": 7,
+  "scratchWarmTicks": 5,
+  "warmupCheckInterval": 120,
+  "exportCallsPerSample": 30,
+  "note": "Release WASM in Node/V8. Tick and Rust export timings exclude JS hydration/copies, worker transfer/scheduling, main-thread rendering and setup. Medians of identical trajectories with alternating engine order.",
+  "tissuePreparation": "Scattered ordinary founders start in anoxic water with a sealed surface. Their ATP is withdrawn to one ATP count before one upkeep tick per cohort. The scenario surface boundary is restored before seeding resident populations and warming the world.",
+  "equivalence": "Canonical checkpoints and legacy world/environment buffers must match exactly. Compact projections match those legacy values; only metrics header[13] (genomeBytes) is normalized because derived execution-plan storage is now counted. The ABI 24 pair additionally compares full typed render and ecology buffers, and all counted mineral, carbon, oxygen and energy ledgers.",
+  "engines": [
+    {
+      "name": "baseline",
+      "sha256": "c3d496d7c9ef7ed3c33c24d7a8a5a303f47be16a86a9cceb27125cb7f58c30f2"
+    },
+    {
+      "name": "optimized",
+      "sha256": "dfda670568f3c6440544da61de01412dbf2574dfc3e604c12958669a83f46869"
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "restored-world",
+      "width": 800,
+      "height": 520,
+      "initialPopulation": 602,
+      "startingTick": 36840,
+      "startingCheckpointSha256": "2c2d76a2d14891b25f58bfa7f556ba5181cfcfd4d9af0581524f866634b84619",
+      "synthetic": false,
+      "warmupTicks": 0,
+      "initialParticles": 5630,
+      "tissueTarget": 0,
+      "donorFounders": 0,
+      "timedStartParticles": 5629,
+      "finalPopulation": 601,
+      "finalParticles": 5634,
+      "births": 855,
+      "deaths": 370,
+      "mutations": 92,
+      "checkpointIdentical": true,
+      "legacyBuffersIdentical": true,
+      "compactProjectionsValidated": true,
+      "checkpointBytes": 6521848,
+      "checkpointSha256": "2aa2aceb28da8dc97f538563033fafc637f0fd1a2bd651fb7a40b933c0fcfe02",
+      "legacyWorldSha256": "91bc9fbca7a004fc55d1baa484f966a0e898db23ecf6365784e3748d72227c39",
+      "environmentSha256": "3ab25508af153110e10052ee2aeddae1b94726343b0f3f46a45f7420e42c7078",
+      "measurements": [
+        {
+          "engine": "baseline",
+          "tickMs": 55.36535667500002,
+          "tickSamplesMs": [
+            55.36535667500002,
+            56.11431022500001,
+            52.02058532500005,
+            47.67690210000001,
+            57.081254575000095,
+            49.9349206750001,
+            71.02931124999995
+          ],
+          "cpuTickMs": 55.380075,
+          "cpuTickSamplesMs": [
+            55.380075,
+            56.068525,
+            52.035675,
+            47.665275,
+            57.084925,
+            49.945825,
+            71.007475
+          ],
+          "snapshotExportMs": 2.0132373666667265,
+          "exportMs": {
+            "legacyCombined": 2.0132373666667265,
+            "legacyWorld": 1.8300547666668232,
+            "environment": 0.028187966666640325,
+            "compactRender": 0.7639279999998204,
+            "metrics": 0.5988459666667041,
+            "summary": 0.00048066666665060135,
+            "selectedCell": 0.001303366666737323,
+            "environmentMetadata": 0.0001288666666368954
+          },
+          "exportSamplesMs": [
+            {
+              "legacyCombined": 1.9162544000000101,
+              "legacyWorld": 1.767028433333447,
+              "environment": 0.0278722666665999,
+              "compactRender": 0.6943704999999075,
+              "metrics": 0.8204896333332726,
+              "summary": 0.0017651333332954285,
+              "selectedCell": 0.002519633333334544,
+              "environmentMetadata": 0.0023496666666081487
+            },
+            {
+              "legacyCombined": 2.1959045666666497,
+              "legacyWorld": 1.7239516666665926,
+              "environment": 0.027860133333403307,
+              "compactRender": 0.6456592333333295,
+              "metrics": 0.518697733333344,
+              "summary": 0.00048066666665060135,
+              "selectedCell": 0.001300666666672138,
+              "environmentMetadata": 0.00012269999994411288
+            },
+            {
+              "legacyCombined": 2.0132373666667265,
+              "legacyWorld": 1.6083596333333845,
+              "environment": 0.06769903333333786,
+              "compactRender": 0.7773113333333943,
+              "metrics": 0.5984054999999595,
+              "summary": 0.0004642666666768491,
+              "selectedCell": 0.0012695666666938147,
+              "environmentMetadata": 0.00012686666668741963
+            },
+            {
+              "legacyCombined": 1.7321602333334642,
+              "legacyWorld": 1.8300547666668232,
+              "environment": 0.027133899999898858,
+              "compactRender": 0.6473122000000634,
+              "metrics": 0.5341883333331983,
+              "summary": 0.0012911000000409938,
+              "selectedCell": 0.002310133333473156,
+              "environmentMetadata": 0.0002052333332054938
+            },
+            {
+              "legacyCombined": 1.8087835333334321,
+              "legacyWorld": 1.8727138333333035,
+              "environment": 0.05169066666664245,
+              "compactRender": 0.7639279999998204,
+              "metrics": 0.6341635666666359,
+              "summary": 0.0004782666668082432,
+              "selectedCell": 0.0013147666664735879,
+              "environmentMetadata": 0.00012626666672683012
+            },
+            {
+              "legacyCombined": 2.2579983666667736,
+              "legacyWorld": 2.173020300000159,
+              "environment": 0.028187966666640325,
+              "compactRender": 0.8416427999999239,
+              "metrics": 0.5988459666667041,
+              "summary": 0.00048176666678045876,
+              "selectedCell": 0.001303366666737323,
+              "environmentMetadata": 0.0001288666666368954
+            },
+            {
+              "legacyCombined": 3.8698166666666416,
+              "legacyWorld": 4.856595566666753,
+              "environment": 0.08372163333333446,
+              "compactRender": 1.9568815333332168,
+              "metrics": 1.6849777333331681,
+              "summary": 0.00047006666670010115,
+              "selectedCell": 0.0012889666667130464,
+              "environmentMetadata": 0.00013023333352369567
+            }
+          ],
+          "payloadBytes": {
+            "legacyWorld": 1068656,
+            "environment": 29580,
+            "compactRender": 373704,
+            "metrics": 1800,
+            "selectedCell": 1328,
+            "summary": 56,
+            "environmentMetadata": 460
+          },
+          "genomeBytes": 6822752,
+          "wasmMemoryBytes": 66977792
+        },
+        {
+          "engine": "optimized",
+          "tickMs": 25.967268524999962,
+          "tickSamplesMs": [
+            25.252184000000035,
+            29.36734565000006,
+            25.413862824999978,
+            25.967268524999962,
+            24.987958274999983,
+            62.57263590000002,
+            108.18096257500001
+          ],
+          "cpuTickMs": 25.9694,
+          "cpuTickSamplesMs": [
+            25.25495,
+            29.37975,
+            25.42,
+            25.9694,
+            24.996725,
+            62.581975,
+            108.209575
+          ],
+          "snapshotExportMs": 2.038069133333435,
+          "exportMs": {
+            "legacyCombined": 2.038069133333435,
+            "legacyWorld": 1.7170802333333994,
+            "environment": 0.028250800000023446,
+            "compactRender": 0.7338872333333711,
+            "metrics": 0.5701630666666461,
+            "summary": 0.00047586666672335315,
+            "selectedCell": 0.0012923999999960264,
+            "environmentMetadata": 0.00013166666685719973
+          },
+          "exportSamplesMs": [
+            {
+              "legacyCombined": 2.325932166666583,
+              "legacyWorld": 1.7170802333333994,
+              "environment": 0.028250800000023446,
+              "compactRender": 0.6878881666666227,
+              "metrics": 0.5281423333333806,
+              "summary": 0.0005236333333111057,
+              "selectedCell": 0.0037256333334274435,
+              "environmentMetadata": 0.0002655666665911364
+            },
+            {
+              "legacyCombined": 1.7886575333332682,
+              "legacyWorld": 1.6831876666667085,
+              "environment": 0.026301933333403818,
+              "compactRender": 0.6165485666667033,
+              "metrics": 0.5701630666666461,
+              "summary": 0.00047513333326302626,
+              "selectedCell": 0.0012923999999960264,
+              "environmentMetadata": 0.0001225666666869074
+            },
+            {
+              "legacyCombined": 2.038069133333435,
+              "legacyWorld": 2.1608418333333246,
+              "environment": 0.03152216666664268,
+              "compactRender": 0.7338872333333711,
+              "metrics": 0.5505835000001146,
+              "summary": 0.00047586666672335315,
+              "selectedCell": 0.013078766666634085,
+              "environmentMetadata": 0.00013786666665206818
+            },
+            {
+              "legacyCombined": 1.8984023333333122,
+              "legacyWorld": 1.6611913333332875,
+              "environment": 0.02698103333338319,
+              "compactRender": 0.812387099999978,
+              "metrics": 0.6214624666667078,
+              "summary": 0.00048303333339087356,
+              "selectedCell": 0.001258366666782725,
+              "environmentMetadata": 0.0001277999999729218
+            },
+            {
+              "legacyCombined": 1.7556931666668485,
+              "legacyWorld": 1.4821835666666934,
+              "environment": 0.032821300000068734,
+              "compactRender": 0.6389814999999847,
+              "metrics": 0.5526460666667845,
+              "summary": 0.0004924666665222806,
+              "selectedCell": 0.00132296666658173,
+              "environmentMetadata": 0.00018076666674460284
+            },
+            {
+              "legacyCombined": 5.3562196999999285,
+              "legacyWorld": 4.5025262666664885,
+              "environment": 0.02395956666659913,
+              "compactRender": 2.243596466666592,
+              "metrics": 2.140495000000131,
+              "summary": 0.0004734666666384631,
+              "selectedCell": 0.0012838666666842376,
+              "environmentMetadata": 0.00013166666685719973
+            },
+            {
+              "legacyCombined": 7.769894400000097,
+              "legacyWorld": 8.857574633333327,
+              "environment": 0.13916883333343624,
+              "compactRender": 3.2938603666666797,
+              "metrics": 2.595866366666693,
+              "summary": 0.0004709666667622514,
+              "selectedCell": 0.00121119999991303,
+              "environmentMetadata": 0.00012560000007700485
+            }
+          ],
+          "payloadBytes": {
+            "legacyWorld": 1068656,
+            "environment": 29580,
+            "compactRender": 373704,
+            "metrics": 1800,
+            "selectedCell": 1328,
+            "summary": 56,
+            "environmentMetadata": 460
+          },
+          "genomeBytes": 6822752,
+          "wasmMemoryBytes": 73793536
+        }
+      ],
+      "speedup": 2.1321209283793974,
+      "tickTimeReductionPercent": 53.098345094333396
+    }
+  ],
+  "basinReplay": {
+    "scenario": "builtin:simulation:springwater-basin",
+    "seed": 7,
+    "countChemistry": true,
+    "founders": 116,
+    "ticksPerSimulationSecond": 30,
+    "mutationRate": 0.1,
+    "cohortSetup": "Ordinary built-in habitat, seed and founder list. Both fresh releases agreed on the cell and particle census at every minute through 960 simulated seconds. The original independent run stopped there. The updated release continued to 1200 seconds.",
+    "minuteCensuses": [
+      {
+        "seconds": 60,
+        "cells": 114,
+        "particles": 728
+      },
+      {
+        "seconds": 120,
+        "cells": 198,
+        "particles": 1610
+      },
+      {
+        "seconds": 180,
+        "cells": 241,
+        "particles": 2684
+      },
+      {
+        "seconds": 240,
+        "cells": 279,
+        "particles": 3503
+      },
+      {
+        "seconds": 300,
+        "cells": 307,
+        "particles": 4154
+      },
+      {
+        "seconds": 360,
+        "cells": 332,
+        "particles": 4646
+      },
+      {
+        "seconds": 420,
+        "cells": 366,
+        "particles": 5295
+      },
+      {
+        "seconds": 480,
+        "cells": 381,
+        "particles": 5645
+      },
+      {
+        "seconds": 540,
+        "cells": 403,
+        "particles": 5858
+      },
+      {
+        "seconds": 600,
+        "cells": 427,
+        "particles": 5920
+      },
+      {
+        "seconds": 660,
+        "cells": 448,
+        "particles": 5873
+      },
+      {
+        "seconds": 720,
+        "cells": 465,
+        "particles": 5830
+      },
+      {
+        "seconds": 780,
+        "cells": 492,
+        "particles": 5705
+      },
+      {
+        "seconds": 840,
+        "cells": 500,
+        "particles": 5833
+      },
+      {
+        "seconds": 900,
+        "cells": 526,
+        "particles": 5855
+      },
+      {
+        "seconds": 960,
+        "cells": 536,
+        "particles": 5657
+      },
+      {
+        "seconds": 1020,
+        "cells": 543,
+        "particles": 5732
+      },
+      {
+        "seconds": 1080,
+        "cells": 558,
+        "particles": 5684
+      },
+      {
+        "seconds": 1140,
+        "cells": 580,
+        "particles": 5590
+      },
+      {
+        "seconds": 1200,
+        "cells": 593,
+        "particles": 5668
+      }
+    ],
+    "matchedIndependentCensusThroughSeconds": 960,
+    "checkpoint20Minutes": {
+      "cells": 593,
+      "particles": 5668,
+      "bytes": 6496267,
+      "sha256": "27a1c276123f4f0342814b7a421aea3d88de9060f67484b2f43d55ad152f1359"
+    },
+    "matchedContinuation": {
+      "startSeconds": 1200,
+      "endSeconds": 1228,
+      "ticks": 840,
+      "cells": 602,
+      "particles": 5630,
+      "bothCheckpointSha256": "2c2d76a2d14891b25f58bfa7f556ba5181cfcfd4d9af0581524f866634b84619",
+      "bytes": 6525599
+    },
+    "replayCommand": "node --no-liftoff scripts/mature-basin-checkpoint.mjs /tmp/basin.bin 1228",
+    "benchmarkCommand": "npm run bench:simulation -- --checkpoint /tmp/basin.bin --baseline /path/to/previous.wasm --samples 7 --ticks 40"
+  }
+}

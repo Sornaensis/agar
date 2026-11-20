@@ -149,22 +149,26 @@ impl World {
                     } else { 0.9 };
                     let mut selected: Option<(Observation, f64, Option<usize>)> = None;
                     let mut consider = |mut observation: Observation, target: Option<usize>| {
-                        let distance = observation.dx.hypot(observation.dy);
-                        let gap = distance - observation.radius;
+                        let extent = range + observation.radius;
+                        if observation.dx.abs() > extent + 1e-9 || observation.dy.abs() > extent + 1e-9 {
+                            return;
+                        }
                         let score;
                         if kind == MechanismKind::SenseContact {
+                            let gap = observation.dx.hypot(observation.dy) - observation.radius;
                             if gap > 0.9 { return; }
                             score = -gap;
                         } else {
-                            let angle = relative_angle(observation.dy.atan2(observation.dx)
-                                - cell.angle - mount_direction);
-                            if angle.abs() > PI * 0.5 || distance > range + observation.radius {
-                                return;
-                            }
                             // A receptor cannot see through the cell it is mounted on.
                             if observation.dx * outward[0] + observation.dy * outward[1] < -1e-9 {
                                 return;
                             }
+                            let distance = observation.dx.hypot(observation.dy);
+                            if distance > extent || selected.as_ref().is_some_and(|(_, best, _)|
+                                observation.contrast / (10.0 + distance) < *best) { return; }
+                            let angle = relative_angle(observation.dy.atan2(observation.dx)
+                                - cell.angle - mount_direction);
+                            if angle.abs() > PI * 0.5 { return; }
                             let illumination = self.environment.light_at(
                                 wrap(x + observation.dx, self.environment.width), wrap(y + observation.dy, self.environment.height)
                             ).clamp(0.0, 1.0);
@@ -192,7 +196,7 @@ impl World {
                             }, None);
                         }
                     }
-                    for other in cell_grid.nearby_radius(x, y, range + max_radius) {
+                    for other in cell_grid.nearby_bounds(x, y, range + max_radius) {
                         if other == index || !geometry.alive[other] { continue; }
                         let [ox, oy] = geometry.positions[other];
                         let [vx, vy] = geometry.velocities[other];
@@ -206,7 +210,7 @@ impl World {
                             resistance: 0.0,
                         }, Some(other));
                     }
-                    for particle in food_grid.nearby_radius(x, y, range + 3.5) {
+                    for particle in food_grid.nearby_bounds(x, y, range + 3.5) {
                         let food = &self.food[particle];
                         consider(Observation {
                             entity: (food.id << 1) | 1,

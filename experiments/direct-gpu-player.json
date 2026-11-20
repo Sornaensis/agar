@@ -1,0 +1,270 @@
+{
+  "scenario": "Springwater basin",
+  "seed": 7,
+  "checkpointAgeSeconds": 1228,
+  "checkpointPopulation": 602,
+  "checkpointParticles": 5630,
+  "checkpointSHA256": "2c2d76a2d14891b25f58bfa7f556ba5181cfcfd4d9af0581524f866634b84619",
+  "engineWasmSHA256": "dfda670568f3c6440544da61de01412dbf2574dfc3e604c12958669a83f46869",
+  "browser": "153.0.8010.0",
+  "wasmTier": "optimizing",
+  "warmupTicks": 60,
+  "speed": 10,
+  "viewport": [
+    1366,
+    900
+  ],
+  "devicePixelRatio": 1,
+  "graphics": "Headless Chromium with software WebGL2 (ANGLE SwiftShader).",
+  "frameMetric": "Distinct worker ticks drawn on the visible player canvas or submitted to its default WebGL framebuffer.",
+  "timing": "Ten seconds per sample after warmup. Fresh browser contexts with normal worker, canvas and autosave; A–B–B–A–A–B order.",
+  "bundles": {
+    "v8": {
+      "file": "index-DVuGO9kH.js",
+      "sha256": "4c3216f74572b535e47d557d62f2c276f8d42c328132f2d303e9d57129738e0d"
+    },
+    "final": {
+      "file": "index-BY7LIa3G.js",
+      "sha256": "5a945373877e6141da9850273a4136e148b7533cacaaccbc04af4bd89a105ef2"
+    }
+  },
+  "median": {
+    "canvas2d": {
+      "uniqueFramesPerSecond": 7.21,
+      "ticksPerSecond": 17.58
+    },
+    "webgl2": {
+      "uniqueFramesPerSecond": 3.623,
+      "ticksPerSecond": 6.854
+    }
+  },
+  "trials": [
+    {
+      "build": "v8",
+      "seconds": 10.03039999999851,
+      "backend": "canvas2d",
+      "device": null,
+      "startingPopulation": 601,
+      "startingParticles": 5635,
+      "ticksPerSecond": 13.060296698039904,
+      "uniqueFramesPerSecond": 4.586058382517829,
+      "gpuDrawsPerSecond": 0,
+      "publishedPerSecond": 4.586058382517829
+    },
+    {
+      "build": "final",
+      "seconds": 10.039,
+      "backend": "webgl2",
+      "device": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "startingPopulation": 601,
+      "startingParticles": 5636,
+      "ticksPerSecond": 13.447554537304512,
+      "uniqueFramesPerSecond": 5.47863333001295,
+      "gpuDrawsPerSecond": 60.56380117541588,
+      "publishedPerSecond": 5.47863333001295
+    },
+    {
+      "build": "final",
+      "seconds": 10.21370000000298,
+      "backend": "webgl2",
+      "device": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "startingPopulation": 601,
+      "startingParticles": 5633,
+      "ticksPerSecond": 6.853539853332247,
+      "uniqueFramesPerSecond": 3.622585351047045,
+      "gpuDrawsPerSecond": 40.72960827123164,
+      "publishedPerSecond": 3.622585351047045
+    },
+    {
+      "build": "v8",
+      "seconds": 10.02729999999702,
+      "backend": "canvas2d",
+      "device": null,
+      "startingPopulation": 601,
+      "startingParticles": 5635,
+      "ticksPerSecond": 22.9373809500133,
+      "uniqueFramesPerSecond": 7.978219460874191,
+      "gpuDrawsPerSecond": 0,
+      "publishedPerSecond": 8.07794720413512
+    },
+    {
+      "build": "v8",
+      "seconds": 10.125,
+      "backend": "canvas2d",
+      "device": null,
+      "startingPopulation": 601,
+      "startingParticles": 5635,
+      "ticksPerSecond": 17.580246913580247,
+      "uniqueFramesPerSecond": 7.209876543209877,
+      "gpuDrawsPerSecond": 0,
+      "publishedPerSecond": 7.209876543209877
+    },
+    {
+      "build": "final",
+      "seconds": 10.16959999999404,
+      "backend": "webgl2",
+      "device": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "startingPopulation": 601,
+      "startingParticles": 5635,
+      "ticksPerSecond": 6.194933920708476,
+      "uniqueFramesPerSecond": 3.0483008181263935,
+      "gpuDrawsPerSecond": 34.612964128402915,
+      "publishedPerSecond": 3.0483008181263935
+    }
+  ],
+  "shippingAutomatic": {
+    "file": "index-CPh_bGJU.js",
+    "sha256": "c5f42de31a10e2a78ff7fb032c4be3fdc71c72a4df978f6347d7762f10b486de",
+    "requestedRenderer": "auto",
+    "runs": [
+      {
+        "seconds": 10.16570000000298,
+        "backend": "canvas2d",
+        "device": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+        "startingPopulation": 601,
+        "startingParticles": 5635,
+        "ticksPerSecond": 20.264221844038246,
+        "uniqueFramesPerSecond": 6.49242059080837,
+        "gpuDrawsPerSecond": 0,
+        "publishedPerSecond": 6.49242059080837
+      },
+      {
+        "seconds": 10.20390000000596,
+        "backend": "canvas2d",
+        "device": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+        "startingPopulation": 601,
+        "startingParticles": 5635,
+        "ticksPerSecond": 15.778280853389974,
+        "uniqueFramesPerSecond": 5.68410117699763,
+        "gpuDrawsPerSecond": 0,
+        "publishedPerSecond": 5.68410117699763
+      }
+    ],
+    "median": {
+      "uniqueFramesPerSecond": 6.088,
+      "ticksPerSecond": 18.021
+    }
+  },
+  "automaticComparison": {
+    "runs": [
+      {
+        "build": "v8",
+        "seconds": 10.041,
+        "backend": "canvas2d",
+        "device": null,
+        "startingPopulation": 601,
+        "startingParticles": 5633,
+        "ticksPerSecond": 28.68240215118016,
+        "uniqueFramesPerSecond": 9.36161736878797,
+        "gpuDrawsPerSecond": 0,
+        "publishedPerSecond": 9.461209042924011
+      },
+      {
+        "build": "shipping",
+        "seconds": 10.16570000000298,
+        "backend": "canvas2d",
+        "device": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+        "startingPopulation": 601,
+        "startingParticles": 5635,
+        "ticksPerSecond": 20.264221844038246,
+        "uniqueFramesPerSecond": 6.49242059080837,
+        "gpuDrawsPerSecond": 0,
+        "publishedPerSecond": 6.49242059080837
+      },
+      {
+        "build": "shipping",
+        "seconds": 10.20390000000596,
+        "backend": "canvas2d",
+        "device": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+        "startingPopulation": 601,
+        "startingParticles": 5635,
+        "ticksPerSecond": 15.778280853389974,
+        "uniqueFramesPerSecond": 5.68410117699763,
+        "gpuDrawsPerSecond": 0,
+        "publishedPerSecond": 5.68410117699763
+      },
+      {
+        "build": "v8",
+        "seconds": 10.11169999999553,
+        "backend": "canvas2d",
+        "device": null,
+        "startingPopulation": 601,
+        "startingParticles": 5636,
+        "ticksPerSecond": 25.020520782866566,
+        "uniqueFramesPerSecond": 7.516045768766241,
+        "gpuDrawsPerSecond": 0,
+        "publishedPerSecond": 7.516045768766241
+      }
+    ],
+    "medians": {
+      "v8": {
+        "uniqueFramesPerSecond": 8.438831568777106,
+        "ticksPerSecond": 26.851461467023363,
+        "publishedPerSecond": 8.488627405845126,
+        "gpuDrawsPerSecond": 0.0
+      },
+      "shipping": {
+        "uniqueFramesPerSecond": 6.088260883903001,
+        "ticksPerSecond": 18.02125134871411,
+        "publishedPerSecond": 6.088260883903001,
+        "gpuDrawsPerSecond": 0.0
+      }
+    },
+    "order": [
+      "v8",
+      "shipping",
+      "shipping",
+      "v8"
+    ]
+  },
+  "softwareProbeComparison": [
+    {
+      "mode": "auto-1",
+      "seconds": 10.152,
+      "backend": "canvas2d",
+      "device": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "startingPopulation": 601,
+      "startingParticles": 5636,
+      "ticksPerSecond": 25.906225374310484,
+      "uniqueFramesPerSecond": 9.357762017336485,
+      "gpuDrawsPerSecond": 0,
+      "publishedPerSecond": 9.357762017336485
+    },
+    {
+      "mode": "bypass-1",
+      "seconds": 10.19020000000298,
+      "backend": "canvas2d",
+      "device": null,
+      "startingPopulation": 601,
+      "startingParticles": 5635,
+      "ticksPerSecond": 22.178171184072337,
+      "uniqueFramesPerSecond": 7.065612058642514,
+      "gpuDrawsPerSecond": 0,
+      "publishedPerSecond": 7.065612058642514
+    },
+    {
+      "mode": "bypass-2",
+      "seconds": 10.0025,
+      "backend": "canvas2d",
+      "device": null,
+      "startingPopulation": 601,
+      "startingParticles": 5634,
+      "ticksPerSecond": 27.893026743314174,
+      "uniqueFramesPerSecond": 7.7980504873781555,
+      "gpuDrawsPerSecond": 0,
+      "publishedPerSecond": 7.8980254936265935
+    },
+    {
+      "mode": "auto-2",
+      "seconds": 10.0725,
+      "backend": "canvas2d",
+      "device": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "startingPopulation": 601,
+      "startingParticles": 5635,
+      "ticksPerSecond": 23.13229089103996,
+      "uniqueFramesPerSecond": 9.43162074956565,
+      "gpuDrawsPerSecond": 0,
+      "publishedPerSecond": 9.530900967982129
+    }
+  ]
+}

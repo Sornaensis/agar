@@ -801,6 +801,25 @@ impl BindingCache {
             ingredients.extend(assembly.recipe.parts.iter().map(|p| stocks.get(&ProductIdentity::new(&p.product)).copied()));
         }
     }
+    /// A newly started assembly is made from this exact declaration. Its
+    /// selectors and product pools already have known indices, including
+    /// missing pools when the inherited stock table is full.
+    fn append_declared(&mut self, definition: usize, parts: &[(usize, f64)]) {
+        let index = self.instance_count;
+        self.instance_definition.push(Some(definition));
+        self.instance_selector.push(Some(definition));
+        self.definition_instances[definition].push(index);
+        self.ingredient_pool.push(parts.iter().map(|&(product, _)| self.product_pool[product]).collect());
+        self.instance_count += 1;
+    }
+    fn truncate_instances(&mut self, keep: usize) {
+        for definition in self.instance_definition.drain(keep..).rev().flatten() {
+            self.definition_instances[definition].pop();
+        }
+        self.instance_selector.truncate(keep);
+        self.ingredient_pool.truncate(keep);
+        self.instance_count = keep;
+    }
     fn invalidate(&mut self) {
         self.next_id = 0;
     }
@@ -1861,8 +1880,8 @@ impl Body {
                 activity: effort(controls.activity.get(definition).copied().unwrap_or(0.0)),
             });
             measures.push(AssemblyMeasures::default());
+            bindings.append_declared(definition, &def.parts);
         }
-        bindings.ensure(program, &state.pools, &state.assemblies, state.next_assembly_id);
         recycle_requests.extend(state.assemblies.iter().enumerate().map(|(index, _assembly)| {
             let requested = bindings.instance_selector[index].map_or(0.0, |definition|
                 state.control_reports[definition].recycle_requested);
@@ -2147,8 +2166,19 @@ impl Body {
                 }
             }
         }
-        let previous_instances = state.assemblies.len();
-        state.assemblies.retain(|assembly| assembly.mass() > 0.0);
+        // Dropping only an unfunded tail preserves every surviving index.
+        // A removal inside the surviving list still requires rebinding it.
+        let mut survivors = 0;
+        let mut first_removed = None;
+        state.assemblies.retain(|assembly| {
+            if assembly.mass() > 0.0 {
+                survivors += 1;
+                true
+            } else {
+                first_removed.get_or_insert(survivors);
+                false
+            }
+        });
         for assembly in &mut state.assemblies {
             if assembly.id == 0 {
                 assembly.id = state.next_assembly_id;
@@ -2165,8 +2195,11 @@ impl Body {
                 || pool.embodied_energy > 0.0
                 || current
         });
-        if previous_instances != state.assemblies.len() || previous_pools != state.pools.len() {
+        if previous_pools != state.pools.len() || first_removed.is_some_and(|prefix| prefix != survivors) {
             bindings.invalidate();
+        } else {
+            if first_removed.is_some() { bindings.truncate_instances(survivors); }
+            bindings.next_id = state.next_assembly_id;
         }
         drop(bindings);
         self.cellular = Some(state);
@@ -2390,6 +2423,40 @@ mod tests {
                 direction: 0.0,
             }],
         )
+    }
+
+    #[test]
+    fn appending_and_truncating_declared_instances_matches_rebinding() {
+        let mut program = flagellum_program();
+        let mut second = program.assemblies[0].clone();
+        second.name = "Other".into();
+        program.assemblies.push(second);
+        let old_program = program.clone();
+        program.products[0].half_life = 2.0;
+        let mut body = stocked(&old_program, &[0.1, 0.2, 0.3]);
+        add_complete(&mut body, &old_program, 0);
+        let state = body.cellular.as_mut().unwrap();
+        let mut incremental = BindingCache::default();
+        incremental.ensure(&program, &state.pools, &state.assemblies, state.next_assembly_id);
+        // The inherited instance keeps its selector and its old ingredient
+        // identities, even though its physical recipe no longer matches.
+        assert_eq!(incremental.instance_definition, vec![None]);
+        assert_eq!(incremental.instance_selector, vec![Some(0)]);
+        for definition in [1, 0, 1] {
+            state.assemblies.push(complete(&program, definition, 0));
+            incremental.append_declared(definition, &program.assemblies[definition].parts);
+        }
+        for keep in [4, 3, 1] {
+            state.assemblies.truncate(keep);
+            incremental.truncate_instances(keep);
+            let mut rebuilt = BindingCache::default();
+            rebuilt.ensure(&program, &state.pools, &state.assemblies, state.next_assembly_id);
+            assert_eq!(incremental.instance_count, rebuilt.instance_count);
+            assert_eq!(incremental.instance_definition, rebuilt.instance_definition);
+            assert_eq!(incremental.instance_selector, rebuilt.instance_selector);
+            assert_eq!(incremental.ingredient_pool, rebuilt.ingredient_pool);
+            assert_eq!(incremental.definition_instances, rebuilt.definition_instances);
+        }
     }
 
     #[test]

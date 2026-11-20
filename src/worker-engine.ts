@@ -1,5 +1,5 @@
 import { decodeEcologySnapshot, decodeMetricsSnapshot, decodeRenderSnapshot } from './engine';
-import type { BodyInspection, Cell, EnvironmentMetadata, EnvironmentSnapshot, GasExchangeConfig, GenomeAnalysis, GenomeEvaluation, GenomeGraph, GenomeLineageEntry, GenomeRecord, LanguageSchema, MetricsSnapshot, MutationKind, MutationResult, RegisterEntry, RenderSnapshot, SimulationSummary, SourceKind, WorldSnapshot } from './engine';
+import type { BodyInspection, Cell, Food, EnvironmentMetadata, EnvironmentSnapshot, GasExchangeConfig, GenomeAnalysis, GenomeEvaluation, GenomeGraph, GenomeLineageEntry, GenomeRecord, LanguageSchema, MetricsSnapshot, MutationKind, MutationResult, RegisterEntry, RenderSnapshot, SimulationSummary, SourceKind, WorldSnapshot } from './engine';
 import type { CapturedCheckpoint, Presentation, PresentationOptions, WirePresentation, WorkerMethod, WorkerRequest, WorkerResponse } from './simulation-protocol';
 export type { CapturedCheckpoint, Presentation, PresentationOptions } from './simulation-protocol';
 
@@ -68,9 +68,11 @@ export class WorkerEngine {
     });
   }
 
-  private decodePresentation(value: WirePresentation): Presentation {
+  private decodePresentation(value: WirePresentation): Presentation<Food[]>;
+  private decodePresentation(value: WirePresentation, packedParticles: boolean): Presentation;
+  private decodePresentation(value: WirePresentation, packedParticles = false): Presentation {
     const result: Presentation = { tick: value.tick, summary: value.summary };
-    if (value.frame) result.frame = decodeRenderSnapshot(value.frame);
+    if (value.frame) result.frame = decodeRenderSnapshot(value.frame, packedParticles);
     if (value.ecology) result.ecology = decodeEcologySnapshot(value.ecology);
     if (value.metrics) {
       result.metrics = decodeMetricsSnapshot(value.metrics);
@@ -84,10 +86,12 @@ export class WorkerEngine {
     return result;
   }
 
-  async advance(steps: number, options: PresentationOptions = {}): Promise<Presentation> {
-    return this.decodePresentation(await this.call<WirePresentation>('advance', [steps, options]));
+  advance(steps: number, options?: PresentationOptions): Promise<Presentation<Food[]>>;
+  advance(steps: number, options: PresentationOptions, packedParticles: true, workerSliceMs?: number): Promise<Presentation>;
+  async advance(steps: number, options: PresentationOptions = {}, packedParticles = false, workerSliceMs?: number): Promise<Presentation> {
+    return this.decodePresentation(await this.call<WirePresentation>('advance', [steps, options, workerSliceMs]), packedParticles);
   }
-  async presentation(options: PresentationOptions = {}): Promise<Presentation> {
+  async presentation(options: PresentationOptions = {}): Promise<Presentation<Food[]>> {
     return this.decodePresentation(await this.call<WirePresentation>('presentation', [options]));
   }
   captureCheckpoint(): Promise<CapturedCheckpoint> { return this.call('captureCheckpoint'); }

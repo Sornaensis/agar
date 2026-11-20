@@ -41,7 +41,19 @@ export function createSimulationWorkerHandler(send: Send, load: () => Promise<En
       const steps = request.args[0] as number;
       if (!Number.isSafeInteger(steps) || steps < 0 || steps > 120) throw new Error('A simulation batch must contain 0 to 120 whole ticks.');
       let error: string | undefined;
-      try { engine.tick(steps); } catch (failure) { error = message(failure); }
+      const sliceMs = request.args[2];
+      if (sliceMs !== undefined && (typeof sliceMs !== 'number' || !Number.isFinite(sliceMs) || sliceMs <= 0 || sliceMs > 100)) {
+        throw new Error('The playback slice must be positive and at most 100 milliseconds.');
+      }
+      try {
+        if (typeof sliceMs === 'number') {
+          const deadline = performance.now() + sliceMs;
+          for (let i = 0; i < steps; i++) {
+            engine.tick(1);
+            if (performance.now() >= deadline) break;
+          }
+        } else engine.tick(steps);
+      } catch (failure) { error = message(failure); }
       const result = presentation(request.args[1] as PresentationOptions | undefined);
       if (error) result.error = error;
       return result;

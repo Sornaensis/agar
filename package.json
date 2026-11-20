@@ -42,6 +42,7 @@
     "test:genome-ancestry": "node scripts/check-genome-ancestry.mjs",
     "test:environment-player": "node scripts/check-environment-player.mjs",
     "test:environment-controls": "node scripts/check-environment-controls.mjs",
+    "test:gpu-player": "node scripts/check-gpu-player.mjs",
     "test:player-view": "node scripts/check-player-view.mjs",
     "test:sim-tools": "node scripts/check-sim-tools.mjs",
     "test:simulation-loop": "node scripts/check-simulation-loop.mjs",

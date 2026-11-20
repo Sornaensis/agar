@@ -51,6 +51,27 @@ for (const speed of [1, 2, 5, 10]) {
   loop.stop(); assert.equal(clock.tasks.size, 0);
 }
 
+// A visible display can request an earned tick before the timer's full batch
+// deadline. The physics clock still bounds elapsed time at each refresh rate.
+for (const [speed, refreshRate] of [[1, 60], [2, 60], [5, 120]]) {
+  const clock = new Clock(), host = clock.window('visible'), target = {};
+  let needsFrame = true, published = 0, ticks = 0;
+  const loop = new SimulationLoop(() => host, () => ({ target, speed, busy: false }), async (_target, steps) => {
+    ticks += steps;
+    if (needsFrame) { published++; needsFrame = false; }
+  }, (_target, error) => { throw error; }, () => clock.now);
+  loop.start();
+  for (let frame = 1; frame <= refreshRate * 2; frame++) {
+    await clock.advance(frame * 1000 / refreshRate - clock.now);
+    needsFrame = true;
+    loop.refresh(true);
+  }
+  loop.stop();
+  assert.ok(Math.abs(ticks - 60 * speed) <= 2, `Wall-time physics at ${speed}×: ${ticks}`);
+  assert.ok(published >= 1.8 * Math.min(30 * speed, refreshRate), `${published} publications at ${refreshRate} Hz / ${speed}×`);
+  assert.ok(published <= refreshRate * 2 + 1);
+}
+
 // A slow tick is indivisible, but timing feedback prevents queuing an eight-tick
 // block once the measured work exceeds the responsiveness budget.
 {
@@ -60,6 +81,28 @@ for (const speed of [1, 2, 5, 10]) {
   }, (_target, error) => { throw error; }, () => clock.now);
   loop.start(); await clock.advance(600); loop.stop();
   assert.ok(batches.length >= 10); assert.ok(batches.every(steps => steps === 1), 'Start cautiously and adapt to expensive ticks');
+}
+
+// The accelerated player can finish a partial worker slice. A delayed
+// response must not force every subsequent command down to one tick.
+{
+  const clock = new Clock(), host = clock.window('accelerated'), target = {};
+  const calls = [];
+  let paused = false;
+  const loop = new SimulationLoop(() => host, () => paused ? null : { target, speed: 10, busy: false, workerSliceMs: 50 },
+    async (_target, requested, _now, slice) => {
+      assert.equal(slice, 50);
+      const completed = Math.min(requested, 3);
+      calls.push({ requested, completed });
+      clock.now += 20 * completed;
+      if (calls.length === 8) paused = true;
+      return completed;
+    }, (_target, error) => { throw error; }, () => clock.now);
+  loop.start(); await clock.advance(1500);
+  assert.equal(calls.length, 8, 'Pausing between worker replies wins before the next command');
+  assert.ok(calls.some(({ requested, completed }) => requested > completed));
+  assert.ok(calls.slice(1).every(({ requested, completed }) => requested <= 8 && completed > 1));
+  loop.stop();
 }
 
 // In-flight work finishes once, then explicit pause/queued edits win before the

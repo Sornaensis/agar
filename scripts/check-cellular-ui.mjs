@@ -52,18 +52,83 @@ const { Engine,decodeRenderSnapshot,validateBodyInspection,validateGenomeEvaluat
   assert.throws(()=>decodeRenderSnapshot(raw.slice(0,-1)),/layout/);
   const viewModule=await moduleUrl('../src/periodic-visibility.ts');
   const { PeriodicVisibility }=await import(viewModule);
+  const program=await moduleUrl('../src/gpu-program.ts');
+  const gpu=await moduleUrl('../src/gpu-world.ts',{
+    './gpu-particles':await moduleUrl('../src/gpu-particles.ts',{'./gpu-program':program}),
+    './gpu-cells':await moduleUrl('../src/gpu-cells.ts',{'./gpu-program':program}),
+  });
   const { Renderer }=await import(await moduleUrl('../src/renderer.ts',{
-    './organelles':organelles,'./world-camera':await moduleUrl('../src/world-camera.ts'),'./periodic-visibility':viewModule,
+    './organelles':organelles,'./world-camera':await moduleUrl('../src/world-camera.ts'),'./periodic-visibility':viewModule,'./gpu-world':gpu,
   }));
+  // The player scans transferred rows without allocating a Food per particle. A
+  // clicked particle must remain valid after the cursor scans later records.
+  const foodWire = new Float64Array(12 + 3 * 6);
+  foodWire.set([0, 0, 0, 3, 0, 0, 0, 400, 400, 0, 0, 0]);
+  foodWire.set([398, 5, 0.1, 0.2, 0, 0.5, 80, 50, 10, 0, 1, 1, 300, 240, 4, 1, 2, 0], 12);
+  const legacyFood = decodeRenderSnapshot(foodWire), packedFood = decodeRenderSnapshot(foodWire, true);
+  const cursor = {...legacyFood.food[0]};
+  for (let i = 0; i < packedFood.food.length; i++) {
+    assert.equal(packedFood.food.read(i, cursor), cursor);
+    assert.deepEqual(cursor, legacyFood.food[i]);
+  }
+  const camera = {scale: 1, toWorld: () => ({x: 1, y: 5})};
+  assert.deepEqual(Renderer.prototype.pickFood.call(camera, packedFood, 0, 0), legacyFood.food[0]);
+  assert.deepEqual(Renderer.prototype.pickFood.call(camera, legacyFood, 0, 0), legacyFood.food[0]);
+  for (const [field, value] of [[4, 4], [5, NaN]]) {
+    const corrupt = foodWire.slice(); corrupt[12 + field] = value;
+    assert.throws(() => decodeRenderSnapshot(corrupt, true), /particle/);
+  }
   const visibility=new PeriodicVisibility();
   visibility.width=visibility.right=400;visibility.height=visibility.bottom=400;
+  // Tiled rasterization repeats a boundary-crossing disk inside each adjacent
+  // clip. Within either clip, the original material order and ring stroke survive.
+  const previousPath = globalThis.Path2D;
+  class CapturePath {
+    centers = [];
+    arc(x, y, radius) { this.centers.push([x,y,radius]); }
+    moveTo() {} lineTo() {} rect() {} closePath() {}
+  }
+  try {
+    globalThis.Path2D = CapturePath;
+    const painted = [], tileClips = [];
+    const target = {
+      getTransform: () => ({}), setTransform() {}, save() {}, restore() {}, beginPath() {},
+      rect(x, y, w, h) { this.clipRect = [x,y,w,h]; },
+      clip() { tileClips.push(this.clipRect); },
+      fill(path) { painted.push([this.clipRect, this.fillStyle, path.centers]); },
+      stroke(path) { painted.push([this.clipRect, this.strokeStyle, path.centers]); },
+    };
+    const draw = (food, scale=1) => {
+      painted.length = tileClips.length = 0; target.clipRect = null;
+      Renderer.prototype.drawParticles.call({cssWidth:400,cssHeight:400,scale,pixelRatio:1,canvas:{width:400,height:400},
+        offsetX:0,offsetY:0,context:target,visibility},{width:400,height:400,food});
+    };
+    const ordinary = {x:245,y:241,energy:4,nutrients:0,kind:2,ligandFraction:0};
+    const crossing = {...ordinary, x:96, y:45, energy:24, kind:1, ligandFraction:.5};
+    const seam = {...crossing, x:1};
+    const dense = [...Array(4000).fill(ordinary),crossing,seam];
+    draw(dense);
+    const clipsFor = (color,x) => painted.filter(([,style,circles]) => style===color && circles.some(p=>p[0]===x && p[1]===45))
+      .map(([clip])=>clip.slice(0,2));
+    for (const color of ['rgba(225,137,122,0.08)','rgba(191,155,234,0.72)']) {
+      assert.deepEqual(clipsFor(color,96),[[0,0],[96,0]]);
+      assert.deepEqual(clipsFor(color,401),[[384,0]]);
+    }
+    assert.deepEqual(painted.filter(([clip])=>clip[0]===96 && clip[1]===0).map(([,style])=>style),
+      ['rgba(225,137,122,0.08)','rgba(225,137,122,0.9)','rgba(191,155,234,0.72)']);
+    assert.ok(tileClips.every(([x,y,w,h])=>x%96===0&&y%96===0&&w===96&&h===96));
+    draw([crossing]); assert.equal(tileClips.length,0);
+    draw(dense,4); assert.equal(tileClips.length,0);
+  } finally {
+    if (previousPath) globalThis.Path2D = previousPath; else delete globalThis.Path2D;
+  }
   const segments=[],rings=[];
   const context={save(){},restore(){},stroke(){},beginPath(){},moveTo(x,y){segments.push([x,y]);},lineTo(x,y){segments.at(-1).push(x,y);},arc(x,y,r){rings.push({x,y,r,color:this.strokeStyle});}};
-  Renderer.prototype.drawBonds.call({context,visibility},{...projected,bonds:[projected.bonds[0]]});
+  Renderer.prototype.drawBonds.call({visibility},{...projected,bonds:[projected.bonds[0]]},context);
   assert.equal(segments.length,2,'Both images of a cross-seam bond are drawn');
   assert.ok(segments.some(([x])=>Math.abs(x)<3) && segments.some(([x])=>Math.abs(x-400)<3));
   assert.ok(segments.every(([xa,ya,xb,yb])=>Math.hypot(xa-xb,ya-yb)<3),'Neither segment crosses the middle of the world');
-  Renderer.prototype.drawBonds.call({context,visibility},docked);
+  Renderer.prototype.drawBonds.call({visibility},docked,context);
   assert.equal(rings.length,2,'Both images of a feeding link across the seam are rings');
   assert.ok(rings.some(({x})=>x===0) && rings.some(({x})=>x===400));
 }

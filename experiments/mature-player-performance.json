@@ -1,0 +1,294 @@
+{
+  "scenario": "Springwater basin",
+  "seed": 7,
+  "startingAgeSeconds": 1228,
+  "startingPopulation": 602,
+  "startingFoodParticles": 5630,
+  "checkpointSha256": "2c2d76a2d14891b25f58bfa7f556ba5181cfcfd4d9af0581524f866634b84619",
+  "player": {
+    "browser": "153.0.8010.0",
+    "headless": true,
+    "viewport": [
+      1366,
+      900
+    ],
+    "devicePixelRatio": 1,
+    "requestedSpeed": 10,
+    "warmupTicksAtLeast": 60,
+    "secondsPerTrial": 10,
+    "order": [
+      "before",
+      "after",
+      "after",
+      "before",
+      "before",
+      "after"
+    ],
+    "measurement": "Fresh browser contexts restore the same save. Counts record completed physics ticks and distinct world ticks drawn to the canvas. Worker, renderer, normal autosaves and main-thread scheduling are included.",
+    "before": {
+      "runs": [
+        {
+          "seconds": 10.148,
+          "startingPopulation": 601,
+          "startingParticles": 5633,
+          "ticksPerSecond": 7.587702010248325,
+          "uniqueFramesPerSecond": 7.587702010248325,
+          "publishedPerSecond": 7.587702010248325
+        },
+        {
+          "seconds": 10.03569999999553,
+          "startingPopulation": 601,
+          "startingParticles": 5633,
+          "ticksPerSecond": 7.572964516678843,
+          "uniqueFramesPerSecond": 7.572964516678843,
+          "publishedPerSecond": 7.572964516678843
+        },
+        {
+          "seconds": 10.08089999999851,
+          "startingPopulation": 601,
+          "startingParticles": 5633,
+          "ticksPerSecond": 5.852652044957169,
+          "uniqueFramesPerSecond": 5.753454552669759,
+          "publishedPerSecond": 5.852652044957169
+        }
+      ],
+      "median": {
+        "ticksPerSecond": 7.572964516678843,
+        "uniqueFramesPerSecond": 7.572964516678843,
+        "publishedPerSecond": 7.572964516678843
+      }
+    },
+    "after": {
+      "runs": [
+        {
+          "seconds": 10.002200000002981,
+          "startingPopulation": 601,
+          "startingParticles": 5635,
+          "ticksPerSecond": 25.394413229082033,
+          "uniqueFramesPerSecond": 7.79828437743464,
+          "publishedPerSecond": 7.79828437743464
+        },
+        {
+          "seconds": 10.13479999999702,
+          "startingPopulation": 601,
+          "startingParticles": 5635,
+          "ticksPerSecond": 23.088763468452147,
+          "uniqueFramesPerSecond": 6.512215337255734,
+          "publishedPerSecond": 6.512215337255734
+        },
+        {
+          "seconds": 10.107,
+          "startingPopulation": 601,
+          "startingParticles": 5635,
+          "ticksPerSecond": 22.45968140892451,
+          "uniqueFramesPerSecond": 6.8269516176907095,
+          "publishedPerSecond": 6.8269516176907095
+        }
+      ],
+      "median": {
+        "ticksPerSecond": 23.088763468452147,
+        "uniqueFramesPerSecond": 6.8269516176907095,
+        "publishedPerSecond": 6.8269516176907095
+      }
+    },
+    "oldBundle": "26e15b196b8dc8668da138fb82717ce7fb33b8e9bb2ee1d4f00bcc707091df22",
+    "newBundle": "4c3216f74572b535e47d557d62f2c276f8d42c328132f2d303e9d57129738e0d"
+  },
+  "optimizedWasmPhases": {
+    "ticks": 120,
+    "cellsAtStart": 602,
+    "particlesAtStart": 5630,
+    "measuredMs": 25.774993141666663,
+    "phases": {
+      "preflight": {
+        "ms": 0.7006669333333334,
+        "pct": 2.718398136838561
+      },
+      "fields": {
+        "ms": 0.45551517500000005,
+        "pct": 1.7672756399831402
+      },
+      "decay": {
+        "ms": 0.4203335083333333,
+        "pct": 1.6307802916689882
+      },
+      "observations": {
+        "ms": 2.464687425,
+        "pct": 9.562320391137954
+      },
+      "cell data and named receptors": {
+        "ms": 2.031135933333333,
+        "pct": 7.880257900243212
+      },
+      "genome evaluation": {
+        "ms": 4.686199741666667,
+        "pct": 18.18118715264049
+      },
+      "actions": {
+        "ms": 0.6446551583333334,
+        "pct": 2.50108760374882
+      },
+      "gas and respiration": {
+        "ms": 0.654153675,
+        "pct": 2.5379392786046
+      },
+      "move cells": {
+        "ms": 0.9253903416666667,
+        "pct": 3.5902641625565495
+      },
+      "digest uptake": {
+        "ms": 0.5014598083333334,
+        "pct": 1.9455283870578288
+      },
+      "move food": {
+        "ms": 1.4905208833333332,
+        "pct": 5.782817768916594
+      },
+      "cell pair collisions": {
+        "ms": 1.0735046333333333,
+        "pct": 4.164907542101167
+      },
+      "settle barriers": {
+        "ms": 0.38725276666666664,
+        "pct": 1.5024359639524083
+      },
+      "adhesion": {
+        "ms": 0.89423865,
+        "pct": 3.4694040269380912
+      },
+      "inlets": {
+        "ms": 0.35817863333333333,
+        "pct": 1.3896361925866756
+      },
+      "harvesting and secretion": {
+        "ms": 1.9038431916666667,
+        "pct": 7.3863965014562964
+      },
+      "predation": {
+        "ms": 0.81653045,
+        "pct": 3.1679172347869016
+      },
+      "development": {
+        "ms": 2.969213716666667,
+        "pct": 11.519745903896181
+      },
+      "first spill": {
+        "ms": 0.7811935666666667,
+        "pct": 3.030819687799743
+      },
+      "division": {
+        "ms": 0.7363812666666667,
+        "pct": 2.85696008770713
+      },
+      "second spill": {
+        "ms": 0.20420400833333333,
+        "pct": 0.7922563052140121
+      },
+      "remove dead": {
+        "ms": 0.5858627916666667,
+        "pct": 2.2729891272777407
+      },
+      "prune contacts": {
+        "ms": 0.08987088333333333,
+        "pct": 0.34867471288693463
+      }
+    }
+  },
+  "standaloneParticleRenderer": {
+    "names": [
+      "base",
+      "bins-96-tiled"
+    ],
+    "init": {
+      "cells": 602,
+      "food": 5630,
+      "zoom": 1
+    },
+    "data": [
+      [
+        {
+          "fps": 11.418628677107314,
+          "submit": 14.895238096160549,
+          "cpu": 95.71428571428572
+        },
+        {
+          "fps": 9.956853634267992,
+          "submit": 15.73888888872332,
+          "cpu": 114.99999999999997
+        },
+        {
+          "fps": 13.418496055005088,
+          "submit": 10.979999999403953,
+          "cpu": 80
+        },
+        {
+          "fps": 13.436525851864978,
+          "submit": 11.824000001251697,
+          "cpu": 79.59999999999994
+        },
+        {
+          "fps": 10.900370612618534,
+          "submit": 13.545000000670552,
+          "cpu": 99.00000000000003
+        }
+      ],
+      [
+        {
+          "fps": 6.621054954734349,
+          "submit": 50.78333333258828,
+          "cpu": 175.8333333333333
+        },
+        {
+          "fps": 10.954102311333468,
+          "submit": 29.7,
+          "cpu": 101.50000000000001
+        },
+        {
+          "fps": 13.587694983434016,
+          "submit": 12.407999999821186,
+          "cpu": 82.00000000000004
+        },
+        {
+          "fps": 12.48303934871099,
+          "submit": 14.091304347242998,
+          "cpu": 86.08695652173922
+        },
+        {
+          "fps": 14.719511530307948,
+          "submit": 11.374074075233054,
+          "cpu": 74.44444444444437
+        }
+      ]
+    ],
+    "pixel": [
+      {
+        "diff": 0,
+        "max": 0,
+        "sum": 0,
+        "over20": 0
+      },
+      {
+        "diff": 8091,
+        "max": 27,
+        "sum": 11688,
+        "over20": 4
+      }
+    ]
+  },
+  "separateDecoderTest": {
+    "ageSeconds": 1200,
+    "cells": 593,
+    "particles": 5668,
+    "beforeCpuMs": 0.42753,
+    "afterCpuMs": 0.1482,
+    "method": "Median of 11 alternating 100-frame decoding batches on the same render buffer."
+  },
+  "lightAllocationTest": {
+    "cells": 547,
+    "particles": 6516,
+    "ticks": 72,
+    "beforeMs": 3.815338,
+    "afterMs": 1.283181,
+    "method": "Median elapsed WASM phase time, excluding secretion, on a prior 900-second precursor basin."
+  }
+}

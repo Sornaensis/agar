@@ -52,31 +52,65 @@ impl World {
 struct CountQuota {
     demand: u64,
     supply: u32,
-    prefix: u64,
-    offset: u64,
+    remainder: u64,
 }
 
 impl CountQuota {
     fn new(tick: u64, patch: usize, channel: u64, demand: u64, supply: u32) -> Self {
         debug_assert!(u64::from(supply) <= demand);
         if supply == 0 || u64::from(supply) == demand {
-            return Self { demand, supply, prefix: 0, offset: 0 };
+            return Self { demand, supply, remainder: 0 };
         }
         let phase = tick.wrapping_mul(0x9e3779b97f4a7c15)
             .wrapping_add((patch as u64).wrapping_mul(0xd1b54a32d192ed03))
             .wrapping_add(channel.wrapping_mul(0x94d049bb133111eb));
         let offset = ((u128::from(phase) * u128::from(demand)) >> 64) as u64;
-        Self { demand, supply, prefix: 0, offset }
+        Self { demand, supply, remainder: offset }
     }
 
     fn next(&mut self, request: u32) -> u32 {
-        if self.supply == 0 { return 0; }
+        if request == 0 || self.supply == 0 { return 0; }
         if u64::from(self.supply) == self.demand { return request; }
-        let before = u128::from(self.prefix) * u128::from(self.supply) + u128::from(self.offset);
-        self.prefix += u64::from(request);
-        let after = u128::from(self.prefix) * u128::from(self.supply) + u128::from(self.offset);
-        let denominator = u128::from(self.demand);
-        (after / denominator - before / denominator) as u32
+        // Carry the previous remainder to produce the same prefix differences.
+        // The product always fits u64. Large cross-cell demands can overflow
+        // only when adding the remainder, in which case use the wider path.
+        let product = u64::from(request) * u64::from(self.supply);
+        if let Some(total) = product.checked_add(self.remainder) {
+            let grant = total / self.demand;
+            self.remainder = total - grant * self.demand;
+            grant as u32
+        } else {
+            let total = u128::from(product) + u128::from(self.remainder);
+            let demand = u128::from(self.demand);
+            let grant = total / demand;
+            self.remainder = (total - grant * demand) as u64;
+            grant as u32
+        }
+    }
+}
+
+#[cfg(test)]
+mod quota_tests {
+    use super::CountQuota;
+
+    #[test]
+    fn rolling_grants_match_absolute_prefixes_including_wide_sums() {
+        let cases = [
+            (27, 7, 11, vec![2, 0, 14, 3, 8]),
+            (27, 0, 0, vec![0, 22, 5]),
+            (27, 27, 0, vec![7, 20]),
+            (u64::MAX, u32::MAX, u64::MAX - 1, vec![u32::MAX, 1, 0, u32::MAX]),
+        ];
+        for (demand, supply, offset, requests) in cases {
+            let mut quota = CountQuota { demand, supply, remainder: offset };
+            let mut prefix = 0_u128;
+            let granted = |prefix: u128| (prefix * u128::from(supply) + u128::from(offset)) / u128::from(demand);
+            for request in requests {
+                let previous = granted(prefix);
+                prefix += u128::from(request);
+                assert_eq!(u128::from(quota.next(request)), granted(prefix) - previous);
+            }
+        }
     }
 }
 
@@ -314,9 +348,24 @@ impl Cell {
 }
 
 #[derive(Default)]
-pub(super) struct PhotonShare {
+struct PhotonShare {
     demand: u64,
     grants: CountQuota,
+}
+
+#[derive(Default)]
+pub(super) struct PhotonPatches {
+    shares: Vec<PhotonShare>,
+    occupied: Vec<u64>,
+}
+
+impl PhotonPatches {
+    fn reset(&mut self, count: usize) {
+        for patch in occupied_patches(&self.occupied) { self.shares[patch].demand = 0; }
+        self.shares.resize_with(count, PhotonShare::default);
+        self.occupied.resize(count.div_ceil(64), 0);
+        self.occupied.fill(0);
+    }
 }
 
 impl World {
@@ -325,24 +374,27 @@ impl World {
     pub(super) fn share_photons(
         &mut self,
         requests: &mut [(usize, usize, f64)],
-        patches: &mut std::collections::HashMap<usize, PhotonShare>,
+        patches: &mut PhotonPatches,
         receipts: &mut Vec<u32>,
     ) {
         receipts.clear();
         receipts.resize(self.cells.len(), 0);
-        patches.clear();
         if requests.is_empty() {
             return;
         }
+        patches.reset(self.environment.patch_count());
         self.photon_credit.resize(self.environment.patch_count(), 0);
         for (row, patch, request) in requests.iter_mut() {
             let cell = self.cells[*row].counted.as_mut().unwrap();
             let wanted = rate(&mut cell.rate_credit[13], *request);
             // Every u32 is exactly representable in the shared footprint workspace.
             *request = f64::from(wanted);
-            patches.entry(*patch).or_default().demand += u64::from(wanted);
+            // Even a sub-quantum request samples incident light for this patch.
+            patches.occupied[*patch / 64] |= 1_u64 << (*patch % 64);
+            patches.shares[*patch].demand += u64::from(wanted);
         }
-        for (&patch, share) in patches.iter_mut() {
+        for patch in occupied_patches(&patches.occupied) {
+            let share = &mut patches.shares[patch];
             let incident = PHOTO_HABITAT_POWER / PATCHES as f64
                 * self.environment.patch_light(patch) * DT;
             let offer = rate(&mut self.photon_credit[patch], incident);
@@ -350,7 +402,7 @@ impl World {
             share.grants = CountQuota::new(self.ticks, patch, 0, share.demand, available);
         }
         for &(row, patch, wanted) in requests.iter() {
-            let share = patches.get_mut(&patch).unwrap();
+            let share = &mut patches.shares[patch];
             let grant = share.grants.next(wanted as u32);
             receipts[row] += grant;
         }
@@ -401,15 +453,25 @@ impl Batch {
         Self{c:counts((e.energy-e.extra_energy)/20.0),m:counts(e.nutrients),e:counts(e.extra_energy)}
     }
     fn portion(self,n:u64)->(u64,u64) {
-        if self.c==0{return (0,0);}
-        ((u128::from(self.m)*u128::from(n)/u128::from(self.c)) as u64,
-         (u128::from(self.e)*u128::from(n)/u128::from(self.c)) as u64)
+        if n == 0 { return (0, 0); }
+        if n == self.c { return (self.m, self.e); }
+        let share = |amount: u64| match amount.checked_mul(n) {
+            Some(product) => product / self.c,
+            None => (u128::from(amount) * u128::from(n) / u128::from(self.c)) as u64,
+        };
+        (share(self.m), share(self.e))
     }
     fn take(&mut self,space:u64,minspace:u32,new_packet:bool)->CountMeal {
-        let mut hi=self.c.min(u32::MAX as u64);
-        let mut lo=0;
-        while lo<hi {let n=lo+(hi-lo).div_ceil(2);let (m,e)=self.portion(n);
-            if 20*n+e<=space && m<=u64::from(minspace) && e<=u64::from(u32::MAX) {lo=n;} else {hi=n-1;}
+        let mut hi = self.c.min(u64::from(u32::MAX)).min(space / CARBON_ENERGY);
+        let fits = |n| {
+            let (mineral, extra) = self.portion(n);
+            extra <= u64::from(u32::MAX) && mineral <= u64::from(minspace)
+                && CARBON_ENERGY * n + extra <= space
+        };
+        let mut lo = if fits(hi) { hi } else { 0 };
+        while lo < hi {
+            let mid = lo + (hi - lo).div_ceil(2);
+            if fits(mid) { lo = mid; } else { hi = mid - 1; }
         }
         // An indivisible, unusually enriched carbon carrier may exceed the soft packet size.
         if lo==0 && new_packet && self.c>0 {lo=1;}
@@ -429,10 +491,17 @@ impl World {
             let mut batch=Batch::from_emission(&emission);
             self.environment.emit_organic(x,y,emission.energy*0.08);
             if batch.c==0 {deposit(&mut self.environment,&mut self.deposits,x,y,[batch.m as u32,0,0]);continue;}
-            ws.nearby.clear();ws.nearby.extend(grid.nearby_radius(x,y,emission.merge_radius));ws.nearby.sort_unstable();
+            ws.nearby.clear();
+            ws.nearby.extend(grid.nearby_bounds(x,y,emission.merge_radius).filter(|&i| {
+                let food = &self.food[i];
+                food.kind == kind && food.counted.as_ref().unwrap().meal.energy() + CARBON_ENERGY <= limit
+                    && delta(food.x - x, self.environment.width).abs() <= emission.merge_radius
+                    && delta(food.y - y, self.environment.height).abs() <= emission.merge_radius
+            }));
+            ws.nearby.sort_unstable();
             for &i in &ws.nearby {
                 let f=&mut self.food[i];
-                if f.kind!=kind||delta(f.x-x,self.environment.width).hypot(delta(f.y-y,self.environment.height))>emission.merge_radius
+                if delta(f.x-x,self.environment.width).hypot(delta(f.y-y,self.environment.height))>emission.merge_radius
                     ||self.environment.segment_blocked((x,y),(f.x,f.y)){continue;}
                 let stock=&mut f.counted.as_mut().unwrap().meal;
                 let part=batch.take(limit.saturating_sub(stock.energy()),u32::MAX-stock.mineral,false);
@@ -494,5 +563,43 @@ impl World {
         for f in &self.food{let p=f.counted?.meal;mineral+=u64::from(p.mineral);carbon+=u64::from(p.carbon);energy+=p.energy();}
         Some([mineral,ext[0]+a.mineral_in,out[0]+a.mineral_out,carbon,ext[2]+a.carbon_in,out[2],
             oxygen,ext[1]+a.fixed,out[1]+a.respired+a.decay,energy,a.energy_in+a.fixed*20,a.energy_out])
+    }
+}
+
+#[cfg(test)]
+mod packet_fit_tests {
+    use super::*;
+
+    #[test]
+    fn counted_packet_fit_matches_wide_arithmetic_and_preserves_remainder() {
+        let max = u64::from(u32::MAX);
+        for batch in [Batch { c: 0, m: 0, e: 0 },
+            Batch { c: 10, m: 2, e: 0 }, Batch { c: 1, m: 13, e: 50 },
+            Batch { c: max + 300, m: max + 700, e: 3 * max }] {
+            for space in [0, 19, 20, 69, 70, 830, 24 * max, u64::MAX] {
+                for minspace in [0, 2, u32::MAX] {
+                    for new_packet in [false, true] {
+                        let mut actual = batch;
+                        let taken = actual.take(space, minspace, new_packet);
+                        let share = |amount, n| if batch.c == 0 { 0 } else {
+                            (u128::from(amount) * u128::from(n) / u128::from(batch.c)) as u64
+                        };
+                        let mut low = 0;
+                        let mut high = batch.c.min(max);
+                        while low < high {
+                            let n = low + (high - low).div_ceil(2);
+                            let (m, e) = (share(batch.m, n), share(batch.e, n));
+                            if 20 * n + e <= space && m <= u64::from(minspace) && e <= max {
+                                low = n;
+                            } else { high = n - 1; }
+                        }
+                        let n = if new_packet && low == 0 && batch.c > 0 { 1 } else { low };
+                        let (m, e) = (share(batch.m, n), share(batch.e, n));
+                        assert_eq!((u64::from(taken.carbon), u64::from(taken.mineral), u64::from(taken.extra)), (n, m, e));
+                        assert_eq!((actual.c, actual.m, actual.e), (batch.c - n, batch.m - m, batch.e - e));
+                    }
+                }
+            }
+        }
     }
 }

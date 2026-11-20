@@ -131,6 +131,21 @@ try {
   assert.equal(Object.hasOwn(initial.frame, 'environment'), false);
   assert.equal(Object.hasOwn(initial.frame.cells[0], 'organelles'), false);
 
+  {
+    const { engine: sliced } = await fresh();
+    const state = reference.saveState();
+    await sliced.restoreState(state);
+    const single = await sliced.advance(8, { frame: false }, true, Number.MIN_VALUE);
+    assert.equal(single.tick, initial.tick + 1, 'The worker yields at the first tick boundary after its deadline');
+    await assert.rejects(sliced.advance(8, { frame: false }, true, NaN), /playback slice/);
+    const local = await Engine.load();
+    local.restoreState(state);
+    local.tick(1);
+    assert.deepEqual(await sliced.saveState(), local.saveState(), 'Sliced execution preserves physics and a rejected budget makes no progress');
+    const exact = await sliced.advance(8, { frame: false });
+    assert.equal(exact.tick, single.tick + 8, 'Ordinary commands still advance the requested number of ticks');
+  }
+
   const full = reference.snapshot();
   for (let index = 0; index < full.cells.length; index++) {
     const cell = full.cells[index], visual = initial.frame.cells[index];

@@ -8,12 +8,13 @@ import { catalog, compile, seed, save, restore, error, snapshot, snapshotStrides
 // Compare release WASM engines on identical worlds. Timers exclude setup,
 // checkpoint comparison, JS hydration, worker transfers and browser rendering.
 const args = process.argv.slice(2);
-let baselinePath, outputPath, checkpointPath, scenarioName, samples = 3, ticks = 60;
+let baselinePath, comparisonPath, outputPath, checkpointPath, scenarioName, samples = 3, ticks = 60;
 for (let i = 0; i < args.length; i += 2) {
   const value = args[i + 1];
   assert.ok(value, `Missing value for ${args[i]}`);
   switch (args[i]) {
     case '--baseline': baselinePath = resolve(value); break;
+    case '--comparison': comparisonPath = resolve(value); break;
     case '--output': outputPath = resolve(value); break;
     case '--checkpoint': checkpointPath = resolve(value); break;
     case '--scenario': scenarioName = value; break;
@@ -26,7 +27,7 @@ assert.ok(Number.isSafeInteger(samples) && samples >= 1 && samples <= 25);
 assert.ok(Number.isSafeInteger(ticks) && ticks >= 1 && ticks <= 18000);
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const contract = JSON.parse(await readFile(new URL('../src/engine-contract.json', import.meta.url), 'utf8'));
-const currentPath = new URL('../engine/pkg/agar_engine.wasm', import.meta.url);
+const currentPath = comparisonPath ?? new URL('../engine/pkg/agar_engine.wasm', import.meta.url);
 const engines = [];
 for (const [name, path] of baselinePath ? [['baseline', baselinePath], ['optimized', currentPath]] : [['current', currentPath]]) {
   const bytes = await readFile(path);
@@ -168,6 +169,25 @@ function rawSnapshot(api) {
 function projection(api, method, ...args) {
   const pointer = api[method](...args), length = api.presentation_len();
   return new Float64Array(api.memory.buffer, pointer, length).slice();
+}
+function comparePlayerAndLedgerOutputs(baseline, candidate, label) {
+  for (const method of ['render_links_snapshot_ptr', 'ecology_snapshot_ptr']) {
+    if (baseline[method] && candidate[method]) {
+      sameBytes(projection(baseline, method), projection(candidate, method), `${label} ${method}`);
+    }
+  }
+  const baselineCounted = baseline.uses_count_chemistry();
+  assert.equal(candidate.uses_count_chemistry(), baselineCounted);
+  if (!baselineCounted) return;
+  for (const [method, length] of [['count_audit_ptr', 12], ['energy_loss_ptr', 7]]) {
+    if (!baseline[method] || !candidate[method]) continue;
+    const buffer = api => {
+      const pointer = api[method]();
+      assert.ok(pointer, method);
+      return new Uint8Array(api.memory.buffer, pointer, length * 8).slice();
+    };
+    sameBytes(buffer(baseline), buffer(candidate), `${label} ${method}`);
+  }
 }
 function expectedRender(api, full, signalCount) {
   const stride = snapshotStrides(api);
@@ -337,6 +357,7 @@ for (const scenario of chosen) {
       sameBytes(states[0], states[1], `${scenario.name} sample ${sample + 1}`);
       sameBytes(snapshots[0].world, snapshots[1].world, `${scenario.name} legacy world snapshot`);
       sameBytes(snapshots[0].environment, snapshots[1].environment, `${scenario.name} environment snapshot`);
+      comparePlayerAndLedgerOutputs(apis[0], apis[1], `${scenario.name} sample ${sample + 1}`);
     }
     for (const [index, api] of apis.entries()) {
       const checked = validateProjections(api, apis[0], snapshots[0].world, `${scenario.name} sample ${sample + 1}`);

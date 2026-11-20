@@ -862,19 +862,27 @@ impl Environment {
     fn sample(&self, values: &[f64], x: f64, y: f64) -> f64 {
         self.sample_with(x,y,|i|values[i])
     }
-    fn sample_with(&self, x:f64, y:f64, read: impl Fn(usize)->f64)->f64 {
-        let gx = x.rem_euclid(self.width) / PATCH_SIZE - 0.5;
-        let gy = y.rem_euclid(self.height) / PATCH_SIZE - 0.5;
+    fn sample_corners(&self, x: f64, y: f64) -> ([usize; 4], f64, f64) {
+        let gx = wrapped(x, self.width) / PATCH_SIZE - 0.5;
+        let gy = wrapped(y, self.height) / PATCH_SIZE - 0.5;
         let ix = gx.floor() as isize;
         let iy = gy.floor() as isize;
         let fx = gx - gx.floor();
         let fy = gy - gy.floor();
-        let at = |x: isize, y: isize| {
-            read(y.rem_euclid(self.rows as isize) as usize * self.columns
-                + x.rem_euclid(self.columns as isize) as usize)
-        };
-        let a = at(ix, iy) * (1.0 - fx) + at(ix + 1, iy) * fx;
-        let b = at(ix, iy + 1) * (1.0 - fx) + at(ix + 1, iy + 1) * fx;
+        // Only the seam needs integer wrapping. Neighbors are shared by the
+        // four corners; the common case has no division or remainder here.
+        let col = if ix < 0 { self.columns - 1 } else { ix as usize };
+        let row = if iy < 0 { self.rows - 1 } else { iy as usize };
+        let top_left = row * self.columns + col;
+        let [_, top_right, _, bottom_left] = self.grid.neighbors[top_left];
+        let bottom_right = self.grid.neighbors[bottom_left][1];
+        let indices = [top_left, top_right, bottom_left, bottom_right];
+        (indices, fx, fy)
+    }
+    fn sample_with(&self, x: f64, y: f64, read: impl Fn(usize) -> f64) -> f64 {
+        let ([tl, tr, bl, br], fx, fy) = self.sample_corners(x, y);
+        let a = read(tl) * (1.0 - fx) + read(tr) * fx;
+        let b = read(bl) * (1.0 - fx) + read(br) * fx;
         a * (1.0 - fy) + b * fy
     }
 }

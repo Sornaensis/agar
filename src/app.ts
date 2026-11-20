@@ -57,7 +57,8 @@ const pendingEnvironmentInputs = new WeakMap<Element, number>();
 let inspectorView: 'overview' | 'body' | 'memory' | 'program' = 'overview';
 let memoryFilter = '', memoryPage = 0, catalogQuery = '', simulationOpenError = '';
 let lastUi = 0, toastTimer = 0;
-let lastPresentation = 0, lastMetrics = 0, lastEnvironment = 0, lastCheckpoint = 0;
+let playerNeedsFrame = true;
+let lastMetrics = 0, lastEnvironment = 0, lastCheckpoint = 0;
 let toastWindow: Window = window;
 let playerElement: HTMLElement | null = null, restoringPlayer = false, unloading = false;
 const playerView = new PlayerView(window, { bindDocument: bindUiDocument, changed: playerWindowChanged, visibilityChanged: playerVisibilityChanged });
@@ -234,7 +235,7 @@ function renderView(): void {
           void updateEnvironmentObject(active,selection,{x,y}).catch(error=>toast(readableError(error)));
         }
       },
-    });
+    }, 'gpu');
     canvas.addEventListener('click', event => {
       if (!active || !renderer || transitioning || renderer.wasDragging()) return;
       if (cellTool) {
@@ -1335,23 +1336,26 @@ function viewPresentationOptions(): PresentationOptions {
 function simulationWork(): SimulationWork<SimulationSession> | null {
   if (!active || unloading || transitioning || lifecycleFlushes || active.metadata.paused
     || prefs.tab !== 'simulation' && !playerView.isOpen || document.hidden && !playerView.isOpen) return null;
-  return { target: active, speed: active.metadata.speed, busy: active.busy };
+  const speed = active.metadata.speed;
+  return { target: active, speed, busy: active.busy, workerSliceMs: speed > 1 ? Math.min(50, 12 * speed) : undefined };
 }
-function advanceSimulation(session: SimulationSession, steps: number, now: number): Promise<void> {
+function advanceSimulation(session: SimulationSession, steps: number, now: number, workerSliceMs?: number): Promise<number> {
   const visible = viewPresentationOptions();
-  const frame = Boolean(visible.frame && now - lastPresentation >= 1000 / 30);
+  const frame = Boolean(visible.frame && playerNeedsFrame);
   const metrics = Boolean(visible.metrics && now - lastMetrics >= 250);
   const environment = visible.environment && now - lastEnvironment >= (playerIsVisible() ? 100 : 250) ? visible.environment : false;
-  if (frame) lastPresentation = now;
+  if (frame) playerNeedsFrame = false;
   if (metrics) lastMetrics = now;
   if (environment) lastEnvironment = now;
-  return session.advance(steps, { frame, metrics, environment });
+  return session.advance(steps, { frame, metrics, environment }, workerSliceMs);
 }
 function frame(now:number):void{
   try{
-    simulationLoop.refresh();
+    const playerVisible = Boolean(active && playerIsVisible());
+    if (playerVisible) playerNeedsFrame = true;
+    simulationLoop.refresh(playerVisible);
     if(active&&(prefs.tab==='simulation'||playerView.isOpen)){
-      const session=active, playerVisible=playerIsVisible();
+      const session=active;
       const uiVisible=!document.hidden||playerView.visible;
       if(renderer&&playerVisible)renderer.render(active.world,selectedId,prefs,cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.cell : null,cellInspection?.session === active && cellInspection.cell.id === selectedId ? cellInspection.body ?? null : null);
       playerView.setTitle(session.metadata.name);

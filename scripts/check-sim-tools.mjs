@@ -85,7 +85,7 @@ async function controlCenters(surface) {
 async function expectCleanCanvas(surface,points) {
   await surface.waitForFunction(points=>{
     const layers=[...document.querySelector('.player-stage').children,document.querySelector('#player-window-toast')];
-    return layers.every(el=>el.id==='world'||!el.checkVisibility({opacityProperty:true,visibilityProperty:true}))
+    return layers.every(el=>el.matches('#world, .gpu-world-entities, .world-annotations')||!el.checkVisibility({opacityProperty:true,visibilityProperty:true}))
       && points.every(p=>document.elementFromPoint(p.x,p.y)?.id==='world');
   },points,{timeout:5000});
 }
@@ -319,12 +319,13 @@ try {
   await leavePlayer(running);
   await expectCleanCanvas(running,[]);
   const startCaption=await running.locator('#player-caption').textContent();
-  const startFrame=await running.locator('#world').evaluate(canvas=>canvas.toDataURL());
+  const startFrame=await running.locator('.player-stage').screenshot();
   await running.waitForFunction(start=>{
     const seconds=text=>{const bits=text.match(/(\d+):(\d+)$/);return bits?Number(bits[1])*60+Number(bits[2]):-1;};
     return seconds(document.querySelector('#player-caption').textContent)>=seconds(start)+3;
   },startCaption);
-  await running.waitForFunction(start=>document.querySelector('#world').toDataURL()!==start,startFrame,{polling:200,timeout:5000});
+  const nextFrame=await running.locator('.player-stage').screenshot();
+  assert.ok(!startFrame.equals(nextFrame),'The composited world changes while controls are hidden');
   await controls(running,'hidden');
   await enterPlayer(running);
   await running.getByRole('button',{name:'Pause simulation'}).click();

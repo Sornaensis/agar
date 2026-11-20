@@ -195,3 +195,27 @@ fn benchmark_field_transport_and_cell_collisions() {
         println!("{name} {ms:.5} ms/step checkpoint {:016x}", fingerprint(state(&world)));
     }
 }
+
+#[test]
+fn bounded_buckets_cover_exact_radius_across_seams_and_bucket_edges() {
+    let mut grid = Grid::new();
+    grid.configure(700.0, 460.0);
+    let points: Vec<_> = (0..=80).flat_map(|y| (0..=120).map(move |x|
+        (x as f64 * 700.0 / 120.0, y as f64 * 460.0 / 80.0))).collect();
+    for (i, &(x, y)) in points.iter().enumerate() { grid.insert(x, y, i); }
+    for &(x, y) in &[(0.0, 0.0), (699.99, 459.99), (-1e-12, 2.0),
+        (700.0 / 12.0, 460.0 / 8.0), (707.25, -2.0)] {
+        for radius in [0.0, 0.9, 58.3333333333, 101.0, 230.0, 350.0, 750.0] {
+            let mut found = vec![false; points.len()];
+            for index in grid.nearby_bounds(x, y, radius) {
+                assert!(!found[index], "duplicate wrapped bucket");
+                found[index] = true;
+            }
+            for (i, &(px, py)) in points.iter().enumerate() {
+                if delta(px - x, grid.width).hypot(delta(py - y, grid.height)) <= radius {
+                    assert!(found[i], "missed point ({px},{py}) from ({x},{y}) at {radius}");
+                }
+            }
+        }
+    }
+}

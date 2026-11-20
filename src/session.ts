@@ -1,13 +1,13 @@
-import type { EcologySnapshot, EnvironmentSnapshot, GenomeEvaluation, MetricsSnapshot, RenderSnapshot } from './engine';
+import type { EcologySnapshot, EnvironmentSnapshot, GenomeEvaluation, MetricsSnapshot, RenderSnapshot, FrameParticles } from './engine';
 import type { WorkerEngine, Presentation, PresentationOptions } from './worker-engine';
 import type { SimulationMetadata, SimulationRecord, SimulationSummary, Storage } from './storage';
 
-export type RenderWorldSnapshot = RenderSnapshot & { environment: EnvironmentSnapshot };
+export type RenderWorldSnapshot = RenderSnapshot<FrameParticles> & { environment: EnvironmentSnapshot };
 export interface CellEvaluationSnapshot { evaluation: GenomeEvaluation; stateVersion: number }
 const CENSUS_SECONDS = 15;
 const censusPeriod = (time: number): number => Math.floor((time + 1e-7) / CENSUS_SECONDS);
 
-export function summarize(world: RenderSnapshot): SimulationSummary {
+export function summarize(world: RenderSnapshot<FrameParticles>): SimulationSummary {
   return { time: world.time, population: world.cells.length, food: world.food.length,
     births: world.births, deaths: world.deaths, generation: world.generation };
 }
@@ -119,19 +119,22 @@ export class SimulationSession {
     return entry.value;
   }
 
-  advance(steps: number, options: PresentationOptions = {}): Promise<void> {
+  advance(steps: number, options: PresentationOptions = {}, workerSliceMs?: number): Promise<number> {
     this.commandEpoch++;
     return this.enqueue(async () => {
+      const startTick = this.tick;
       const census = this.metadata.ecologyHistory;
       const nextTime = this.metadata.summary.time + steps / 30;
       const sampleDue = !census?.length || censusPeriod(nextTime) > censusPeriod(census[census.length - 1].time);
-      const presentation = await this.engine.advance(steps, sampleDue ? { ...options, ecology: true } : options);
+      // The player paints straight from the transferred particle records.
+      const presentation = await this.engine.advance(steps, sampleDue ? { ...options, ecology: true } : options, true, workerSliceMs);
       // Even a failed batch can have completed earlier ticks. Accept that exact
       // state and mark it dirty before propagating the original engine error.
       this.accept(presentation);
       this.stateVersion++;
       this.touch();
       if (presentation.error) throw new Error(presentation.error);
+      return presentation.tick - startTick;
     });
   }
 

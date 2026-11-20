@@ -263,6 +263,32 @@ impl Grid {
             self.buckets[r*self.columns+c].iter().copied()
         }))
     }
+    /// Static entity positions can be bounded by the actual query box. Collision
+    /// resolution keeps the wider frozen-bucket traversal because bodies move
+    /// while its candidate index is in use.
+    fn nearby_bounds(&self, x: f64, y: f64, radius: f64) -> impl Iterator<Item=usize> + '_ {
+        fn span(center: f64, length: f64, buckets: usize, radius: f64) -> (usize, usize) {
+            let center = wrap(center, length);
+            // Include both sides of a boundary rounded by the torus displacement
+            // or the position-to-bucket conversion.
+            let reach = radius + 1e-9;
+            if 2.0 * reach >= length { return (0, buckets); }
+            let first = ((center - reach) / length * buckets as f64).floor() as isize;
+            let last = ((center + reach) / length * buckets as f64).floor() as isize;
+            let start = if first < 0 { (first + buckets as isize) as usize } else { first as usize };
+            (start, ((last - first + 1) as usize).min(buckets))
+        }
+        let (left, width) = span(x, self.width, self.columns, radius);
+        let (top, height) = span(y, self.height, self.rows, radius);
+        (top..top + height).flat_map(move |r| {
+            let row = if r >= self.rows { r - self.rows } else { r };
+            (left..left + width).flat_map(move |c| {
+                let col = if c >= self.columns { c - self.columns } else { c };
+                self.buckets[row * self.columns + col].iter().copied()
+            })
+        })
+    }
+
 }
 
 #[derive(Clone, Debug, Default)]
@@ -277,16 +303,15 @@ struct Track {
     seen: u64,
 }
 impl Tracking {
-    fn observe(&mut self, entity: u64, cell_id: u32, tick: u64) -> Rc<str> {
-        self.entries
-            .retain(|entry| tick.saturating_sub(entry.seen) <= TRACK_TTL);
+    fn observe(&mut self, entity: u64, tick: u64) -> Option<u64> {
+        // The tick's frozen tracking snapshot has already expired old entries.
         let serial =
             if let Some(entry) = self.entries.iter_mut().find(|entry| entry.entity == entity) {
                 entry.seen = tick;
                 entry.serial
             } else {
                 if self.next_serial == u64::MAX {
-                    return Rc::from("");
+                    return None;
                 }
                 self.next_serial += 1;
                 if self.entries.len() == TRACK_LIMIT {
@@ -307,7 +332,7 @@ impl Tracking {
                 });
                 serial
             };
-        token(cell_id, serial)
+        Some(serial)
     }
     fn entity(&self, requested: &str, cell_id: u32, tick: u64) -> Option<u64> {
         if requested.is_empty() {
@@ -617,7 +642,8 @@ struct PhaseWorkspace {
     groups: Vec<Vec<(usize, f64)>>,
     group_patches: Vec<u64>,
     photo_requests: Vec<(usize, usize, f64)>,
-    photon_patches: std::collections::HashMap<usize, counted::PhotonShare>,
+    photon_patches: counted::PhotonPatches,
+    footprint_columns: Vec<(usize, f64)>,
     photon_receipts: Vec<u32>,
     footprint: Vec<(usize, f64)>,
     totals: Vec<f64>,
@@ -1090,8 +1116,12 @@ impl World {
             // reachable from this program; tracking still runs in full below.
             let program = genomes.map(|genomes| &genomes[(cell.genome_id - 1) as usize].program);
             let reads = |sensor| program.is_none_or(|program| program.reads_sensor(sensor));
-            let space = cell.body.space();
-            let surface = cell.body.surface();
+            let space = if reads(Sensor::BodySpaceFree) || reads(Sensor::BodySpaceUsed) || reads(Sensor::BodySpaceCapacity) {
+                cell.body.space()
+            } else { Default::default() };
+            let surface = if reads(Sensor::BodySurfaceFree) || reads(Sensor::BodySurfaceUsed) || reads(Sensor::BodySurfaceCapacity) {
+                cell.body.surface()
+            } else { Default::default() };
             // Preserve nested cellular buffers when resetting the scalar snapshot.
             let products = std::mem::take(&mut result[output_index].products);
             let assemblies = std::mem::take(&mut result[output_index].assemblies);
@@ -1116,7 +1146,7 @@ impl World {
                 memory_used: cell.memory.populated_count() as f64,
                 memory_cost: cell.memory.populated_count() as f64 * MEMORY_REGISTER_COST,
                 body_area: cell.body.area,
-                body_mass: cell.mass(),
+                body_mass: if reads(Sensor::BodyMass) { cell.mass() } else { 0.0 },
                 body_birth_area: cell.birth_area,
                 body_maturity: cell.maturity(),
                 body_division_ready: cell.division_ready(),
@@ -1152,14 +1182,16 @@ impl World {
             input.products.clear();
             input.assemblies.clear();
             input.receptors.clear();
-            for (i, family) in cell.body.family_summaries().iter().enumerate() {
-                input.organelle[i] = OrganelleInput {
-                    count: family.count.min(i32::MAX as u32) as i32,
-                    mass: family.mass,
-                    capacity: family.capacity,
-                    damaged: family.damaged,
-                    building: family.building,
-                };
+            if program.is_none_or(Program::reads_organelle_families) {
+                for (i, family) in cell.body.family_summaries().iter().enumerate() {
+                    input.organelle[i] = OrganelleInput {
+                        count: family.count.min(i32::MAX as u32) as i32,
+                        mass: family.mass,
+                        capacity: family.capacity,
+                        damaged: family.damaged,
+                        building: family.building,
+                    };
+                }
             }
             let bearing = |(x, y): (f64, f64)| {
                 if x.hypot(y) < 1e-12 {
@@ -1265,8 +1297,14 @@ impl World {
             let width = cell.scan_width.min(units as f64 * PI * 0.65).min(TAU);
             let mut object: Option<(Observation, f64)> = None;
             let mut contact: Option<Observation> = None;
-            if input.object_available || input.contact_available {
+            let scanning = input.object_available && width > 0.0;
+            let contact_reach = if input.contact_available { cell.radius() + 1.0 } else { 0.0 };
+            let optical_reach = if scanning { caps.optical_range } else { 0.0 };
+            let reach = optical_reach.max(contact_reach);
+            if scanning || input.contact_available {
                 let mut consider = |mut o: Observation| {
+                    let extent = reach + o.radius;
+                    if o.dx.abs() > extent || o.dy.abs() > extent { return; }
                     let distance = o.dx.hypot(o.dy);
                     let gap = distance - cell.radius() - o.radius;
                     if input.contact_available
@@ -1279,12 +1317,13 @@ impl World {
                     {
                         contact = Some(o.clone());
                     }
-                    let angle = relative_angle(o.dy.atan2(o.dx) - cell.angle - cell.scan_bearing);
-                    if input.object_available
-                        && width > 0.0
-                        && distance <= caps.optical_range + o.radius
-                        && angle.abs() <= width * 0.5
-                    {
+                    if scanning && distance <= caps.optical_range + o.radius {
+                        // Illumination and angular weighting can only reduce a
+                        // candidate's score. Explicitly tracked entities have priority.
+                        if requested != Some(o.entity) && object.as_ref().is_some_and(|(_, best)|
+                            o.contrast / (10.0 + distance) < *best) { return; }
+                        let angle = relative_angle(o.dy.atan2(o.dx) - cell.angle - cell.scan_bearing);
+                        if angle.abs() > width * 0.5 { return; }
                         // Visibility depends on light arriving from the observed
                         // surface, not whether the observer itself is in shadow.
                         let illumination = self
@@ -1313,8 +1352,7 @@ impl World {
                         }
                     }
                 };
-                let reach = (caps.optical_range + max_radius).max(cell.radius() + max_radius + 1.0);
-                for i in cell_grid.nearby_radius(cell.x, cell.y, reach) {
+                for i in cell_grid.nearby_bounds(cell.x, cell.y, reach + max_radius) {
                     if geometry.ids[i] == cell.id {
                         continue;
                     }
@@ -1333,11 +1371,7 @@ impl World {
                         resistance: capacities[i].protection + 0.15,
                     });
                 }
-                for i in food_grid.nearby_radius(
-                    cell.x,
-                    cell.y,
-                    caps.optical_range.max(cell.radius()) + 3.5,
-                ) {
+                for i in food_grid.nearby_bounds(cell.x, cell.y, reach + 2.5) {
                     let f = &self.food[i];
                     consider(Observation {
                         entity: (f.id << 1) | 1,
@@ -1354,35 +1388,44 @@ impl World {
                     });
                 }
             }
-            if let Some(o) = contact {
-                input.contact_token = tracking.observe(o.entity, cell.id, self.ticks);
-                input.contact_valid = !input.contact_token.is_empty();
-                if input.contact_valid {
-                    let (vx, vy) = o.relative_motion(cell, &self.environment, self.time());
+            if let Some((o, serial)) = contact.and_then(|o| tracking.observe(o.entity, self.ticks).map(|id| (o, id))) {
+                input.contact_valid = true;
+                if reads(Sensor::ContactToken) { input.contact_token = token(cell.id, serial); }
+                if reads(Sensor::ContactOffset) {
                     input.contact_offset = local_vector(o.dx, o.dy, cell.angle)
                         .map(|v| measure(v, caps.mechanical_sensing, 0.08));
+                }
+                if reads(Sensor::ContactPressure) {
+                    let (vx, vy) = o.relative_motion(cell, &self.environment, self.time());
+                    let distance = o.dx.hypot(o.dy);
                     input.contact_pressure = measure(
-                        (cell.radius() + o.radius - o.dx.hypot(o.dy)).max(0.0)
-                            + (-vx * o.dx - vy * o.dy).max(0.0) / (1.0 + o.dx.hypot(o.dy)),
-                        caps.mechanical_sensing,
-                        0.01,
+                        (cell.radius() + o.radius - distance).max(0.0)
+                            + (-vx * o.dx - vy * o.dy).max(0.0) / (1.0 + distance),
+                        caps.mechanical_sensing, 0.01,
                     );
-                    input.contact_resistance =
-                        measure(o.resistance, caps.mechanical_sensing, 0.002);
+                }
+                if reads(Sensor::ContactResistance) {
+                    input.contact_resistance = measure(o.resistance, caps.mechanical_sensing, 0.002);
                 }
             }
-            if let Some((o, _)) = object {
-                input.object_token = tracking.observe(o.entity, cell.id, self.ticks);
-                input.object_valid = !input.object_token.is_empty();
-                if input.object_valid {
-                    let (vx, vy) = o.relative_motion(cell, &self.environment, self.time());
+            if let Some((o, serial)) = object.and_then(|(o, _)| tracking.observe(o.entity, self.ticks).map(|id| (o, id))) {
+                input.object_valid = true;
+                if reads(Sensor::ObjectToken) { input.object_token = token(cell.id, serial); }
+                if reads(Sensor::ObjectOffset) {
                     input.object_offset = local_vector(o.dx, o.dy, cell.angle)
                         .map(|v| measure(v, caps.optical_sensing, 0.08));
+                }
+                if reads(Sensor::ObjectArea) {
                     input.object_area = measure(o.area, caps.optical_sensing, 0.002).max(0.02);
-                    input.object_contrast =
-                        measure(o.contrast, caps.optical_sensing, 0.001).clamp(0.0, 1.0);
-                    input.object_pigment =
-                        measure(o.pigment, caps.optical_sensing, 0.001).clamp(0.0, 1.0);
+                }
+                if reads(Sensor::ObjectContrast) {
+                    input.object_contrast = measure(o.contrast, caps.optical_sensing, 0.001).clamp(0.0, 1.0);
+                }
+                if reads(Sensor::ObjectPigment) {
+                    input.object_pigment = measure(o.pigment, caps.optical_sensing, 0.001).clamp(0.0, 1.0);
+                }
+                if reads(Sensor::ObjectMotion) {
+                    let (vx, vy) = o.relative_motion(cell, &self.environment, self.time());
                     input.object_motion = local_vector(vx, vy, cell.angle)
                         .map(|v| measure(v, caps.optical_sensing, 0.03));
                 }
@@ -2048,9 +2091,8 @@ impl World {
         &mut self, outputs: &[Outputs], caps: &[BodyCapacities], _processing: &mut [f64],
         workspace: &mut PhaseWorkspace,
     ) {
-        let PhaseWorkspace { photo_requests: requests, footprint, totals, gains, photon_patches, photon_receipts, .. } = workspace;
+        let PhaseWorkspace { photo_requests: requests, footprint, footprint_columns, totals, gains, photon_patches, photon_receipts, .. } = workspace;
         requests.clear();
-        totals.resize(self.environment.patch_count(), 0.0); totals.fill(0.0);
         for (i, c) in self.cells.iter().enumerate() {
             if !c.alive() { continue; }
             let reserve_room = (caps[i].energy / CHEMICAL_ENERGY_PER_CARBON - c.organic_carbon).max(0.0);
@@ -2058,16 +2100,18 @@ impl World {
             let capacity = capacity.min(c.internal_inorganic_carbon * CHEMICAL_ENERGY_PER_CARBON)
                 .min(reserve_room * CHEMICAL_ENERGY_PER_CARBON);
             if capacity <= 0.0 { continue; }
-            photon_footprint_into(&self.environment, c.x, c.y, c.body.area, footprint);
+            photon_footprint_into(&self.environment, c.x, c.y, c.body.area, footprint_columns, footprint);
             for &(patch, weight) in footprint.iter() {
                 let request = capacity * weight * self.environment.patch_light(patch);
-                if request > 0.0 { requests.push((i, patch, request)); totals[patch] += request; }
+                if request > 0.0 { requests.push((i, patch, request)); }
             }
         }
-        gains.resize(self.cells.len(), 0.0); gains.fill(0.0);
         if self.uses_count_chemistry() {
             self.share_photons(requests, photon_patches, photon_receipts);
         } else {
+            totals.resize(self.environment.patch_count(), 0.0); totals.fill(0.0);
+            for &(_, patch, request) in requests.iter() { totals[patch] += request; }
+            gains.resize(self.cells.len(), 0.0); gains.fill(0.0);
             for &(i, patch, request) in requests.iter() {
                 let supply = PHOTO_HABITAT_POWER / PATCHES as f64 * self.environment.patch_light(patch) * DT;
                 gains[i] += request * (supply / totals[patch]).min(1.0);
@@ -2582,7 +2626,7 @@ impl World {
                 continue;
             }
             nearby.clear();
-            nearby.extend(grid.nearby_radius(x, y, merge_radius));
+            nearby.extend(grid.nearby_bounds(x, y, merge_radius));
             nearby.sort_unstable();
             for &index in nearby.iter() {
                 let food = &mut self.food[index];
@@ -2958,37 +3002,49 @@ fn metabolic_factor(temperature: f64) -> f64 {
 #[cfg(test)]
 fn photon_footprint(x: f64, y: f64, area: f64) -> Vec<(usize, f64)> {
     let mut result = Vec::new();
-    photon_footprint_into(&Environment::default(), x, y, area, &mut result);
+    photon_footprint_into(&Environment::default(), x, y, area, &mut Vec::new(), &mut result);
     result
 }
-fn photon_footprint_into(environment: &Environment, x: f64, y: f64, area: f64, result: &mut Vec<(usize, f64)>) {
+fn photon_footprint_into(
+    environment: &Environment, x: f64, y: f64, area: f64,
+    columns: &mut Vec<(usize, f64)>, result: &mut Vec<(usize, f64)>,
+) {
     let radius = (60.0 * area.sqrt()).max(20.0);
+    let radius_squared = radius.powi(2);
     let span = (radius / 20.0).ceil() as isize;
     let center = environment.patch_index(x, y);
-    let col = (center % environment.columns) as isize;
-    let row = (center / environment.columns) as isize;
+    let mut col = ((center % environment.columns) as isize - span).rem_euclid(environment.columns as isize) as usize;
+    let mut row = ((center / environment.columns) as isize - span).rem_euclid(environment.rows as isize) as usize;
     let cols = (2 * span + 1).min(environment.columns as isize);
     let rows = (2 * span + 1).min(environment.rows as isize);
+
+    // All patches in a column share x, and all patches in a row share y.
+    // Retain the wrapped row/column order used for summing the weights.
+    columns.clear();
+    for _ in 0..cols {
+        let (px, _) = environment.patch_position(col);
+        columns.push((col, delta(px - x, environment.width).powi(2)));
+        col += 1;
+        if col == environment.columns { col = 0; }
+    }
     result.clear();
     let mut total = 0.0;
-    for dy in 0..rows {
-        for dx in 0..cols {
-            let c = (col - span + dx).rem_euclid(environment.columns as isize) as usize;
-            let r = (row - span + dy).rem_euclid(environment.rows as isize) as usize;
-            let patch = r * environment.columns + c;
-            let (px, py) = environment.patch_position(patch);
-            let scaled =
-                (delta(px - x, environment.width).powi(2) + delta(py - y, environment.height).powi(2)) / radius.powi(2);
+    for _ in 0..rows {
+        let base = row * environment.columns;
+        let (_, py) = environment.patch_position(base);
+        let dy_squared = delta(py - y, environment.height).powi(2);
+        for &(column, dx_squared) in columns.iter() {
+            let scaled = (dx_squared + dy_squared) / radius_squared;
             if scaled < 1.0 {
                 let weight = (1.0 - scaled * scaled).powi(2);
-                result.push((patch, weight));
+                result.push((base + column, weight));
                 total += weight;
             }
         }
+        row += 1;
+        if row == environment.rows { row = 0; }
     }
-    for (_, weight) in result.iter_mut() {
-        *weight /= total;
-    }
+    for (_, weight) in result.iter_mut() { *weight /= total; }
 }
 fn relative_angle(angle: f64) -> f64 {
     (angle + PI).rem_euclid(TAU) - PI

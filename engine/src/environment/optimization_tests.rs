@@ -441,3 +441,23 @@ fn reusable_face_velocities_follow_source_edits_ambient_changes_and_resize() {
         }
     }
 }
+
+#[test]
+fn interpolated_samples_match_direct_four_corner_wrapping() {
+    let mut env = Environment::default();
+    assert!(env.set_size(700.0, 460.0));
+    let field: Vec<_> = (0..env.patch_count()).map(|i| ((13 * i) as f64).sin()).collect();
+    for x in [-1400.03, -700.0, -1e-12, 0.0, 3.1, 10.0, 690.0, 700.0, 1440.0] {
+        for y in [-930.1, -1e-12, 0.0, 5.13, 10.0, 459.99, 460.0, 1380.3] {
+            let gx = f64::rem_euclid(x, env.width) / PATCH_SIZE - 0.5;
+            let gy = f64::rem_euclid(y, env.height) / PATCH_SIZE - 0.5;
+            let (ix, iy) = (gx.floor() as isize, gy.floor() as isize);
+            let (fx, fy) = (gx - gx.floor(), gy - gy.floor());
+            let at = |i: isize, j: isize| field[j.rem_euclid(env.rows as isize) as usize * env.columns
+                + i.rem_euclid(env.columns as isize) as usize];
+            let a = at(ix, iy) * (1.0 - fx) + at(ix + 1, iy) * fx;
+            let b = at(ix, iy + 1) * (1.0 - fx) + at(ix + 1, iy + 1) * fx;
+            assert_eq!(env.sample(&field, x, y).to_bits(), (a * (1.0 - fy) + b * fy).to_bits());
+        }
+    }
+}

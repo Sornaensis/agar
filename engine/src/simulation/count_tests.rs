@@ -106,7 +106,7 @@ fn one_patch_shares_its_actual_whole_photon_supply_between_two_cells() {
     let patch = engine.world.environment.patch_index(100.0, 100.0);
     let light = engine.world.environment.patch_light(patch);
     assert!(light > 0.0);
-    let mut patches = std::collections::HashMap::new();
+    let mut patches = Default::default();
     let mut receipts = Vec::new();
     let mut supplied = 0;
     let mut received = [0_u32; 2];
@@ -163,7 +163,7 @@ fn scarce_quanta_on_spaced_ticks_reach_both_equal_requesters() {
     for cap in &mut caps { cap.uptake = 10.0; cap.minerals = 20.0; }
     let outputs = vec![Outputs { absorb: 1.0, ..Outputs::default() }; 2];
     let mut workspace = PhaseWorkspace::default();
-    let mut patches = std::collections::HashMap::new();
+    let mut patches = Default::default();
     let mut receives = Vec::new();
     let mut light = [0; 2];
     for tick in 0..32 {

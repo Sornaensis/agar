@@ -1,4 +1,4 @@
-export interface SimulationWork<T> { target: T; speed: number; busy: boolean }
+export interface SimulationWork<T> { target: T; speed: number; busy: boolean; workerSliceMs?: number }
 
 /** Simulation pacing is independent of display refresh and hidden-window rAF. */
 export class SimulationLoop<T> {
@@ -15,7 +15,7 @@ export class SimulationLoop<T> {
 
   constructor(private readonly host: () => Window,
     private readonly work: () => SimulationWork<T> | null,
-    private readonly advance: (target: T, steps: number, now: number) => Promise<void>,
+    private readonly advance: (target: T, steps: number, now: number, workerSliceMs?: number) => Promise<number | void>,
     private readonly failed: (target: T, error: unknown) => void,
     private readonly now: () => number = () => performance.now()) {}
 
@@ -25,9 +25,17 @@ export class SimulationLoop<T> {
     this.cancel(); this.target = null; this.credit = 0; this.last = this.now();
     this.refresh();
   }
-  refresh(): void {
+  refresh(displayReady = false): void {
     if (!this.running || this.inFlight) return;
-    if (this.timer && this.owner === this.host()) return;
+    if (this.timer && this.owner === this.host()) {
+      // A fast visible player can consume a smaller batch on its next refresh.
+      // The timer still drives physics if the display slows or disappears.
+      if (displayReady && this.target !== null && this.credit + (this.now() - this.last) * 30 * this.speed / 1000 >= 1 - 1e-9) {
+        this.cancel();
+        this.pump();
+      }
+      return;
+    }
     this.cancel(); this.schedule(0);
   }
   private cancel(): void {
@@ -44,7 +52,7 @@ export class SimulationLoop<T> {
       this.timer = 0; this.pump();
     }, Math.max(0, delay));
   }
-  private pump(): void {
+  private pump(eagerContinuation = true): void {
     const work = this.work(), now = this.now();
     if (!work) { this.target = null; this.credit = 0; this.last = now; return; }
     if (work.target !== this.target || work.speed !== this.speed) {
@@ -53,25 +61,39 @@ export class SimulationLoop<T> {
     }
     const elapsed = Math.max(0, now - this.last); this.last = now;
     const budget = this.millisecondsPerTick >= 0 ? Math.max(1, Math.floor(12 / Math.max(.001, this.millisecondsPerTick))) : 1;
-    const limit = Math.min(8, Math.ceil(work.speed), budget);
+    // For accelerated playback the worker can enforce the slice at tick boundaries.
+    // A slow paint or late delivery should not masquerade as expensive physics.
+    const limit = Math.min(8, Math.ceil(work.speed), work.workerSliceMs ? 8 : budget);
     // A suspended tab never accrues an offline backlog. Even a late timer is
     // allowed at most one bounded batch before returning to normal pacing.
-    this.credit = Math.min(limit, this.credit + Math.min(elapsed, 200) * 30 * work.speed / 1000);
+    const due = this.credit + elapsed * 30 * work.speed / 1000;
+    // Discard overdue whole ticks beyond one batch, but retain ordinary timer
+    // jitter below a tick so slightly late wakes do not slow the simulation.
+    this.credit = elapsed > 200 ? limit : Math.min(limit, Math.floor(due)) + (due - Math.floor(due));
     if (work.busy) { this.credit = 0; this.schedule(16); return; }
     const steps = Math.min(limit, Math.floor(this.credit + 1e-9));
     if (!steps) { this.schedule(Math.max(1, (limit - this.credit) * 1000 / (30 * work.speed))); return; }
     this.credit -= steps; this.inFlight = true;
-    const started = now;
-    let operation: Promise<void>;
-    try { operation = this.advance(work.target, steps, now); }
+    const epoch = this.epoch;
+    let completed = steps;
+    let operation: Promise<number | void>;
+    try { operation = this.advance(work.target, steps, now, work.workerSliceMs); }
     catch (error) { operation = Promise.reject(error); }
-    void operation.catch(error => this.failed(work.target, error)).finally(() => {
-      const cost = Math.max(0, this.now() - started) / steps;
+    void operation.then(actual => {
+      if (typeof actual === 'number') completed = actual;
+      if (this.epoch === epoch) this.credit += steps - completed;
+    }).catch(error => this.failed(work.target, error)).finally(() => {
+      const elapsed = Math.max(0, this.now() - now);
+      const cost = elapsed / Math.max(1, completed);
       this.millisecondsPerTick = this.millisecondsPerTick >= 0 ? this.millisecondsPerTick * .7 + cost * .3 : cost;
       this.inFlight = false;
-      // A timer turn between every batch lets input, inspection, checkpoints
-      // and queued edits run before another bounded command is accepted.
-      this.refresh();
+      // A worker reply has already yielded to the browser. An overdue fast
+      // run can start its next slice before painting, with at least one timer
+      // turn between pairs of slices. pump() checks pause and queued commands.
+      if (work.workerSliceMs && eagerContinuation && this.epoch === epoch && this.running
+          && elapsed >= 12 && this.credit + elapsed * 30 * work.speed / 1000 >= 1) {
+        this.pump(false);
+      } else this.refresh();
     });
   }
 }

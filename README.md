@@ -1,6 +1,6 @@
 # agar
 
-A playable, client-only artificial-life simulator: a TypeScript interface and canvas renderer backed by a Rust WebAssembly engine. Single cells carry reactive cellular programs, material-bearing products and individually assembled machinery. The earlier action/register language remains supported for existing worlds. Cells compete for light, dissolved minerals, inorganic carbon, oxygen and organic material in a wrapping 2D environment with heat and currents.
+A playable, client-only artificial-life simulator: a TypeScript player backed by a Rust WebAssembly engine. The player draws food and organisms directly on a WebGL2 surface and uses Canvas 2D when WebGL2 is unavailable or the browser identifies a software rasterizer. Single cells carry reactive cellular programs, material-bearing products and individually assembled machinery. The earlier action/register language remains supported for existing worlds. Cells compete for light, dissolved minerals, inorganic carbon, oxygen and organic material in a wrapping 2D environment with heat and currents.
 
 ## Run
 
@@ -334,7 +334,7 @@ The relative Vite base (`./`) works at both a user Pages root and a repository s
 | `src/genome-network.ts`, `src/genome-visualizer.ts` | Dependency projection and graph UI |
 | `src/storage.ts`, `src/session.ts` | Validated persistence and ordered checkpoint saves |
 | `src/worker-engine.ts`, `src/simulation-worker-runtime.ts`, `src/simulation-protocol.ts` | Dedicated simulation worker, ordered commands and transferable presentation buffers |
-| `src/renderer.ts`, `src/engine.ts` | Canvas display and the typed WASM boundary |
+| `src/renderer.ts`, `src/gpu-world.ts`, `src/engine.ts` | Player canvas layers, direct WebGL2 entity drawing and the typed WASM boundary |
 | `engine/src/body.rs`, `engine/src/cellular.rs` | Organs, material-bearing products, recipes, physical work, footprints and conservative partitioning |
 | `engine/src/material_allocation.rs` | Sparse material costs, deterministic resource sharing and reusable allocation buffers |
 | `engine/src/genome.rs`, `engine/src/genome/` | Typed language, registers, source-preserving mutation and inspection |
@@ -372,7 +372,7 @@ Tests cover physical accounting and packing, sensor gates, conservative inherita
 
 Start a new preset to run its revised genomes. Saved simulations resume with the genome sources in their checkpoints.
 
-Run `npm run test:editor-navigation` to exercise the genome editor in Chromium. Run `node scripts/check-ui.mjs` for the player and live inspection checks. Both use an isolated browser context. Build with `npm run build:pages` and serve `docs` on `http://127.0.0.1:4173/`. Set `UI_TEST_URL`, `PLAYWRIGHT_MODULE` or `CHROMIUM_PATH` to use a different preview or browser installation.
+Run `npm run test:editor-navigation` to exercise the genome editor in Chromium. Run `node scripts/check-ui.mjs` for the player and live inspection checks. Run `npm run test:gpu-player` to check direct drawing, picking, context recovery and the Canvas fallback. These checks use isolated browser contexts. Build with `npm run build:pages` and serve `docs` on `http://127.0.0.1:4173/`. Set `UI_TEST_URL`, `PLAYWRIGHT_MODULE` or `CHROMIUM_PATH` to use a different preview or browser installation.
 
 ## Simulation performance
 
@@ -383,10 +383,9 @@ genome plan with folded constants and unreachable bindings removed. Authored
 programs remain intact for mutation, inspection and checkpoints.
 
 Each simulation and environment preview runs in a dedicated worker. A completion-driven scheduler
-requests at most one advancing batch of eight fixed 1/30-second ticks and adapts
-batch size to recent cost. Drawing remains independent of stepping; visible
-frames are requested at most about 30 times per second, while hidden or
-non-simulation views receive only exact tick/summary updates. Field samples are
+keeps one request in flight, with at most eight fixed 1/30-second ticks per request.
+During accelerated playback the worker checks its time budget between ticks and
+reports its actual progress. Slower rendering can overlap the next slice of simulation. The visible player requests one fresh snapshot per display refresh when a physics tick is available. At 1× the world advances 30 ticks per second. Faster playback can show more distinct states on faster displays. Hidden players skip drawing snapshots. Field samples are
 requested only for visible overlays; source/barrier metadata stays current
 without copying the grid. Selected-cell details are fetched on demand, and
 visible inspectors share one trace per unchanged session state. Pausing and closing drain outstanding work
@@ -398,7 +397,7 @@ checkpoint and render-buffer equality at sampled boundaries.
 
 ```sh
 npm run bench:simulation
-npm run bench:simulation -- --baseline /path/to/compatible-ABI22/engine/pkg/agar_engine.wasm --output experiments/comparison.json
+npm run bench:simulation -- --baseline /path/to/compatible-ABI24/engine/pkg/agar_engine.wasm --output experiments/comparison.json
 ```
 
 The benchmark uses V8's optimizing WASM tier from the start to avoid timing tier

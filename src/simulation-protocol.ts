@@ -1,4 +1,4 @@
-import type { CountAudit, EcologySnapshot, EnergyLoss, EnvironmentMetadata, EnvironmentSnapshot, MetricsSnapshot, RenderSnapshot, SimulationSummary } from './engine';
+import type { CountAudit, EcologySnapshot, EnergyLoss, EnvironmentMetadata, EnvironmentSnapshot, MetricsSnapshot, RenderSnapshot, FrameParticles, SimulationSummary } from './engine';
 
 export interface PresentationOptions {
   /** Omit drawing data when only the simulation clock or aggregates are needed. */
@@ -7,10 +7,10 @@ export interface PresentationOptions {
   ecology?: boolean;
   environment?: boolean | 'metadata';
 }
-export interface Presentation {
+export interface Presentation<Particles extends FrameParticles = FrameParticles> {
   tick: number;
   summary: SimulationSummary;
-  frame?: RenderSnapshot;
+  frame?: RenderSnapshot<Particles>;
   metrics?: MetricsSnapshot;
   ecology?: EcologySnapshot;
   environment?: EnvironmentMetadata | EnvironmentSnapshot;

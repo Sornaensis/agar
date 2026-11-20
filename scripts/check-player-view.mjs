@@ -258,7 +258,7 @@ const createPlayer = opener => { const host = opener.document.createElement('div
     ready: true, transitioning: false, unloading: false, prefs: { tab: 'simulation', simulationView: 'player', overlay: 'none' },
     active: session, renderer, inspectorProgram: editor, playerElement: player, restoringPlayer: false,
     inspectorEpoch: 0, selectedId: null, cellInspection: null, catalogQuery: '', environmentOpen: false, liveGasesOpen: false,
-    lastPresentation: 0, lastMetrics: 0, lastEnvironment: 0, lastCheckpoint: 0, lastUi: 0, lifecycleFlushes: 0, saveFailed: false,
+    playerNeedsFrame: true, lastMetrics: 0, lastEnvironment: 0, lastCheckpoint: 0, lastUi: 0, lifecycleFlushes: 0, saveFailed: false,
     playerView: { isOpen: true, visible: true, setTitle() {} },
     frameLoop: { refresh() {} }, simulationLoop: { refresh() {}, reset() {} }, flushLifecycle: async () => {},
     $: id => id === 'workspace' ? workspace : null, queryUi: () => null, esc: value => value, icon: () => '',
@@ -294,6 +294,11 @@ const createPlayer = opener => { const host = opener.document.createElement('div
     assert.equal(calls.advances.at(-1).options.frame, true);
     assert.equal(calls.advances.at(-1).options.environment, 'metadata', 'No overlay exports only object/config metadata');
   }
+  await context.advanceSimulation(session, 1, now + 1);
+  assert.equal(calls.advances.at(-1).options.frame, false, 'Between paints, additional batches export only their status');
+  context.frame(now + 10);
+  await context.advanceSimulation(session, 1, now + 11);
+  assert.equal(calls.advances.at(-1).options.frame, true, 'A new paint can request the next snapshot within 33 ms');
   session.metadata.paused = true; let before = calls.advances.length; frame(); assert.equal(calls.advances.length, before);
   session.metadata.paused = false; frame(); assert.equal(calls.advances.length, before + 1);
   context.playerView.visible = false; before = calls.advances.length;

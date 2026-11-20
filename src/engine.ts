@@ -346,13 +346,39 @@ const READ_SIGNAL_COUNT = 175;
 const WRITE_SIGNAL_COUNT = 81;
 const CELL_STRIDE = 166;
 const FOOD_STRIDE = 6;
-function decodeFood(data: Float64Array, offset: number): Food {
-  const kind = data[offset + 4], ligandFraction = data[offset + 5];
-  if ((kind !== 0 && kind !== 1 && kind !== 2) || !(ligandFraction >= 0 && ligandFraction <= 1)) {
+function checkParticle(kind: number, ligand: number): asserts kind is OrganicKind {
+  if ((kind !== 0 && kind !== 1 && kind !== 2) || !(ligand >= 0 && ligand <= 1)) {
     throw new Error('The particle snapshot has an invalid origin or ligand fraction.');
   }
+}
+
+function decodeFood(data: Float64Array, offset: number): Food {
+  const kind = data[offset + 4], ligandFraction = data[offset + 5];
+  checkParticle(kind, ligandFraction);
   return { x:data[offset], y:data[offset+1], energy:data[offset+2], nutrients:data[offset+3], kind, ligandFraction };
 }
+
+/** View of the owned frame buffer. Validate once, then reuse a single row while painting. */
+class PackedParticles {
+  readonly length: number;
+
+  constructor(private readonly rows: Float64Array) {
+    this.length = rows.length / FOOD_STRIDE;
+    for (let offset = 0; offset < rows.length; offset += FOOD_STRIDE) {
+      checkParticle(rows[offset + 4], rows[offset + 5]);
+    }
+  }
+
+  read(index: number, row: Food): Food {
+    const offset = index * FOOD_STRIDE, data = this.rows;
+    row.x = data[offset]; row.y = data[offset + 1];
+    row.energy = data[offset + 2]; row.nutrients = data[offset + 3];
+    row.kind = data[offset + 4] as OrganicKind;
+    row.ligandFraction = data[offset + 5];
+    return row;
+  }
+}
+export type FrameParticles = Food[] | PackedParticles;
 export type MutationKind = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 export interface GenomeLineageEntry { id: number; parentId: number; mutationKind: MutationKind }
 export interface GenomeRecord { source: string; parentId: number; mutationKind: MutationKind }
@@ -378,11 +404,11 @@ export interface RenderCell {
   flagellumCount:number; flagellumCapacity:number; cortexMass:number; cortexCapacity:number;
   photosyntheticCapacity:number; piercerCapacity:number; generation:number;
 }
-export interface RenderSnapshot {
+export interface RenderSnapshot<Particles extends FrameParticles = Food[]> {
   tick:number; time:number; width:number; height:number; births:number; deaths:number; eaten:number;
-  mutationRate:number; generation:number; cells:RenderCell[]; food:Food[]; bonds:RenderBond[];
+  mutationRate:number; generation:number; cells:RenderCell[]; food:Particles; bonds:RenderBond[];
 }
-export type RenderWorldSnapshot = RenderSnapshot & { environment: EnvironmentSnapshot };
+export type RenderWorldSnapshot = RenderSnapshot<FrameParticles> & { environment: EnvironmentSnapshot };
 export interface SimulationSummary {
   time:number; population:number; food:number; births:number; deaths:number; generation:number;
 }
@@ -473,7 +499,9 @@ const RENDER_CELL_STRIDE = 21;
 const METRICS_HEADER = 54;
 
 /** Decode a worker-transferred compact buffer without any WASM calls. */
-export function decodeRenderSnapshot(data: Float64Array): RenderSnapshot {
+export function decodeRenderSnapshot(data: Float64Array): RenderSnapshot;
+export function decodeRenderSnapshot(data: Float64Array, packed: boolean): RenderSnapshot<FrameParticles>;
+export function decodeRenderSnapshot(data: Float64Array, packed = false): RenderSnapshot<FrameParticles> {
   const baseLength = RENDER_HEADER + data[2] * RENDER_CELL_STRIDE + data[3] * FOOD_STRIDE;
   const signalCount = data[9], bondsStart = baseLength + signalCount * 2;
   if (data.length < RENDER_HEADER || !Number.isSafeInteger(data[2]) || data[2] < 0
@@ -483,7 +511,6 @@ export function decodeRenderSnapshot(data: Float64Array): RenderSnapshot {
     throw new Error('The render snapshot has an invalid layout.');
   }
   const cells: RenderCell[] = [];
-  const food: Food[] = [];
   for (let i = 0; i < data[2]; i++) {
     const n = RENDER_HEADER + i * RENDER_CELL_STRIDE;
     cells.push({id:data[n],genomeId:data[n+1],x:data[n+2],y:data[n+3],vx:data[n+4],vy:data[n+5],
@@ -493,9 +520,9 @@ export function decodeRenderSnapshot(data: Float64Array): RenderSnapshot {
       photosyntheticCapacity:data[n+18],piercerCapacity:data[n+19],generation:data[n+20]});
   }
   const start = RENDER_HEADER + cells.length * RENDER_CELL_STRIDE;
-  for (let i = 0; i < data[3]; i++) {
-    const n = start + i * FOOD_STRIDE;
-    food.push(decodeFood(data,n));
+  const food: FrameParticles = packed ? new PackedParticles(data.subarray(start, baseLength)) : [];
+  if (Array.isArray(food)) {
+    for (let n = start; n < baseLength; n += FOOD_STRIDE) food.push(decodeFood(data, n));
   }
   let previous = -1;
   for (let n = baseLength; n < bondsStart; n += 2) {

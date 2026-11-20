@@ -70,20 +70,7 @@ impl Environment {
             || (!clear && self.transport_segment_blocked(origin, (x, y)))) {
             return TransportStencil::Origin(origin);
         }
-        let gx = wrapped(x, self.width) / PATCH_SIZE - 0.5;
-        let gy = wrapped(y, self.height) / PATCH_SIZE - 0.5;
-        let ix = gx.floor() as isize;
-        let iy = gy.floor() as isize;
-        let fx = gx - gx.floor();
-        let fy = gy - gy.floor();
-        // Only the seam needs integer wrapping. Neighbors are shared by the
-        // four corners; the common case has no division or remainder here.
-        let col = if ix < 0 { self.columns - 1 } else { ix as usize };
-        let row = if iy < 0 { self.rows - 1 } else { iy as usize };
-        let top_left = row * self.columns + col;
-        let [_, top_right, _, bottom_left] = self.grid.neighbors[top_left];
-        let bottom_right = self.grid.neighbors[bottom_left][1];
-        let indices = [top_left, top_right, bottom_left, bottom_right];
+        let (indices, fx, fy) = self.sample_corners(x, y);
         if !walls {
             return TransportStencil::Bilinear { indices, fx, fy };
         }

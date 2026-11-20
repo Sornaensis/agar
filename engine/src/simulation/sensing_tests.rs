@@ -117,6 +117,10 @@ fn skipping_unused_pure_sensors_preserves_outputs_and_tracking() {
     for source in [IDLE,
         "thrust=light.level;turn=chemical.organic_bearing;divide=false;feed=flow.speed;absorb=heat.value;",
         "thrust=length(object.motion);turn=angle(contact.offset);divide=false;feed=chemical.mineral;absorb=light.bearing;",
+        r#"thrust=body.space.used + organelle.optical.capacity;turn=body.surface.free + body.mass;
+            divide=object.token != "";feed=contact.pressure + contact.resistance;absorb=length(object.offset);"#,
+        r#"thrust=object.area + object.pigment;turn=object.contrast;divide=contact.token != "";feed=0;absorb=0;"#,
+
     ] {
         let (mut world, genomes) = scene(BodyFixture::Hunter, source, 0.8);
         world.environment.configure(0.3, 0.8, 8.0);
@@ -408,4 +412,21 @@ fn optical_return_does_not_depend_on_hidden_target_energy_genome_or_cell_integri
             after.object_motion
         )
     );
+}
+
+#[test]
+fn equal_optical_scores_keep_lowest_entity_even_if_it_is_visited_last_across_a_seam() {
+    let (mut world, _) = scene(BodyFixture::Hunter, IDLE, 1.0);
+    assert!(world.set_world_size(700.0, 460.0));
+    let cell = &mut world.cells[0];
+    cell.x = 686.0;
+    cell.y = 110.0;
+    add_particle(&mut world, 16.0, 110.0);
+    add_particle(&mut world, 16.0, 110.0);
+    world.food[1].energy = world.food[0].energy;
+    let lowest = (world.food[0].id << 1) | 1;
+    world.food.swap(0, 1);
+    let input = observe_and_retain_tracks(&mut world);
+    assert!(input.object_valid);
+    assert_eq!(world.cells[0].tracking.entity(&input.object_token, 1, world.ticks), Some(lowest));
 }

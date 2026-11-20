@@ -68,14 +68,16 @@ impl World {
         self.food.retain_mut(|food| {
             let contacts = &mut ws.inlet_contacts;
             contacts.clear();
-            for index in grid.nearby_radius(food.x, food.y, max_reach) {
+            for index in grid.nearby_bounds(food.x, food.y, max_reach) {
                 let port = &ports[index];
                 let cell = &self.cells[port.cell];
-                if port.budget <= 0.0 || cell.gut_fraction_for(food.energy, food.nutrients, &caps[port.cell]) <= 0.0 { continue; }
+                if port.budget <= 0.0 { continue; }
                 let dx = delta(food.x - port.origin[0], self.environment.width);
                 let dy = delta(food.y - port.origin[1], self.environment.height);
+                if dx.abs() > port.reach || dy.abs() > port.reach { continue; }
                 let distance = dx.hypot(dy);
-                if distance > port.reach || self.environment.segment_blocked((port.origin[0], port.origin[1]), (port.origin[0]+dx, port.origin[1]+dy)) { continue; }
+                if distance > port.reach || cell.gut_fraction_for(food.energy, food.nutrients, &caps[port.cell]) <= 0.0
+                    || self.environment.segment_blocked((port.origin[0], port.origin[1]), (port.origin[0]+dx, port.origin[1]+dy)) { continue; }
                 if let Some(def) = port.guard {
                     let resistance = contact::measured_resistance(cell, port.origin, [food.x, food.y], 2.5, &self.environment, || food.traits().0);
                     let peer = PeerContact { resistance, ..Default::default() };
